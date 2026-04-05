@@ -10,6 +10,7 @@ import pytest
 
 from dagnam import _is_uuid, load_dataset
 from dagnam.client import DagnamClient
+from dagnam.dataset import DagnamDataset
 
 
 # ------------------------------------------------------------------
@@ -90,57 +91,50 @@ class TestSystemDatasetRouting:
     """Friendly names should route through system dataset endpoints."""
 
     def test_friendly_name_calls_system_meta(self, tmp_path: Path):
-        csv_content = b"x,y\n1,2\n"
-        checksum = _sha256(csv_content)
-        meta = {**SYSTEM_META, "checksum": checksum}
+        meta = {
+            **SYSTEM_META,
+            "checksum": "placeholder",
+            "source_type": "system",
+        }
+
+        mock_native_ds = MagicMock(spec=DagnamDataset)
 
         with (
             patch("dagnam.get_api_key", return_value="key"),
             patch("dagnam.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta) as mock_sys_meta,
             patch.object(DagnamClient, "get_dataset_meta") as mock_user_meta,
-            patch.object(DagnamClient, "download_system_dataset") as mock_sys_dl,
-            patch.object(DagnamClient, "download_dataset") as mock_user_dl,
+            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
-            # Simulate download writing a file
-            dest = tmp_path / "mnist-digits" / "data.csv"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(csv_content)
-            mock_sys_dl.return_value = dest
-
             ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
 
             mock_sys_meta.assert_called_once_with("mnist-digits")
             mock_user_meta.assert_not_called()
-            mock_sys_dl.assert_called_once()
-            mock_user_dl.assert_not_called()
-            assert ds.name == "MNIST Digits"
+            mock_resolve.assert_called_once_with(meta)
+            assert ds is mock_native_ds
 
     def test_friendly_name_with_dashes(self, tmp_path: Path):
-        """Names like 'imdb-sentiment' are NOT UUIDs and should use system endpoints."""
-        csv_content = b"text,label\nhello,1\n"
-        checksum = _sha256(csv_content)
+        """Names like 'imdb-sentiment' are NOT UUIDs and should use system endpoints.
+        With unified architecture, system datasets route to native loaders."""
         meta = {
             **SYSTEM_META,
             "id": "imdb-sentiment",
             "name": "IMDB Sentiment",
-            "checksum": checksum,
+            "checksum": "placeholder",
+            "source_type": "system",
         }
+
+        mock_native_ds = MagicMock(spec=DagnamDataset)
 
         with (
             patch("dagnam.get_api_key", return_value="key"),
             patch("dagnam.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
-            patch.object(DagnamClient, "download_system_dataset") as mock_sys_dl,
+            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
-            dest = tmp_path / "imdb-sentiment" / "data.csv"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(csv_content)
-            mock_sys_dl.return_value = dest
-
             ds = load_dataset("imdb-sentiment", cache_dir=str(tmp_path))
-            assert ds.name == "IMDB Sentiment"
-            mock_sys_dl.assert_called_once()
+            assert ds is mock_native_ds
+            mock_resolve.assert_called_once_with(meta)
 
 
 # ------------------------------------------------------------------

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
 
+from dagnam.loaders.csv_loader import _detect_label_column
+
 if TYPE_CHECKING:
     from dagnam.dataset import DagnamDataset
 
@@ -36,8 +38,6 @@ def create_flax_dataset(
     import jax.numpy as jnp
 
     df = dagnam_ds.to_pandas()
-
-    from dagnam.loaders.csv_loader import _detect_label_column
 
     label_col = _detect_label_column(df, dagnam_ds.feature_schema)
 

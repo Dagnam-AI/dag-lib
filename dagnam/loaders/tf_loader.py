@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from dagnam.loaders.csv_loader import _detect_label_column
+
 if TYPE_CHECKING:
     from dagnam.dataset import DagnamDataset
 
@@ -29,8 +31,6 @@ def create_tensorflow_dataset(
     import tensorflow as tf
 
     df = dagnam_ds.to_pandas()
-
-    from dagnam.loaders.csv_loader import _detect_label_column
 
     label_col = _detect_label_column(df, dagnam_ds.feature_schema)
 

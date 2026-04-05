@@ -36,23 +36,31 @@ def create_pytorch_loader(
     val_ratio: float,
     test_ratio: float,
     seed: int,
+    column_roles: dict[str, str] | None = None,
 ) -> torch.utils.data.DataLoader:
     """Create a PyTorch DataLoader from a CSV/TSV dataset.
 
     Label detection, encoding, deterministic splitting, and DataLoader
     configuration are all handled here.  Invalid split names are already
     validated by ``DagnamDataset.to_pytorch_loader()``.
+
+    When *column_roles* is provided, it is used to separate feature and
+    target columns instead of the heuristic-based detection.  Columns
+    with role ``"ignore"`` are excluded entirely.
     """
     df = dagnam_ds.to_pandas()
 
-    # ---- label column detection ----
-    label_col = _detect_label_column(df, dagnam_ds.feature_schema)
+    if column_roles is not None:
+        label_col, feature_cols = _split_by_roles(df, column_roles)
+    else:
+        # ---- legacy heuristic path ----
+        label_col = _detect_label_column(df, dagnam_ds.feature_schema)
+        feature_cols = [c for c in df.columns if c != label_col]
 
     # ---- label encoding ----
     labels = _encode_labels(df[label_col], dagnam_ds.class_names)
 
-    # ---- feature encoding (numeric columns only, excluding label) ----
-    feature_cols = [c for c in df.columns if c != label_col]
+    # ---- feature encoding (numeric columns only) ----
     features_df = df[feature_cols].select_dtypes(include="number")
     features = torch.tensor(features_df.values, dtype=torch.float32)
 
@@ -88,6 +96,45 @@ def create_pytorch_loader(
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
+# Role sets used by _split_by_roles to classify columns.
+_FEATURE_ROLES = frozenset({
+    "feature", "text_input", "image_input", "audio_input", "prompt", "anchor",
+})
+_TARGET_ROLES = frozenset({"target", "text_target", "completion"})
+
+
+def _split_by_roles(
+    df: pd.DataFrame,
+    column_roles: dict[str, str],
+) -> tuple[str, list[str]]:
+    """Separate feature and target columns using an explicit role mapping.
+
+    Returns ``(label_col, feature_cols)`` where *feature_cols* preserves
+    the original DataFrame column order.  Columns with role ``"ignore"``
+    (or any role not in the feature/target sets) are excluded from both
+    lists.
+    """
+    feature_cols: list[str] = []
+    target_cols: list[str] = []
+
+    for col in df.columns:
+        role = column_roles.get(col)
+        if role in _FEATURE_ROLES:
+            feature_cols.append(col)
+        elif role in _TARGET_ROLES:
+            target_cols.append(col)
+        # else: ignore / unknown role — skip
+
+    if not target_cols:
+        raise ValueError(
+            "column_roles does not specify any target column "
+            "(expected a column with role 'target', 'text_target', or 'completion')"
+        )
+
+    # Use the first target column as the label column.
+    label_col = target_cols[0]
+    return label_col, feature_cols
 
 
 def _detect_label_column(df: pd.DataFrame, feature_schema: dict | None) -> str:

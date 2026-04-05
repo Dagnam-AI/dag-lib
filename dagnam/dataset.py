@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -12,9 +13,19 @@ class DagnamDataset:
 
     Data is loaded lazily — file parsing is deferred until ``to_pandas()``
     or ``to_pytorch_loader()`` is called.
+
+    For system datasets loaded via native libraries (torchvision, etc.),
+    ``_native_train`` and ``_native_test`` are populated directly and
+    ``to_pytorch_loader()`` uses them instead of loading from a file.
     """
 
-    def __init__(self, meta: dict, data_dir: Path) -> None:
+    def __init__(
+        self,
+        meta: dict,
+        data_dir: Path,
+        _native_train: Any = None,
+        _native_test: Any = None,
+    ) -> None:
         self.id: str = meta["id"]
         self.name: str = meta["name"]
         self.format: str = meta["format"]
@@ -25,6 +36,8 @@ class DagnamDataset:
         self.class_names: list[str] | None = meta.get("class_names")
         self._data_dir: Path = data_dir
         self._data: pd.DataFrame | None = None
+        self._native_train: Any = _native_train
+        self._native_test: Any = _native_test
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -94,7 +107,10 @@ class DagnamDataset:
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Create a PyTorch DataLoader for the specified split.
 
-        Dispatches to a format-specific loader (csv_loader or json_loader).
+        When ``_native_train`` / ``_native_test`` are set (system datasets),
+        uses the native dataset directly.  Otherwise dispatches to a
+        format-specific loader (csv_loader or json_loader).
+
         ``shuffle`` defaults to ``True`` for train, ``False`` for val/test.
 
         Raises:
@@ -107,12 +123,6 @@ class DagnamDataset:
                 f"Unknown split: {split}. Use 'train', 'val', or 'test'."
             )
 
-        fmt = self.format.lower()
-        if fmt not in ("csv", "tsv", "json", "jsonl"):
-            raise ValueError(
-                f"Unsupported format for PyTorch loader: {self.format}"
-            )
-
         try:
             import torch  # noqa: F401
         except ImportError:
@@ -121,13 +131,31 @@ class DagnamDataset:
                 "Install with: uv pip install dagnam[pytorch]"
             )
 
+        if shuffle is None:
+            shuffle = split == "train"
+
+        # --- Native dataset path (system datasets via torchvision etc.) ---
+        if self._native_train is not None:
+            return self._native_pytorch_loader(
+                split=split,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                seed=seed,
+            )
+
+        # --- File-based path (user datasets) ---
+        fmt = self.format.lower()
+        if fmt not in ("csv", "tsv", "json", "jsonl"):
+            raise ValueError(
+                f"Unsupported format for PyTorch loader: {self.format}"
+            )
+
         if fmt in ("csv", "tsv"):
             from dagnam.loaders.csv_loader import create_pytorch_loader
         else:
             from dagnam.loaders.json_loader import create_pytorch_loader
-
-        if shuffle is None:
-            shuffle = split == "train"
 
         return create_pytorch_loader(
             dagnam_ds=self,
@@ -139,6 +167,111 @@ class DagnamDataset:
             test_ratio=test_ratio,
             seed=seed,
         )
+
+    def _native_pytorch_loader(
+        self,
+        split: str,
+        batch_size: int,
+        num_workers: int,
+        shuffle: bool,
+        val_ratio: float,
+        seed: int,
+    ) -> "torch.utils.data.DataLoader":  # noqa: F821
+        """Build a DataLoader from native train/test datasets."""
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset, random_split
+
+        native_train = self._native_train
+        native_test = self._native_test
+
+        # Handle IMDB-style tuple datasets (numpy arrays)
+        if isinstance(native_train, tuple):
+            return self._native_numpy_loader(
+                split, batch_size, num_workers, shuffle, val_ratio, seed,
+            )
+
+        # Handle torchvision map-style datasets
+        if split == "test":
+            ds = native_test if native_test is not None else native_train
+        elif split == "val":
+            n_val = int(len(native_train) * val_ratio)
+            n_train = len(native_train) - n_val
+            _, ds = random_split(
+                native_train, [n_train, n_val],
+                generator=torch.Generator().manual_seed(seed),
+            )
+        else:  # train
+            n_val = int(len(native_train) * val_ratio)
+            n_train = len(native_train) - n_val
+            ds, _ = random_split(
+                native_train, [n_train, n_val],
+                generator=torch.Generator().manual_seed(seed),
+            )
+
+        return DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=(split == "train"),
+        )
+
+    def _native_numpy_loader(
+        self,
+        split: str,
+        batch_size: int,
+        num_workers: int,
+        shuffle: bool,
+        val_ratio: float,
+        seed: int,
+    ) -> "torch.utils.data.DataLoader":  # noqa: F821
+        """Build a DataLoader from numpy array tuples (e.g. IMDB)."""
+        import numpy as np
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+
+        x_train, y_train = self._native_train
+        x_test, y_test = self._native_test
+
+        if split == "test":
+            # IMDB sequences are variable-length object arrays — pad them
+            if x_test.dtype == object:
+                x_test = self._pad_sequences(x_test)
+            x_t = torch.from_numpy(np.asarray(x_test)).long()
+            y_t = torch.from_numpy(np.asarray(y_test)).float().unsqueeze(1)
+            ds = TensorDataset(x_t, y_t)
+        else:
+            if x_train.dtype == object:
+                x_train = self._pad_sequences(x_train)
+            n_val = int(len(x_train) * val_ratio)
+            if split == "val":
+                x = torch.from_numpy(np.asarray(x_train[-n_val:])).long()
+                y = torch.from_numpy(np.asarray(y_train[-n_val:])).float().unsqueeze(1)
+            else:
+                x = torch.from_numpy(np.asarray(x_train[:-n_val] if n_val > 0 else x_train)).long()
+                y = torch.from_numpy(np.asarray(y_train[:-n_val] if n_val > 0 else y_train)).float().unsqueeze(1)
+            ds = TensorDataset(x, y)
+
+        return DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=(split == "train"),
+        )
+
+    @staticmethod
+    def _pad_sequences(sequences, maxlen: int = 200, num_words: int = 20000):
+        """Pad/truncate variable-length integer sequences (e.g. IMDB)."""
+        import numpy as np
+        result = np.zeros((len(sequences), maxlen), dtype=np.int32)
+        for i, seq in enumerate(sequences):
+            filtered = [w if w < num_words else 0 for w in seq]
+            trunc = filtered[:maxlen]
+            result[i, : len(trunc)] = trunc
+        return result
 
     # ------------------------------------------------------------------
     # TensorFlow conversion
