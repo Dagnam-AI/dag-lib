@@ -9,7 +9,7 @@ import pandas as pd
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from dagnam.loaders.csv_loader import _FEATURE_ROLES, _TARGET_ROLES, _split_by_roles
+from dagnam.data.loaders.csv_loader import _FEATURE_ROLES, _TARGET_ROLES, _split_by_roles
 
 # ------------------------------------------------------------------
 # Strategies

@@ -2,7 +2,7 @@
 
 import pytest
 
-from dagnam.exceptions import (
+from dagnam._core.exceptions import (
     APIError,
     AuthError,
     ChecksumError,

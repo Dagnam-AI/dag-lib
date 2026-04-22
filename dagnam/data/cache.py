@@ -86,7 +86,7 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
     Returns list of evicted dataset IDs.
     """
     if max_size_bytes is None:
-        from dagnam.config import get_config_value
+        from dagnam._core.config import get_config_value
 
         max_size_bytes = get_config_value("max_cache_size", DEFAULT_MAX_CACHE_BYTES)
 

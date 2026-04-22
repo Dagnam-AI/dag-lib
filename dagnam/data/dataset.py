@@ -153,9 +153,9 @@ class DagnamDataset:
             )
 
         if fmt in ("csv", "tsv"):
-            from dagnam.loaders.csv_loader import create_pytorch_loader
+            from dagnam.data.loaders.csv_loader import create_pytorch_loader
         else:
-            from dagnam.loaders.json_loader import create_pytorch_loader
+            from dagnam.data.loaders.json_loader import create_pytorch_loader
 
         return create_pytorch_loader(
             dagnam_ds=self,
@@ -311,7 +311,7 @@ class DagnamDataset:
                 "Install with: uv pip install dagnam[tensorflow]"
             )
 
-        from dagnam.loaders.tf_loader import create_tensorflow_dataset
+        from dagnam.data.loaders.tf_loader import create_tensorflow_dataset
 
         if shuffle is None:
             shuffle = split == "train"
@@ -364,7 +364,7 @@ class DagnamDataset:
                 "Install with: uv pip install dagnam[flax]"
             )
 
-        from dagnam.loaders.flax_loader import create_flax_dataset
+        from dagnam.data.loaders.flax_loader import create_flax_dataset
 
         if shuffle is None:
             shuffle = split == "train"

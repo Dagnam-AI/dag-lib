@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dagnam import _is_uuid, load_dataset
-from dagnam.client import DagnamClient
-from dagnam.dataset import DagnamDataset
+from dagnam._core.client import DagnamClient
+from dagnam.data.dataset import DagnamDataset
 
 
 # ------------------------------------------------------------------
@@ -104,7 +104,7 @@ class TestSystemDatasetRouting:
             patch("dagnam.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta) as mock_sys_meta,
             patch.object(DagnamClient, "get_dataset_meta") as mock_user_meta,
-            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
+            patch("dagnam.data.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
             ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
 
@@ -130,7 +130,7 @@ class TestSystemDatasetRouting:
             patch("dagnam.get_api_key", return_value="key"),
             patch("dagnam.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
-            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
+            patch("dagnam.data.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
             ds = load_dataset("imdb-sentiment", cache_dir=str(tmp_path))
             assert ds is mock_native_ds
@@ -187,7 +187,7 @@ class TestClientSystemMethods:
         mock_resp.ok = True
         mock_resp.json.return_value = [{"id": "mnist-digits", "name": "MNIST"}]
 
-        with patch("dagnam.client.requests.get", return_value=mock_resp) as mock_get:
+        with patch("dagnam._core.client.requests.get", return_value=mock_resp) as mock_get:
             result = client.list_system_datasets()
 
         mock_get.assert_called_once()
@@ -201,7 +201,7 @@ class TestClientSystemMethods:
         mock_resp.ok = True
         mock_resp.json.return_value = {"id": "mnist-digits", "name": "MNIST"}
 
-        with patch("dagnam.client.requests.get", return_value=mock_resp) as mock_get:
+        with patch("dagnam._core.client.requests.get", return_value=mock_resp) as mock_get:
             result = client.get_system_dataset_meta("mnist-digits")
 
         call_url = mock_get.call_args[0][0]
@@ -218,7 +218,7 @@ class TestClientSystemMethods:
         }
         mock_resp.iter_content.return_value = [b"hello"]
 
-        with patch("dagnam.client.requests.get", return_value=mock_resp) as mock_get:
+        with patch("dagnam._core.client.requests.get", return_value=mock_resp) as mock_get:
             result = client.download_system_dataset("mnist-digits", tmp_path)
 
         call_url = mock_get.call_args[0][0]

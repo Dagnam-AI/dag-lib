@@ -40,12 +40,12 @@ class TestLogin:
         config_file = config_dir / "config.json"
 
         monkeypatch.setattr("dagnam.cli.getpass.getpass", lambda _: "test-key-123")
-        monkeypatch.setattr("dagnam.config.CONFIG_DIR", config_dir)
-        monkeypatch.setattr("dagnam.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
         monkeypatch.setattr("sys.argv", ["dagnam", "login"])
 
         # Mock the client so it doesn't actually hit the network
-        with mock.patch("dagnam.client.DagnamClient.list_datasets", return_value=[]):
+        with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
             main()
 
         assert config_file.exists()
@@ -65,13 +65,13 @@ class TestCacheList:
     def test_empty_cache(self, tmp_path, monkeypatch, capsys):
         empty_dir = tmp_path / "datasets"
         empty_dir.mkdir()
-        monkeypatch.setattr("dagnam.cache.DEFAULT_CACHE_DIR", empty_dir)
+        monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", empty_dir)
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "list"])
         main()
         assert "empty" in capsys.readouterr().out.lower()
 
     def test_nonexistent_cache_dir(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr("dagnam.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
+        monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "list"])
         main()
         assert "empty" in capsys.readouterr().out.lower()
@@ -83,7 +83,7 @@ class TestCacheList:
         (ds_dir / "meta.json").write_text(json.dumps({"name": "Test DS"}))
         (ds_dir / "data.csv").write_text("a,b\n1,2\n")
 
-        monkeypatch.setattr("dagnam.cache.DEFAULT_CACHE_DIR", cache)
+        monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", cache)
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "list"])
         main()
         out = capsys.readouterr().out
@@ -93,7 +93,7 @@ class TestCacheList:
 
 class TestCacheClear:
     def test_empty_cache(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr("dagnam.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
+        monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "clear"])
         main()
         assert "already empty" in capsys.readouterr().out.lower()
@@ -104,7 +104,7 @@ class TestCacheClear:
         ds_dir.mkdir(parents=True)
         (ds_dir / "data.csv").write_text("a,b\n1,2\n")
 
-        monkeypatch.setattr("dagnam.cache.DEFAULT_CACHE_DIR", cache)
+        monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", cache)
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "clear"])
         main()
         assert not cache.exists()

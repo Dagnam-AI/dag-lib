@@ -10,7 +10,7 @@ import torch
 import torch.utils.data
 
 if TYPE_CHECKING:
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
 
 class _TabularDataset(torch.utils.data.Dataset):

@@ -7,8 +7,8 @@ Resolves API key and API URL using a three-tier priority chain:
 import os
 from typing import Optional
 
-from dagnam.config import get_config_value
-from dagnam.exceptions import AuthError
+from dagnam._core.config import get_config_value
+from dagnam._core.exceptions import AuthError
 
 _DEFAULT_API_URL = "https://api.dagnam.ai"
 

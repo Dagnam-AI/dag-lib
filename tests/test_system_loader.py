@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dagnam import load_dataset, _load_internal
-from dagnam.dataset import DagnamDataset
-from dagnam.exceptions import DatasetNotFoundError
+from dagnam.data.dataset import DagnamDataset
+from dagnam._core.exceptions import DatasetNotFoundError
 
 
 # ------------------------------------------------------------------
@@ -60,24 +60,24 @@ class TestResolveSystemDataset:
     """Verify system dataset name matching."""
 
     def test_unknown_dataset_raises(self):
-        from dagnam.loaders.system_loader import resolve_system_dataset
+        from dagnam.data.loaders.system_loader import resolve_system_dataset
         meta = {"name": "totally-unknown-dataset", "dataset_type": "tabular"}
         with pytest.raises(DatasetNotFoundError):
             resolve_system_dataset(meta)
 
     def test_exact_match_mnist(self):
         """MNIST should match via exact key."""
-        from dagnam.loaders.system_loader import _NATIVE_LOADERS
+        from dagnam.data.loaders.system_loader import _NATIVE_LOADERS
         assert "mnist" in _NATIVE_LOADERS
         assert "mnist handwritten digits" in _NATIVE_LOADERS
 
     def test_exact_match_cifar10(self):
-        from dagnam.loaders.system_loader import _NATIVE_LOADERS
+        from dagnam.data.loaders.system_loader import _NATIVE_LOADERS
         assert "cifar-10" in _NATIVE_LOADERS
         assert "cifar10" in _NATIVE_LOADERS
 
     def test_exact_match_imdb(self):
-        from dagnam.loaders.system_loader import _NATIVE_LOADERS
+        from dagnam.data.loaders.system_loader import _NATIVE_LOADERS
         assert "imdb" in _NATIVE_LOADERS
         assert "imdb movie reviews" in _NATIVE_LOADERS
 
@@ -109,7 +109,7 @@ class TestSourceTypeDetection:
             patch("dagnam.get_api_key", return_value="key"),
             patch("dagnam.get_api_url", return_value="http://localhost"),
             patch("dagnam.DagnamClient") as MockClient,
-            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
+            patch("dagnam.data.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
             MockClient.return_value.get_dataset_meta.return_value = meta
 
@@ -187,7 +187,7 @@ class TestLoadInternal:
                 "DAGNAM_INTERNAL": "true",
                 "DAGNAM_META_DIR": str(meta_dir),
             }),
-            patch("dagnam.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
+            patch("dagnam.data.loaders.system_loader.resolve_system_dataset", return_value=mock_native_ds) as mock_resolve,
         ):
             ds = _load_internal(dataset_id)
 

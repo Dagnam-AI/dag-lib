@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 
-from dagnam.cache import (
+from dagnam.data.cache import (
     DEFAULT_MAX_CACHE_BYTES,
     compute_file_checksum,
     evict_lru,

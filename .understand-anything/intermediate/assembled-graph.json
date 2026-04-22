@@ -1,0 +1,1944 @@
+{
+  "nodes": [
+    {
+      "id": "file:.python-version",
+      "type": "file",
+      "name": ".python-version",
+      "filePath": ".python-version",
+      "summary": "Pyenv-style version pin declaring the Python interpreter version used for local development and tooling.",
+      "tags": [
+        "configuration",
+        "python",
+        "tooling"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "dagnam/__init__.py",
+      "summary": "Public package entry point exposing the top-level load_dataset API that routes between user (UUID) and system (named) datasets, handling download, checksum verification, caching, and LRU eviction.",
+      "tags": [
+        "entry-point",
+        "barrel",
+        "api",
+        "dataset-loader"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/__init__.py:load_dataset",
+      "type": "function",
+      "name": "load_dataset",
+      "filePath": "dagnam/__init__.py",
+      "lineRange": [
+        39,
+        115
+      ],
+      "summary": "Top-level SDK function that loads a dataset by UUID or system name, resolving credentials, hitting the remote API, streaming into local cache, verifying checksums, and returning a DagnamDataset.",
+      "tags": [
+        "api",
+        "entry-point",
+        "dataset-loader",
+        "orchestration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/__init__.py:_load_internal",
+      "type": "function",
+      "name": "_load_internal",
+      "filePath": "dagnam/__init__.py",
+      "lineRange": [
+        118,
+        161
+      ],
+      "summary": "Internal helper that loads datasets bundled locally with the SDK (offline/dev path) without hitting the remote API.",
+      "tags": [
+        "internal",
+        "dataset-loader",
+        "offline"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:dagnam/auth.py",
+      "type": "file",
+      "name": "auth.py",
+      "filePath": "dagnam/auth.py",
+      "summary": "Authentication helpers that resolve the Dagnam API key and URL from environment variables, a user config file, or a persistent credential store, with configurable precedence.",
+      "tags": [
+        "authentication",
+        "configuration",
+        "credentials"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/auth.py:get_api_key",
+      "type": "function",
+      "name": "get_api_key",
+      "filePath": "dagnam/auth.py",
+      "lineRange": [
+        27,
+        49
+      ],
+      "summary": "Resolves the DAGNAM_API_KEY using the precedence: explicit argument, env var, persisted config; raises AuthError when missing.",
+      "tags": [
+        "authentication",
+        "credentials",
+        "lookup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/auth.py:get_api_url",
+      "type": "function",
+      "name": "get_api_url",
+      "filePath": "dagnam/auth.py",
+      "lineRange": [
+        52,
+        68
+      ],
+      "summary": "Resolves the Dagnam API base URL from explicit argument, environment, or config, falling back to the public production endpoint.",
+      "tags": [
+        "authentication",
+        "configuration",
+        "lookup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/cache.py",
+      "type": "file",
+      "name": "cache.py",
+      "filePath": "dagnam/cache.py",
+      "summary": "Local filesystem cache layer providing dataset directory resolution, metadata and checksum persistence, LRU eviction, and cache size accounting for downloaded datasets.",
+      "tags": [
+        "cache",
+        "persistence",
+        "filesystem",
+        "lru"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cache.py:get_cache_info",
+      "type": "function",
+      "name": "get_cache_info",
+      "filePath": "dagnam/cache.py",
+      "lineRange": [
+        57,
+        80
+      ],
+      "summary": "Enumerates all cached datasets, returning a list of dicts with id, size, last-access timestamp, and metadata for display in the CLI.",
+      "tags": [
+        "cache",
+        "introspection",
+        "cli-support"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/cache.py:evict_lru",
+      "type": "function",
+      "name": "evict_lru",
+      "filePath": "dagnam/cache.py",
+      "lineRange": [
+        83,
+        115
+      ],
+      "summary": "Evicts least-recently-used cached datasets until total cache size falls below the configured max-bytes budget.",
+      "tags": [
+        "cache",
+        "lru",
+        "eviction"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cache.py:compute_file_checksum",
+      "type": "function",
+      "name": "compute_file_checksum",
+      "filePath": "dagnam/cache.py",
+      "lineRange": [
+        141,
+        150
+      ],
+      "summary": "Streams a file in chunks and returns its SHA-256 hex digest for post-download integrity verification.",
+      "tags": [
+        "checksum",
+        "integrity",
+        "hashing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/cli.py",
+      "type": "file",
+      "name": "cli.py",
+      "filePath": "dagnam/cli.py",
+      "summary": "Argparse-based command-line interface exposing login, dataset listing/download/info, and cache list/clear subcommands for the Dagnam SDK.",
+      "tags": [
+        "cli",
+        "entry-point",
+        "argparse",
+        "user-interface"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:dagnam/cli.py:_cmd_login",
+      "type": "function",
+      "name": "_cmd_login",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        54,
+        86
+      ],
+      "summary": "Interactive login handler that prompts for an API key, validates it against the remote API, and persists it to the user config file.",
+      "tags": [
+        "cli",
+        "authentication",
+        "command-handler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cli.py:_cmd_dataset_list",
+      "type": "function",
+      "name": "_cmd_dataset_list",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        89,
+        121
+      ],
+      "summary": "CLI handler that fetches and tabulates available user and system datasets from the remote API.",
+      "tags": [
+        "cli",
+        "command-handler",
+        "listing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cli.py:_cmd_dataset_info",
+      "type": "function",
+      "name": "_cmd_dataset_info",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        138,
+        165
+      ],
+      "summary": "CLI handler that retrieves and pretty-prints a dataset's metadata (samples, schema, classes) for a given id or system name.",
+      "tags": [
+        "cli",
+        "command-handler",
+        "introspection"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cli.py:_cmd_cache_list",
+      "type": "function",
+      "name": "_cmd_cache_list",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        168,
+        199
+      ],
+      "summary": "CLI handler that prints a human-readable table of cached datasets with sizes and last-access times.",
+      "tags": [
+        "cli",
+        "command-handler",
+        "cache"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cli.py:_build_parser",
+      "type": "function",
+      "name": "_build_parser",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        218,
+        252
+      ],
+      "summary": "Constructs the argparse parser with all subcommands and flags for the dagnam CLI.",
+      "tags": [
+        "cli",
+        "argparse",
+        "factory"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/cli.py:main",
+      "type": "function",
+      "name": "main",
+      "filePath": "dagnam/cli.py",
+      "lineRange": [
+        259,
+        284
+      ],
+      "summary": "CLI entry point that parses arguments, dispatches to the appropriate subcommand handler, and maps exceptions to user-friendly error output.",
+      "tags": [
+        "cli",
+        "entry-point",
+        "dispatcher"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:dagnam/client.py",
+      "type": "file",
+      "name": "client.py",
+      "filePath": "dagnam/client.py",
+      "summary": "HTTP client wrapping the Dagnam REST API for dataset listing, metadata retrieval, and authenticated binary downloads with streaming and retry-friendly error mapping.",
+      "tags": [
+        "http-client",
+        "api-client",
+        "service",
+        "networking"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:dagnam/client.py:DagnamClient",
+      "type": "class",
+      "name": "DagnamClient",
+      "filePath": "dagnam/client.py",
+      "lineRange": [
+        17,
+        203
+      ],
+      "summary": "REST client for the Dagnam API supporting user and system dataset listing, metadata fetching, and streamed file downloads; centralizes auth headers and status-to-exception mapping.",
+      "tags": [
+        "http-client",
+        "api-client",
+        "service"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:dagnam/config.py",
+      "type": "file",
+      "name": "config.py",
+      "filePath": "dagnam/config.py",
+      "summary": "Persistent user configuration helpers that read and write the dagnam JSON config file under the user's home directory.",
+      "tags": [
+        "configuration",
+        "persistence",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/dataset.py",
+      "type": "file",
+      "name": "dataset.py",
+      "filePath": "dagnam/dataset.py",
+      "summary": "Defines the DagnamDataset class, the core abstraction returned by load_dataset, with lazy conversion methods to pandas DataFrames, PyTorch DataLoaders, TensorFlow datasets, and Flax batches.",
+      "tags": [
+        "data-model",
+        "dataset",
+        "framework-adapter",
+        "core"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:dagnam/dataset.py:DagnamDataset",
+      "type": "class",
+      "name": "DagnamDataset",
+      "filePath": "dagnam/dataset.py",
+      "lineRange": [
+        11,
+        413
+      ],
+      "summary": "Central dataset handle wrapping local files and metadata; exposes info() plus framework-specific converters (to_pandas, to_pytorch_loader, to_tensorflow_dataset, to_flax_dataset) with built-in train/val/test splitting and padding.",
+      "tags": [
+        "data-model",
+        "framework-adapter",
+        "dataset",
+        "core"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:dagnam/exceptions.py",
+      "type": "file",
+      "name": "exceptions.py",
+      "filePath": "dagnam/exceptions.py",
+      "summary": "Defines the SDK's exception hierarchy rooted at DagnamError, including AuthError, DatasetNotFoundError, APIError, and ChecksumError for structured error handling.",
+      "tags": [
+        "exceptions",
+        "error-handling",
+        "type-definition"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:dagnam/exceptions.py:DagnamError",
+      "type": "class",
+      "name": "DagnamError",
+      "filePath": "dagnam/exceptions.py",
+      "lineRange": [
+        4,
+        5
+      ],
+      "summary": "Base exception class for all Dagnam SDK errors.",
+      "tags": [
+        "exception",
+        "base-class"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:dagnam/exceptions.py:AuthError",
+      "type": "class",
+      "name": "AuthError",
+      "filePath": "dagnam/exceptions.py",
+      "lineRange": [
+        8,
+        9
+      ],
+      "summary": "Raised when the API key is missing, invalid, or rejected by the server.",
+      "tags": [
+        "exception",
+        "authentication"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:dagnam/exceptions.py:DatasetNotFoundError",
+      "type": "class",
+      "name": "DatasetNotFoundError",
+      "filePath": "dagnam/exceptions.py",
+      "lineRange": [
+        12,
+        17
+      ],
+      "summary": "Raised when a dataset id or system name cannot be resolved via the API.",
+      "tags": [
+        "exception",
+        "dataset"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:dagnam/exceptions.py:APIError",
+      "type": "class",
+      "name": "APIError",
+      "filePath": "dagnam/exceptions.py",
+      "lineRange": [
+        20,
+        26
+      ],
+      "summary": "Raised for non-success HTTP responses from the Dagnam API, carrying status code and message.",
+      "tags": [
+        "exception",
+        "http",
+        "api"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:dagnam/exceptions.py:ChecksumError",
+      "type": "class",
+      "name": "ChecksumError",
+      "filePath": "dagnam/exceptions.py",
+      "lineRange": [
+        29,
+        30
+      ],
+      "summary": "Raised when a downloaded file's computed checksum does not match the server-provided value.",
+      "tags": [
+        "exception",
+        "integrity",
+        "checksum"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/loaders/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "dagnam/loaders/__init__.py",
+      "summary": "Marks dagnam.loaders as a subpackage; intentionally empty to allow lazy, framework-optional imports from loader modules.",
+      "tags": [
+        "barrel",
+        "package-init",
+        "framework-adapter"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/loaders/csv_loader.py",
+      "type": "file",
+      "name": "csv_loader.py",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "summary": "CSV-to-PyTorch bridge providing a _TabularDataset, automatic feature/label role splitting, label encoding, and a create_pytorch_loader factory with train/val/test DataLoaders.",
+      "tags": [
+        "framework-adapter",
+        "pytorch",
+        "csv",
+        "data-loader"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:dagnam/loaders/csv_loader.py:_TabularDataset",
+      "type": "class",
+      "name": "_TabularDataset",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "lineRange": [
+        16,
+        27
+      ],
+      "summary": "Minimal torch.utils.data.Dataset over pre-tensored features and labels used by the CSV loader.",
+      "tags": [
+        "pytorch",
+        "dataset",
+        "adapter"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/csv_loader.py:create_pytorch_loader",
+      "type": "function",
+      "name": "create_pytorch_loader",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "lineRange": [
+        30,
+        93
+      ],
+      "summary": "Builds PyTorch DataLoaders from a CSV path by detecting labels, encoding categoricals, tensorizing features, and splitting train/val/test with a reproducible seed.",
+      "tags": [
+        "factory",
+        "pytorch",
+        "data-loader",
+        "csv"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/csv_loader.py:_split_by_roles",
+      "type": "function",
+      "name": "_split_by_roles",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "lineRange": [
+        107,
+        137
+      ],
+      "summary": "Splits a DataFrame into feature and label sub-frames using per-column role metadata from the dataset schema.",
+      "tags": [
+        "preprocessing",
+        "schema",
+        "split"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/csv_loader.py:_detect_label_column",
+      "type": "function",
+      "name": "_detect_label_column",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "lineRange": [
+        140,
+        153
+      ],
+      "summary": "Heuristically detects the label column of a DataFrame using common naming conventions when schema roles are absent.",
+      "tags": [
+        "heuristic",
+        "preprocessing",
+        "label"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/csv_loader.py:_encode_labels",
+      "type": "function",
+      "name": "_encode_labels",
+      "filePath": "dagnam/loaders/csv_loader.py",
+      "lineRange": [
+        156,
+        170
+      ],
+      "summary": "Converts categorical labels to integer codes, returning both the encoded series and the label-to-index mapping.",
+      "tags": [
+        "preprocessing",
+        "encoding",
+        "categorical"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/loaders/flax_loader.py",
+      "type": "file",
+      "name": "flax_loader.py",
+      "filePath": "dagnam/loaders/flax_loader.py",
+      "summary": "JAX/Flax adapter exposing a FlaxBatch dataclass and a create_flax_dataset factory that reuses the CSV preprocessing pipeline and yields JAX-array batches.",
+      "tags": [
+        "framework-adapter",
+        "flax",
+        "jax",
+        "data-loader"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:dagnam/loaders/flax_loader.py:FlaxBatch",
+      "type": "class",
+      "name": "FlaxBatch",
+      "filePath": "dagnam/loaders/flax_loader.py",
+      "lineRange": [
+        17,
+        21
+      ],
+      "summary": "Dataclass-like container pairing a features array with a labels array, used as the iteration unit for Flax training loops.",
+      "tags": [
+        "data-model",
+        "flax",
+        "batch"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/flax_loader.py:create_flax_dataset",
+      "type": "function",
+      "name": "create_flax_dataset",
+      "filePath": "dagnam/loaders/flax_loader.py",
+      "lineRange": [
+        24,
+        85
+      ],
+      "summary": "Builds a list of FlaxBatch objects from a CSV dataset by reusing the CSV loader's preprocessing and converting tensors to jax.numpy arrays.",
+      "tags": [
+        "factory",
+        "flax",
+        "data-loader",
+        "csv"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:dagnam/loaders/json_loader.py",
+      "type": "file",
+      "name": "json_loader.py",
+      "filePath": "dagnam/loaders/json_loader.py",
+      "summary": "Placeholder JSON loader module that currently delegates to the CSV loader pipeline; reserved for future native JSON ingestion.",
+      "tags": [
+        "framework-adapter",
+        "json",
+        "placeholder"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:dagnam/loaders/system_loader.py",
+      "type": "file",
+      "name": "system_loader.py",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "summary": "Registry and loaders for built-in system datasets (MNIST, CIFAR-10/100, Fashion-MNIST, IMDB, Oxford Pets, Speech Commands, WikiText-2), resolving friendly names to native framework downloads.",
+      "tags": [
+        "system-dataset",
+        "dataset-loader",
+        "registry",
+        "framework-adapter"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:resolve_system_dataset",
+      "type": "function",
+      "name": "resolve_system_dataset",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        21,
+        48
+      ],
+      "summary": "Dispatches a system dataset name to the appropriate native loader, raising DatasetNotFoundError when the name is unknown.",
+      "tags": [
+        "dispatcher",
+        "system-dataset",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_mnist",
+      "type": "function",
+      "name": "_load_mnist",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        55,
+        70
+      ],
+      "summary": "Downloads MNIST via torchvision to the cache directory and returns a populated DagnamDataset handle.",
+      "tags": [
+        "system-dataset",
+        "pytorch",
+        "mnist"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_cifar10",
+      "type": "function",
+      "name": "_load_cifar10",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        73,
+        88
+      ],
+      "summary": "Downloads CIFAR-10 via torchvision and wraps it in a DagnamDataset.",
+      "tags": [
+        "system-dataset",
+        "pytorch",
+        "cifar"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_cifar100",
+      "type": "function",
+      "name": "_load_cifar100",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        91,
+        106
+      ],
+      "summary": "Downloads CIFAR-100 via torchvision and wraps it in a DagnamDataset.",
+      "tags": [
+        "system-dataset",
+        "pytorch",
+        "cifar"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_fashion_mnist",
+      "type": "function",
+      "name": "_load_fashion_mnist",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        109,
+        124
+      ],
+      "summary": "Downloads Fashion-MNIST via torchvision and returns a DagnamDataset handle.",
+      "tags": [
+        "system-dataset",
+        "pytorch",
+        "fashion-mnist"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_imdb",
+      "type": "function",
+      "name": "_load_imdb",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        127,
+        153
+      ],
+      "summary": "Fetches the IMDB sentiment dataset and materializes it as a DagnamDataset with tokenized text features.",
+      "tags": [
+        "system-dataset",
+        "nlp",
+        "imdb"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_oxford_pets",
+      "type": "function",
+      "name": "_load_oxford_pets",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        156,
+        179
+      ],
+      "summary": "Downloads the Oxford-IIIT Pet dataset via torchvision and returns a DagnamDataset handle.",
+      "tags": [
+        "system-dataset",
+        "pytorch",
+        "vision"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_speech_commands",
+      "type": "function",
+      "name": "_load_speech_commands",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        182,
+        199
+      ],
+      "summary": "Downloads the Speech Commands audio dataset via torchaudio and wraps it as a DagnamDataset.",
+      "tags": [
+        "system-dataset",
+        "audio",
+        "speech"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:dagnam/loaders/system_loader.py:_load_wikitext2",
+      "type": "function",
+      "name": "_load_wikitext2",
+      "filePath": "dagnam/loaders/system_loader.py",
+      "lineRange": [
+        202,
+        220
+      ],
+      "summary": "Downloads the WikiText-2 language-modeling corpus and exposes it as a DagnamDataset.",
+      "tags": [
+        "system-dataset",
+        "nlp",
+        "language-model"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:dagnam/loaders/tf_loader.py",
+      "type": "file",
+      "name": "tf_loader.py",
+      "filePath": "dagnam/loaders/tf_loader.py",
+      "summary": "TensorFlow adapter that reuses the CSV preprocessing pipeline and constructs a tf.data.Dataset from feature and label tensors.",
+      "tags": [
+        "framework-adapter",
+        "tensorflow",
+        "data-loader",
+        "csv"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:dagnam/loaders/tf_loader.py:create_tensorflow_dataset",
+      "type": "function",
+      "name": "create_tensorflow_dataset",
+      "filePath": "dagnam/loaders/tf_loader.py",
+      "lineRange": [
+        17,
+        76
+      ],
+      "summary": "Factory that converts a CSV dataset to a tf.data.Dataset using the CSV loader's feature/label split, with optional batching and shuffling.",
+      "tags": [
+        "factory",
+        "tensorflow",
+        "data-loader",
+        "csv"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:hello.py",
+      "type": "file",
+      "name": "hello.py",
+      "filePath": "hello.py",
+      "summary": "Trivial placeholder script left over from project scaffolding, containing a single main() that prints a greeting.",
+      "tags": [
+        "placeholder",
+        "scaffold",
+        "script"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:pyproject.toml",
+      "type": "config",
+      "name": "pyproject.toml",
+      "filePath": "pyproject.toml",
+      "summary": "Python build and packaging metadata declaring the dagnam distribution, dependencies, optional framework extras (torch, tf, flax), and the dagnam CLI entry point.",
+      "tags": [
+        "configuration",
+        "build-system",
+        "packaging",
+        "python"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Top-level project documentation with install instructions, quick-start snippets, per-framework adapter examples, CLI reference, caching behavior, and development notes.",
+      "tags": [
+        "documentation",
+        "entry-point",
+        "overview",
+        "quickstart"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "tests/__init__.py",
+      "summary": "Empty marker file making the tests directory a Python package for pytest collection.",
+      "tags": [
+        "test",
+        "package-init"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/conftest.py",
+      "type": "file",
+      "name": "conftest.py",
+      "filePath": "tests/conftest.py",
+      "summary": "Pytest configuration providing shared fixtures for a temporary cache directory, sample metadata, and sample CSV/JSON dataset files.",
+      "tags": [
+        "test",
+        "fixtures",
+        "pytest"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:tests/test_cache.py",
+      "type": "file",
+      "name": "test_cache.py",
+      "filePath": "tests/test_cache.py",
+      "summary": "Comprehensive unit tests for the cache module covering directory resolution, metadata and checksum persistence, size tracking, LRU eviction, and touch-on-access semantics.",
+      "tags": [
+        "test",
+        "cache",
+        "unit-test"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:tests/test_cli.py",
+      "type": "file",
+      "name": "test_cli.py",
+      "filePath": "tests/test_cli.py",
+      "summary": "Unit tests for the argparse-based CLI exercising login, cache list/clear, argument parsing, and human-readable size formatting.",
+      "tags": [
+        "test",
+        "cli",
+        "unit-test"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/test_csv_loader_roles.py",
+      "type": "file",
+      "name": "test_csv_loader_roles.py",
+      "filePath": "tests/test_csv_loader_roles.py",
+      "summary": "Hypothesis property-based tests verifying that _split_by_roles round-trips DataFrames consistently across arbitrary column-role assignments.",
+      "tags": [
+        "test",
+        "property-based",
+        "csv-loader"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/test_csv_loader.py",
+      "type": "file",
+      "name": "test_csv_loader.py",
+      "filePath": "tests/test_csv_loader.py",
+      "summary": "Unit tests for the CSV loader covering the tabular Dataset wrapper, label-column detection, categorical encoding, and end-to-end PyTorch DataLoader creation.",
+      "tags": [
+        "test",
+        "csv-loader",
+        "pytorch",
+        "unit-test"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:tests/test_dataset.py",
+      "type": "file",
+      "name": "test_dataset.py",
+      "filePath": "tests/test_dataset.py",
+      "summary": "Unit tests for the DagnamDataset core class exercising initialization, info(), and conversion methods to pandas, PyTorch, TensorFlow, and Flax.",
+      "tags": [
+        "test",
+        "dataset",
+        "framework-adapter",
+        "unit-test"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:tests/test_exceptions.py",
+      "type": "file",
+      "name": "test_exceptions.py",
+      "filePath": "tests/test_exceptions.py",
+      "summary": "Unit tests verifying the Dagnam exception hierarchy and the construction behavior of each specialized error class.",
+      "tags": [
+        "test",
+        "exceptions",
+        "unit-test"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:tests/test_load_dataset.py",
+      "type": "file",
+      "name": "test_load_dataset.py",
+      "filePath": "tests/test_load_dataset.py",
+      "summary": "Integration-style tests for the top-level load_dataset API covering UUID vs system-name routing, cache hits, and DagnamClient system-dataset methods.",
+      "tags": [
+        "test",
+        "integration-test",
+        "dataset-loader"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:tests/test_system_loader.py",
+      "type": "file",
+      "name": "test_system_loader.py",
+      "filePath": "tests/test_system_loader.py",
+      "summary": "Tests for the system dataset loader module covering native-field handling, resolve_system_dataset dispatch, source-type detection, and _load_internal routing.",
+      "tags": [
+        "test",
+        "system-dataset",
+        "unit-test"
+      ],
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/auth.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/cache.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/config.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:dagnam/loaders/system_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "file:dagnam/config.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "file:dagnam/config.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:dagnam/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:dagnam/auth.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:dagnam/cache.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:dagnam/client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/client.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:dagnam/loaders/flax_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:dagnam/loaders/json_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:dagnam/loaders/tf_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/json_loader.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/tf_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/loaders/tf_loader.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_cache.py",
+      "target": "file:dagnam/cache.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_cli.py",
+      "target": "file:dagnam/cli.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_csv_loader_roles.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_csv_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_csv_loader.py",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_dataset.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_exceptions.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_load_dataset.py",
+      "target": "file:dagnam/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_load_dataset.py",
+      "target": "file:dagnam/client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_load_dataset.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_system_loader.py",
+      "target": "file:dagnam/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_system_loader.py",
+      "target": "file:dagnam/dataset.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_system_loader.py",
+      "target": "file:dagnam/exceptions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:tests/test_system_loader.py",
+      "target": "file:dagnam/loaders/system_loader.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "function:dagnam/__init__.py:load_dataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "function:dagnam/__init__.py:_load_internal",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "function:dagnam/__init__.py:load_dataset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "function:dagnam/auth.py:get_api_key",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "function:dagnam/auth.py:get_api_url",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "function:dagnam/auth.py:get_api_key",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/auth.py",
+      "target": "function:dagnam/auth.py:get_api_url",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:get_cache_info",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:evict_lru",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:compute_file_checksum",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:get_cache_info",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:evict_lru",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "function:dagnam/cache.py:compute_file_checksum",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:_cmd_login",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:_cmd_dataset_list",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:_cmd_dataset_info",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:_cmd_cache_list",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:_build_parser",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:main",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "function:dagnam/cli.py:main",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/client.py",
+      "target": "class:dagnam/client.py:DagnamClient",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/client.py",
+      "target": "class:dagnam/client.py:DagnamClient",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "class:dagnam/dataset.py:DagnamDataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "class:dagnam/dataset.py:DagnamDataset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:AuthError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:DatasetNotFoundError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:APIError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:ChecksumError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:AuthError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:DatasetNotFoundError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:APIError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "class:dagnam/exceptions.py:ChecksumError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "class:dagnam/exceptions.py:AuthError",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "inherits",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "class:dagnam/exceptions.py:DatasetNotFoundError",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "inherits",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "class:dagnam/exceptions.py:APIError",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "inherits",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "class:dagnam/exceptions.py:ChecksumError",
+      "target": "class:dagnam/exceptions.py:DagnamError",
+      "type": "inherits",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "class:dagnam/loaders/csv_loader.py:_TabularDataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "function:dagnam/loaders/csv_loader.py:create_pytorch_loader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "function:dagnam/loaders/csv_loader.py:_split_by_roles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "function:dagnam/loaders/csv_loader.py:_detect_label_column",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "function:dagnam/loaders/csv_loader.py:_encode_labels",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "function:dagnam/loaders/csv_loader.py:create_pytorch_loader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "class:dagnam/loaders/flax_loader.py:FlaxBatch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "function:dagnam/loaders/flax_loader.py:create_flax_dataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "class:dagnam/loaders/flax_loader.py:FlaxBatch",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/loaders/flax_loader.py",
+      "target": "function:dagnam/loaders/flax_loader.py:create_flax_dataset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:resolve_system_dataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_mnist",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_cifar10",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_cifar100",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_fashion_mnist",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_imdb",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_oxford_pets",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_speech_commands",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:_load_wikitext2",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "function:dagnam/loaders/system_loader.py:resolve_system_dataset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/loaders/tf_loader.py",
+      "target": "function:dagnam/loaders/tf_loader.py:create_tensorflow_dataset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:dagnam/loaders/tf_loader.py",
+      "target": "function:dagnam/loaders/tf_loader.py:create_tensorflow_dataset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "function:dagnam/auth.py:get_api_key",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "function:dagnam/auth.py:get_api_url",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "class:dagnam/client.py:DagnamClient",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "class:dagnam/dataset.py:DagnamDataset",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "function:dagnam/loaders/system_loader.py:resolve_system_dataset",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "function:dagnam/cache.py:compute_file_checksum",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "function:dagnam/cache.py:evict_lru",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:dagnam/__init__.py:load_dataset",
+      "target": "class:dagnam/exceptions.py:ChecksumError",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:dagnam/cache.py",
+      "target": "file:tests/test_cache.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/cli.py",
+      "target": "file:tests/test_cli.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "file:tests/test_csv_loader_roles.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/loaders/csv_loader.py",
+      "target": "file:tests/test_csv_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:tests/test_csv_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:tests/test_dataset.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "file:tests/test_exceptions.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:tests/test_load_dataset.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/client.py",
+      "target": "file:tests/test_load_dataset.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:tests/test_load_dataset.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/__init__.py",
+      "target": "file:tests/test_system_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/dataset.py",
+      "target": "file:tests/test_system_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/exceptions.py",
+      "target": "file:tests/test_system_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:dagnam/loaders/system_loader.py",
+      "target": "file:tests/test_system_loader.py",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:pyproject.toml",
+      "target": "file:dagnam/__init__.py",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:pyproject.toml",
+      "target": "file:dagnam/cli.py",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/__init__.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/cli.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/dataset.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/cache.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/loaders/csv_loader.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/loaders/tf_loader.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:dagnam/loaders/flax_loader.py",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

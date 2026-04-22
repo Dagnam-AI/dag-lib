@@ -5,6 +5,6 @@ as the CSV loader. Format-specific parsing is handled by
 ``DagnamDataset.to_pandas()``.
 """
 
-from dagnam.loaders.csv_loader import create_pytorch_loader
+from dagnam.data.loaders.csv_loader import create_pytorch_loader
 
 __all__ = ["create_pytorch_loader"]

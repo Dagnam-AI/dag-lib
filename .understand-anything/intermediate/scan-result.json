@@ -1,0 +1,216 @@
+{
+  "name": "dagnam",
+  "description": "Official Python SDK for Dagnam.AI — datasets, training, model hub, deployments, and inference.",
+  "languages": [
+    "markdown",
+    "python",
+    "toml"
+  ],
+  "frameworks": [
+    "Pytest",
+    "Hypothesis"
+  ],
+  "files": [
+    {
+      "path": ".python-version",
+      "language": "unknown",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/__init__.py",
+      "language": "python",
+      "sizeLines": 162,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/auth.py",
+      "language": "python",
+      "sizeLines": 69,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/cache.py",
+      "language": "python",
+      "sizeLines": 151,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/cli.py",
+      "language": "python",
+      "sizeLines": 285,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/client.py",
+      "language": "python",
+      "sizeLines": 223,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/config.py",
+      "language": "python",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/dataset.py",
+      "language": "python",
+      "sizeLines": 414,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/exceptions.py",
+      "language": "python",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/__init__.py",
+      "language": "python",
+      "sizeLines": 14,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/csv_loader.py",
+      "language": "python",
+      "sizeLines": 171,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/flax_loader.py",
+      "language": "python",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/json_loader.py",
+      "language": "python",
+      "sizeLines": 11,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/system_loader.py",
+      "language": "python",
+      "sizeLines": 245,
+      "fileCategory": "code"
+    },
+    {
+      "path": "dagnam/loaders/tf_loader.py",
+      "language": "python",
+      "sizeLines": 77,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hello.py",
+      "language": "python",
+      "sizeLines": 7,
+      "fileCategory": "code"
+    },
+    {
+      "path": "pyproject.toml",
+      "language": "toml",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 205,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tests/__init__.py",
+      "language": "python",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/conftest.py",
+      "language": "python",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_cache.py",
+      "language": "python",
+      "sizeLines": 302,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_cli.py",
+      "language": "python",
+      "sizeLines": 126,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_csv_loader_roles.py",
+      "language": "python",
+      "sizeLines": 123,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_csv_loader.py",
+      "language": "python",
+      "sizeLines": 236,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_dataset.py",
+      "language": "python",
+      "sizeLines": 251,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_exceptions.py",
+      "language": "python",
+      "sizeLines": 76,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_load_dataset.py",
+      "language": "python",
+      "sizeLines": 228,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_system_loader.py",
+      "language": "python",
+      "sizeLines": 210,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 28,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "small",
+  "importMap": {
+    ".python-version": [],
+    "dagnam/__init__.py": [],
+    "dagnam/auth.py": [],
+    "dagnam/cache.py": [],
+    "dagnam/cli.py": [],
+    "dagnam/client.py": [],
+    "dagnam/config.py": [],
+    "dagnam/dataset.py": [],
+    "dagnam/exceptions.py": [],
+    "dagnam/loaders/__init__.py": [],
+    "dagnam/loaders/csv_loader.py": [],
+    "dagnam/loaders/flax_loader.py": [],
+    "dagnam/loaders/json_loader.py": [],
+    "dagnam/loaders/system_loader.py": [],
+    "dagnam/loaders/tf_loader.py": [],
+    "hello.py": [],
+    "pyproject.toml": [],
+    "README.md": [],
+    "tests/__init__.py": [],
+    "tests/conftest.py": [],
+    "tests/test_cache.py": [],
+    "tests/test_cli.py": [],
+    "tests/test_csv_loader_roles.py": [],
+    "tests/test_csv_loader.py": [],
+    "tests/test_dataset.py": [],
+    "tests/test_exceptions.py": [],
+    "tests/test_load_dataset.py": [],
+    "tests/test_system_loader.py": []
+  }
+}

@@ -7,8 +7,8 @@ import os
 import re
 from pathlib import Path
 
-from dagnam.auth import configure, get_api_key, get_api_url
-from dagnam.cache import (
+from dagnam._core.auth import configure, get_api_key, get_api_url
+from dagnam.data.cache import (
     compute_file_checksum,
     evict_lru,
     get_cache_dir,
@@ -18,12 +18,33 @@ from dagnam.cache import (
     save_metadata,
     touch_cache,
 )
-from dagnam.config import get_config_value
-from dagnam.client import DagnamClient
-from dagnam.dataset import DagnamDataset
-from dagnam.exceptions import ChecksumError
+from dagnam._core.config import get_config_value
+from dagnam._core.client import DagnamClient
+from dagnam.data.dataset import DagnamDataset
+from dagnam._core.exceptions import ChecksumError
+from dagnam.services.inference import deployment_health, inference, inference_batch
+from dagnam.services.checkpoints import download_checkpoint
+from dagnam.services.training import TrainingEvent, stream_training
+from dagnam.services import codegen, deployments, hub, projects
+from dagnam.services import datasets_upload
+from dagnam._core.lro import LongRunningOperation
 
-__all__ = ["load_dataset", "configure"]
+__all__ = [
+    "load_dataset",
+    "configure",
+    "inference",
+    "inference_batch",
+    "deployment_health",
+    "download_checkpoint",
+    "stream_training",
+    "TrainingEvent",
+    "codegen",
+    "deployments",
+    "hub",
+    "projects",
+    "datasets_upload",
+    "LongRunningOperation",
+]
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -73,7 +94,7 @@ def load_dataset(
     source_type = meta.get("source_type", "")
     if source_type == "system" or is_system:
         try:
-            from dagnam.loaders.system_loader import resolve_system_dataset
+            from dagnam.data.loaders.system_loader import resolve_system_dataset
             return resolve_system_dataset(meta)
         except (ImportError, Exception):
             # Fall through to normal download path if native loader fails
@@ -144,7 +165,7 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
     # System datasets: use native loader with shared TORCH_HOME cache
     if meta.get("source_type") == "system":
         try:
-            from dagnam.loaders.system_loader import resolve_system_dataset
+            from dagnam.data.loaders.system_loader import resolve_system_dataset
             return resolve_system_dataset(meta)
         except (ImportError, Exception):
             pass  # Fall through to file-based path

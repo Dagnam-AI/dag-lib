@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 import torch
 
-from dagnam.dataset import DagnamDataset
-from dagnam.loaders.csv_loader import (
+from dagnam.data.dataset import DagnamDataset
+from dagnam.data.loaders.csv_loader import (
     _TabularDataset,
     _detect_label_column,
     _encode_labels,

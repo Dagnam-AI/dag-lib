@@ -9,13 +9,15 @@ dependencies = [
     "requests>=2.28",
     "pandas>=1.5",
     "tqdm>=4.60",
+    "sseclient-py>=1.7",
 ]
 
 [project.optional-dependencies]
 pytorch = ["torch>=2.0"]
 tensorflow = ["tensorflow>=2.12"]
 flax = ["jax>=0.4", "flax>=0.7"]
-all = ["torch>=2.0", "tensorflow>=2.12", "jax>=0.4", "flax>=0.7"]
+aio = ["httpx>=0.27", "httpx-sse>=0.4"]
+all = ["torch>=2.0", "tensorflow>=2.12", "jax>=0.4", "flax>=0.7", "httpx>=0.27", "httpx-sse>=0.4"]
 
 [project.scripts]
 dagnam = "dagnam.cli:main"
@@ -26,6 +28,7 @@ dev = [
     "hypothesis",
     "pytest-cov",
     "ruff",
+    "respx>=0.20",
 ]
 
 [build-system]

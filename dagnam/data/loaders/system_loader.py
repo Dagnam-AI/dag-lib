@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dagnam.exceptions import DatasetNotFoundError
+from dagnam._core.exceptions import DatasetNotFoundError
 
 # Cache root for system datasets downloaded by native libraries
 _SYSTEM_CACHE_ROOT = Path.home() / ".dagnam" / "system_datasets"
@@ -27,7 +27,7 @@ def resolve_system_dataset(meta: dict) -> "DagnamDataset":
     Raises:
         DatasetNotFoundError: If no native loader exists for the dataset.
     """
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     name = meta.get("name", "").lower()
 
@@ -54,7 +54,7 @@ def resolve_system_dataset(meta: dict) -> "DagnamDataset":
 
 def _load_mnist(meta: dict) -> "DagnamDataset":
     from torchvision import datasets, transforms
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "mnist"
     cache.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,7 @@ def _load_mnist(meta: dict) -> "DagnamDataset":
 
 def _load_cifar10(meta: dict) -> "DagnamDataset":
     from torchvision import datasets, transforms
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "cifar10"
     cache.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,7 @@ def _load_cifar10(meta: dict) -> "DagnamDataset":
 
 def _load_cifar100(meta: dict) -> "DagnamDataset":
     from torchvision import datasets, transforms
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "cifar100"
     cache.mkdir(parents=True, exist_ok=True)
@@ -108,7 +108,7 @@ def _load_cifar100(meta: dict) -> "DagnamDataset":
 
 def _load_fashion_mnist(meta: dict) -> "DagnamDataset":
     from torchvision import datasets, transforms
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "fashion_mnist"
     cache.mkdir(parents=True, exist_ok=True)
@@ -129,7 +129,7 @@ def _load_imdb(meta: dict) -> "DagnamDataset":
     import urllib.request
 
     import numpy as np
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "imdb"
     cache.mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,7 @@ def _load_imdb(meta: dict) -> "DagnamDataset":
 
 def _load_oxford_pets(meta: dict) -> "DagnamDataset":
     from torchvision import datasets, transforms
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "oxford_pets"
     cache.mkdir(parents=True, exist_ok=True)
@@ -180,7 +180,7 @@ def _load_oxford_pets(meta: dict) -> "DagnamDataset":
 
 
 def _load_speech_commands(meta: dict) -> "DagnamDataset":
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "speech_commands"
     cache.mkdir(parents=True, exist_ok=True)
@@ -200,7 +200,7 @@ def _load_speech_commands(meta: dict) -> "DagnamDataset":
 
 
 def _load_wikitext2(meta: dict) -> "DagnamDataset":
-    from dagnam.dataset import DagnamDataset
+    from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "wikitext2"
     cache.mkdir(parents=True, exist_ok=True)
