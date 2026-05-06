@@ -13,11 +13,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pytorch = ["torch>=2.0"]
+pytorch = ["torch>=2.0", "torchvision>=0.15"]
+audio = ["torch>=2.0", "torchaudio>=2.0"]
 tensorflow = ["tensorflow>=2.12"]
 flax = ["jax>=0.4", "flax>=0.7"]
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
-all = ["torch>=2.0", "tensorflow>=2.12", "jax>=0.4", "flax>=0.7", "httpx>=0.27", "httpx-sse>=0.4"]
+all = ["torch>=2.0", "torchvision>=0.15", "torchaudio>=2.0", "tensorflow>=2.12", "jax>=0.4", "flax>=0.7", "httpx>=0.27", "httpx-sse>=0.4"]
 
 [project.scripts]
 dagnam = "dagnam.cli:main"

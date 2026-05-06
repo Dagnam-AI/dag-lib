@@ -108,7 +108,7 @@ class TestSystemDatasetRouting:
         ):
             ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
 
-            mock_sys_meta.assert_called_once_with("mnist-digits")
+            mock_sys_meta.assert_called_once_with("mnist-digits", version=None)
             mock_user_meta.assert_not_called()
             mock_resolve.assert_called_once_with(meta)
             assert ds is mock_native_ds
@@ -166,7 +166,7 @@ class TestUserDatasetRouting:
 
             ds = load_dataset(dataset_id, cache_dir=str(tmp_path))
 
-            mock_user_meta.assert_called_once_with(dataset_id)
+            mock_user_meta.assert_called_once_with(dataset_id, version=None)
             mock_sys_meta.assert_not_called()
             mock_user_dl.assert_called_once()
             mock_sys_dl.assert_not_called()

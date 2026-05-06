@@ -38,6 +38,7 @@ class DagnamDataset:
         self._data: pd.DataFrame | None = None
         self._native_train: Any = _native_train
         self._native_test: Any = _native_test
+        self._raw_meta: dict = meta
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -104,6 +105,7 @@ class DagnamDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        column_roles: dict[str, str] | None = None,
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Create a PyTorch DataLoader for the specified split.
 
@@ -112,6 +114,12 @@ class DagnamDataset:
         format-specific loader (csv_loader or json_loader).
 
         ``shuffle`` defaults to ``True`` for train, ``False`` for val/test.
+
+        Args:
+            column_roles: Optional mapping of column names to roles
+                (e.g. ``{"x": "feature", "label": "target"}``).
+                Only used by tabular loaders (CSV/JSON). Ignored by
+                image and audio loaders.
 
         Raises:
             ImportError: If PyTorch is not installed.
@@ -147,6 +155,44 @@ class DagnamDataset:
 
         # --- File-based path (user datasets) ---
         fmt = self.format.lower()
+
+        # Image folder datasets
+        if fmt == "image_folder":
+            from dagnam.data.loaders.image_folder_loader import (
+                create_pytorch_loader as create_image_loader,
+            )
+
+            return create_image_loader(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+            )
+
+        # Audio folder datasets
+        if fmt == "audio_folder" or (
+            fmt not in ("csv", "tsv", "json", "jsonl") and self.dataset_type == "audio"
+        ):
+            from dagnam.data.loaders.audio_loader import (
+                create_pytorch_loader as create_audio_loader,
+            )
+
+            return create_audio_loader(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+            )
+
+        # Tabular datasets (CSV, TSV, JSON, JSONL)
         if fmt not in ("csv", "tsv", "json", "jsonl"):
             raise ValueError(
                 f"Unsupported format for PyTorch loader: {self.format}"
@@ -166,6 +212,7 @@ class DagnamDataset:
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            column_roles=column_roles,
         )
 
     def _native_pytorch_loader(
@@ -179,7 +226,7 @@ class DagnamDataset:
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Build a DataLoader from native train/test datasets."""
         import torch
-        from torch.utils.data import DataLoader, TensorDataset, random_split
+        from torch.utils.data import DataLoader, random_split
 
         native_train = self._native_train
         native_test = self._native_test

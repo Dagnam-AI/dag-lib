@@ -62,12 +62,26 @@ def load_dataset(
     api_url: str | None = None,
     api_key: str | None = None,
     cache_dir: str | None = None,
+    version: str | None = None,
+    presigned_url: str | None = None,
+    download_url: str | None = None,
+    resume: bool = True,
 ) -> DagnamDataset:
     """Load a dataset by ID. Auto-downloads and caches if needed.
 
     In server mode (DAGNAM_INTERNAL=true), reads sidecar metadata from
     DAGNAM_META_DIR and loads directly from the filesystem.
     In client mode, resolves auth → checks cache → downloads if needed → returns DagnamDataset.
+
+    Args:
+        dataset_id: Dataset UUID or system dataset name.
+        api_url: Override API URL.
+        api_key: Override API key.
+        cache_dir: Override cache directory.
+        version: Optional dataset version to load.
+        presigned_url: Optional presigned download URL (skips auth).
+        download_url: Alias for presigned_url.
+        resume: Whether to resume partial downloads (default True).
     """
     # --- Server mode: bypass HTTP entirely via sidecar metadata ---
     if os.environ.get("DAGNAM_INTERNAL"):
@@ -86,9 +100,9 @@ def load_dataset(
 
     # 4. Get metadata from server
     if is_system:
-        meta = client.get_system_dataset_meta(dataset_id)
+        meta = client.get_system_dataset_meta(dataset_id, version=version)
     else:
-        meta = client.get_dataset_meta(dataset_id)
+        meta = client.get_dataset_meta(dataset_id, version=version)
 
     # 5. Detect system datasets by source_type and route to native loader
     source_type = meta.get("source_type", "")
@@ -100,36 +114,48 @@ def load_dataset(
             # Fall through to normal download path if native loader fails
             pass
 
-    # 6. Resolve cache base dir
+    # 6. Resolve cache base dir and version-aware cache key
     cache_dir_path: Path | None = Path(cache_dir) if cache_dir is not None else None
+    cache_key = f"{dataset_id}@{version}" if version else dataset_id
 
-    # 7. Check cache
-    if is_cached(dataset_id, meta["checksum"], base_dir=cache_dir_path):
-        cached_meta = load_metadata(dataset_id, base_dir=cache_dir_path)
-        ds_cache_dir = get_cache_dir(dataset_id, base_dir=cache_dir_path)
+    # 7. Resolve effective download URL (presigned_url takes precedence)
+    effective_download_url = presigned_url or download_url or meta.get("download_url")
+
+    # 8. Check cache
+    if is_cached(cache_key, meta["checksum"], base_dir=cache_dir_path):
+        cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
+        ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
         return DagnamDataset(cached_meta, ds_cache_dir)
 
-    # 8. Download
-    ds_cache_dir = get_cache_dir(dataset_id, base_dir=cache_dir_path)
+    # 9. Download
+    ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
     if is_system:
         downloaded_file = client.download_system_dataset(dataset_id, ds_cache_dir)
     else:
-        downloaded_file = client.download_dataset(dataset_id, ds_cache_dir)
+        downloaded_file = client.download_dataset(
+            dataset_id,
+            ds_cache_dir,
+            download_url=effective_download_url,
+            filename=meta.get("filename"),
+            version=version,
+            resume=resume,
+        )
 
-    # 9. Verify checksum
+    # 10. Verify checksum
     local_checksum = compute_file_checksum(downloaded_file)
-    if local_checksum != meta["checksum"]:
+    expected_checksum = meta["checksum"].removeprefix("sha256:")
+    if local_checksum != expected_checksum:
         raise ChecksumError(
             f"Checksum mismatch for dataset '{dataset_id}': "
             f"expected {meta['checksum']}, got {local_checksum}"
         )
 
-    # 10. Persist metadata and checksum
-    save_metadata(dataset_id, meta, base_dir=cache_dir_path)
-    save_checksum(dataset_id, meta["checksum"], base_dir=cache_dir_path)
+    # 11. Persist metadata and checksum
+    save_metadata(cache_key, meta, base_dir=cache_dir_path)
+    save_checksum(cache_key, meta["checksum"], base_dir=cache_dir_path)
 
-    # 10. Update access timestamp and run LRU eviction
-    touch_cache(dataset_id, base_dir=cache_dir_path)
+    # 12. Update access timestamp and run LRU eviction
+    touch_cache(cache_key, base_dir=cache_dir_path)
     max_cache = get_config_value("max_cache_size", None)
     evict_lru(max_size_bytes=max_cache, base_dir=cache_dir_path)
 

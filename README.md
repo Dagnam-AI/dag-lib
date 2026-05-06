@@ -166,6 +166,82 @@ LRU eviction runs automatically after each download. Default limit is 10 GB, con
 | TSV    | ✅ | ✅ | ✅ | ✅ |
 | JSON   | ✅ | ✅ | ✅ | ✅ |
 | JSONL  | ✅ | ✅ | ✅ | ✅ |
+| Image Folder | — | ✅ | — | — |
+| Audio Folder | — | ✅ | — | — |
+
+## Image Folder Datasets
+
+Load image classification datasets organized in class-folder structure:
+
+```python
+images = dagnam.load_dataset("cats-dogs", version="v1")
+train_loader = images.to_pytorch_loader(split="train", batch_size=32)
+```
+
+Supports two layouts:
+- **Split layout**: `root/{split}/{class}/*.jpg` (train/val/test folders)
+- **Unsplit layout**: `root/{class}/*.jpg` (deterministic splits applied)
+
+Requires `torchvision`: `pip install dagnam[pytorch]`
+
+## Audio Folder Datasets
+
+Load audio classification datasets with automatic mel spectrogram conversion:
+
+```python
+audio = dagnam.load_dataset("speech-commands")
+train_loader = audio.to_pytorch_loader(
+    split="train",
+    batch_size=32,
+)
+```
+
+Supports WAV, MP3, and FLAC formats. Audio is converted to mono, resampled to 16kHz, and transformed to mel spectrograms by default.
+
+Requires `torchaudio`: `pip install dagnam[audio]`
+
+## Dataset Versioning
+
+Load a specific version of a dataset:
+
+```python
+ds = dagnam.load_dataset("my-dataset-id", version="v2")
+```
+
+Versioned datasets are cached separately under `{dataset_id}@{version}/`.
+
+## Presigned URL Downloads
+
+Use a presigned URL for temporary access without an API key:
+
+```python
+ds = dagnam.load_dataset(
+    "my-dataset-id",
+    presigned_url="https://api.dagnam.ai/api/v1/datasets/.../download?token=..."
+)
+```
+
+Presigned URLs are valid for 7 days and are included in the metadata response.
+
+## Resumable Downloads
+
+Downloads automatically resume from where they left off if interrupted. A `.part` file tracks progress. Disable with `resume=False`:
+
+```python
+ds = dagnam.load_dataset("my-dataset-id", resume=False)
+```
+
+## Column Roles
+
+Specify column roles for tabular datasets to control feature/target separation:
+
+```python
+loader = dataset.to_pytorch_loader(
+    split="train",
+    batch_size=32,
+    column_roles={"x": "feature", "label": "target", "id": "ignore"},
+)
+```
 
 ## Label Detection
 
