@@ -39,6 +39,10 @@ def create_pytorch_loader(
     sample_rate: int | None = None,
     n_mels: int = 64,
     max_duration_sec: float = 5.0,
+    waveform_transform=None,
+    spectrogram_transform=None,
+    target_transform=None,
+    collate_fn=None,
 ) -> "DataLoader":
     """Create a PyTorch DataLoader from an audio-folder dataset.
 
@@ -118,6 +122,9 @@ def create_pytorch_loader(
         target_sample_rate=sample_rate,
         n_mels=n_mels,
         max_duration_sec=max_duration_sec,
+        waveform_transform=waveform_transform,
+        spectrogram_transform=spectrogram_transform,
+        target_transform=target_transform,
     )
 
     # Apply deterministic split if unsplit
@@ -136,6 +143,7 @@ def create_pytorch_loader(
         num_workers=num_workers,
         pin_memory=True,
         drop_last=(split == "train"),
+        collate_fn=collate_fn,
     )
 
 
@@ -153,6 +161,9 @@ class AudioFolderDataset:
         target_sample_rate: int = 16000,
         n_mels: int = 64,
         max_duration_sec: float = 5.0,
+        waveform_transform=None,
+        spectrogram_transform=None,
+        target_transform=None,
     ) -> None:
         import torchaudio
 
@@ -161,6 +172,9 @@ class AudioFolderDataset:
         self.target_sample_rate = target_sample_rate
         self.n_mels = n_mels
         self.max_samples = int(target_sample_rate * max_duration_sec)
+        self.waveform_transform = waveform_transform
+        self.spectrogram_transform = spectrogram_transform
+        self.target_transform = target_transform
 
         self.mel_transform = torchaudio.transforms.MelSpectrogram(
             sample_rate=target_sample_rate,
@@ -198,10 +212,22 @@ class AudioFolderDataset:
             padding = self.max_samples - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding))
 
+        if self.waveform_transform is not None:
+            waveform = self.waveform_transform(waveform)
+
         # Apply mel spectrogram
         mel_spec = self.mel_transform(waveform)
 
-        return mel_spec.squeeze(0), torch.tensor(label, dtype=torch.long)
+        if self.spectrogram_transform is not None:
+            mel_spec = self.spectrogram_transform(mel_spec)
+
+        if self.target_transform is not None:
+            label = self.target_transform(label)
+
+        if not torch.is_tensor(label):
+            label = torch.tensor(label, dtype=torch.long)
+
+        return mel_spec.squeeze(0), label
 
 
 def _collect_audio_files(

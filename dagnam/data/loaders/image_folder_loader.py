@@ -31,6 +31,9 @@ def create_pytorch_loader(
     test_ratio: float = 0.1,
     seed: int = 42,
     image_size: tuple[int, int] = (224, 224),
+    transform=None,
+    target_transform=None,
+    collate_fn=None,
 ) -> "DataLoader":
     """Create a PyTorch DataLoader from an image-folder dataset.
 
@@ -80,29 +83,29 @@ def create_pytorch_loader(
     # Discover folder layout
     layout = discover_class_folders(data_root)
 
-    # Build transforms
-    if split == "train":
-        transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-    else:
+    # Build default transforms. Augmentation/normalization are explicit hooks.
+    if transform is None:
         transform = transforms.Compose([
             transforms.Resize(image_size),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
     if layout.has_explicit_splits:
         # Use explicit split directories
         # Normalize split name: 'val' -> check for 'val' or 'validation'
         split_dir = _resolve_split_dir(data_root, split, layout.splits)
-        dataset = datasets.ImageFolder(str(split_dir), transform=transform)
+        dataset = datasets.ImageFolder(
+            str(split_dir),
+            transform=transform,
+            target_transform=target_transform,
+        )
     else:
         # Unsplit: load all images and use deterministic subset
-        dataset = datasets.ImageFolder(str(data_root), transform=transform)
+        dataset = datasets.ImageFolder(
+            str(data_root),
+            transform=transform,
+            target_transform=target_transform,
+        )
         n = len(dataset)
         train_idx, val_idx, test_idx = split_indices(
             n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
@@ -117,6 +120,7 @@ def create_pytorch_loader(
         num_workers=num_workers,
         pin_memory=True,
         drop_last=(split == "train"),
+        collate_fn=collate_fn,
     )
 
 

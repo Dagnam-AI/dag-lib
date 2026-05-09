@@ -29,6 +29,8 @@ def create_flax_dataset(
     val_ratio: float,
     test_ratio: float,
     seed: int,
+    transform_fn=None,
+    batch_transform_fn=None,
 ) -> list[FlaxBatch]:
     """Create a list of FlaxBatch from a tabular dataset.
 
@@ -75,11 +77,28 @@ def create_flax_dataset(
     split_features = features[split_indices]
     split_labels = labels[split_indices]
 
+    if transform_fn is not None:
+        transformed_features = []
+        transformed_labels = []
+        for feature, label in zip(split_features, split_labels):
+            transformed = transform_fn(feature, label)
+            if isinstance(transformed, tuple) and len(transformed) == 2:
+                feature, label = transformed
+            else:
+                feature = transformed
+            transformed_features.append(feature)
+            transformed_labels.append(label)
+        split_features = np.asarray(transformed_features)
+        split_labels = np.asarray(transformed_labels)
+
     # Batch into list of FlaxBatch
     batches = []
     for i in range(0, len(split_indices), batch_size):
         batch_f = jnp.array(split_features[i : i + batch_size])
         batch_l = jnp.array(split_labels[i : i + batch_size])
-        batches.append(FlaxBatch(features=batch_f, labels=batch_l))
+        batch = FlaxBatch(features=batch_f, labels=batch_l)
+        if batch_transform_fn is not None:
+            batch = batch_transform_fn(batch)
+        batches.append(batch)
 
     return batches

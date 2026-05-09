@@ -22,6 +22,8 @@ def create_tensorflow_dataset(
     val_ratio: float,
     test_ratio: float,
     seed: int,
+    map_fn=None,
+    batch_map_fn=None,
 ) -> "tf.data.Dataset":
     """Create a tf.data.Dataset from a tabular dataset.
 
@@ -70,7 +72,14 @@ def create_tensorflow_dataset(
     if shuffle:
         ds = ds.shuffle(buffer_size=len(split_indices), seed=seed)
 
+    if map_fn is not None:
+        ds = ds.map(map_fn)
+
     ds = ds.batch(batch_size)
+
+    if batch_map_fn is not None:
+        ds = ds.map(batch_map_fn)
+
     ds = ds.prefetch(tf.data.AUTOTUNE)
 
     return ds

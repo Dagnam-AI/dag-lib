@@ -2,10 +2,91 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+
+def _wrap_collate(collate_fn=None, batch_transform=None):
+    """Apply an optional batch transform after PyTorch collation."""
+    if batch_transform is None:
+        return collate_fn
+
+    def wrapped(batch):
+        if collate_fn is None:
+            from torch.utils.data._utils.collate import default_collate
+
+            collated = default_collate(batch)
+        else:
+            collated = collate_fn(batch)
+        return batch_transform(collated)
+
+    return wrapped
+
+
+def _with_collate(loader, collate_fn=None, batch_transform=None):
+    """Rebuild a DataLoader with hook-aware collation when needed.
+
+    Preserves the original loader's sampler so that shuffle behavior is
+    retained (PyTorch's DataLoader uses RandomSampler internally when
+    shuffle=True, so handing the sampler over preserves that behavior).
+    """
+    wrapped_collate = _wrap_collate(collate_fn, batch_transform)
+    if wrapped_collate is None:
+        return loader
+
+    from torch.utils.data import DataLoader
+
+    # When a sampler is provided, PyTorch requires shuffle to be False/None.
+    # The sampler itself encodes the shuffle behavior of the original loader.
+    return DataLoader(
+        loader.dataset,
+        batch_size=loader.batch_size,
+        shuffle=False,
+        sampler=loader.sampler,
+        num_workers=loader.num_workers,
+        collate_fn=wrapped_collate,
+        pin_memory=loader.pin_memory,
+        drop_last=loader.drop_last,
+        timeout=loader.timeout,
+        worker_init_fn=loader.worker_init_fn,
+        multiprocessing_context=loader.multiprocessing_context,
+        generator=loader.generator,
+        prefetch_factor=loader.prefetch_factor,
+        persistent_workers=loader.persistent_workers,
+        pin_memory_device=loader.pin_memory_device,
+    )
+
+
+class _TransformDataset:
+    """Map-style dataset wrapper that applies sample and target hooks."""
+
+    def __init__(self, dataset, transform=None, target_transform=None) -> None:
+        self.dataset = dataset
+        self.transform = transform
+        self.target_transform = target_transform
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        item = self.dataset[index]
+        if isinstance(item, tuple) and len(item) >= 2:
+            data = item[0]
+            target = item[1]
+            rest = item[2:]
+            if self.transform is not None:
+                data = self.transform(data)
+            if self.target_transform is not None:
+                target = self.target_transform(target)
+            if rest:
+                return (data, target, *rest)
+            return data, target
+        if self.transform is not None:
+            return self.transform(item)
+        return item
 
 
 class DagnamDataset:
@@ -106,6 +187,12 @@ class DagnamDataset:
         test_ratio: float = 0.1,
         seed: int = 42,
         column_roles: dict[str, str] | None = None,
+        transform=None,
+        target_transform=None,
+        collate_fn=None,
+        batch_transform=None,
+        waveform_transform=None,
+        spectrogram_transform=None,
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Create a PyTorch DataLoader for the specified split.
 
@@ -151,6 +238,9 @@ class DagnamDataset:
                 shuffle=shuffle,
                 val_ratio=val_ratio,
                 seed=seed,
+                transform=transform,
+                target_transform=target_transform,
+                collate_fn=_wrap_collate(collate_fn, batch_transform),
             )
 
         # --- File-based path (user datasets) ---
@@ -171,6 +261,9 @@ class DagnamDataset:
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                transform=transform,
+                target_transform=target_transform,
+                collate_fn=_wrap_collate(collate_fn, batch_transform),
             )
 
         # Audio folder datasets
@@ -190,6 +283,10 @@ class DagnamDataset:
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                waveform_transform=waveform_transform,
+                spectrogram_transform=spectrogram_transform,
+                target_transform=target_transform,
+                collate_fn=_wrap_collate(collate_fn, batch_transform),
             )
 
         # Tabular datasets (CSV, TSV, JSON, JSONL)
@@ -203,7 +300,7 @@ class DagnamDataset:
         else:
             from dagnam.data.loaders.json_loader import create_pytorch_loader
 
-        return create_pytorch_loader(
+        loader = create_pytorch_loader(
             dagnam_ds=self,
             split=split,
             batch_size=batch_size,
@@ -214,6 +311,7 @@ class DagnamDataset:
             seed=seed,
             column_roles=column_roles,
         )
+        return _with_collate(loader, collate_fn, batch_transform)
 
     def _native_pytorch_loader(
         self,
@@ -223,6 +321,9 @@ class DagnamDataset:
         shuffle: bool,
         val_ratio: float,
         seed: int,
+        transform=None,
+        target_transform=None,
+        collate_fn=None,
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Build a DataLoader from native train/test datasets."""
         import torch
@@ -234,7 +335,15 @@ class DagnamDataset:
         # Handle IMDB-style tuple datasets (numpy arrays)
         if isinstance(native_train, tuple):
             return self._native_numpy_loader(
-                split, batch_size, num_workers, shuffle, val_ratio, seed,
+                split,
+                batch_size,
+                num_workers,
+                shuffle,
+                val_ratio,
+                seed,
+                transform=transform,
+                target_transform=target_transform,
+                collate_fn=collate_fn,
             )
 
         # Handle torchvision map-style datasets
@@ -255,6 +364,9 @@ class DagnamDataset:
                 generator=torch.Generator().manual_seed(seed),
             )
 
+        if transform is not None or target_transform is not None:
+            ds = _TransformDataset(ds, transform, target_transform)
+
         return DataLoader(
             ds,
             batch_size=batch_size,
@@ -262,6 +374,7 @@ class DagnamDataset:
             num_workers=num_workers,
             pin_memory=True,
             drop_last=(split == "train"),
+            collate_fn=collate_fn,
         )
 
     def _native_numpy_loader(
@@ -272,6 +385,9 @@ class DagnamDataset:
         shuffle: bool,
         val_ratio: float,
         seed: int,
+        transform=None,
+        target_transform=None,
+        collate_fn=None,
     ) -> "torch.utils.data.DataLoader":  # noqa: F821
         """Build a DataLoader from numpy array tuples (e.g. IMDB)."""
         import numpy as np
@@ -300,6 +416,9 @@ class DagnamDataset:
                 y = torch.from_numpy(np.asarray(y_train[:-n_val] if n_val > 0 else y_train)).float().unsqueeze(1)
             ds = TensorDataset(x, y)
 
+        if transform is not None or target_transform is not None:
+            ds = _TransformDataset(ds, transform, target_transform)
+
         return DataLoader(
             ds,
             batch_size=batch_size,
@@ -307,6 +426,7 @@ class DagnamDataset:
             num_workers=num_workers,
             pin_memory=True,
             drop_last=(split == "train"),
+            collate_fn=collate_fn,
         )
 
     @staticmethod
@@ -321,6 +441,153 @@ class DagnamDataset:
         return result
 
     # ------------------------------------------------------------------
+    # Raw sample/array access
+    # ------------------------------------------------------------------
+
+    def iter_samples(
+        self,
+        split: str = "train",
+        decoded: bool = True,
+        val_ratio: float = 0.1,
+        test_ratio: float = 0.1,
+        seed: int = 42,
+    ):
+        """Yield raw samples for a split when data is already available."""
+        del decoded  # Reserved for future media decoding support.
+
+        if isinstance(self._data, dict) and split in self._data:
+            yield from self._data[split]
+            return
+
+        if isinstance(self._data, list):
+            yield from self._data
+            return
+
+        native = self._native_test if split == "test" else self._native_train
+        if isinstance(native, tuple) and len(native) == 2:
+            features, labels = native
+            for feature, label in zip(features, labels):
+                yield feature, label
+            return
+
+        if native is not None:
+            for index in range(len(native)):
+                yield native[index]
+            return
+
+        if self.format.lower() in ("csv", "tsv", "json", "jsonl"):
+            yield from self._iter_tabular_file_samples(
+                split=split,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+            )
+            return
+
+        raise ValueError(
+            f"Raw sample iteration is not available for format '{self.format}'"
+        )
+
+    def to_arrays(
+        self,
+        split: str = "train",
+        decoded: bool = True,
+        val_ratio: float = 0.1,
+        test_ratio: float = 0.1,
+        seed: int = 42,
+    ):
+        """Return features and labels as NumPy arrays for generated pipelines."""
+        import numpy as np
+
+        features = []
+        labels = []
+        for item in self.iter_samples(
+            split=split,
+            decoded=decoded,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+        ):
+            if isinstance(item, tuple) and len(item) == 2:
+                feature, label = item
+            else:
+                feature, label = item, None
+            features.append(feature)
+            labels.append(label)
+
+        if labels and all(label is not None for label in labels):
+            return np.asarray(features), np.asarray(labels)
+        return np.asarray(features), None
+
+    def _iter_tabular_file_samples(
+        self,
+        split: str,
+        val_ratio: float,
+        test_ratio: float,
+        seed: int,
+    ):
+        """Yield numeric feature rows and encoded labels from a tabular file."""
+        df = self.to_pandas()
+        label_col = self._detect_label_column(df)
+        labels = self._encode_label_values(df[label_col])
+        feature_cols = [col for col in df.columns if col != label_col]
+        features = df[feature_cols].select_dtypes(include="number").values
+
+        indices = self._split_indices(
+            len(df),
+            split=split,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+        )
+        for index in indices:
+            yield features[index].tolist(), labels[index]
+
+    def _detect_label_column(self, df: pd.DataFrame) -> str:
+        if self.feature_schema and "columns" in self.feature_schema:
+            for col_info in self.feature_schema["columns"]:
+                if col_info.get("type") == "categorical":
+                    return col_info["name"]
+        return df.columns[-1]
+
+    def _encode_label_values(self, series: pd.Series) -> list:
+        if self.class_names:
+            mapping = {name: idx for idx, name in enumerate(self.class_names)}
+            return series.map(mapping).tolist()
+        encoded, _ = pd.factorize(series)
+        return encoded.tolist()
+
+    @staticmethod
+    def _split_indices(
+        n: int,
+        split: str,
+        val_ratio: float,
+        test_ratio: float,
+        seed: int,
+    ) -> list[int]:
+        """Compute deterministic index ranges for train/val/test splits.
+
+        Uses the same shuffle behavior as ``csv_loader`` / ``json_loader``
+        so that ``to_arrays()`` and ``to_pytorch_loader()`` produce identical
+        splits with the same seed.
+        """
+        n_test = int(n * test_ratio)
+        n_val = int(n * val_ratio)
+        n_train = n - n_val - n_test
+
+        indices = list(range(n))
+        # Always shuffle for determinism parity with file-based loaders,
+        # which shuffle unconditionally regardless of val/test ratios.
+        random.Random(seed).shuffle(indices)
+
+        split_map = {
+            "train": indices[:n_train],
+            "val": indices[n_train : n_train + n_val],
+            "test": indices[n_train + n_val :],
+        }
+        return split_map[split]
+
+    # ------------------------------------------------------------------
     # TensorFlow conversion
     # ------------------------------------------------------------------
 
@@ -332,6 +599,8 @@ class DagnamDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        map_fn=None,
+        batch_map_fn=None,
     ) -> "tf.data.Dataset":  # noqa: F821
         """Create a TensorFlow Dataset for the specified split.
 
@@ -371,6 +640,8 @@ class DagnamDataset:
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            map_fn=map_fn,
+            batch_map_fn=batch_map_fn,
         )
 
     # ------------------------------------------------------------------
@@ -385,6 +656,8 @@ class DagnamDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        transform_fn=None,
+        batch_transform_fn=None,
     ) -> list:
         """Create a list of Flax batches for the specified split.
 
@@ -424,6 +697,8 @@ class DagnamDataset:
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            transform_fn=transform_fn,
+            batch_transform_fn=batch_transform_fn,
         )
 
     # ------------------------------------------------------------------

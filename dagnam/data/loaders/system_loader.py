@@ -18,7 +18,7 @@ from dagnam._core.exceptions import DatasetNotFoundError
 _SYSTEM_CACHE_ROOT = Path.home() / ".dagnam" / "system_datasets"
 
 
-def resolve_system_dataset(meta: dict) -> "DagnamDataset":
+def resolve_system_dataset(meta: dict, transform=None) -> "DagnamDataset":
     """Load a system dataset using its native library internally.
 
     Matches on the dataset name (case-insensitive, fuzzy).  Returns a
@@ -45,86 +45,88 @@ def resolve_system_dataset(meta: dict) -> "DagnamDataset":
             f"Contact support or use a user-uploaded version."
         )
 
-    return loader(meta)
+    return loader(meta, transform=transform)
 
 
 # ------------------------------------------------------------------
 # Individual loaders
 # ------------------------------------------------------------------
 
-def _load_mnist(meta: dict) -> "DagnamDataset":
+def _load_mnist(meta: dict, transform=None) -> "DagnamDataset":
     from torchvision import datasets, transforms
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "mnist"
     cache.mkdir(parents=True, exist_ok=True)
 
-    transform = transforms.Compose([
+    # When the caller passes a custom transform, honor it as-is (caller owns normalization).
+    # Otherwise, preserve the historical bundled default (ToTensor + dataset-specific Normalize).
+    base_transform = transform if transform is not None else transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
     ])
 
-    train_ds = datasets.MNIST(root=str(cache), train=True, download=True, transform=transform)
-    test_ds = datasets.MNIST(root=str(cache), train=False, download=True, transform=transform)
+    train_ds = datasets.MNIST(root=str(cache), train=True, download=True, transform=base_transform)
+    test_ds = datasets.MNIST(root=str(cache), train=False, download=True, transform=base_transform)
 
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_cifar10(meta: dict) -> "DagnamDataset":
+def _load_cifar10(meta: dict, transform=None) -> "DagnamDataset":
     from torchvision import datasets, transforms
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "cifar10"
     cache.mkdir(parents=True, exist_ok=True)
 
-    transform = transforms.Compose([
+    base_transform = transform if transform is not None else transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
     ])
 
-    train_ds = datasets.CIFAR10(root=str(cache), train=True, download=True, transform=transform)
-    test_ds = datasets.CIFAR10(root=str(cache), train=False, download=True, transform=transform)
+    train_ds = datasets.CIFAR10(root=str(cache), train=True, download=True, transform=base_transform)
+    test_ds = datasets.CIFAR10(root=str(cache), train=False, download=True, transform=base_transform)
 
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_cifar100(meta: dict) -> "DagnamDataset":
+def _load_cifar100(meta: dict, transform=None) -> "DagnamDataset":
     from torchvision import datasets, transforms
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "cifar100"
     cache.mkdir(parents=True, exist_ok=True)
 
-    transform = transforms.Compose([
+    base_transform = transform if transform is not None else transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
     ])
 
-    train_ds = datasets.CIFAR100(root=str(cache), train=True, download=True, transform=transform)
-    test_ds = datasets.CIFAR100(root=str(cache), train=False, download=True, transform=transform)
+    train_ds = datasets.CIFAR100(root=str(cache), train=True, download=True, transform=base_transform)
+    test_ds = datasets.CIFAR100(root=str(cache), train=False, download=True, transform=base_transform)
 
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_fashion_mnist(meta: dict) -> "DagnamDataset":
+def _load_fashion_mnist(meta: dict, transform=None) -> "DagnamDataset":
     from torchvision import datasets, transforms
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "fashion_mnist"
     cache.mkdir(parents=True, exist_ok=True)
 
-    transform = transforms.Compose([
+    base_transform = transform if transform is not None else transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.2860,), (0.3530,)),
     ])
 
-    train_ds = datasets.FashionMNIST(root=str(cache), train=True, download=True, transform=transform)
-    test_ds = datasets.FashionMNIST(root=str(cache), train=False, download=True, transform=transform)
+    train_ds = datasets.FashionMNIST(root=str(cache), train=True, download=True, transform=base_transform)
+    test_ds = datasets.FashionMNIST(root=str(cache), train=False, download=True, transform=base_transform)
 
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_imdb(meta: dict) -> "DagnamDataset":
+def _load_imdb(meta: dict, transform=None) -> "DagnamDataset":
     """Load IMDB via direct npz download (no TensorFlow dependency)."""
     import urllib.request
 
@@ -153,24 +155,26 @@ def _load_imdb(meta: dict) -> "DagnamDataset":
     )
 
 
-def _load_oxford_pets(meta: dict) -> "DagnamDataset":
+def _load_oxford_pets(meta: dict, transform=None) -> "DagnamDataset":
     from torchvision import datasets, transforms
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "oxford_pets"
     cache.mkdir(parents=True, exist_ok=True)
 
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
+    base_transform = transform
+    if base_transform is None:
+        base_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
 
     try:
         train_ds = datasets.OxfordIIITPet(
-            root=str(cache), split="trainval", download=True, transform=transform,
+            root=str(cache), split="trainval", download=True, transform=base_transform,
         )
         test_ds = datasets.OxfordIIITPet(
-            root=str(cache), split="test", download=True, transform=transform,
+            root=str(cache), split="test", download=True, transform=base_transform,
         )
     except Exception:
         # Fallback: if torchvision doesn't have OxfordIIITPet, return file-based
@@ -179,7 +183,7 @@ def _load_oxford_pets(meta: dict) -> "DagnamDataset":
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_speech_commands(meta: dict) -> "DagnamDataset":
+def _load_speech_commands(meta: dict, transform=None) -> "DagnamDataset":
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "speech_commands"
@@ -199,7 +203,7 @@ def _load_speech_commands(meta: dict) -> "DagnamDataset":
         return DagnamDataset(meta, cache)
 
 
-def _load_wikitext2(meta: dict) -> "DagnamDataset":
+def _load_wikitext2(meta: dict, transform=None) -> "DagnamDataset":
     from dagnam.data.dataset import DagnamDataset
 
     cache = _SYSTEM_CACHE_ROOT / "wikitext2"
