@@ -1,0 +1,72 @@
+name: dagnam CI
+
+on:
+  pull_request:
+    paths:
+      - "**"
+      - ".github/workflows/dag-lib-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**"
+      - ".github/workflows/dag-lib-ci.yml"
+
+jobs:
+  quality:
+    name: Lint, type, build, and audit (Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      # uv.toml already sets native-tls = true for local corporate-CA
+      # environments. This env var is the CI equivalent — it's a no-op on
+      # clean GitHub runners and harmless to leave in.
+      UV_NATIVE_TLS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Ruff check
+        run: uv run ruff check
+      - name: Ruff format
+        run: uv run ruff format --check
+      - name: Type check
+        run: uv run --with "pyright>=1.1.380" pyright
+      - name: Build
+        run: uv build
+      - name: Check distribution metadata
+        run: |
+          uv run --with twine twine check dist/*
+          uv run --with "readme-renderer[md]" python -m readme_renderer README.md > /dev/null
+      - name: Install smoke test
+        run: |
+          python -m venv .smoke
+          .smoke/bin/pip install dist/*.whl
+          .smoke/bin/python -c "import dagnam; dagnam.load_dataset, dagnam.configure"
+      - name: Dependency audit
+        run: uv run --with pip-audit pip-audit
+
+  tests:
+    # Validates the `requires-python = ">=3.9"` contract and every
+    # `Programming Language :: Python :: 3.x` classifier in pyproject.toml
+    # by actually running the suite on each claimed version. If any matrix
+    # cell fails, either the code or the advertised support needs to move.
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    env:
+      UV_NATIVE_TLS: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Tests
+        run: uv run pytest tests -q

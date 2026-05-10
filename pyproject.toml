@@ -1,10 +1,50 @@
 [project]
 name = "dagnam"
 version = "0.1.0"
-description = "Official Python SDK for Dagnam.AI — datasets, training, model hub, deployments, and inference."
-readme = "README.md"
+description = "Official Python SDK for Dagnam.AI - datasets, training, model hub, deployments, and inference."
+readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
+authors = [
+    { name = "Angad Sandhu", email = "angad@dagnam.ai" },
+]
+maintainers = [
+    { name = "Dagnam.AI", email = "sdk@dagnam.ai" },
+]
+keywords = [
+    "dagnam",
+    "machine-learning",
+    "deep-learning",
+    "pytorch",
+    "tensorflow",
+    "jax",
+    "flax",
+    "datasets",
+    "model-hub",
+    "training",
+    "inference",
+    "mlops",
+    "ai",
+    "sdk",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "requests>=2.28",
     "pandas>=1.5",
@@ -18,18 +58,38 @@ audio = ["torch>=2.0", "torchaudio>=2.0"]
 tensorflow = ["tensorflow>=2.12"]
 flax = ["jax>=0.4", "flax>=0.7"]
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
-all = ["torch>=2.0", "torchvision>=0.15", "torchaudio>=2.0", "tensorflow>=2.12", "jax>=0.4", "flax>=0.7", "httpx>=0.27", "httpx-sse>=0.4"]
+all = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "torchaudio>=2.0",
+    "tensorflow>=2.12",
+    "jax>=0.4",
+    "flax>=0.7",
+    "httpx>=0.27",
+    "httpx-sse>=0.4",
+]
 
 [project.scripts]
 dagnam = "dagnam.cli:main"
 
+[project.urls]
+Homepage = "https://dagnam.ai"
+Documentation = "https://dagnam.ai/docs"
+Repository = "https://github.com/dagnam-ai/dagnam"
+Changelog = "https://github.com/dagnam-ai/dagnam/blob/main/dag-lib/CHANGELOG.md"
+Issues = "https://github.com/dagnam-ai/dagnam/issues"
+
 [dependency-groups]
 dev = [
-    "pytest",
     "hypothesis",
+    "pip-audit>=2.7",
+    "pre-commit>=3.5",
+    "pyright>=1.1.380",
+    "pytest",
     "pytest-cov",
-    "ruff",
+    "requests-mock>=1.12",
     "respx>=0.20",
+    "ruff",
 ]
 
 [build-system]
@@ -38,9 +98,146 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dagnam"]
+include = ["dagnam/py.typed"]
+force-include = { "NOTICE" = "dagnam/NOTICE" }
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "dagnam",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+branch = true
+source = ["dagnam"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.pyright]
+include = ["dagnam", "tests"]
+exclude = ["**/__pycache__", ".venv"]
+pythonVersion = "3.9"
+typeCheckingMode = "strict"
+reportMissingImports = "error"
+reportMissingTypeStubs = "warning"
+reportImplicitOverride = "error"
+reportUnusedImport = "error"
+
 [tool.ruff]
+line-length = 100
 target-version = "py39"
+src = ["dagnam", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "PT",
+    "RUF",
+    "ASYNC",
+    "S",
+    "T20",
+    "TID",
+    "TCH",
+    "D",
+    "PERF",
+    "FBT",
+    "FA",
+    "ARG",
+]
+ignore = [
+    "E501",
+    "D203", "D213", "D211", "D212",
+    "D100", "D104", "D105",
+    "S101",
+    "S113",
+    "B008",
+    "ARG001",
+    "ARG002",
+    "ARG005",
+    "ASYNC230",
+    "ASYNC240",
+    "B904",
+    "D103",
+    "D107",
+    "D415",
+    "D417",
+    "E741",
+    "FA100",
+    "FA102",
+    "FBT001",
+    "FBT002",
+    "PERF401",
+    "PERF403",
+    "RUF059",
+    "S110",
+    "S202",
+    "S310",
+    "S311",
+    "SIM105",
+    "SIM108",
+    "SIM201",
+    "TC001",
+    "TC003",
+    "UP006",
+    "UP007",
+    "UP028",
+    "UP035",
+    "UP045",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = [
+    "S101", "S105", "S106", "S108",
+    "D",
+    "T20",
+    "ARG",
+    "FBT",
+    "E741",
+    "N806",
+    "PERF401",
+    "PT011", "PT012",
+    "RUF059",
+    "SIM117",
+    "TC003",
+    "UP028",
+]
+"dagnam/cli/**/*" = ["T20"]
+"dagnam/__init__.py" = ["F401"]
+"dagnam/_core/__init__.py" = ["F401"]
+"dagnam/aio.py" = ["F401"]
+"dagnam/services/**/*" = ["F401", "F403", "RUF100"]
+"dagnam/data/loaders/*_loader.py" = ["F401", "F403", "RUF100"]
+"dagnam/_core/_common.py" = ["F403", "RUF100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dagnam"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

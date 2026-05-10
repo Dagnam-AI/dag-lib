@@ -1,0 +1,82 @@
+name: Release dagnam to PyPI
+
+on:
+  push:
+    tags:
+      - "dagnam/v*"
+
+jobs:
+  build:
+    name: Build wheel and sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Build
+        run: uv build
+      - name: Check distribution metadata
+        run: |
+          uv run --with twine twine check dist/*
+          uv run --with "readme-renderer[md]" python -m readme_renderer README.md > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dagnam
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  smoke-testpypi:
+    name: Install from TestPyPI and import
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install from TestPyPI
+        run: |
+          for i in 1 2 3 4 5; do
+            pip install \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "dagnam==${GITHUB_REF_NAME#dagnam/v}" && break
+            echo "Waiting for TestPyPI indexing ($i/5)..."
+            sleep 30
+          done
+      - name: Import smoke test
+        run: |
+          python -c "import dagnam; print(dagnam.__version__)"
+          python -c "from dagnam import load_dataset, configure"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: smoke-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dagnam
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -213,3 +213,8 @@ graphify-out/
 # AI Agents
 .kiro/
 .claude/
+.codex-logs/
+.agents/
+
+# IDE
+.vscode/

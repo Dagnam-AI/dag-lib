@@ -254,7 +254,17 @@ Labels are encoded as integers using `class_names` (if provided) or `pd.factoriz
 
 ## Server Mode
 
-On Dagnam infrastructure (when `DAGNAM_INTERNAL` is set), the library skips HTTP and reads directly from the local filesystem via `DAGNAM_STORAGE_PATH`.
+On Dagnam infrastructure, the backend can set `DAGNAM_INTERNAL` to make
+`load_dataset()` skip HTTP and load from sidecar metadata instead.
+`DAGNAM_META_DIR` points at the directory containing
+`{dataset_id}.meta.json`; if that sidecar is missing, the loader falls
+back to the legacy `DAGNAM_STORAGE_PATH/{dataset_id}/meta.json` layout.
+
+## Compatibility
+
+| SDK version | Backend version | Notes |
+| --- | --- | --- |
+| `0.1.x` | `>=0.5.0, <0.7.0` | First public SDK release line. |
 
 ## Development
 
@@ -273,8 +283,14 @@ uv run pytest tests/ -v --cov=dagnam
 # Lint
 uv run ruff check
 uv run ruff format
+
+# Type check
+uv run --with "pyright>=1.1.380" pyright
+
+# Audit dependencies
+uv run --with pip-audit pip-audit
 ```
 
 ## License
 
-MIT
+Apache License, Version 2.0. See [LICENSE](LICENSE).

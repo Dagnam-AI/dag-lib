@@ -1,13 +1,18 @@
-"""Loaders package — format-specific dataset factories.
+"""Format-specific dataset loader modules.
 
-Available loaders (imported lazily to avoid requiring framework deps at
-import time):
-
-- ``dagnam.loaders.csv_loader.create_pytorch_loader``  — CSV/TSV → PyTorch
-- ``dagnam.loaders.json_loader.create_pytorch_loader`` — JSON/JSONL → PyTorch
-- ``dagnam.loaders.tf_loader.create_tensorflow_dataset`` — tabular → tf.data
-- ``dagnam.loaders.flax_loader.create_flax_dataset``   — tabular → JAX batches
-
-These are dispatched automatically by the corresponding
-``DagnamDataset.to_*`` methods based on the dataset format.
+The modules are intentionally not imported here so optional framework
+dependencies are only required when a specific loader is used.
 """
+
+from __future__ import annotations
+
+__all__ = [
+    "audio",
+    "csv",
+    "flax",
+    "image_folder",
+    "json_array",
+    "media",
+    "system",
+    "tf",
+]

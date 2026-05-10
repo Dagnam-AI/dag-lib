@@ -18,8 +18,9 @@ threads.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import time
-from typing import Any, Callable, FrozenSet, Iterable, Mapping, Optional
+from typing import Any, Callable, FrozenSet, Optional
 
 from dagnam._core.exceptions import LROFailedError, LROTimeoutError
 
@@ -109,7 +110,7 @@ class LongRunningOperation:
         *,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
-    ) -> "LongRunningOperation":
+    ) -> LongRunningOperation:
         """Block until the operation reaches a terminal state.
 
         Polls with exponential backoff from ``poll_min`` to ``poll_max``
@@ -164,13 +165,13 @@ class LongRunningOperation:
             )
         state = self._current_state(self._latest)
         if state in self._failure:
-            detail = self._latest.get(self._error_key) if isinstance(self._latest, Mapping) else None
+            detail = (
+                self._latest.get(self._error_key) if isinstance(self._latest, Mapping) else None
+            )
             raise LROFailedError(state, detail if isinstance(detail, str) else None)
         if state in self._success:
             return self._latest
-        raise LROTimeoutError(
-            f"{self._name} is still in non-terminal state {state!r}"
-        )
+        raise LROTimeoutError(f"{self._name} is still in non-terminal state {state!r}")
 
 
 __all__ = ["LongRunningOperation"]

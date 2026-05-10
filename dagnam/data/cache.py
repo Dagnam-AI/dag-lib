@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 import shutil
 import time
-from pathlib import Path
 
 DEFAULT_CACHE_DIR: Path = Path.home() / ".dagnam" / "datasets"
 DEFAULT_MAX_CACHE_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
@@ -72,11 +72,13 @@ def get_cache_info(base_dir: Path | None = None) -> list[dict]:
                 last_access = float(access_file.read_text(encoding="utf-8").strip())
             except (ValueError, OSError):
                 pass
-        entries.append({
-            "dataset_id": child.name,
-            "size_bytes": size,
-            "last_access": last_access,
-        })
+        entries.append(
+            {
+                "dataset_id": child.name,
+                "size_bytes": size,
+                "last_access": last_access,
+            }
+        )
     return entries
 
 

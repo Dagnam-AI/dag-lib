@@ -1,0 +1,8 @@
+# uv configuration.
+#
+# native-tls = true tells uv to use the operating system's certificate store
+# (SChannel on Windows, Security framework on macOS) instead of the bundled
+# rustls webpki roots. Required on machines where an enterprise proxy, AV
+# suite, or custom CA re-signs TLS traffic — without this, uv fails with
+# "invalid peer certificate: UnknownIssuer" even when Python/requests work.
+native-tls = true

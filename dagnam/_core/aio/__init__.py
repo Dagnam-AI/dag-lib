@@ -1,0 +1,28 @@
+"""Async HTTP client implementation."""
+
+from __future__ import annotations
+
+from dagnam._core.aio.base import BaseAsyncDagnamClient
+from dagnam._core.aio.checkpoints import AsyncCheckpointsMixin
+from dagnam._core.aio.codegen import AsyncCodegenMixin
+from dagnam._core.aio.datasets import AsyncDatasetsMixin
+from dagnam._core.aio.deployments import AsyncDeploymentsMixin
+from dagnam._core.aio.hub import AsyncHubMixin
+from dagnam._core.aio.inference import AsyncInferenceMixin
+from dagnam._core.aio.projects import AsyncProjectsMixin
+
+
+class AsyncDagnamClient(
+    AsyncDatasetsMixin,
+    AsyncInferenceMixin,
+    AsyncCheckpointsMixin,
+    AsyncDeploymentsMixin,
+    AsyncHubMixin,
+    AsyncProjectsMixin,
+    AsyncCodegenMixin,
+    BaseAsyncDagnamClient,
+):
+    """Async wrapper around the Dagnam.AI REST API using ``httpx``."""
+
+
+__all__ = ["AsyncDagnamClient"]

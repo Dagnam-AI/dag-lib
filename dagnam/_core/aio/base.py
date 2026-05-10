@@ -1,0 +1,94 @@
+"""Base async client transport for Dagnam.AI."""
+
+from __future__ import annotations
+
+try:
+    import httpx
+except ImportError as _exc:
+    raise ImportError(
+        "dagnam.aio requires httpx. Install with: pip install 'dagnam[aio]'"
+    ) from _exc
+
+import re
+from typing import Any
+
+from dagnam._core.client.common import bearer_headers, inference_headers
+from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
+
+_TIMEOUT = 30
+
+
+class BaseAsyncDagnamClient:
+    """Shared httpx transport helpers for the async Dagnam client."""
+
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: int = _TIMEOUT,
+    ) -> None:
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+        self._client = httpx.AsyncClient(timeout=timeout)
+
+    async def __aenter__(self) -> BaseAsyncDagnamClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self._client.aclose()
+
+    def _headers(self) -> dict[str, str]:
+        return bearer_headers(self.api_key)
+
+    def _inference_headers(self) -> dict[str, str]:
+        return inference_headers(self.api_key)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict | None = None,
+        json: Any = None,
+        data: dict | None = None,
+        files: Any = None,
+        headers: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> httpx.Response:
+        url = f"{self.api_url}{path}"
+        try:
+            return await self._client.request(
+                method,
+                url,
+                headers=headers or self._headers(),
+                params=params,
+                json=json,
+                data=data,
+                files=files,
+                timeout=timeout or self.timeout,
+            )
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
+
+def _raise_for_job(resp: httpx.Response, job_id: str) -> None:
+    """Map training-job response errors (mirrors sync client._raise_for_job)."""
+    if resp.is_success:
+        return
+    code = resp.status_code
+    if code == 401:
+        raise AuthError("Authentication failed: invalid or expired API key")
+    if code == 404:
+        raise TrainingJobNotFoundError(job_id)
+    raise APIError(code, resp.text)
+
+
+def _parse_cd(header: str | None) -> str:
+    """Extract filename from Content-Disposition header."""
+    if not header:
+        return "data"
+    m = re.search(r'filename="([^"]+)"', header) or re.search(r"filename=([^\s;]+)", header)
+    return m.group(1) if m else "data"
