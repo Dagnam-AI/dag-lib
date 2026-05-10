@@ -811,24 +811,51 @@ class DagnamClient:
         except ValueError:
             return resp.text
 
-    def generate_code(self, project_id: str, payload: dict, async_mode: bool = False) -> dict:
-        params = {"async": "true"} if async_mode else None
-        return self._codegen_request("POST", f"/api/v1/codegen/{project_id}/generate", json_body=payload, params=params)
+    def generate_code(
+        self,
+        project_id: str,
+        payload: dict | None = None,
+        async_mode: bool = False,
+        *,
+        framework: str = "pytorch",
+        version_id: str | None = None,
+        options: dict | None = None,
+    ) -> dict:
+        if payload is None:
+            payload = {"framework": framework}
+            if version_id is not None:
+                payload["version_id"] = version_id
+            if options is not None:
+                payload["options"] = options
+        params = {"async_mode": "true"} if async_mode else None
+        return self._codegen_request(
+            "POST",
+            f"/api/v1/projects/{project_id}/generate-code",
+            json_body=payload,
+            params=params,
+        )
 
     def preview_code(self, project_id: str, framework: str, version_id: str | None = None) -> dict:
         params: dict[str, str] = {"framework": framework}
         if version_id:
             params["version_id"] = version_id
-        return self._codegen_request("GET", f"/api/v1/codegen/{project_id}/preview", params=params)
+        return self._codegen_request(
+            "GET", f"/api/v1/projects/{project_id}/code-preview", params=params
+        )
+
+    def validate_code(self, project_id: str, version_id: str | None = None) -> dict:
+        params = {"version_id": version_id} if version_id else None
+        return self._codegen_request(
+            "POST", f"/api/v1/projects/{project_id}/validate", params=params
+        )
 
     def validate_architecture(self, project_id: str, version_id: str | None = None) -> dict:
-        params = {"version_id": version_id} if version_id else None
-        return self._codegen_request("POST", f"/api/v1/codegen/{project_id}/validate", params=params)
+        return self.validate_code(project_id, version_id=version_id)
 
-    def download_code_zip(
+    def download_code(
         self,
         project_id: str,
-        framework: str,
+        framework: str = "pytorch",
         version_id: str | None = None,
         dest_path: Path | str | None = None,
     ) -> Path | bytes:
@@ -837,7 +864,7 @@ class DagnamClient:
         params: dict[str, str] = {"framework": framework}
         if version_id:
             params["version_id"] = version_id
-        url = f"{self.api_url}/api/v1/codegen/{project_id}/download"
+        url = f"{self.api_url}/api/v1/projects/{project_id}/download-code"
         try:
             resp = requests.get(
                 url, headers=self._headers(), params=params,
@@ -854,8 +881,24 @@ class DagnamClient:
             return self._stream_response_to_file(resp, Path(dest_path))
         return resp.content
 
+    def download_code_zip(
+        self,
+        project_id: str,
+        framework: str,
+        version_id: str | None = None,
+        dest_path: Path | str | None = None,
+    ) -> Path | bytes:
+        return self.download_code(
+            project_id,
+            framework=framework,
+            version_id=version_id,
+            dest_path=dest_path,
+        )
+
     def get_code_status(self, project_id: str, task_id: str) -> dict:
-        return self._codegen_request("GET", f"/api/v1/codegen/{project_id}/status/{task_id}")
+        return self._codegen_request(
+            "GET", f"/api/v1/projects/{project_id}/code-status/{task_id}"
+        )
 
     # ------------------------------------------------------------------
     # Dataset upload endpoints

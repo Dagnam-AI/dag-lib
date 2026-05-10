@@ -7,14 +7,12 @@ and query params — without running a real server.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import pytest
 import requests_mock as rm_module
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
-    APIError,
     AuthError,
     CheckpointNotFoundError,
     DeploymentNotFoundError,
@@ -131,3 +129,67 @@ def test_checkpoint_404_maps_to_checkpoint_not_found(client, rmock, tmp_path):
         client.download_checkpoint_stream(
             "job_1", "ck_bad", tmp_path / "x.pt"
         )
+
+
+def test_codegen_generate_posts_framework_and_version(client, rmock):
+    url = f"{API}/api/v1/projects/p1/generate-code"
+    rmock.post(url, json={"files": []})
+
+    result = client.generate_code("p1", framework="tensorflow", version_id="v2")
+
+    assert result == {"files": []}
+    req = rmock.last_request
+    assert req.json() == {"framework": "tensorflow", "version_id": "v2"}
+    assert req.qs == {}
+
+
+def test_codegen_generate_async_sets_query_param(client, rmock):
+    url = f"{API}/api/v1/projects/p1/generate-code"
+    rmock.post(url, json={"task_id": "t1", "status": "pending"})
+
+    result = client.generate_code("p1", framework="pytorch", async_mode=True)
+
+    assert result["task_id"] == "t1"
+    assert rmock.last_request.qs["async_mode"] == ["true"]
+    assert rmock.last_request.json() == {"framework": "pytorch"}
+
+
+def test_codegen_preview_uses_project_preview_route(client, rmock):
+    url = f"{API}/api/v1/projects/p1/code-preview"
+    rmock.get(url, json={"files": []})
+
+    result = client.preview_code("p1", framework="pytorch", version_id="v4")
+
+    assert result == {"files": []}
+    assert rmock.last_request.qs["framework"] == ["pytorch"]
+    assert rmock.last_request.qs["version_id"] == ["v4"]
+
+
+def test_codegen_validate_posts_to_project_route(client, rmock):
+    url = f"{API}/api/v1/projects/p1/validate"
+    rmock.post(url, json={"is_valid": True})
+
+    assert client.validate_code("p1", version_id="v1") == {"is_valid": True}
+    assert rmock.last_request.qs["version_id"] == ["v1"]
+
+
+def test_codegen_status_uses_project_status_route(client, rmock):
+    url = f"{API}/api/v1/projects/p1/code-status/t1"
+    rmock.get(url, json={"status": "completed"})
+
+    assert client.get_code_status("p1", "t1") == {"status": "completed"}
+
+
+def test_codegen_download_uses_project_download_route(client, rmock, tmp_path):
+    body = b"zip-bytes"
+    url = f"{API}/api/v1/projects/p1/download-code"
+    rmock.get(url, content=body)
+
+    assert client.download_code("p1", framework="flax", version_id="v3") == body
+    assert rmock.last_request.qs["framework"] == ["flax"]
+    assert rmock.last_request.qs["version_id"] == ["v3"]
+
+    dest = tmp_path / "code.zip"
+    rmock.get(url, content=body)
+    assert client.download_code("p1", dest_path=dest) == dest
+    assert dest.read_bytes() == body

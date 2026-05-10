@@ -38,7 +38,10 @@ def generate(
     """
     resolved = resolve_client(client, api_key, api_url)
     resp = resolved.generate_code(
-        project_id, framework=framework, version_id=version_id,
+        project_id,
+        framework=framework,
+        version_id=version_id,
+        async_mode=async_mode,
     )
     if not async_mode:
         return resp

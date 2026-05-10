@@ -20,19 +20,26 @@ class TestGenerate:
     def test_sync_returns_dict(self):
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1", "code": "..."}))
         out = codegen.generate("p1", client=c)
-        c.generate_code.assert_called_once_with("p1", framework="pytorch", version_id=None)
+        c.generate_code.assert_called_once_with(
+            "p1", framework="pytorch", version_id=None, async_mode=False
+        )
         assert out["task_id"] == "t1"
 
     def test_async_returns_lro(self):
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1", "status": "pending"}))
         op = codegen.generate("p1", async_mode=True, client=c)
+        c.generate_code.assert_called_once_with(
+            "p1", framework="pytorch", version_id=None, async_mode=True
+        )
         assert isinstance(op, LongRunningOperation)
         assert op.initial()["task_id"] == "t1"
 
     def test_passes_framework_and_version(self):
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1"}))
         codegen.generate("p1", framework="tensorflow", version_id="v2", client=c)
-        c.generate_code.assert_called_once_with("p1", framework="tensorflow", version_id="v2")
+        c.generate_code.assert_called_once_with(
+            "p1", framework="tensorflow", version_id="v2", async_mode=False
+        )
 
 
 class TestPreview:
