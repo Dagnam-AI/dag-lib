@@ -29,6 +29,7 @@ def create_flax_dataset(
     val_ratio: float,
     test_ratio: float,
     seed: int,
+    column_roles: dict[str, str] | None = None,
     transform_fn=None,
     batch_transform_fn=None,
 ) -> list[FlaxBatch]:
@@ -36,12 +37,13 @@ def create_flax_dataset(
 
     Returns a list of (features, labels) NamedTuples as JAX arrays.
     Uses the same splitting logic as the PyTorch and TF loaders.
+    ``column_roles`` overrides automatic label detection.
     """
     import jax.numpy as jnp
 
     df = dagnam_ds.to_pandas()
 
-    label_col = _detect_label_column(df, dagnam_ds.feature_schema)
+    label_col = _detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
 
     # Label encoding
     if dagnam_ds.class_names:

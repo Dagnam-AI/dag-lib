@@ -22,19 +22,20 @@ def create_tensorflow_dataset(
     val_ratio: float,
     test_ratio: float,
     seed: int,
+    column_roles: dict[str, str] | None = None,
     map_fn=None,
     batch_map_fn=None,
 ) -> "tf.data.Dataset":
     """Create a tf.data.Dataset from a tabular dataset.
 
     Uses the same label detection, encoding, and splitting logic as the
-    PyTorch loader.
+    PyTorch loader. ``column_roles`` overrides automatic label detection.
     """
     import tensorflow as tf
 
     df = dagnam_ds.to_pandas()
 
-    label_col = _detect_label_column(df, dagnam_ds.feature_schema)
+    label_col = _detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
 
     # Label encoding — get numpy arrays directly
     if dagnam_ds.class_names:

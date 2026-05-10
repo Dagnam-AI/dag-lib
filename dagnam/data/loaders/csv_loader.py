@@ -137,13 +137,23 @@ def _split_by_roles(
     return label_col, feature_cols
 
 
-def _detect_label_column(df: pd.DataFrame, feature_schema: dict | None) -> str:
+def _detect_label_column(
+    df: pd.DataFrame,
+    feature_schema: dict | None,
+    column_roles: dict[str, str] | None = None,
+) -> str:
     """Return the label column name.
 
     Priority:
-    1. First column with type ``"categorical"`` in *feature_schema*.
-    2. Last DataFrame column as fallback.
+    1. Column explicitly marked ``"target"`` / ``"label"`` in *column_roles*.
+    2. First column with type ``"categorical"`` in *feature_schema*.
+    3. Last DataFrame column as fallback.
     """
+    if column_roles:
+        for col, role in column_roles.items():
+            if role in ("target", "label") and col in df.columns:
+                return col
+
     if feature_schema and "columns" in feature_schema:
         for col_info in feature_schema["columns"]:
             if col_info.get("type") == "categorical":

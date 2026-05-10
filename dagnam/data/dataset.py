@@ -106,6 +106,10 @@ class DagnamDataset:
         data_dir: Path,
         _native_train: Any = None,
         _native_test: Any = None,
+        _native_train_tf: Any = None,
+        _native_test_tf: Any = None,
+        _native_train_flax: Any = None,
+        _native_test_flax: Any = None,
     ) -> None:
         self.id: str = meta["id"]
         self.name: str = meta["name"]
@@ -119,6 +123,12 @@ class DagnamDataset:
         self._data: pd.DataFrame | None = None
         self._native_train: Any = _native_train
         self._native_test: Any = _native_test
+        # Framework-native dataset objects populated by system_loader when
+        # tensorflow_datasets or jax-native loaders are available (16.72-bb/16.82-bb).
+        self._native_train_tf: Any = _native_train_tf
+        self._native_test_tf: Any = _native_test_tf
+        self._native_train_flax: Any = _native_train_flax
+        self._native_test_flax: Any = _native_test_flax
         self._raw_meta: dict = meta
 
     # ------------------------------------------------------------------
@@ -441,6 +451,354 @@ class DagnamDataset:
         return result
 
     # ------------------------------------------------------------------
+    # Native TF / FLAX adapters (16.72-bb and 16.82-bb)
+    # ------------------------------------------------------------------
+
+    def _native_to_tensorflow(
+        self,
+        split: str,
+        batch_size: int,
+        shuffle: bool,
+        val_ratio: float,
+        seed: int,
+        map_fn=None,
+        batch_map_fn=None,
+    ):
+        """Convert a torchvision-style native dataset into a tf.data.Dataset.
+
+        Materializes all samples in memory as numpy arrays then constructs a
+        ``tf.data.Dataset.from_tensor_slices``. Intended for small benchmark
+        datasets (MNIST, CIFAR-10, Fashion-MNIST). For larger datasets the
+        caller should use ``_native_train_tf`` / ``_native_test_tf`` set by
+        the TF-specific system loader (see ``_load_native_tf``).
+        """
+        import numpy as np
+        import tensorflow as tf
+
+        native_train = self._native_train
+        native_test = self._native_test
+
+        if isinstance(native_train, tuple):
+            # numpy tuple datasets (IMDB)
+            x_train, y_train = native_train
+            x_test, y_test = native_test
+            if x_train.dtype == object:
+                x_train = self._pad_sequences(x_train)
+                x_test = self._pad_sequences(x_test)
+            if split == "test":
+                x, y = np.asarray(x_test), np.asarray(y_test).astype(np.int64)
+            else:
+                n = len(x_train)
+                n_val = int(n * val_ratio)
+                if split == "val":
+                    x = np.asarray(x_train[-n_val:]) if n_val > 0 else np.asarray([])
+                    y = np.asarray(y_train[-n_val:]).astype(np.int64) if n_val > 0 else np.asarray([], dtype=np.int64)
+                else:
+                    x = np.asarray(x_train[:-n_val] if n_val > 0 else x_train)
+                    y = np.asarray(y_train[:-n_val] if n_val > 0 else y_train).astype(np.int64)
+        else:
+            # torchvision-style: iterate to materialize
+            import torch as _torch
+            source = native_test if (split == "test" and native_test is not None) else native_train
+            images = []
+            labels = []
+            for i in range(len(source)):
+                img, lbl = source[i]
+                if hasattr(img, "numpy"):
+                    img = img.numpy()
+                images.append(img)
+                labels.append(int(lbl))
+            x = np.stack(images)
+            y = np.array(labels, dtype=np.int64)
+            # For split='val' or 'train' on the training set, apply val cut.
+            if split in ("train", "val") and native_test is not None:
+                n = len(x)
+                n_val = int(n * val_ratio)
+                rng = np.random.default_rng(seed)
+                order = rng.permutation(n)
+                val_idx = order[:n_val]
+                train_idx = order[n_val:]
+                if split == "val":
+                    x, y = x[val_idx], y[val_idx]
+                else:
+                    x, y = x[train_idx], y[train_idx]
+
+        ds = tf.data.Dataset.from_tensor_slices((x, y))
+        if shuffle:
+            ds = ds.shuffle(buffer_size=max(len(x), 1024), seed=seed)
+        if map_fn is not None:
+            ds = ds.map(map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.batch(batch_size)
+        if batch_map_fn is not None:
+            ds = ds.map(batch_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        return ds.prefetch(tf.data.AUTOTUNE)
+
+    def _native_to_flax(
+        self,
+        split: str,
+        batch_size: int,
+        shuffle: bool,
+        val_ratio: float,
+        seed: int,
+        transform_fn=None,
+        batch_transform_fn=None,
+    ) -> list:
+        """Convert a torchvision-style native dataset into a list of FlaxBatch."""
+        import numpy as np
+        import jax.numpy as jnp
+        from dagnam.data.loaders.flax_loader import FlaxBatch
+
+        native_train = self._native_train
+        native_test = self._native_test
+
+        if isinstance(native_train, tuple):
+            x_train, y_train = native_train
+            x_test, y_test = native_test
+            if x_train.dtype == object:
+                x_train = self._pad_sequences(x_train)
+                x_test = self._pad_sequences(x_test)
+            if split == "test":
+                x, y = np.asarray(x_test), np.asarray(y_test).astype(np.int64)
+            else:
+                n = len(x_train)
+                n_val = int(n * val_ratio)
+                if split == "val":
+                    x = np.asarray(x_train[-n_val:]) if n_val > 0 else np.asarray([])
+                    y = np.asarray(y_train[-n_val:]).astype(np.int64) if n_val > 0 else np.asarray([], dtype=np.int64)
+                else:
+                    x = np.asarray(x_train[:-n_val] if n_val > 0 else x_train)
+                    y = np.asarray(y_train[:-n_val] if n_val > 0 else y_train).astype(np.int64)
+        else:
+            source = native_test if (split == "test" and native_test is not None) else native_train
+            images = []
+            labels = []
+            for i in range(len(source)):
+                img, lbl = source[i]
+                if hasattr(img, "numpy"):
+                    img = img.numpy()
+                images.append(img)
+                labels.append(int(lbl))
+            x = np.stack(images)
+            y = np.array(labels, dtype=np.int64)
+            if split in ("train", "val") and native_test is not None:
+                n = len(x)
+                n_val = int(n * val_ratio)
+                rng_np = np.random.default_rng(seed)
+                order = rng_np.permutation(n)
+                if split == "val":
+                    x, y = x[order[:n_val]], y[order[:n_val]]
+                else:
+                    x, y = x[order[n_val:]], y[order[n_val:]]
+
+        if shuffle:
+            rng_np = np.random.default_rng(seed)
+            order = rng_np.permutation(len(x))
+            x, y = x[order], y[order]
+
+        batches = []
+        for start in range(0, len(x), batch_size):
+            batch_x = x[start : start + batch_size]
+            batch_y = y[start : start + batch_size]
+            if transform_fn is not None:
+                batch_x = np.stack([transform_fn(s) for s in batch_x])
+            feat = jnp.asarray(batch_x)
+            lbl = jnp.asarray(batch_y)
+            batch = FlaxBatch(features=feat, labels=lbl)
+            if batch_transform_fn is not None:
+                f, l = batch_transform_fn(batch.features, batch.labels)
+                batch = FlaxBatch(features=f, labels=l)
+            batches.append(batch)
+        return batches
+
+    def _native_tensorflow_dataset(
+        self,
+        split: str,
+        batch_size: int,
+        shuffle: bool,
+        val_ratio: float = 0.1,
+        seed: int = 42,
+        map_fn=None,
+        batch_map_fn=None,
+    ):
+        """Route to a TF-native dataset when ``_native_train_tf`` is set.
+
+        Partitions the native train split into train/val subsets so that
+        callers requesting ``split='val'`` get a distinct slice instead of the
+        full training set.
+        """
+        import tensorflow as tf
+
+        native_train_tf = getattr(self, "_native_train_tf", None)
+        native_test_tf = getattr(self, "_native_test_tf", None)
+
+        if split == "test":
+            ds = native_test_tf if native_test_tf is not None else native_train_tf
+        elif split == "val":
+            if native_train_tf is None:
+                raise ValueError("No native TF dataset available for 'val' split")
+            cardinality = tf.data.experimental.cardinality(native_train_tf).numpy()
+            if cardinality == tf.data.experimental.UNKNOWN_CARDINALITY or cardinality < 0:
+                # Fall back to materializing the count; prefer to ask tfds for it
+                # via the cached InfoDatasetBuilder when possible, but for unknown
+                # sources we must iterate once.
+                cardinality = sum(1 for _ in native_train_tf)
+            n_val = max(1, int(cardinality * val_ratio))
+            ds = native_train_tf.take(n_val)
+        else:  # train
+            if native_train_tf is None:
+                raise ValueError("No native TF dataset available for 'train' split")
+            cardinality = tf.data.experimental.cardinality(native_train_tf).numpy()
+            if cardinality == tf.data.experimental.UNKNOWN_CARDINALITY or cardinality < 0:
+                cardinality = sum(1 for _ in native_train_tf)
+            n_val = max(1, int(cardinality * val_ratio))
+            ds = native_train_tf.skip(n_val)
+
+        if ds is None:
+            raise ValueError(f"No native TF dataset for split '{split}'")
+
+        if shuffle:
+            ds = ds.shuffle(buffer_size=max(batch_size * 16, 1024), seed=seed)
+        if map_fn is not None:
+            ds = ds.map(map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.batch(batch_size)
+        if batch_map_fn is not None:
+            ds = ds.map(batch_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        return ds.prefetch(tf.data.AUTOTUNE)
+
+    def _native_flax_dataset(
+        self,
+        split: str,
+        batch_size: int,
+        shuffle: bool,
+        val_ratio: float = 0.1,
+        seed: int = 42,
+        transform_fn=None,
+        batch_transform_fn=None,
+    ) -> list:
+        """Route to a FLAX-native dataset when ``_native_train_flax`` is set.
+
+        The native FLAX path stores ``list[FlaxBatch]`` at a native batch size
+        chosen by the loader. This helper flattens that list to samples, then
+        applies the caller-requested split/shuffle/batch semantics plus
+        optional transforms so val/test stay deterministic.
+        """
+        import numpy as np
+        import jax.numpy as jnp
+        from dagnam.data.loaders.flax_loader import FlaxBatch
+
+        native_train_flax = getattr(self, "_native_train_flax", None)
+        native_test_flax = getattr(self, "_native_test_flax", None)
+
+        if split == "test" and native_test_flax is not None:
+            source_batches = native_test_flax
+        elif split in ("train", "val"):
+            if native_train_flax is None:
+                raise ValueError(f"No native FLAX dataset for split '{split}'")
+            source_batches = native_train_flax
+        else:
+            source_batches = native_train_flax or []
+
+        if not source_batches:
+            return []
+
+        # Flatten to per-sample arrays so we can re-split and rebatch.
+        features_list = [np.asarray(b.features) for b in source_batches]
+        labels_list = [np.asarray(b.labels) for b in source_batches]
+        all_features = np.concatenate(features_list, axis=0)
+        all_labels = np.concatenate(labels_list, axis=0)
+
+        if split in ("train", "val"):
+            n = len(all_features)
+            n_val = max(1, int(n * val_ratio))
+            rng_np = np.random.default_rng(seed)
+            order = rng_np.permutation(n)
+            if split == "val":
+                keep = order[:n_val]
+            else:
+                keep = order[n_val:]
+            all_features = all_features[keep]
+            all_labels = all_labels[keep]
+
+        if shuffle:
+            rng_np = np.random.default_rng(seed)
+            order = rng_np.permutation(len(all_features))
+            all_features = all_features[order]
+            all_labels = all_labels[order]
+
+        batches: list[FlaxBatch] = []
+        for start in range(0, len(all_features), batch_size):
+            chunk_x = all_features[start : start + batch_size]
+            chunk_y = all_labels[start : start + batch_size]
+            if transform_fn is not None:
+                chunk_x = np.stack([transform_fn(s) for s in chunk_x])
+            feat = jnp.asarray(chunk_x)
+            lbl = jnp.asarray(chunk_y)
+            batch = FlaxBatch(features=feat, labels=lbl)
+            if batch_transform_fn is not None:
+                f, l = batch_transform_fn(batch.features, batch.labels)
+                batch = FlaxBatch(features=f, labels=l)
+            batches.append(batch)
+        return batches
+
+    def _try_upgrade_to_native_tf(self) -> bool:
+        """Upgrade a PT-native system dataset to a TF-native dataset via tfds.
+
+        Returns True if the upgrade succeeded and populated
+        ``_native_train_tf`` / ``_native_test_tf``. False when tfds isn't
+        available or the dataset doesn't map to a known tfds name; the caller
+        should then fall through to ``_native_to_tensorflow`` (in-memory).
+        """
+        if getattr(self, "_native_train_tf", None) is not None:
+            return True
+        if not self._raw_meta.get("source_type") == "system":
+            return False
+        try:
+            from dagnam.data.loaders.system_loader import (
+                _resolve_tfds_name,
+                resolve_system_dataset_tf,
+            )
+            import tensorflow_datasets  # noqa: F401
+        except ImportError:
+            return False
+
+        if _resolve_tfds_name(self._raw_meta) is None:
+            return False
+
+        upgraded = resolve_system_dataset_tf(self._raw_meta)
+        if upgraded._native_train_tf is None:
+            return False
+        # Copy upgraded native handles onto self so subsequent calls use them.
+        self._native_train_tf = upgraded._native_train_tf
+        self._native_test_tf = upgraded._native_test_tf
+        return True
+
+    def _try_upgrade_to_native_flax(self) -> bool:
+        """Upgrade a PT-native system dataset to a FLAX-native dataset via tfds."""
+        if getattr(self, "_native_train_flax", None) is not None:
+            return True
+        if not self._raw_meta.get("source_type") == "system":
+            return False
+        try:
+            from dagnam.data.loaders.system_loader import (
+                _resolve_tfds_name,
+                resolve_system_dataset_flax,
+            )
+            import tensorflow_datasets  # noqa: F401
+        except ImportError:
+            return False
+
+        if _resolve_tfds_name(self._raw_meta) is None:
+            return False
+
+        upgraded = resolve_system_dataset_flax(self._raw_meta)
+        if upgraded._native_train_flax is None:
+            return False
+        self._native_train_flax = upgraded._native_train_flax
+        self._native_test_flax = upgraded._native_test_flax
+        return True
+
+
+    # ------------------------------------------------------------------
     # Raw sample/array access
     # ------------------------------------------------------------------
 
@@ -570,6 +928,10 @@ class DagnamDataset:
         Uses the same shuffle behavior as ``csv_loader`` / ``json_loader``
         so that ``to_arrays()`` and ``to_pytorch_loader()`` produce identical
         splits with the same seed.
+
+        Contract: split order is defined by Python's stdlib
+        ``random.Random(seed).shuffle``. Keep all framework loaders on this
+        RNG unless the split contract is intentionally versioned.
         """
         n_test = int(n * test_ratio)
         n_val = int(n * val_ratio)
@@ -599,10 +961,19 @@ class DagnamDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        column_roles: dict[str, str] | None = None,
         map_fn=None,
         batch_map_fn=None,
     ) -> "tf.data.Dataset":  # noqa: F821
         """Create a TensorFlow Dataset for the specified split.
+
+        Supports tabular (CSV/TSV/JSON/JSONL), image-folder, and audio-folder
+        datasets, plus system datasets (via the native path).
+
+        Args:
+            column_roles: Optional mapping of column names to roles for
+                tabular datasets (``{"x": "feature", "label": "target"}``).
+                Ignored for image/audio formats.
 
         Raises ImportError if tensorflow is not installed.
         Raises ValueError for unsupported formats or invalid split names.
@@ -613,8 +984,24 @@ class DagnamDataset:
                 f"Unknown split: {split}. Use 'train', 'val', or 'test'."
             )
 
+        # Format validation — before TF import so unsupported formats raise
+        # ValueError regardless of install state.
         fmt = self.format.lower()
-        if fmt not in ("csv", "tsv", "json", "jsonl"):
+        supported_formats = {
+            "csv", "tsv", "json", "jsonl", "image_folder", "audio_folder",
+        }
+        is_system_with_native = (
+            self._native_train is not None
+            or getattr(self, "_native_train_tf", None) is not None
+        )
+        is_audio_via_type = (
+            fmt not in ("csv", "tsv", "json", "jsonl") and self.dataset_type == "audio"
+        )
+        if (
+            fmt not in supported_formats
+            and not is_system_with_native
+            and not is_audio_via_type
+        ):
             raise ValueError(
                 f"Unsupported format for TensorFlow dataset: {self.format}"
             )
@@ -627,10 +1014,89 @@ class DagnamDataset:
                 "Install with: uv pip install dagnam[tensorflow]"
             )
 
-        from dagnam.data.loaders.tf_loader import create_tensorflow_dataset
-
         if shuffle is None:
             shuffle = split == "train"
+
+        # --- Native dataset path (system datasets) ---
+        if getattr(self, "_native_train_tf", None) is not None:
+            return self._native_tensorflow_dataset(
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                seed=seed,
+                map_fn=map_fn,
+                batch_map_fn=batch_map_fn,
+            )
+        if self._native_train is not None:
+            # Try to upgrade to a native TF path via tensorflow_datasets if available.
+            upgraded = self._try_upgrade_to_native_tf()
+            if upgraded:
+                return self._native_tensorflow_dataset(
+                    split=split,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    val_ratio=val_ratio,
+                    seed=seed,
+                    map_fn=map_fn,
+                    batch_map_fn=batch_map_fn,
+                )
+            # Legacy native path: convert PyTorch-style native datasets to tf.data.
+            return self._native_to_tensorflow(
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                seed=seed,
+                map_fn=map_fn,
+                batch_map_fn=batch_map_fn,
+            )
+
+        fmt = self.format.lower()
+
+        # Image folder
+        if fmt == "image_folder":
+            from dagnam.data.loaders.image_folder_loader import (
+                create_tensorflow_dataset as create_image_tf,
+            )
+            return create_image_tf(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+                map_fn=map_fn,
+                batch_map_fn=batch_map_fn,
+            )
+
+        # Audio folder
+        if fmt == "audio_folder" or (
+            fmt not in ("csv", "tsv", "json", "jsonl") and self.dataset_type == "audio"
+        ):
+            from dagnam.data.loaders.audio_loader import (
+                create_tensorflow_dataset as create_audio_tf,
+            )
+            return create_audio_tf(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+                map_fn=map_fn,
+                batch_map_fn=batch_map_fn,
+            )
+
+        # Tabular datasets
+        if fmt not in ("csv", "tsv", "json", "jsonl"):
+            raise ValueError(
+                f"Unsupported format for TensorFlow dataset: {self.format}"
+            )
+
+        from dagnam.data.loaders.tf_loader import create_tensorflow_dataset
 
         return create_tensorflow_dataset(
             dagnam_ds=self,
@@ -640,6 +1106,7 @@ class DagnamDataset:
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            column_roles=column_roles,
             map_fn=map_fn,
             batch_map_fn=batch_map_fn,
         )
@@ -656,10 +1123,18 @@ class DagnamDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        column_roles: dict[str, str] | None = None,
         transform_fn=None,
         batch_transform_fn=None,
     ) -> list:
         """Create a list of Flax batches for the specified split.
+
+        Supports tabular (CSV/TSV/JSON/JSONL), image-folder, and audio-folder
+        datasets, plus system datasets (via the native path).
+
+        Args:
+            column_roles: Optional mapping of column names to roles for
+                tabular datasets. Ignored for image/audio formats.
 
         Raises ImportError if jax/flax is not installed.
         Raises ValueError for unsupported formats or invalid split names.
@@ -670,8 +1145,23 @@ class DagnamDataset:
                 f"Unknown split: {split}. Use 'train', 'val', or 'test'."
             )
 
+        # Format validation — before JAX import.
         fmt = self.format.lower()
-        if fmt not in ("csv", "tsv", "json", "jsonl"):
+        supported_formats = {
+            "csv", "tsv", "json", "jsonl", "image_folder", "audio_folder",
+        }
+        is_system_with_native = (
+            self._native_train is not None
+            or getattr(self, "_native_train_flax", None) is not None
+        )
+        is_audio_via_type = (
+            fmt not in ("csv", "tsv", "json", "jsonl") and self.dataset_type == "audio"
+        )
+        if (
+            fmt not in supported_formats
+            and not is_system_with_native
+            and not is_audio_via_type
+        ):
             raise ValueError(
                 f"Unsupported format for Flax dataset: {self.format}"
             )
@@ -684,10 +1174,87 @@ class DagnamDataset:
                 "Install with: uv pip install dagnam[flax]"
             )
 
-        from dagnam.data.loaders.flax_loader import create_flax_dataset
-
         if shuffle is None:
             shuffle = split == "train"
+
+        # --- Native dataset path ---
+        if getattr(self, "_native_train_flax", None) is not None:
+            return self._native_flax_dataset(
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                seed=seed,
+                transform_fn=transform_fn,
+                batch_transform_fn=batch_transform_fn,
+            )
+        if self._native_train is not None:
+            upgraded = self._try_upgrade_to_native_flax()
+            if upgraded:
+                return self._native_flax_dataset(
+                    split=split,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    val_ratio=val_ratio,
+                    seed=seed,
+                    transform_fn=transform_fn,
+                    batch_transform_fn=batch_transform_fn,
+                )
+            return self._native_to_flax(
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                seed=seed,
+                transform_fn=transform_fn,
+                batch_transform_fn=batch_transform_fn,
+            )
+
+        fmt = self.format.lower()
+
+        # Image folder
+        if fmt == "image_folder":
+            from dagnam.data.loaders.image_folder_loader import (
+                create_flax_dataset as create_image_flax,
+            )
+            return create_image_flax(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+                transform_fn=transform_fn,
+                batch_transform_fn=batch_transform_fn,
+            )
+
+        # Audio folder
+        if fmt == "audio_folder" or (
+            fmt not in ("csv", "tsv", "json", "jsonl") and self.dataset_type == "audio"
+        ):
+            from dagnam.data.loaders.audio_loader import (
+                create_flax_dataset as create_audio_flax,
+            )
+            return create_audio_flax(
+                dagnam_ds=self,
+                split=split,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+                transform_fn=transform_fn,
+                batch_transform_fn=batch_transform_fn,
+            )
+
+        # Tabular
+        if fmt not in ("csv", "tsv", "json", "jsonl"):
+            raise ValueError(
+                f"Unsupported format for Flax dataset: {self.format}"
+            )
+
+        from dagnam.data.loaders.flax_loader import create_flax_dataset
 
         return create_flax_dataset(
             dagnam_ds=self,
@@ -697,6 +1264,7 @@ class DagnamDataset:
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            column_roles=column_roles,
             transform_fn=transform_fn,
             batch_transform_fn=batch_transform_fn,
         )
