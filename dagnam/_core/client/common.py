@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import quote
 
 from dagnam._core.exceptions import (
     APIError,
@@ -31,11 +32,18 @@ from dagnam._core.exceptions import (
 )
 
 API_BASE = "/api/v1"
+_MAX_ERROR_BODY = 2048
+_TEXT_CONTENT_MARKERS = ("text/", "json", "xml", "javascript", "yaml", "html")
 
 
 def build_url(api_url: str, path: str) -> str:
     """Join a base API URL with a path that may or may not start with /."""
     return f"{api_url.rstrip('/')}{path if path.startswith('/') else '/' + path}"
+
+
+def quote_path_segment(value: str) -> str:
+    """Percent-encode an untrusted value for use as one URL path segment."""
+    return quote(str(value), safe="")
 
 
 def bearer_headers(api_key: str, *, extra: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -65,16 +73,54 @@ class _Resp:
 
 
 def _text(resp: Any) -> str:
-    t = getattr(resp, "text", "")
-    return t if isinstance(t, str) else str(t)
+    return safe_response_text(resp)
+
+
+def safe_response_text(resp: Any) -> str:
+    """Return a short, text-safe response body for exception messages."""
+    headers = getattr(resp, "headers", {}) or {}
+    try:
+        content_type = str(headers.get("Content-Type") or headers.get("content-type") or "").lower()
+    except AttributeError:
+        content_type = ""
+
+    if getattr(resp, "_content", None) is False:
+        if content_type:
+            return f"<streaming {content_type} body omitted>"
+        return "<streaming response body omitted>"
+
+    content = getattr(resp, "content", b"") or b""
+    if content_type and not any(marker in content_type for marker in _TEXT_CONTENT_MARKERS):
+        try:
+            body_len = len(content)
+        except TypeError:
+            body_len = 0
+        return f"<{body_len} bytes of {content_type}>"
+
+    try:
+        text = getattr(resp, "text", "")
+    except Exception:
+        try:
+            body_len = len(content)
+        except TypeError:
+            body_len = 0
+        return f"<{body_len} bytes; failed to decode body>"
+    if not isinstance(text, str):
+        text = str(text)
+
+    if len(text) > _MAX_ERROR_BODY:
+        return text[:_MAX_ERROR_BODY] + f"... [truncated, {len(text)} chars total]"
+    return text
 
 
 def _ok(resp: Any) -> bool:
     ok = getattr(resp, "ok", None)
+    code = getattr(resp, "status_code", None)
+    if isinstance(code, int):
+        return 200 <= code < 300
     if ok is not None:
         return bool(ok)
-    code = getattr(resp, "status_code", 0)
-    return 200 <= int(code) < 400
+    return False
 
 
 def raise_for_generic(

@@ -3,7 +3,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from dagnam._core.aio.base import _parse_cd as _parse_async_filename
 from dagnam._core.client import DagnamClient
+from dagnam._core.client.base import _parse_filename
 
 
 def _mock_response(status_code, headers, chunks):
@@ -205,3 +209,53 @@ class TestResumableDownload:
             path = client.download_dataset("ds1", tmp_path)
 
         assert path.name == "my_data.csv"
+
+    def test_content_disposition_path_traversal_is_rejected(self, tmp_path: Path):
+        """Server-provided filenames cannot escape the output directory."""
+        client = DagnamClient("https://api.test", "secret")
+        resp = _mock_response(
+            200,
+            {
+                "Content-Disposition": 'attachment; filename="../../../escape.txt"',
+                "Content-Length": "5",
+            },
+            [b"hello"],
+        )
+
+        with patch("dagnam._core.client.base.requests.get", return_value=resp):
+            with pytest.raises(ValueError, match="Unsafe filename"):
+                client.download_dataset("ds1", tmp_path)
+
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+
+class TestContentDispositionFilename:
+    def test_rejects_empty_dot_and_parent_names(self):
+        for value in ('attachment; filename=""', "attachment; filename=.", "filename=.."):
+            with pytest.raises(ValueError, match="Unsafe filename"):
+                _parse_filename(value)
+
+    def test_rejects_slash_and_backslash_paths(self):
+        for value in ('attachment; filename="../x.csv"', 'attachment; filename="..\\x.csv"'):
+            with pytest.raises(ValueError, match="Unsafe filename"):
+                _parse_filename(value)
+
+    def test_rejects_windows_special_paths(self):
+        for value in (
+            'attachment; filename="C:escape.txt"',
+            'attachment; filename="file.txt:ads"',
+            'attachment; filename="CON"',
+            'attachment; filename="nul.txt"',
+        ):
+            with pytest.raises(ValueError, match="Unsafe filename"):
+                _parse_filename(value)
+
+    def test_async_parser_rejects_windows_special_paths(self):
+        for value in (
+            'attachment; filename="C:escape.txt"',
+            'attachment; filename="file.txt:ads"',
+            'attachment; filename="CON"',
+            'attachment; filename="nul.txt"',
+        ):
+            with pytest.raises(ValueError, match="Unsafe filename"):
+                _parse_async_filename(value)

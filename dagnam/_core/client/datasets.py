@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dagnam._core.client.base import _TIMEOUT, APIError, _parse_filename, requests
+from dagnam._core.client.base import (
+    _ALLOW_REDIRECTS,
+    _TIMEOUT,
+    APIError,
+    _parse_filename,
+    requests,
+)
+from dagnam._core.client.common import quote_path_segment
 
 
 class DatasetsClientMixin:
@@ -18,7 +25,13 @@ class DatasetsClientMixin:
         if search:
             params["search"] = search
         try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                params=params,
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
@@ -31,10 +44,17 @@ class DatasetsClientMixin:
 
         GET /api/v1/datasets/{dataset_id}/meta[?version=...]
         """
-        url = f"{self.api_url}/api/v1/datasets/{dataset_id}/meta"
+        dataset_path = quote_path_segment(dataset_id)
+        url = f"{self.api_url}/api/v1/datasets/{dataset_path}/meta"
         params = {"version": version} if version else None
         try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                params=params,
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
@@ -47,7 +67,12 @@ class DatasetsClientMixin:
         """GET /api/v1/datasets/system — List all system datasets."""
         url = f"{self.api_url}/api/v1/datasets/system"
         try:
-            resp = requests.get(url, headers=self._headers(), timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
@@ -57,10 +82,17 @@ class DatasetsClientMixin:
 
     def get_system_dataset_meta(self, dataset_id: str, version: str | None = None) -> dict:
         """GET /api/v1/datasets/system/{dataset_id} — Get system dataset metadata."""
-        url = f"{self.api_url}/api/v1/datasets/system/{dataset_id}"
+        dataset_path = quote_path_segment(dataset_id)
+        url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}"
         params = {"version": version} if version else None
         try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                params=params,
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
@@ -75,7 +107,8 @@ class DatasetsClientMixin:
 
         Returns the path to the downloaded file.
         """
-        url = f"{self.api_url}/api/v1/datasets/system/{dataset_id}/download"
+        dataset_path = quote_path_segment(dataset_id)
+        url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}/download"
         resp = self._get_stream(url)
         self._raise_for_status(resp, dataset_id)
         filename = _parse_filename(resp.headers.get("Content-Disposition"))
@@ -124,7 +157,8 @@ class DatasetsClientMixin:
             headers: dict[str, str] = {}
             params = None
         else:
-            url = f"{self.api_url}/api/v1/datasets/{dataset_id}/download"
+            dataset_path = quote_path_segment(dataset_id)
+            url = f"{self.api_url}/api/v1/datasets/{dataset_path}/download"
             headers = self._headers()
             params = {"version": version} if version else None
 
@@ -148,6 +182,7 @@ class DatasetsClientMixin:
                 params=params,
                 timeout=_TIMEOUT,
                 stream=True,
+                allow_redirects=bool(download_url),
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -219,6 +254,7 @@ class DatasetsClientMixin:
                     data=fields,
                     files=files,
                     timeout=None,
+                    allow_redirects=_ALLOW_REDIRECTS,
                 )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -255,6 +291,7 @@ class DatasetsClientMixin:
                 headers=self._headers(),
                 json=body,
                 timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -267,9 +304,15 @@ class DatasetsClientMixin:
     def get_dataset_task_status(self, task_id: str) -> dict:
         from dagnam._core.client.common import raise_for_task
 
-        url = f"{self.api_url}/api/v1/datasets/tasks/{task_id}"
+        task_path = quote_path_segment(task_id)
+        url = f"{self.api_url}/api/v1/datasets/tasks/{task_path}"
         try:
-            resp = requests.get(url, headers=self._headers(), timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:

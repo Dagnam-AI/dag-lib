@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dagnam._core.client.base import _TIMEOUT, APIError, requests
+from dagnam._core.client.base import _ALLOW_REDIRECTS, _TIMEOUT, APIError, requests
+from dagnam._core.client.common import quote_path_segment
 
 
 class CodegenClientMixin:
@@ -31,6 +32,7 @@ class CodegenClientMixin:
                 params=params,
                 json=json_body,
                 timeout=timeout,
+                allow_redirects=_ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -65,7 +67,7 @@ class CodegenClientMixin:
         params = {"async_mode": "true"} if async_mode else None
         return self._codegen_request(
             "POST",
-            f"/api/v1/projects/{project_id}/generate-code",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
             json_body=payload,
             params=params,
         )
@@ -75,13 +77,13 @@ class CodegenClientMixin:
         if version_id:
             params["version_id"] = version_id
         return self._codegen_request(
-            "GET", f"/api/v1/projects/{project_id}/code-preview", params=params
+            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}/code-preview", params=params
         )
 
     def validate_code(self, project_id: str, version_id: str | None = None) -> dict:
         params = {"version_id": version_id} if version_id else None
         return self._codegen_request(
-            "POST", f"/api/v1/projects/{project_id}/validate", params=params
+            "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
         )
 
     def validate_architecture(self, project_id: str, version_id: str | None = None) -> dict:
@@ -99,7 +101,7 @@ class CodegenClientMixin:
         params: dict[str, str] = {"framework": framework}
         if version_id:
             params["version_id"] = version_id
-        url = f"{self.api_url}/api/v1/projects/{project_id}/download-code"
+        url = f"{self.api_url}/api/v1/projects/{quote_path_segment(project_id)}/download-code"
         try:
             resp = requests.get(
                 url,
@@ -107,6 +109,7 @@ class CodegenClientMixin:
                 params=params,
                 stream=bool(dest_path),
                 timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -134,4 +137,10 @@ class CodegenClientMixin:
         )
 
     def get_code_status(self, project_id: str, task_id: str) -> dict:
-        return self._codegen_request("GET", f"/api/v1/projects/{project_id}/code-status/{task_id}")
+        return self._codegen_request(
+            "GET",
+            (
+                f"/api/v1/projects/{quote_path_segment(project_id)}"
+                f"/code-status/{quote_path_segment(task_id)}"
+            ),
+        )

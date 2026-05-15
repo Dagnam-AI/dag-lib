@@ -42,6 +42,14 @@ class TestGetCacheDir:
         r2 = get_cache_dir("ds-1", base_dir=cache_dir)
         assert r1 == r2
 
+    def test_dataset_id_cannot_escape_cache_dir(self, tmp_path):
+        base = tmp_path / "cache"
+        result = get_cache_dir("../escape", base_dir=base)
+
+        assert result.resolve().is_relative_to(base.resolve())
+        assert result.name == "..%2Fescape"
+        assert not (tmp_path / "escape").exists()
+
 
 class TestIsCached:
     def test_no_checksum_file(self, cache_dir):

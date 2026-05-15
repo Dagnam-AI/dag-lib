@@ -386,7 +386,6 @@ source = { editable = "." }
 dependencies = [
     { name = "pandas" },
     { name = "requests" },
-    { name = "sseclient-py" },
     { name = "tqdm" },
 ]
 
@@ -400,6 +399,7 @@ all = [
     { name = "httpx" },
     { name = "httpx-sse" },
     { name = "jax" },
+    { name = "sseclient-py" },
     { name = "tensorflow" },
     { name = "torch" },
     { name = "torchaudio" },
@@ -416,6 +416,9 @@ flax = [
 pytorch = [
     { name = "torch" },
     { name = "torchvision" },
+]
+streaming = [
+    { name = "sseclient-py" },
 ]
 tensorflow = [
     { name = "tensorflow" },
@@ -446,7 +449,8 @@ requires-dist = [
     { name = "jax", marker = "extra == 'flax'", specifier = ">=0.4" },
     { name = "pandas", specifier = ">=1.5" },
     { name = "requests", specifier = ">=2.28" },
-    { name = "sseclient-py", specifier = ">=1.7" },
+    { name = "sseclient-py", marker = "extra == 'all'", specifier = ">=1.7" },
+    { name = "sseclient-py", marker = "extra == 'streaming'", specifier = ">=1.7" },
     { name = "tensorflow", marker = "extra == 'all'", specifier = ">=2.12" },
     { name = "tensorflow", marker = "extra == 'tensorflow'", specifier = ">=2.12" },
     { name = "torch", marker = "extra == 'all'", specifier = ">=2.0" },

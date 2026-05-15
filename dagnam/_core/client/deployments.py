@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagnam._core.client.base import _TIMEOUT, APIError, requests
+from dagnam._core.client.base import _ALLOW_REDIRECTS, _TIMEOUT, APIError, requests
+from dagnam._core.client.common import quote_path_segment
 
 
 class DeploymentsClientMixin:
@@ -37,6 +38,7 @@ class DeploymentsClientMixin:
                 params=params,
                 json=json_body,
                 timeout=timeout,
+                allow_redirects=_ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -78,7 +80,7 @@ class DeploymentsClientMixin:
         """GET /api/v1/deployments/{id}"""
         return self._deployment_request(
             "GET",
-            f"/api/v1/deployments/{deployment_id}",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
         )
 
@@ -90,7 +92,7 @@ class DeploymentsClientMixin:
         """PUT /api/v1/deployments/{id}"""
         return self._deployment_request(
             "PUT",
-            f"/api/v1/deployments/{deployment_id}",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
             json_body=payload,
         )
@@ -99,28 +101,28 @@ class DeploymentsClientMixin:
         """DELETE /api/v1/deployments/{id}"""
         return self._deployment_request(
             "DELETE",
-            f"/api/v1/deployments/{deployment_id}",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
         )
 
     def pause_deployment(self, deployment_id: str) -> dict:
         return self._deployment_request(
             "POST",
-            f"/api/v1/deployments/{deployment_id}/pause",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/pause",
             deployment_id=deployment_id,
         )
 
     def resume_deployment(self, deployment_id: str) -> dict:
         return self._deployment_request(
             "POST",
-            f"/api/v1/deployments/{deployment_id}/resume",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/resume",
             deployment_id=deployment_id,
         )
 
     def scale_deployment(self, deployment_id: str, num_instances: int) -> dict:
         return self._deployment_request(
             "PUT",
-            f"/api/v1/deployments/{deployment_id}/scale",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
             deployment_id=deployment_id,
             params={"num_instances": num_instances},
         )
@@ -128,7 +130,7 @@ class DeploymentsClientMixin:
     def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> dict:
         return self._deployment_request(
             "POST",
-            f"/api/v1/deployments/{deployment_id}/rollback",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
             deployment_id=deployment_id,
             params={"checkpoint_path": checkpoint_path},
         )
@@ -136,7 +138,7 @@ class DeploymentsClientMixin:
     def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> dict:
         return self._deployment_request(
             "GET",
-            f"/api/v1/deployments/{deployment_id}/metrics",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
             deployment_id=deployment_id,
             params={"time_range": time_range},
         )
@@ -163,7 +165,7 @@ class DeploymentsClientMixin:
             params["end_time"] = end_time
         return self._deployment_request(
             "GET",
-            f"/api/v1/deployments/{deployment_id}/logs",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/logs",
             deployment_id=deployment_id,
             params=params,
         )
@@ -176,7 +178,7 @@ class DeploymentsClientMixin:
         """
         return self._deployment_request(
             "GET",
-            f"/api/v1/deployments/{deployment_id}/health",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
             deployment_id=deployment_id,
         )
 
@@ -189,13 +191,20 @@ class DeploymentsClientMixin:
         """
         from dagnam._core.client.common import raise_for_deployment
 
-        url = f"{self.api_url}/api/v1/deployments/{deployment_id}/stream"
+        url = f"{self.api_url}/api/v1/deployments/{quote_path_segment(deployment_id)}/stream"
         params = {"api_key": self.api_key}
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id
         try:
-            resp = requests.get(url, params=params, headers=headers, stream=True, timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                stream=True,
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dagnam.data.dataset.hooks import _TransformDataset, _with_collate, _wrap_collate
+from dagnam.data.loaders.torch_utils import should_pin_memory
 
 
 class PytorchDatasetMixin:
@@ -201,7 +202,7 @@ class PytorchDatasetMixin:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
-            pin_memory=True,
+            pin_memory=should_pin_memory(),
             drop_last=(split == "train"),
             collate_fn=collate_fn,
         )
@@ -257,7 +258,7 @@ class PytorchDatasetMixin:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
-            pin_memory=True,
+            pin_memory=should_pin_memory(),
             drop_last=(split == "train"),
             collate_fn=collate_fn,
         )

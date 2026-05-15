@@ -9,6 +9,8 @@ import pandas as pd
 import torch
 import torch.utils.data
 
+from dagnam.data.loaders.torch_utils import should_pin_memory
+
 if TYPE_CHECKING:
     from dagnam.data.dataset import DagnamDataset
 
@@ -88,7 +90,7 @@ def create_pytorch_loader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=should_pin_memory(),
         drop_last=(split == "train"),
     )
 

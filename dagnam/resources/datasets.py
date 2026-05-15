@@ -34,7 +34,7 @@ def upload(
 ) -> dict:
     """Upload a local dataset file.
 
-    >>> result = dagnam.datasets_upload.upload(
+    >>> result = dagnam.datasets.upload(
     ...     "data.csv",
     ...     name="my-dataset",
     ...     dataset_type="tabular",
@@ -43,7 +43,7 @@ def upload(
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.upload_dataset(
-        path=path,
+        file_path=path,
         name=name,
         dataset_type=dataset_type,
         format=format,
@@ -68,7 +68,7 @@ def upload_from_url(
 ) -> LongRunningOperation:
     """Start a server-side dataset import from a URL and return an LRO.
 
-    >>> op = dagnam.datasets_upload.upload_from_url(
+    >>> op = dagnam.datasets.upload_from_url(
     ...     "https://example.com/data.parquet",
     ...     name="remote-ds",
     ...     dataset_type="tabular",
@@ -92,7 +92,7 @@ def upload_from_url(
         failure_states=_FAILURE_STATES,
         state_key="status",
         error_key="error_message",
-        name=f"datasets_upload.upload_from_url({task_id})",
+        name=f"datasets.upload_from_url({task_id})",
         initial=initial,
     )
 

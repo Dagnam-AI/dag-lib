@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 import json
+import random
 import time
 from typing import Callable, Optional
 
@@ -101,4 +102,5 @@ def iter_with_reconnect(
         attempts += 1
         if attempts > max_reconnects:
             raise StreamError(f"{resource_label} dropped after {max_reconnects} reconnect attempts")
-        time.sleep(backoff_base * (2 ** (attempts - 1)))
+        delay = backoff_base * (2 ** (attempts - 1))
+        time.sleep(delay + random.uniform(0, delay * 0.1))

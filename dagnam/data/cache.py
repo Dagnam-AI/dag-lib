@@ -10,9 +10,21 @@ import json
 from pathlib import Path
 import shutil
 import time
+from urllib.parse import quote
 
 DEFAULT_CACHE_DIR: Path = Path.home() / ".dagnam" / "datasets"
 DEFAULT_MAX_CACHE_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
+
+
+def _cache_dir_name(dataset_id: str) -> str:
+    """Return a single filesystem-safe cache directory name for a dataset key."""
+    raw = str(dataset_id)
+    if raw == "":
+        raise ValueError("dataset_id must not be empty")
+    encoded = quote(raw, safe="-_.@")
+    if encoded in {".", ".."}:
+        encoded = encoded.replace(".", "%2E")
+    return encoded
 
 
 def get_cache_dir(dataset_id: str, base_dir: Path | None = None) -> Path:
@@ -21,7 +33,7 @@ def get_cache_dir(dataset_id: str, base_dir: Path | None = None) -> Path:
     Creates the directory (including parents) if it doesn't exist.
     """
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
-    cache_dir = base / dataset_id
+    cache_dir = base / _cache_dir_name(dataset_id)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 

@@ -25,7 +25,6 @@ from dagnam.resources.inference import deployment_health, inference, inference_b
 from dagnam.resources.training import TrainingEvent, stream_training
 
 __version__ = "0.1.0"
-datasets_upload = datasets
 
 __all__ = [
     "ChecksumError",
@@ -38,7 +37,6 @@ __all__ = [
     "compute_file_checksum",
     "configure",
     "datasets",
-    "datasets_upload",
     "deployment_health",
     "deployments",
     "download_checkpoint",

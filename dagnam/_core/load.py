@@ -122,6 +122,7 @@ def load_dataset(
 
 def _load_internal(dataset_id: str) -> DagnamDataset:
     """Load dataset from sidecar metadata for server-side training."""
+    _validate_internal_dataset_id(dataset_id)
     meta_dir_env = os.environ.get("DAGNAM_META_DIR", ".dagnam_meta")
     meta_dir = Path(meta_dir_env)
     meta_path = meta_dir / f"{dataset_id}.meta.json"
@@ -154,6 +155,13 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
             return DagnamDataset(meta, file_path.parent)
 
     raise FileNotFoundError(f"Dataset file not found for '{dataset_id}': file_path={file_path_str}")
+
+
+def _validate_internal_dataset_id(dataset_id: str) -> None:
+    raw = str(dataset_id)
+    normalized = raw.replace("\\", "/")
+    if raw in {"", ".", ".."} or "/" in normalized or ":" in raw or Path(raw).is_absolute():
+        raise ValueError(f"Unsafe dataset_id for internal loading: {dataset_id!r}")
 
 
 __all__ = ["load_dataset"]

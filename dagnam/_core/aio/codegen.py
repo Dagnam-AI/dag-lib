@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from dagnam._core.client.common import raise_for_codegen
+from dagnam._core.client.common import quote_path_segment, raise_for_codegen
 
 
 class AsyncCodegenMixin:
@@ -47,7 +47,7 @@ class AsyncCodegenMixin:
         params = {"async_mode": "true"} if async_mode else None
         return await self._codegen_req(
             "POST",
-            f"/api/v1/projects/{project_id}/generate-code",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
             json_body=payload,
             params=params,
         )
@@ -59,13 +59,13 @@ class AsyncCodegenMixin:
         if version_id:
             params["version_id"] = version_id
         return await self._codegen_req(
-            "GET", f"/api/v1/projects/{project_id}/code-preview", params=params
+            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}/code-preview", params=params
         )
 
     async def validate_code(self, project_id: str, version_id: str | None = None) -> dict:
         params = {"version_id": version_id} if version_id else None
         return await self._codegen_req(
-            "POST", f"/api/v1/projects/{project_id}/validate", params=params
+            "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
         )
 
     async def validate_architecture(self, project_id: str, version_id: str | None = None) -> dict:
@@ -82,7 +82,7 @@ class AsyncCodegenMixin:
         if version_id:
             params["version_id"] = version_id
         resp = await self._request(
-            "GET", f"/api/v1/projects/{project_id}/download-code", params=params
+            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}/download-code", params=params
         )
         raise_for_codegen(resp)
         if dest_path:
@@ -108,5 +108,8 @@ class AsyncCodegenMixin:
 
     async def get_code_status(self, project_id: str, task_id: str) -> dict:
         return await self._codegen_req(
-            "GET", f"/api/v1/projects/{project_id}/code-status/{task_id}"
+            (
+                f"/api/v1/projects/{quote_path_segment(project_id)}"
+                f"/code-status/{quote_path_segment(task_id)}"
+            ),
         )

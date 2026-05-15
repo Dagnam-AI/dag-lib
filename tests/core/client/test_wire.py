@@ -13,6 +13,7 @@ import requests_mock as rm_module
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
+    APIError,
     AuthError,
     CheckpointNotFoundError,
     DeploymentNotFoundError,
@@ -60,6 +61,19 @@ def test_deployment_health_get(client, rmock):
     rmock.get(url, json={"status": "healthy"})
 
     assert client.deployment_health("dep_1") == {"status": "healthy"}
+
+
+def test_path_identifiers_are_percent_encoded(client, rmock):
+    """Untrusted identifiers must not inject extra URL path/query syntax."""
+    url = f"{API}/api/v1/datasets/tenant%2Fdata%3Fversion%3Dlatest/meta"
+    rmock.get(url, json={"id": "tenant/data?version=latest"})
+
+    assert client.get_dataset_meta("tenant/data?version=latest") == {
+        "id": "tenant/data?version=latest"
+    }
+    assert rmock.last_request.path.lower() == (
+        "/api/v1/datasets/tenant%2Fdata%3Fversion%3Dlatest/meta".lower()
+    )
 
 
 def test_checkpoint_download_streams_and_returns_checksum(client, rmock, tmp_path):
@@ -122,6 +136,25 @@ def test_checkpoint_404_maps_to_checkpoint_not_found(client, rmock, tmp_path):
 
     with pytest.raises(CheckpointNotFoundError):
         client.download_checkpoint_stream("job_1", "ck_bad", tmp_path / "x.pt")
+
+
+def test_checkpoint_redirect_is_rejected_not_written(client, rmock, tmp_path):
+    url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
+    rmock.get(url, status_code=302, headers={"Location": "https://evil.test/ck.pt"})
+    dest = tmp_path / "x.pt"
+
+    with pytest.raises(APIError):
+        client.download_checkpoint_stream("job_1", "ck_1", dest)
+
+    assert not dest.exists()
+
+
+def test_sse_redirect_is_rejected(client, rmock):
+    url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
+    rmock.get(url, status_code=302, headers={"Location": "https://evil.test/stream"})
+
+    with pytest.raises(APIError):
+        client.open_training_stream("job_1")
 
 
 def test_codegen_generate_posts_framework_and_version(client, rmock):

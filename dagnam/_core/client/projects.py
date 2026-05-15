@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagnam._core.client.base import _TIMEOUT, APIError, requests
+from dagnam._core.client.base import _ALLOW_REDIRECTS, _TIMEOUT, APIError, requests
+from dagnam._core.client.common import quote_path_segment
 
 
 class ProjectsClientMixin:
@@ -35,6 +36,7 @@ class ProjectsClientMixin:
                 data=data,
                 files=files,
                 timeout=timeout,
+                allow_redirects=_ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -54,24 +56,31 @@ class ProjectsClientMixin:
         return self._project_request("GET", "/api/v1/projects", params=filter_params)
 
     def get_project(self, project_id: str) -> dict:
-        return self._project_request("GET", f"/api/v1/projects/{project_id}", project_id=project_id)
+        return self._project_request(
+            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}", project_id=project_id
+        )
 
     def create_project(self, payload: dict) -> dict:
         return self._project_request("POST", "/api/v1/projects", json_body=payload)
 
     def update_project(self, project_id: str, payload: dict) -> dict:
         return self._project_request(
-            "PUT", f"/api/v1/projects/{project_id}", project_id=project_id, json_body=payload
+            "PUT",
+            f"/api/v1/projects/{quote_path_segment(project_id)}",
+            project_id=project_id,
+            json_body=payload,
         )
 
     def delete_project(self, project_id: str) -> None:
-        self._project_request("DELETE", f"/api/v1/projects/{project_id}", project_id=project_id)
+        self._project_request(
+            "DELETE", f"/api/v1/projects/{quote_path_segment(project_id)}", project_id=project_id
+        )
 
     def duplicate_project(self, project_id: str, title: str | None = None) -> dict:
         body = {"title": title} if title else None
         return self._project_request(
             "POST",
-            f"/api/v1/projects/{project_id}/duplicate",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/duplicate",
             project_id=project_id,
             json_body=body,
         )
@@ -79,7 +88,7 @@ class ProjectsClientMixin:
     def save_architecture(self, project_id: str, payload: dict) -> dict:
         return self._project_request(
             "POST",
-            f"/api/v1/projects/{project_id}/architecture",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/architecture",
             project_id=project_id,
             json_body=payload,
         )
@@ -90,7 +99,7 @@ class ProjectsClientMixin:
     def import_dag_existing(self, project_id: str, payload: dict) -> dict:
         return self._project_request(
             "POST",
-            f"/api/v1/projects/{project_id}/import",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/import",
             project_id=project_id,
             json_body=payload,
         )
@@ -103,17 +112,24 @@ class ProjectsClientMixin:
     def link_dataset(self, project_id: str, dataset_id: str, role: str) -> dict:
         return self._project_request(
             "POST",
-            f"/api/v1/projects/{project_id}/datasets",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
             project_id=project_id,
             json_body={"dataset_id": dataset_id, "role": role},
         )
 
     def get_project_datasets(self, project_id: str) -> dict:
         return self._project_request(
-            "GET", f"/api/v1/projects/{project_id}/datasets", project_id=project_id
+            "GET",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
+            project_id=project_id,
         )
 
     def unlink_dataset(self, project_id: str, dataset_id: str) -> None:
         self._project_request(
-            "DELETE", f"/api/v1/projects/{project_id}/datasets/{dataset_id}", project_id=project_id
+            "DELETE",
+            (
+                f"/api/v1/projects/{quote_path_segment(project_id)}"
+                f"/datasets/{quote_path_segment(dataset_id)}"
+            ),
+            project_id=project_id,
         )

@@ -1,31 +1,58 @@
 # Changelog
 
-All notable changes to the `dagnam` Python SDK.
+All notable changes to the `dagnam` Python SDK are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- Restructured SDK internals around `resources`, `_core.load`, package-based
-  client/dataset/CLI modules, and renamed loader modules.
-- Added typed-package metadata via `dagnam/py.typed`.
-- Relicensed from Unlicense to Apache License 2.0 to align with the
-  industry-standard SDK license used by OpenAI, Google, and Mistral, and
-  to provide explicit patent + trademark grants for enterprise adoption.
-  Added a `NOTICE` attribution file as required by section 4(d) and
-  wired `force-include` in hatchling so it ships with every wheel.
-
-### Compatibility
-
-- `mvp-backend` >= 0.5.0, < 0.7.0
+- Release-process documentation for maintainers.
 
 ## [0.1.0] - 2026-05-10
 
-Initial public release line.
+First public PyPI release of the official Dagnam.AI Python SDK.
+
+### Added
+
+- Dataset loading with API-key authentication, metadata lookup, local caching,
+  SHA-256 verification, LRU eviction, resumable downloads, presigned download
+  URLs, and dataset version selection.
+- `DagnamDataset` adapters for pandas, PyTorch, TensorFlow, and Flax/JAX.
+- Tabular CSV, TSV, JSON, and JSONL loaders with deterministic train/validation
+  and test splits.
+- Image-folder and audio-folder dataset loaders with archive extraction,
+  deterministic fallback splits, and framework transform hooks.
+- System dataset resolution by friendly name.
+- Dataset upload helpers for local files and server-side URL ingestion.
+- Inference helpers for single and batch prediction plus deployment health.
+- Checkpoint download with checksum verification and a dedicated checkpoint
+  cache.
+- Synchronous SSE training stream iterator with reconnect support.
+- Deployment, Model Hub, project, and code generation resource modules.
+- `LongRunningOperation` for polling asynchronous platform operations.
+- `dagnam.aio.AsyncDagnamClient` for low-level async API access.
+- CLI commands for login, datasets, cache, inference, checkpoints, streams,
+  deployments, hub, projects, and code generation.
+- Typed package marker via `dagnam/py.typed`.
+
+### Security
+
+- `dagnam login` writes `~/.dagnam/config.json` with owner-only permissions on
+  POSIX systems and creates `~/.dagnam` with owner-only directory permissions.
+- Archive extraction rejects unsafe paths, symlinks, special files, and oversized
+  archives before unpacking media datasets.
+- Downloaded dataset and checkpoint filenames from `Content-Disposition` are
+  sanitized before writing to disk.
+
+### Changed
+
+- Licensed the SDK under Apache License 2.0 with a root `NOTICE` file included
+  in source and wheel distributions.
 
 ### Compatibility
 
-- `mvp-backend` >= 0.5.0, < 0.7.0
+- Python `>=3.9`.
+- Dagnam backend `>=0.5.0, <0.7.0`.

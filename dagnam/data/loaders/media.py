@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import random
+import shutil
+import stat
 import tarfile
 from typing import List, Tuple
 import zipfile
@@ -42,6 +44,8 @@ AUDIO_EXTENSIONS = frozenset(
         ".m4a",
     }
 )
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
+_MAX_ARCHIVE_MEMBERS = 200_000
 
 
 @dataclass(frozen=True)
@@ -220,14 +224,60 @@ def _validate_archive_target(destination: Path, member_name: str) -> None:
 
 
 def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
-    for member in archive.infolist():
+    members = archive.infolist()
+    _validate_archive_size((member.file_size for member in members), len(members))
+    for member in members:
         _validate_archive_target(destination, member.filename)
-    archive.extractall(destination)
+        if _zip_member_is_symlink(member):
+            raise ValueError(f"Unsafe archive member link: {member.filename}")
+
+    for member in members:
+        target = destination / member.filename
+        if member.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member, "r") as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
 
 
 def _safe_extract_tar(archive: tarfile.TarFile, destination: Path) -> None:
-    for member in archive.getmembers():
+    members = archive.getmembers()
+    _validate_archive_size((member.size for member in members), len(members))
+    for member in members:
         _validate_archive_target(destination, member.name)
         if member.issym() or member.islnk():
             raise ValueError(f"Unsafe archive member link: {member.name}")
-    archive.extractall(destination)
+        if not (member.isdir() or member.isfile()):
+            raise ValueError(f"Unsafe archive member type: {member.name}")
+
+    for member in members:
+        target = destination / member.name
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        src = archive.extractfile(member)
+        if src is None:
+            raise ValueError(f"Unable to extract archive member: {member.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+
+def _zip_member_is_symlink(member: zipfile.ZipInfo) -> bool:
+    file_type = (member.external_attr >> 16) & 0o170000
+    return file_type == stat.S_IFLNK
+
+
+def _validate_archive_size(member_sizes, member_count: int) -> None:
+    if member_count > _MAX_ARCHIVE_MEMBERS:
+        raise ValueError(f"Archive has too many members: {member_count}")
+
+    total_size = 0
+    for size in member_sizes:
+        total_size += max(0, int(size or 0))
+        if total_size > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "Archive is too large after decompression "
+                f"({total_size} bytes > {_MAX_ARCHIVE_UNCOMPRESSED_BYTES} bytes)"
+            )

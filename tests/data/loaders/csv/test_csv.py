@@ -180,8 +180,10 @@ class TestCreatePytorchLoader:
         )
         assert loader.drop_last is False
 
-    def test_pin_memory(self, tmp_path):
+    def test_pin_memory_disabled_without_accelerator(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(torch.accelerator, "is_available", lambda: False)
         ds = _make_csv_dataset(tmp_path, class_names=["cat", "dog"])
+
         loader = create_pytorch_loader(
             ds,
             split="train",
@@ -192,7 +194,8 @@ class TestCreatePytorchLoader:
             test_ratio=0.1,
             seed=42,
         )
-        assert loader.pin_memory is True
+
+        assert loader.pin_memory is False
 
     def test_deterministic_splits(self, tmp_path):
         ds = _make_csv_dataset(tmp_path, class_names=["cat", "dog"])

@@ -1,4 +1,4 @@
-"""Unit tests for dagnam.datasets_upload module."""
+"""Unit tests for dagnam.datasets upload helpers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dagnam import datasets_upload
+from dagnam import datasets as datasets_upload
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import UploadError
 from dagnam._core.lro import LongRunningOperation
@@ -30,7 +30,7 @@ class TestUpload:
             client=c,
         )
         c.upload_dataset.assert_called_once_with(
-            path="data.csv",
+            file_path="data.csv",
             name="my-ds",
             dataset_type="tabular",
             format="csv",

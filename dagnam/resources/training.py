@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 import json
+import random
 import time
 from typing import Optional
 
@@ -111,4 +112,5 @@ def stream_training(
                 f"Training stream for job {job_id} dropped after "
                 f"{max_reconnects} reconnect attempts"
             )
-        time.sleep(_BACKOFF_BASE * (2 ** (attempts - 1)))
+        delay = _BACKOFF_BASE * (2 ** (attempts - 1))
+        time.sleep(delay + random.uniform(0, delay * 0.1))

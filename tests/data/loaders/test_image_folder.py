@@ -2,6 +2,7 @@
 
 import io
 from pathlib import Path
+import stat
 import tarfile
 from unittest.mock import patch
 import zipfile
@@ -11,6 +12,8 @@ import pytest
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.loaders.media import (
     FolderLayout,
+    _safe_extract_tar,
+    _safe_extract_zip,
     discover_class_folders,
     ensure_extracted,
     split_indices,
@@ -131,6 +134,59 @@ class TestSafeArchiveExtraction:
             ensure_extracted(tmp_path)
 
         assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_zip_decompression_bomb_is_rejected(self, tmp_path: Path):
+        class Archive:
+            def infolist(self):
+                info = zipfile.ZipInfo("huge.bin")
+                info.file_size = 10 * 1024 * 1024 * 1024
+                return [info]
+
+            def extractall(self, destination: Path):
+                raise AssertionError("unsafe archive should not be extracted")
+
+        with pytest.raises(ValueError, match="Archive is too large"):
+            _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
+
+    def test_tar_decompression_bomb_is_rejected(self, tmp_path: Path):
+        class Archive:
+            def getmembers(self):
+                info = tarfile.TarInfo("huge.bin")
+                info.size = 10 * 1024 * 1024 * 1024
+                return [info]
+
+            def extractall(self, destination: Path):
+                raise AssertionError("unsafe archive should not be extracted")
+
+        with pytest.raises(ValueError, match="Archive is too large"):
+            _safe_extract_tar(Archive(), tmp_path)  # type: ignore[arg-type]
+
+    def test_zip_symlink_member_is_rejected(self, tmp_path: Path):
+        class Archive:
+            def infolist(self):
+                info = zipfile.ZipInfo("link")
+                info.file_size = 0
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                return [info]
+
+            def extractall(self, destination: Path):
+                raise AssertionError("unsafe archive should not be extracted")
+
+        with pytest.raises(ValueError, match="Unsafe archive member link"):
+            _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
+
+    def test_tar_special_member_is_rejected(self, tmp_path: Path):
+        class Archive:
+            def getmembers(self):
+                info = tarfile.TarInfo("device")
+                info.type = tarfile.CHRTYPE
+                return [info]
+
+            def extractall(self, destination: Path):
+                raise AssertionError("unsafe archive should not be extracted")
+
+        with pytest.raises(ValueError, match="Unsafe archive member type"):
+            _safe_extract_tar(Archive(), tmp_path)  # type: ignore[arg-type]
 
     def test_tar_path_traversal_is_rejected(self, tmp_path: Path):
         archive = tmp_path / "bad.tar"

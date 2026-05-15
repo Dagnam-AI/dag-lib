@@ -5,7 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from dagnam._core.aio.base import _parse_cd
-from dagnam._core.client.common import raise_for_dataset, raise_for_task, raise_for_upload
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_dataset,
+    raise_for_task,
+    raise_for_upload,
+)
 
 
 class AsyncDatasetsMixin:
@@ -20,7 +25,7 @@ class AsyncDatasetsMixin:
         return resp.json()
 
     async def get_dataset_meta(self, dataset_id: str) -> dict:
-        resp = await self._request("GET", f"/api/v1/datasets/{dataset_id}/meta")
+        resp = await self._request("GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/meta")
         raise_for_dataset(resp, dataset_id)
         return resp.json()
 
@@ -30,12 +35,16 @@ class AsyncDatasetsMixin:
         return resp.json()
 
     async def get_system_dataset_meta(self, dataset_id: str) -> dict:
-        resp = await self._request("GET", f"/api/v1/datasets/system/{dataset_id}")
+        resp = await self._request(
+            "GET", f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}"
+        )
         raise_for_dataset(resp, dataset_id)
         return resp.json()
 
     async def download_dataset(self, dataset_id: str, output_dir: Path) -> Path:
-        resp = await self._request("GET", f"/api/v1/datasets/{dataset_id}/download")
+        resp = await self._request(
+            "GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/download"
+        )
         raise_for_dataset(resp, dataset_id)
         filename = _parse_cd(resp.headers.get("content-disposition"))
         dest = Path(output_dir) / filename
@@ -44,7 +53,9 @@ class AsyncDatasetsMixin:
         return dest
 
     async def download_system_dataset(self, dataset_id: str, output_dir: Path) -> Path:
-        resp = await self._request("GET", f"/api/v1/datasets/system/{dataset_id}/download")
+        resp = await self._request(
+            "GET", f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}/download"
+        )
         raise_for_dataset(resp, dataset_id)
         filename = _parse_cd(resp.headers.get("content-disposition"))
         dest = Path(output_dir) / filename
@@ -109,6 +120,6 @@ class AsyncDatasetsMixin:
         return resp.json()
 
     async def get_dataset_task_status(self, task_id: str) -> dict:
-        resp = await self._request("GET", f"/api/v1/datasets/tasks/{task_id}")
+        resp = await self._request("GET", f"/api/v1/datasets/tasks/{quote_path_segment(task_id)}")
         raise_for_task(resp, task_id)
         return resp.json()

@@ -15,7 +15,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
 from dagnam._core.resolver import resolve_client
-from dagnam.data.cache import compute_file_checksum, evict_lru, touch_cache
+from dagnam.data.cache import _cache_dir_name, compute_file_checksum, evict_lru, touch_cache
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,8 @@ def download_checkpoint(
         checkpoint_id = str(picked["id"])
 
     base = Path(cache_dir) if cache_dir is not None else DEFAULT_CHECKPOINT_CACHE_DIR
-    job_dir = base / job_id
-    dest = job_dir / f"{checkpoint_id}.pt"
+    job_dir = base / _cache_dir_name(job_id)
+    dest = job_dir / f"{_cache_dir_name(checkpoint_id)}.pt"
 
     # Cache hit: bump access time and return. Integrity was verified at download.
     if dest.exists():

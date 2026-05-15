@@ -86,6 +86,50 @@ class TestResolveSystemDataset:
         assert "imdb movie reviews" in _NATIVE_LOADERS
 
 
+class TestVerifiedSystemDownloads:
+    def test_download_helper_rejects_non_https_urls(self, tmp_path: Path):
+        from dagnam.data.loaders.system import torchvision
+
+        with pytest.raises(ValueError, match="HTTPS"):
+            torchvision._download_verified_file(  # type: ignore[attr-defined]
+                "file:///tmp/imdb.npz",
+                tmp_path / "imdb.npz",
+                "0" * 64,
+            )
+
+    def test_download_helper_verifies_sha256(self, tmp_path: Path):
+        from dagnam.data.loaders.system import torchvision
+
+        class Response:
+            def __init__(self):
+                self.headers = {"Content-Length": "3"}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size: int):
+                yield b"bad"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        with patch(
+            "dagnam.data.loaders.system.torchvision.requests.get",
+            return_value=Response(),
+        ):
+            with pytest.raises(ValueError, match="checksum"):
+                torchvision._download_verified_file(  # type: ignore[attr-defined]
+                    "https://example.test/imdb.npz",
+                    tmp_path / "imdb.npz",
+                    "0" * 64,
+                )
+
+        assert not (tmp_path / "imdb.npz").exists()
+
+
 # ------------------------------------------------------------------
 # load_dataset with source_type detection
 # ------------------------------------------------------------------
@@ -224,3 +268,36 @@ class TestLoadInternal:
             pytest.raises(FileNotFoundError),
         ):
             _load_internal("nonexistent-id")
+
+    def test_internal_dataset_id_cannot_escape_meta_dir(self, tmp_path: Path):
+        """Internal sidecar lookup must not accept path-like dataset IDs."""
+        meta_dir = tmp_path / ".dagnam_meta"
+        meta_dir.mkdir()
+        escaped_meta = tmp_path / "escape.meta.json"
+        escaped_meta.write_text(
+            json.dumps(
+                {
+                    "id": "../escape",
+                    "name": "Escaped",
+                    "format": "csv",
+                    "dataset_type": "tabular",
+                    "source_type": "uploaded",
+                    "num_samples": 1,
+                    "num_classes": 1,
+                    "file_path": str(escaped_meta),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "DAGNAM_INTERNAL": "true",
+                    "DAGNAM_META_DIR": str(meta_dir),
+                },
+            ),
+            pytest.raises(ValueError, match="Unsafe dataset_id"),
+        ):
+            _load_internal("../escape")

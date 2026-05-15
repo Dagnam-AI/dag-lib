@@ -109,3 +109,16 @@ class TestDownloadCheckpoint:
         path = download_checkpoint("job_1", client=client, cache_dir=ck_cache)
         assert path == ck_cache / "job_1" / "new.pt"
         client.list_checkpoints.assert_called_once_with("job_1")
+
+    def test_checkpoint_cache_paths_cannot_escape_cache_dir(self, ck_cache, tmp_path):
+        body = b"weights"
+        side, _ = self._fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.download_checkpoint_stream.side_effect = side
+
+        path = download_checkpoint("../job", "../ck", client=client, cache_dir=ck_cache)
+
+        assert path.resolve().is_relative_to(ck_cache.resolve())
+        assert path == ck_cache / "..%2Fjob" / "..%2Fck.pt"
+        assert not (tmp_path / "job").exists()
+        assert not (tmp_path / "ck.pt").exists()

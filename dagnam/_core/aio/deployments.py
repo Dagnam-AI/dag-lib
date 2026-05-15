@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagnam._core.client.common import raise_for_deployment
+from dagnam._core.client.common import quote_path_segment, raise_for_deployment
 
 
 class AsyncDeploymentsMixin:
@@ -52,7 +52,9 @@ class AsyncDeploymentsMixin:
 
     async def get_deployment(self, deployment_id: str) -> dict:
         return await self._deployment_req(
-            "GET", f"/api/v1/deployments/{deployment_id}", deployment_id=deployment_id
+            "GET",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
+            deployment_id=deployment_id,
         )
 
     async def create_deployment(self, payload: dict) -> dict:
@@ -61,30 +63,36 @@ class AsyncDeploymentsMixin:
     async def update_deployment(self, deployment_id: str, payload: dict) -> dict:
         return await self._deployment_req(
             "PUT",
-            f"/api/v1/deployments/{deployment_id}",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
             json_body=payload,
         )
 
     async def delete_deployment(self, deployment_id: str) -> dict | None:
         return await self._deployment_req(
-            "DELETE", f"/api/v1/deployments/{deployment_id}", deployment_id=deployment_id
+            "DELETE",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
+            deployment_id=deployment_id,
         )
 
     async def pause_deployment(self, deployment_id: str) -> dict:
         return await self._deployment_req(
-            "POST", f"/api/v1/deployments/{deployment_id}/pause", deployment_id=deployment_id
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/pause",
+            deployment_id=deployment_id,
         )
 
     async def resume_deployment(self, deployment_id: str) -> dict:
         return await self._deployment_req(
-            "POST", f"/api/v1/deployments/{deployment_id}/resume", deployment_id=deployment_id
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/resume",
+            deployment_id=deployment_id,
         )
 
     async def scale_deployment(self, deployment_id: str, num_instances: int) -> dict:
         return await self._deployment_req(
             "PUT",
-            f"/api/v1/deployments/{deployment_id}/scale",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
             deployment_id=deployment_id,
             params={"num_instances": num_instances},
         )
@@ -92,7 +100,7 @@ class AsyncDeploymentsMixin:
     async def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> dict:
         return await self._deployment_req(
             "POST",
-            f"/api/v1/deployments/{deployment_id}/rollback",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
             deployment_id=deployment_id,
             params={"checkpoint_path": checkpoint_path},
         )
@@ -100,7 +108,7 @@ class AsyncDeploymentsMixin:
     async def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> dict:
         return await self._deployment_req(
             "GET",
-            f"/api/v1/deployments/{deployment_id}/metrics",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
             deployment_id=deployment_id,
             params={"time_range": time_range},
         )
@@ -127,12 +135,14 @@ class AsyncDeploymentsMixin:
             params["end_time"] = end_time
         return await self._deployment_req(
             "GET",
-            f"/api/v1/deployments/{deployment_id}/logs",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/logs",
             deployment_id=deployment_id,
             params=params,
         )
 
     async def get_deployment_health_full(self, deployment_id: str) -> dict:
         return await self._deployment_req(
-            "GET", f"/api/v1/deployments/{deployment_id}/health", deployment_id=deployment_id
+            "GET",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
+            deployment_id=deployment_id,
         )

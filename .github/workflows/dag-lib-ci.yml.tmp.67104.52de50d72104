@@ -2,9 +2,15 @@ name: dagnam CI
 
 on:
   pull_request:
+    paths:
+      - "**"
+      - ".github/workflows/dag-lib-ci.yml"
   push:
     branches:
       - main
+    paths:
+      - "**"
+      - ".github/workflows/dag-lib-ci.yml"
 
 jobs:
   quality:

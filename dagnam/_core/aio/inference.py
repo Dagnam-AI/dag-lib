@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dagnam._core.client.common import raise_for_deployment
+from dagnam._core.client.common import quote_path_segment, raise_for_deployment
 
 
 class AsyncInferenceMixin:
@@ -11,7 +11,7 @@ class AsyncInferenceMixin:
     async def predict(self, deployment_id: str, inputs: dict, timeout: int | None = None) -> dict:
         resp = await self._request(
             "POST",
-            f"/api/v1/inference/{deployment_id}/predict",
+            f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict",
             json=inputs,
             headers=self._inference_headers(),
             timeout=timeout,
@@ -24,7 +24,7 @@ class AsyncInferenceMixin:
     ) -> list:
         resp = await self._request(
             "POST",
-            f"/api/v1/inference/{deployment_id}/predict/batch",
+            f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict/batch",
             json={"inputs": inputs},
             headers=self._inference_headers(),
             timeout=timeout,
@@ -35,7 +35,7 @@ class AsyncInferenceMixin:
     async def deployment_health(self, deployment_id: str) -> dict:
         resp = await self._request(
             "GET",
-            f"/api/v1/inference/{deployment_id}/health",
+            f"/api/v1/inference/{quote_path_segment(deployment_id)}/health",
             headers=self._inference_headers(),
         )
         raise_for_deployment(resp, deployment_id)

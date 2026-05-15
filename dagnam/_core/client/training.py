@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dagnam._core.client.base import (
+    _ALLOW_REDIRECTS,
     _TIMEOUT,
     APIError,
+    _is_success_response,
+    _safe_error_body,
     requests,
 )
+from dagnam._core.client.common import quote_path_segment
 from dagnam._core.exceptions import AuthError, TrainingJobNotFoundError
 
 
@@ -23,23 +27,31 @@ class TrainingClientMixin:
         Returns the raw streaming Response; the caller is responsible for
         wrapping it (e.g. via sseclient-py) and closing it.
         """
-        url = f"{self.api_url}/api/v1/streaming/training-jobs/{job_id}/stream"
+        job_path = quote_path_segment(job_id)
+        url = f"{self.api_url}/api/v1/streaming/training-jobs/{job_path}/stream"
         params = {"api_key": self.api_key}
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id
         try:
-            resp = requests.get(url, params=params, headers=headers, stream=True, timeout=_TIMEOUT)
+            resp = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                stream=True,
+                timeout=_TIMEOUT,
+                allow_redirects=_ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
-        if not resp.ok:
+        if not _is_success_response(resp):
             code = resp.status_code
             if code == 401:
                 raise AuthError("Authentication failed: invalid or expired API key")
             if code == 404:
                 raise TrainingJobNotFoundError(job_id)
-            raise APIError(code, resp.text)
+            raise APIError(code, _safe_error_body(resp))
         return resp

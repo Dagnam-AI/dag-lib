@@ -2,6 +2,7 @@
 
 import pytest
 
+from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
     APIError,
     AuthError,
@@ -61,6 +62,52 @@ class TestAPIError:
     def test_message_format(self):
         err = APIError(500, "Internal Server Error")
         assert str(err) == "API error 500: Internal Server Error"
+
+    def test_response_body_is_truncated_in_generic_mapper(self):
+        class Response:
+            def __init__(self):
+                self.ok = False
+                self.status_code = 500
+                self.text = "x" * 5000
+                self.headers = {"Content-Type": "text/plain"}
+                self.content = self.text.encode()
+
+        with pytest.raises(APIError) as exc_info:
+            raise_for_generic(Response())
+
+        assert len(exc_info.value.message) < 2200
+        assert "truncated" in exc_info.value.message
+
+    def test_binary_response_body_is_not_dumped(self):
+        class Response:
+            def __init__(self):
+                self.ok = False
+                self.status_code = 500
+                self.text = "\x00" * 5000
+                self.headers = {"Content-Type": "application/octet-stream"}
+                self.content = b"\x00" * 5000
+
+        with pytest.raises(APIError) as exc_info:
+            raise_for_generic(Response())
+
+        assert exc_info.value.message == "<5000 bytes of application/octet-stream>"
+
+    def test_streaming_error_body_is_not_materialized(self):
+        class Response:
+            _content = False
+
+            def __init__(self):
+                self.headers = {"Content-Type": "application/octet-stream"}
+
+            @property
+            def content(self):
+                raise AssertionError("streaming body should not be read")
+
+            @property
+            def text(self):
+                raise AssertionError("streaming text should not be read")
+
+        assert safe_response_text(Response()) == "<streaming application/octet-stream body omitted>"
 
 
 class TestChecksumError:

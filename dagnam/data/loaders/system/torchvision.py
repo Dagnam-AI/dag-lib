@@ -2,12 +2,63 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
+
+import requests
 
 from dagnam.data.loaders.system.common import _SYSTEM_CACHE_ROOT
 
 if TYPE_CHECKING:
     from dagnam.data.dataset import DagnamDataset
+
+_IMDB_URL = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/imdb.npz"
+_IMDB_SHA256 = "69664113be75683a8fe16e3ed0ab59fda8886cb3cd7ada244f7d9544e4676b9f"
+_DOWNLOAD_TIMEOUT = (30, 60)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
+    """Download an HTTPS file and atomically install it only if SHA-256 matches."""
+    if urlparse(url).scheme != "https":
+        raise ValueError("System dataset downloads must use HTTPS URLs")
+
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.unlink(missing_ok=True)
+    try:
+        with requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT) as resp:
+            resp.raise_for_status()
+            with open(tmp, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        fh.write(chunk)
+
+        actual = _sha256(tmp)
+        if actual != expected_sha256:
+            tmp.unlink(missing_ok=True)
+            raise ValueError(
+                f"Downloaded system dataset checksum mismatch: expected {expected_sha256}, got {actual}"
+            )
+        tmp.replace(dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _ensure_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
+    if dest.exists() and _sha256(dest) == expected_sha256:
+        return
+    dest.unlink(missing_ok=True)
+    _download_verified_file(url, dest, expected_sha256)
 
 
 def _load_mnist(meta: dict, transform=None) -> DagnamDataset:
@@ -126,8 +177,6 @@ def _load_fashion_mnist(meta: dict, transform=None) -> DagnamDataset:
 
 def _load_imdb(meta: dict, transform=None) -> DagnamDataset:
     """Load IMDB via direct npz download (no TensorFlow dependency)."""
-    import urllib.request
-
     import numpy as np
 
     from dagnam.data.dataset import DagnamDataset
@@ -136,13 +185,14 @@ def _load_imdb(meta: dict, transform=None) -> DagnamDataset:
     cache.mkdir(parents=True, exist_ok=True)
     npz_path = cache / "imdb.npz"
 
-    if not npz_path.exists():
-        url = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/imdb.npz"
-        urllib.request.urlretrieve(url, str(npz_path))
+    _ensure_verified_file(_IMDB_URL, npz_path, _IMDB_SHA256)
 
     # Build a simple pandas DataFrame so the existing to_pytorch_loader
     # file-based path can work.  However, we also set _native_train/test
     # as numpy arrays for direct use.
+    # The upstream Keras IMDB npz stores ragged review sequences as object arrays,
+    # so NumPy requires pickle support. The pinned SHA-256 check above prevents
+    # network or cache tampering before this trusted file is deserialized.
     with np.load(str(npz_path), allow_pickle=True) as f:
         x_train, y_train = f["x_train"], f["y_train"]
         x_test, y_test = f["x_test"], f["y_test"]
