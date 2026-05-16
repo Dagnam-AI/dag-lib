@@ -208,7 +208,7 @@ def test_to_arrays_reads_file_backed_csv_dataset(tmp_path: Path):
     assert sorted(labels.tolist()) == [0, 0, 1]
     # Verify each feature row's label matches the original mapping
     feature_to_label = {(1.0, 2.0): 0, (3.0, 4.0): 1, (5.0, 6.0): 0}
-    for feat_row, label in zip(features.tolist(), labels.tolist()):
+    for feat_row, label in zip(features.tolist(), labels.tolist(), strict=False):
         assert feature_to_label[tuple(feat_row)] == label
 
 

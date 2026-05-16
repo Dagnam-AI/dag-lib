@@ -86,3 +86,41 @@ jobs:
         run: uv sync --all-extras --dev
       - name: Tests
         run: uv run pytest tests -q
+
+  coverage:
+    # Single-version coverage gate. Keeps the matrix job fast while still
+    # enforcing a floor on the test suite's reach. Threshold is set just
+    # below the current overall figure so accidental coverage drops fail CI.
+    name: Coverage gate (Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      UV_NATIVE_TLS: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install uv
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests \
+            --cov=dagnam \
+            --cov-branch \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --cov-fail-under=95
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: coverage-xml
+          path: coverage.xml
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: coverage-html
+          path: htmlcov/

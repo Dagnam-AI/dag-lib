@@ -1,0 +1,18 @@
+[run]
+branch = True
+source = dagnam
+omit =
+    dagnam/data/loaders/audio/*
+    dagnam/data/loaders/flax.py
+    dagnam/data/loaders/image_folder.py
+    dagnam/data/loaders/tf.py
+    dagnam/data/loaders/torch_utils.py
+    dagnam/data/loaders/system/torchvision.py
+    dagnam/data/loaders/system/tensorflow_datasets.py
+    dagnam/data/loaders/system/flax.py
+    dagnam/data/dataset/to_flax.py
+    dagnam/data/dataset/to_tensorflow.py
+
+[report]
+show_missing = True
+skip_covered = True

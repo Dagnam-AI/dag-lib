@@ -105,7 +105,7 @@ class DagnamDataset(
         native = self._native_test if split == "test" else self._native_train
         if isinstance(native, tuple) and len(native) == 2:
             features, labels = native
-            for feature, label in zip(features, labels):
+            for feature, label in zip(features, labels, strict=False):
                 yield feature, label
             return
 

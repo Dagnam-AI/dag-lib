@@ -219,7 +219,7 @@ class TestCreatePytorchLoader:
             test_ratio=0.1,
             seed=99,
         )
-        for (f1, l1), (f2, l2) in zip(loader1, loader2):
+        for (f1, l1), (f2, l2) in zip(loader1, loader2, strict=False):
             assert torch.equal(f1, f2)
             assert torch.equal(l1, l2)
 

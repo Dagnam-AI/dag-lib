@@ -84,7 +84,7 @@ def create_flax_dataset(
     if transform_fn is not None:
         transformed_features = []
         transformed_labels = []
-        for feature, label in zip(split_features, split_labels):
+        for feature, label in zip(split_features, split_labels, strict=False):
             transformed = transform_fn(feature, label)
             if isinstance(transformed, tuple) and len(transformed) == 2:
                 feature, label = transformed
