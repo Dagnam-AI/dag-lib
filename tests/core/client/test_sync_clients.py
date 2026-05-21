@@ -206,7 +206,9 @@ def test_hub_categories_featured_trending_starred(client, rmock):
 
 
 def test_hub_text_body_returned_when_not_json(client, rmock):
-    rmock.get(f"{API}/api/v1/hub/categories", text="plain text", headers={"Content-Type": "text/plain"})
+    rmock.get(
+        f"{API}/api/v1/hub/categories", text="plain text", headers={"Content-Type": "text/plain"}
+    )
     assert client.list_hub_categories() == "plain text"
 
 

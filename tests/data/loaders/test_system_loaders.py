@@ -90,7 +90,17 @@ def _stub_dataset(monkeypatch, attr_name):
 def test_load_mnist(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "MNIST")
-    ds = tv_mod._load_mnist({"name": "MNIST", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2})
+    ds = tv_mod._load_mnist(
+        {
+            "name": "MNIST",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
     assert ds._native_train is not None
     assert ds._native_test is not None
 
@@ -99,7 +109,16 @@ def test_load_mnist_with_explicit_transform(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "MNIST")
     ds = tv_mod._load_mnist(
-        {"name": "MNIST", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}, transform="X"
+        {
+            "name": "MNIST",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        transform="X",
     )
     assert ds._native_train is not None
 
@@ -107,7 +126,17 @@ def test_load_mnist_with_explicit_transform(monkeypatch, tmp_path):
 def test_load_cifar10(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "CIFAR10")
-    ds = tv_mod._load_cifar10({"name": "cifar10", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2})
+    ds = tv_mod._load_cifar10(
+        {
+            "name": "cifar10",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
     assert ds._native_train is not None
 
 
@@ -115,7 +144,16 @@ def test_load_cifar10_with_transform(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "CIFAR10")
     ds = tv_mod._load_cifar10(
-        {"name": "cifar10", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}, transform="Z"
+        {
+            "name": "cifar10",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        transform="Z",
     )
     assert ds
 
@@ -123,7 +161,17 @@ def test_load_cifar10_with_transform(monkeypatch, tmp_path):
 def test_load_cifar100(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "CIFAR100")
-    ds = tv_mod._load_cifar100({"name": "cifar100", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2})
+    ds = tv_mod._load_cifar100(
+        {
+            "name": "cifar100",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
     assert ds
 
 
@@ -131,7 +179,16 @@ def test_load_cifar100_with_transform(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "CIFAR100")
     ds = tv_mod._load_cifar100(
-        {"name": "cifar100", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}, transform="Q"
+        {
+            "name": "cifar100",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        transform="Q",
     )
     assert ds
 
@@ -140,7 +197,15 @@ def test_load_fashion_mnist(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "FashionMNIST")
     ds = tv_mod._load_fashion_mnist(
-        {"name": "fashion-mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "fashion-mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds
 
@@ -149,7 +214,16 @@ def test_load_fashion_mnist_with_transform(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "FashionMNIST")
     ds = tv_mod._load_fashion_mnist(
-        {"name": "fashion-mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}, transform="T"
+        {
+            "name": "fashion-mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        transform="T",
     )
     assert ds
 
@@ -158,7 +232,15 @@ def test_load_oxford_pets(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "OxfordIIITPet")
     ds = tv_mod._load_oxford_pets(
-        {"name": "oxford pets", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds._native_train is not None
 
@@ -167,7 +249,16 @@ def test_load_oxford_pets_with_transform(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     _stub_dataset(monkeypatch, "OxfordIIITPet")
     ds = tv_mod._load_oxford_pets(
-        {"name": "oxford pets", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}, transform="T"
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        transform="T",
     )
     assert ds
 
@@ -181,7 +272,15 @@ def test_load_oxford_pets_falls_back_when_torchvision_lacks_it(monkeypatch, tmp_
 
     monkeypatch.setattr(datasets, "OxfordIIITPet", _raises)
     ds = tv_mod._load_oxford_pets(
-        {"name": "oxford pets", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 0}
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 0,
+        }
     )
     # Falls back to file-based DagnamDataset
     assert ds is not None
@@ -201,7 +300,15 @@ def test_load_speech_commands_fallback(monkeypatch, tmp_path):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     ds = tv_mod._load_speech_commands(
-        {"name": "speech commands", "id": "1", "format": "native", "dataset_type": "audio", "num_classes": 2, "class_names": [], "num_samples": 0}
+        {
+            "name": "speech commands",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "audio",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 0,
+        }
     )
     assert ds is not None
 
@@ -210,7 +317,15 @@ def test_load_wikitext2_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_mod, "_SYSTEM_CACHE_ROOT", tmp_path)
     # If torchtext isn't installed the ImportError branch fires; verify it returns a file-based ds
     ds = tv_mod._load_wikitext2(
-        {"name": "wikitext-2", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 0}
+        {
+            "name": "wikitext-2",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 0,
+        }
     )
     assert ds is not None
 
@@ -236,7 +351,17 @@ def test_load_imdb_uses_existing_verified_file(monkeypatch, tmp_path):
     # Patch _sha256 to return the expected hash so the verified-file path is taken.
     monkeypatch.setattr(tv_mod, "_sha256", lambda _p: tv_mod._IMDB_SHA256)
 
-    ds = tv_mod._load_imdb({"name": "IMDB", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 4})
+    ds = tv_mod._load_imdb(
+        {
+            "name": "IMDB",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 4,
+        }
+    )
     assert ds._native_train is not None
     x_train, y_train = ds._native_train
     assert len(x_train) == 2
@@ -279,7 +404,17 @@ def test_load_imdb_downloads_when_missing(monkeypatch, tmp_path):
     # Override _sha256 to match our expected hash so checksum passes.
     monkeypatch.setattr(tv_mod, "_sha256", lambda _p: expected_sha)
 
-    ds = tv_mod._load_imdb({"name": "IMDB", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2})
+    ds = tv_mod._load_imdb(
+        {
+            "name": "IMDB",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
     assert ds._native_train is not None
 
 
@@ -377,7 +512,17 @@ def test_resolve_system_dataset_tf_loads(monkeypatch, tmp_path):
     import sys
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
-    out = resolve_system_dataset_tf({"name": "mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2})
+    out = resolve_system_dataset_tf(
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
     assert out._native_train_tf == "TFDS:train"
     assert out._native_test_tf == "TFDS:test"
 
@@ -427,7 +572,17 @@ def test_resolve_system_dataset_flax_image_path(monkeypatch, tmp_path):
     import sys
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
-    ds = resolve_system_dataset_flax({"name": "mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 5})
+    ds = resolve_system_dataset_flax(
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 5,
+        }
+    )
     assert ds._native_train_flax is not None
     assert ds._native_test_flax is not None
 
@@ -441,14 +596,20 @@ def test_resolve_system_dataset_flax_text_bytes(monkeypatch, tmp_path):
 
     samples = [(b"hello", 0), (b"world!", 1)]
 
-    fake_tfds = SimpleNamespace(
-        load=lambda *a, **kw: samples, as_numpy=lambda x: x
-    )
+    fake_tfds = SimpleNamespace(load=lambda *a, **kw: samples, as_numpy=lambda x: x)
     import sys
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
     ds = resolve_system_dataset_flax(
-        {"name": "imdb", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "imdb",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds._native_train_flax is not None
 
@@ -465,7 +626,15 @@ def test_resolve_system_dataset_flax_text_str(monkeypatch, tmp_path):
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
     ds = resolve_system_dataset_flax(
-        {"name": "imdb", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "imdb",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds._native_train_flax is not None
 
@@ -483,7 +652,15 @@ def test_resolve_system_dataset_flax_numeric_array(monkeypatch, tmp_path):
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
     ds = resolve_system_dataset_flax(
-        {"name": "mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds._native_train_flax is not None
 
@@ -501,6 +678,14 @@ def test_resolve_system_dataset_flax_fallback_for_misc_type(monkeypatch, tmp_pat
 
     monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
     ds = resolve_system_dataset_flax(
-        {"name": "mnist", "id": "1", "format": "native", "dataset_type": "image", "num_classes": 2, "class_names": [], "num_samples": 2}
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
     )
     assert ds._native_train_flax is not None

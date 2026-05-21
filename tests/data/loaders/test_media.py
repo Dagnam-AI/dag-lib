@@ -127,7 +127,9 @@ def test_ensure_extracted_unknown_archive_returns_data_dir(tmp_path):
 
 def test_validate_archive_size_too_many_members():
     with pytest.raises(ValueError, match="too many"):
-        _validate_archive_size((1 for _ in range(_MAX_ARCHIVE_MEMBERS + 1)), _MAX_ARCHIVE_MEMBERS + 1)
+        _validate_archive_size(
+            (1 for _ in range(_MAX_ARCHIVE_MEMBERS + 1)), _MAX_ARCHIVE_MEMBERS + 1
+        )
 
 
 def test_validate_archive_size_too_large():

@@ -70,6 +70,7 @@ class _IndexableNativeDs:
     def __getitem__(self, i):
         arr = np.full((3, 4, 4), float(i), dtype=np.float32)
         if self.with_numpy:
+
             class _T:
                 def __init__(self, a):
                     self._a = a

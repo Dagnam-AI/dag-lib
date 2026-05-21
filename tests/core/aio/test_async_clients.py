@@ -343,7 +343,9 @@ async def test_async_dataset_404(client, mock):
 
 
 async def test_async_list_system_datasets(client, mock):
-    mock.get("/api/v1/datasets/system").mock(return_value=httpx.Response(200, json=[{"id": "iris"}]))
+    mock.get("/api/v1/datasets/system").mock(
+        return_value=httpx.Response(200, json=[{"id": "iris"}])
+    )
     assert await client.list_system_datasets() == [{"id": "iris"}]
 
 
@@ -408,7 +410,9 @@ async def test_async_upload_dataset_from_url(client, mock):
 
 
 async def test_async_get_dataset_task_status(client, mock):
-    mock.get("/api/v1/datasets/tasks/t1").mock(return_value=httpx.Response(200, json={"status": "done"}))
+    mock.get("/api/v1/datasets/tasks/t1").mock(
+        return_value=httpx.Response(200, json={"status": "done"})
+    )
     assert await client.get_dataset_task_status("t1") == {"status": "done"}
 
 
@@ -431,9 +435,7 @@ async def test_async_list_checkpoints_404(client, mock):
 async def test_async_download_checkpoint(client, mock, tmp_path: Path):
     url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
     mock.get(url).mock(
-        return_value=httpx.Response(
-            200, content=b"weights", headers={"x-checksum-sha256": "abc"}
-        )
+        return_value=httpx.Response(200, content=b"weights", headers={"x-checksum-sha256": "abc"})
     )
     dest = tmp_path / "ck.bin"
     written, checksum = await client.download_checkpoint("job1", "ck1", dest)
@@ -469,7 +471,9 @@ async def test_async_generate_code_default(client, mock):
     route = mock.post("/api/v1/projects/p1/generate-code").mock(
         return_value=httpx.Response(200, json={"task_id": "t1"})
     )
-    await client.generate_code("p1", framework="tf", version_id="v2", options={"s": 1}, async_mode=True)
+    await client.generate_code(
+        "p1", framework="tf", version_id="v2", options={"s": 1}, async_mode=True
+    )
     body = route.calls[0].request.read()
     assert b"tf" in body
     assert b"v2" in body

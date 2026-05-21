@@ -56,7 +56,9 @@ def test_load_waveform_via_soundfile(monkeypatch, tmp_path):
     p = tmp_path / "x.wav"
     p.write_bytes(b"x")
     # 2-D stereo waveform — exercises the mono mean reduction.
-    fake_sf = SimpleNamespace(read=lambda _path, dtype=None, always_2d=None: (np.ones((100, 2), dtype=np.float32), 8000))
+    fake_sf = SimpleNamespace(
+        read=lambda _path, dtype=None, always_2d=None: (np.ones((100, 2), dtype=np.float32), 8000)
+    )
     monkeypatch.setitem(sys.modules, "soundfile", fake_sf)
     wav = audio_io._load_waveform_py(str(p), target_sr=16000, target_len=200)
     # Pad branch (100 < 200) and resample branch (8000 → 16000) both fire.
@@ -68,7 +70,9 @@ def test_load_waveform_truncates(monkeypatch, tmp_path):
 
     p = tmp_path / "x.wav"
     p.write_bytes(b"x")
-    fake_sf = SimpleNamespace(read=lambda _p, dtype=None, always_2d=None: (np.ones(1000, dtype=np.float32), 16000))
+    fake_sf = SimpleNamespace(
+        read=lambda _p, dtype=None, always_2d=None: (np.ones(1000, dtype=np.float32), 16000)
+    )
     monkeypatch.setitem(sys.modules, "soundfile", fake_sf)
     wav = audio_io._load_waveform_py(str(p), target_sr=16000, target_len=100)
     assert len(wav) == 100
@@ -91,7 +95,9 @@ def test_load_waveform_falls_back_to_torchaudio(monkeypatch, tmp_path):
         def numpy(self):
             return self._data
 
-    fake_torchaudio = SimpleNamespace(load=lambda _p: (_T(np.ones((2, 100), dtype=np.float32)), 16000))
+    fake_torchaudio = SimpleNamespace(
+        load=lambda _p: (_T(np.ones((2, 100), dtype=np.float32)), 16000)
+    )
 
     # Make `import soundfile` raise so the fallback fires.
     import builtins
@@ -136,7 +142,9 @@ def test_load_waveform_no_resample_path(monkeypatch, tmp_path):
 
     p = tmp_path / "x.wav"
     p.write_bytes(b"x")
-    fake_sf = SimpleNamespace(read=lambda _p, dtype=None, always_2d=None: (np.ones(100, dtype=np.float32), 16000))
+    fake_sf = SimpleNamespace(
+        read=lambda _p, dtype=None, always_2d=None: (np.ones(100, dtype=np.float32), 16000)
+    )
     monkeypatch.setitem(sys.modules, "soundfile", fake_sf)
     wav = audio_io._load_waveform_py(str(p), target_sr=16000, target_len=100)
     assert len(wav) == 100
@@ -150,7 +158,9 @@ def test_collect_audio_samples_unsplit(tmp_path):
 
     _build_audio_folder(tmp_path, per_class=4)
     ds = DagnamDataset(_audio_meta(num_samples=8), tmp_path)
-    samples, classes = audio_io._collect_audio_samples(ds, "train", val_ratio=0.2, test_ratio=0.2, seed=0)
+    samples, classes = audio_io._collect_audio_samples(
+        ds, "train", val_ratio=0.2, test_ratio=0.2, seed=0
+    )
     assert classes == ["cat", "dog"]
     assert len(samples) >= 1
 
@@ -160,15 +170,23 @@ def test_collect_audio_samples_split(tmp_path):
 
     _build_split_audio(tmp_path)
     ds = DagnamDataset(_audio_meta(num_samples=12), tmp_path)
-    samples, classes = audio_io._collect_audio_samples(ds, "val", val_ratio=0.0, test_ratio=0.0, seed=0)
+    samples, classes = audio_io._collect_audio_samples(
+        ds, "val", val_ratio=0.0, test_ratio=0.0, seed=0
+    )
     assert len(samples) >= 1
 
 
 def test_resolve_audio_split_dir_aliases(tmp_path):
     from dagnam.data.loaders.audio import io as audio_io
 
-    assert audio_io._resolve_audio_split_dir(tmp_path, "val", ["train", "validation"]) == tmp_path / "validation"
-    assert audio_io._resolve_audio_split_dir(tmp_path, "validation", ["train", "val"]) == tmp_path / "val"
+    assert (
+        audio_io._resolve_audio_split_dir(tmp_path, "val", ["train", "validation"])
+        == tmp_path / "validation"
+    )
+    assert (
+        audio_io._resolve_audio_split_dir(tmp_path, "validation", ["train", "val"])
+        == tmp_path / "val"
+    )
     assert audio_io._resolve_audio_split_dir(tmp_path, "test", ["dev"]) == tmp_path / "dev"
     assert audio_io._resolve_audio_split_dir(tmp_path, "val", ["train"]) == tmp_path / "train"
 
@@ -176,7 +194,9 @@ def test_resolve_audio_split_dir_aliases(tmp_path):
 def test_resolve_audio_split_dir_direct(tmp_path):
     from dagnam.data.loaders.audio import io as audio_io
 
-    assert audio_io._resolve_audio_split_dir(tmp_path, "train", ["train", "val"]) == tmp_path / "train"
+    assert (
+        audio_io._resolve_audio_split_dir(tmp_path, "train", ["train", "val"]) == tmp_path / "train"
+    )
 
 
 def test_resolve_audio_split_dir_raises(tmp_path):
@@ -227,7 +247,13 @@ def test_audio_folder_dataset_basic(monkeypatch, tmp_path):
 
     _build_audio_folder(tmp_path, per_class=2)
     files = list((tmp_path / "dog").glob("*.wav")) + list((tmp_path / "cat").glob("*.wav"))
-    ds = AudioFolderDataset(file_paths=files, labels=[0, 0, 1, 1], target_sample_rate=16000, n_mels=8, max_duration_sec=1.0)
+    ds = AudioFolderDataset(
+        file_paths=files,
+        labels=[0, 0, 1, 1],
+        target_sample_rate=16000,
+        n_mels=8,
+        max_duration_sec=1.0,
+    )
     assert len(ds) == 4
     item, label = ds[0]
     assert item.ndim == 2  # (n_mels, frames)
@@ -284,8 +310,11 @@ def test_audio_folder_dataset_resamples_when_sr_differs(monkeypatch, tmp_path):
 
     _build_audio_folder(tmp_path, per_class=1)
     ds = AudioFolderDataset(
-        file_paths=[tmp_path / "dog" / "0.wav"], labels=[0],
-        target_sample_rate=16000, n_mels=8, max_duration_sec=1.0,
+        file_paths=[tmp_path / "dog" / "0.wav"],
+        labels=[0],
+        target_sample_rate=16000,
+        n_mels=8,
+        max_duration_sec=1.0,
     )
     item, _ = ds[0]
     assert item.shape[-1] >= 1
@@ -297,8 +326,8 @@ def test_audio_folder_dataset_truncates_when_too_long(monkeypatch, tmp_path):
     fake = SimpleNamespace(
         load=lambda _p: (torch.zeros((1, 100_000)), 16000),  # very long → truncates
         transforms=SimpleNamespace(
-            Resample=lambda *_a, **_kw: (lambda w: w),
-            MelSpectrogram=lambda **_kw: (lambda w: torch.zeros((w.shape[0], 8, w.shape[-1] // 256))),
+            Resample=lambda *_a, **_kw: lambda w: w,
+            MelSpectrogram=lambda **_kw: lambda w: torch.zeros((w.shape[0], 8, w.shape[-1] // 256)),
         ),
     )
     monkeypatch.setitem(sys.modules, "torchaudio", fake)
@@ -307,8 +336,11 @@ def test_audio_folder_dataset_truncates_when_too_long(monkeypatch, tmp_path):
 
     _build_audio_folder(tmp_path, per_class=1)
     ds = AudioFolderDataset(
-        file_paths=[tmp_path / "dog" / "0.wav"], labels=[0],
-        target_sample_rate=16000, n_mels=8, max_duration_sec=1.0,  # max=16000 samples
+        file_paths=[tmp_path / "dog" / "0.wav"],
+        labels=[0],
+        target_sample_rate=16000,
+        n_mels=8,
+        max_duration_sec=1.0,  # max=16000 samples
     )
     ds[0]
 

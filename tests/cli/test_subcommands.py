@@ -40,9 +40,7 @@ def test_subcommand_without_action_prints_help_and_exits(subcmd, monkeypatch):
 
 def test_dataset_list_empty(run_cli, capsys, monkeypatch):
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
-    with mock.patch(
-        "dagnam._core.client.DagnamClient.list_datasets", return_value=[]
-    ):
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["dataset", "list"])
     assert "No datasets found" in capsys.readouterr().out
 
@@ -628,9 +626,7 @@ def test_login_preserves_existing_config(run_cli, tmp_path, monkeypatch):
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
     monkeypatch.setattr("getpass.getpass", lambda _prompt: "good-key")
-    with mock.patch(
-        "dagnam._core.client.DagnamClient.list_datasets", return_value=[]
-    ):
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login"])
     data = json.loads(config_file.read_text())
     assert data["api_key"] == "good-key"
@@ -643,9 +639,7 @@ def test_login_with_custom_api_url(run_cli, tmp_path, monkeypatch):
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
     monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
-    with mock.patch(
-        "dagnam._core.client.DagnamClient.list_datasets", return_value=[]
-    ):
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login", "--api-url", "https://custom"])
     data = json.loads(config_file.read_text())
     assert data["api_url"] == "https://custom"
@@ -659,9 +653,7 @@ def test_login_corrupt_existing_config_starts_fresh(run_cli, tmp_path, monkeypat
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
     monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
-    with mock.patch(
-        "dagnam._core.client.DagnamClient.list_datasets", return_value=[]
-    ):
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login"])
     data = json.loads(config_file.read_text())
     assert data == {"api_key": "k"}

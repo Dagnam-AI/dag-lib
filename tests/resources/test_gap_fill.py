@@ -329,9 +329,7 @@ def test_download_checkpoint_checksum_mismatch_unlinks(tmp_path, monkeypatch):
         return dest, "expected-sha256"
 
     client.download_checkpoint_stream.side_effect = fake_stream
-    monkeypatch.setattr(
-        ck_module, "compute_file_checksum", lambda _path: "actual-different"
-    )
+    monkeypatch.setattr(ck_module, "compute_file_checksum", lambda _path: "actual-different")
 
     with pytest.raises(ChecksumError):
         ck_module.download_checkpoint("job1", "ck1", client=client, cache_dir=cache)
@@ -374,9 +372,7 @@ def test_download_checkpoint_eviction_failure_is_logged(tmp_path, monkeypatch, c
 
     client.download_checkpoint_stream.side_effect = fake_stream
     monkeypatch.setattr(ck_module, "get_config_value", lambda key, default=None: 1024)
-    monkeypatch.setattr(
-        ck_module, "evict_lru", MagicMock(side_effect=OSError("disk full"))
-    )
+    monkeypatch.setattr(ck_module, "evict_lru", MagicMock(side_effect=OSError("disk full")))
 
     import logging
 
@@ -437,15 +433,27 @@ def test_core_init_handles_missing_aio(monkeypatch):
     """When the aio subpackage fails to import, _core falls back to None."""
     import sys
 
+    # Snapshot every dagnam._core* entry so we can restore exactly what was
+    # there before. Otherwise, re-importing dagnam._core mid-suite drops the
+    # cached submodule attributes (e.g. dagnam._core.resolver) that later
+    # tests rely on via mock.patch("dagnam._core.resolver.X") — on Python
+    # 3.10 the attribute-lookup-after-import dance in unittest.mock then
+    # fails. See unittest.mock._dot_lookup.
+    snapshot = {
+        k: v for k, v in sys.modules.items() if k == "dagnam._core" or k.startswith("dagnam._core.")
+    }
+
     monkeypatch.setitem(sys.modules, "dagnam._core.aio", None)
     monkeypatch.delitem(sys.modules, "dagnam._core", raising=False)
     mod = importlib.import_module("dagnam._core")
-    # Reset for the rest of the suite.
-    sys.modules.pop("dagnam._core", None)
-    importlib.import_module("dagnam._core")
-    # The freshly reloaded module's AsyncDagnamClient may be the real class
-    # after re-import; we only need to confirm the import-error branch ran.
     assert mod is not None
+
+    # Restore the original module objects so subsequent tests see the same
+    # dagnam._core / dagnam._core.* tree they had before this test ran.
+    for k in list(sys.modules):
+        if k == "dagnam._core" or k.startswith("dagnam._core."):
+            sys.modules.pop(k, None)
+    sys.modules.update(snapshot)
 
 
 # ---------------------------------------------------------------- _freeze
