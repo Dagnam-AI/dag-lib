@@ -27,7 +27,7 @@ def configure(api_key: Optional[str] = None, api_url: Optional[str] = None) -> N
 def get_api_key(override: Optional[str] = None) -> str:
     """Resolve API key: override → inline → DAGNAM_API_KEY env var → config file.
 
-    Raises AuthError if no key found in any source.
+    Raises AuthError if no key found in object source.
     """
     if override is not None:
         return override
@@ -40,7 +40,7 @@ def get_api_key(override: Optional[str] = None) -> str:
         return env_key
 
     config_key = get_config_value("api_key")
-    if config_key is not None:
+    if isinstance(config_key, str):
         return config_key
 
     raise AuthError(
@@ -62,7 +62,7 @@ def get_api_url(override: Optional[str] = None) -> str:
         return env_url
 
     config_url = get_config_value("api_url")
-    if config_url is not None:
+    if isinstance(config_url, str):
         return config_url
 
     return _DEFAULT_API_URL

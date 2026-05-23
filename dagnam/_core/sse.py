@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from importlib import import_module
 import json
 import random
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol, cast
 
 import requests
 
+from dagnam._types import JsonObject, ensure_json_object
 from dagnam._core.exceptions import StreamError
 
 DEFAULT_MAX_RECONNECTS = 5
@@ -28,31 +30,71 @@ class SSEEvent:
     """A parsed server-sent event."""
 
     event: str
-    data: dict | str
+    data: JsonObject | str
     id: Optional[str] = None
     retry: Optional[int] = None
 
 
-def parse_raw_event(raw) -> SSEEvent:
-    event_type = getattr(raw, "event", None) or "message"
-    data_str = getattr(raw, "data", "") or ""
+class RawSSEEvent(Protocol):
+    """Event object returned by sseclient."""
+
+    event: object
+    data: object
+    id: object
+    retry: object
+
+
+class ClosableResponse(Protocol):
+    """Response-like stream object that can be closed after iteration."""
+
+    def close(self) -> None: ...
+
+
+class SSEClientInstance(Protocol):
+    """sseclient instance surface used by this module."""
+
+    def events(self) -> Iterator[RawSSEEvent]: ...
+
+
+class SSEClientFactory(Protocol):
+    """sseclient.SSEClient constructor surface."""
+
+    def __call__(self, event_source: object) -> SSEClientInstance: ...
+
+
+class SSEClientModule(Protocol):
+    """sseclient module surface used by this module."""
+
+    SSEClient: SSEClientFactory
+
+
+def parse_raw_event(raw: object) -> SSEEvent:
+    raw_event_type = getattr(raw, "event", None) or "message"
+    event_type = raw_event_type if isinstance(raw_event_type, str) else str(raw_event_type)
+    raw_data = getattr(raw, "data", None) or ""
+    data_str = raw_data if isinstance(raw_data, str) else str(raw_data)
     try:
-        data = json.loads(data_str) if data_str else {}
+        loaded: object = cast(object, json.loads(data_str)) if data_str else cast(object, {})
+        data = ensure_json_object(cast(object, loaded)) if isinstance(loaded, dict) else data_str
     except (json.JSONDecodeError, ValueError):
         data = data_str
 
-    event_id = getattr(raw, "id", None)
+    raw_event_id = getattr(raw, "id", None)
+    event_id = raw_event_id if isinstance(raw_event_id, str) else None
     retry_attr = getattr(raw, "retry", None)
-    try:
-        retry = int(retry_attr) if retry_attr is not None else None
-    except (TypeError, ValueError):
+    if isinstance(retry_attr, str | bytes | int | float | bool):
+        try:
+            retry = int(retry_attr)
+        except ValueError:
+            retry = None
+    else:
         retry = None
 
     return SSEEvent(event=event_type, data=data, id=event_id, retry=retry)
 
 
 def iter_with_reconnect(
-    open_stream: Callable[[Optional[str]], requests.Response],
+    open_stream: Callable[[Optional[str]], ClosableResponse],
     *,
     terminal_events: frozenset[str],
     include_heartbeats: bool = False,
@@ -68,7 +110,7 @@ def iter_with_reconnect(
     ``open_stream`` before returning).
     """
     try:
-        import sseclient  # type: ignore[import]
+        sseclient = cast(SSEClientModule, import_module("sseclient"))
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "sseclient-py is required for SSE streams. "

@@ -8,14 +8,14 @@ from unittest import mock
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 
-def test_should_pin_memory_uses_accelerator_when_available():
+def test_should_pin_memory_uses_accelerator_when_available() -> None:
     fake_torch = SimpleNamespace(accelerator=SimpleNamespace(is_available=lambda: True))
     with mock.patch.dict("sys.modules", {"torch": fake_torch}):
         assert should_pin_memory() is True
 
 
-def test_should_pin_memory_swallows_accelerator_failure():
-    def _raise():
+def test_should_pin_memory_swallows_accelerator_failure() -> None:
+    def _raise() -> None:
         raise RuntimeError("boom")
 
     fake_torch = SimpleNamespace(
@@ -28,7 +28,7 @@ def test_should_pin_memory_swallows_accelerator_failure():
         assert should_pin_memory() is False
 
 
-def test_should_pin_memory_falls_back_to_cuda():
+def test_should_pin_memory_falls_back_to_cuda() -> None:
     fake_torch = SimpleNamespace(
         accelerator=None,
         cuda=SimpleNamespace(is_available=lambda: True),
@@ -37,7 +37,7 @@ def test_should_pin_memory_falls_back_to_cuda():
         assert should_pin_memory() is True
 
 
-def test_should_pin_memory_falls_back_to_xpu():
+def test_should_pin_memory_falls_back_to_xpu() -> None:
     fake_torch = SimpleNamespace(
         accelerator=None,
         cuda=SimpleNamespace(is_available=lambda: False),
@@ -47,7 +47,7 @@ def test_should_pin_memory_falls_back_to_xpu():
         assert should_pin_memory() is True
 
 
-def test_should_pin_memory_falls_back_to_mps():
+def test_should_pin_memory_falls_back_to_mps() -> None:
     fake_torch = SimpleNamespace(
         accelerator=None,
         cuda=SimpleNamespace(is_available=lambda: False),
@@ -58,7 +58,7 @@ def test_should_pin_memory_falls_back_to_mps():
         assert should_pin_memory() is True
 
 
-def test_should_pin_memory_returns_false_when_nothing_available():
+def test_should_pin_memory_returns_false_when_nothing_available() -> None:
     fake_torch = SimpleNamespace(
         accelerator=None,
         cuda=SimpleNamespace(is_available=lambda: False),
@@ -69,7 +69,7 @@ def test_should_pin_memory_returns_false_when_nothing_available():
         assert should_pin_memory() is False
 
 
-def test_should_pin_memory_handles_missing_attributes():
+def test_should_pin_memory_handles_missing_attributes() -> None:
     """When the optional accelerator/cuda/xpu/mps attrs don't exist at all."""
     fake_torch = SimpleNamespace()
     with mock.patch.dict("sys.modules", {"torch": fake_torch}):

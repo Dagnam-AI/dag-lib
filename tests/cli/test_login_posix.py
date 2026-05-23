@@ -6,6 +6,10 @@ plus ``sys.platform = 'linux'`` for the duration of the test.
 """
 
 from __future__ import annotations
+from collections.abc import Callable
+from pathlib import Path
+from tests.typing_helpers import PytestMonkeyPatch
+
 
 import json
 from types import SimpleNamespace
@@ -17,7 +21,16 @@ import dagnam.cli.login as login_mod
 from dagnam.cli.login import _lock_down_config_path
 
 
-def _fake_os(*, stat_fn, chmod_fn=lambda _p, _m: None, uid: int = 1000):
+def _noop_chmod(_path: Path | str, _mode: int) -> None:
+    return None
+
+
+def _fake_os(
+    *,
+    stat_fn: Callable[[Path | str], object],
+    chmod_fn: Callable[[Path | str, int], None] = _noop_chmod,
+    uid: int = 1000,
+) -> SimpleNamespace:
     """Build a SimpleNamespace standing in for the ``os`` module inside login.py."""
     return SimpleNamespace(
         getuid=lambda: uid,
@@ -35,25 +48,25 @@ def _fake_os(*, stat_fn, chmod_fn=lambda _p, _m: None, uid: int = 1000):
 
 
 @pytest.fixture
-def force_linux(monkeypatch):
+def force_linux(monkeypatch: PytestMonkeyPatch) -> SimpleNamespace:
     """Swap login_mod.sys for a stub so pretending to be Linux doesn't leak globally."""
     fake_sys = SimpleNamespace(platform="linux")
     monkeypatch.setattr(login_mod, "sys", fake_sys)
     return fake_sys
 
 
-def test_lock_down_config_path_returns_early_on_windows(monkeypatch, tmp_path):
+def test_lock_down_config_path_returns_early_on_windows(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(login_mod, "sys", SimpleNamespace(platform="win32"))
     # Should be a no-op even with a missing dir.
     _lock_down_config_path(tmp_path / "missing", tmp_path / "missing.json")
 
 
-def test_lock_down_config_path_chmods_loose_dir(force_linux, monkeypatch, tmp_path):
+def test_lock_down_config_path_chmods_loose_dir(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     config_dir = tmp_path / ".dagnam"
     config_dir.mkdir()
-    chmod_calls: list = []
+    chmod_calls: list[tuple[Path | str, int]] = []
 
-    def chmod(path, mode):
+    def chmod(path: Path | str, mode: int) -> None:
         chmod_calls.append((path, mode))
 
     fake = _fake_os(
@@ -65,7 +78,7 @@ def test_lock_down_config_path_chmods_loose_dir(force_linux, monkeypatch, tmp_pa
     assert (config_dir, 0o700) in chmod_calls
 
 
-def test_lock_down_config_path_rejects_foreign_uid(force_linux, monkeypatch, tmp_path):
+def test_lock_down_config_path_rejects_foreign_uid(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     fake = _fake_os(
         stat_fn=lambda _path: SimpleNamespace(st_uid=42, st_mode=0o700),
     )
@@ -74,8 +87,8 @@ def test_lock_down_config_path_rejects_foreign_uid(force_linux, monkeypatch, tmp
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_handles_stat_failure(force_linux, monkeypatch, tmp_path):
-    def _raise(_path):
+def test_lock_down_config_path_handles_stat_failure(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    def _raise(_path: Path | str) -> None:
         raise OSError("perm denied")
 
     fake = _fake_os(stat_fn=_raise)
@@ -84,8 +97,8 @@ def test_lock_down_config_path_handles_stat_failure(force_linux, monkeypatch, tm
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_chmod_failure_exits(force_linux, monkeypatch, tmp_path):
-    def _bad_chmod(_p, _m):
+def test_lock_down_config_path_chmod_failure_exits(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    def _bad_chmod(_p: Path | str, _m: int) -> None:
         raise OSError("locked")
 
     fake = _fake_os(
@@ -97,11 +110,11 @@ def test_lock_down_config_path_chmod_failure_exits(force_linux, monkeypatch, tmp
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_file_uid_mismatch(force_linux, monkeypatch, tmp_path):
+def test_lock_down_config_path_file_uid_mismatch(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
 
-    def stat(path):
+    def stat(path: Path | str) -> SimpleNamespace:
         # Dir is owned by us; file is foreign.
         if str(path) == str(cfg_file):
             return SimpleNamespace(st_uid=99, st_mode=0o600)
@@ -113,11 +126,11 @@ def test_lock_down_config_path_file_uid_mismatch(force_linux, monkeypatch, tmp_p
         _lock_down_config_path(tmp_path, cfg_file)
 
 
-def test_lock_down_config_path_file_stat_failure(force_linux, monkeypatch, tmp_path):
+def test_lock_down_config_path_file_stat_failure(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
 
-    def stat(path):
+    def stat(path: Path | str) -> SimpleNamespace:
         if str(path) == str(cfg_file):
             raise OSError("file gone")
         return SimpleNamespace(st_uid=1000, st_mode=0o700)
@@ -128,8 +141,8 @@ def test_lock_down_config_path_file_stat_failure(force_linux, monkeypatch, tmp_p
         _lock_down_config_path(tmp_path, cfg_file)
 
 
-def test_login_chmod_failure_swallowed(force_linux, monkeypatch, tmp_path):
-    """The post-write chmod() inside _cmd_login is best-effort; OSError mustn't abort."""
+def test_login_chmod_failure_swallowed(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    """The post-write chmod() inside cmd_login is best-effort; OSError mustn't abort."""
     config_dir = tmp_path / ".dagnam"
     config_file = config_dir / "config.json"
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
@@ -137,9 +150,9 @@ def test_login_chmod_failure_swallowed(force_linux, monkeypatch, tmp_path):
     monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
 
     # Track chmod calls and have only the post-write file chmod fail.
-    chmod_calls: list = []
+    chmod_calls: list[tuple[Path | str, int]] = []
 
-    def chmod(path, mode):
+    def chmod(path: Path | str, mode: int) -> None:
         chmod_calls.append((path, mode))
         if str(path) == str(config_file):
             raise OSError("locked")

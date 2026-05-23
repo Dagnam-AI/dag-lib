@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dagnam._types import JsonObject, JsonValue, QueryParams
+from dagnam._core.client.base import (
+    ALLOW_REDIRECTS,
+    APIError,
+    BaseDagnamClient,
+    DEFAULT_TIMEOUT,
+    requests,
+)
+from dagnam._core.client.common import quote_path_segment, requests_query_params
 
-from dagnam._core.client.base import _ALLOW_REDIRECTS, _TIMEOUT, APIError, requests
-from dagnam._core.client.common import quote_path_segment
 
-
-class DeploymentsClientMixin:
+class DeploymentsClientMixin(BaseDagnamClient):
     """Deployments resource methods for DagnamClient."""
 
     def _deployment_request(
@@ -17,17 +22,17 @@ class DeploymentsClientMixin:
         path: str,
         *,
         deployment_id: str | None = None,
-        params: dict | None = None,
-        json_body: Any = None,
-        timeout: int = _TIMEOUT,
-    ) -> dict | list | None:
+        params: QueryParams | None = None,
+        json_body: JsonValue = None,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> JsonValue | str | None:
         """Issue an authenticated request against a deployment route.
 
         Maps transport errors to ``APIError(0, …)``, translates status
         codes through :func:`_common.raise_for_deployment`, and decodes
         JSON on success.  Returns ``None`` for empty bodies (e.g. 204).
         """
-        from dagnam._core.client.common import raise_for_deployment
+        from dagnam._core.client.common import raise_for_deployment, response_json_value
 
         url = f"{self.api_url}{path}"
         try:
@@ -35,10 +40,10 @@ class DeploymentsClientMixin:
                 method,
                 url,
                 headers=self._headers(),
-                params=params,
+                params=requests_query_params(params),
                 json=json_body,
                 timeout=timeout,
-                allow_redirects=_ALLOW_REDIRECTS,
+                allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -50,9 +55,31 @@ class DeploymentsClientMixin:
         if not resp.content:
             return None
         try:
-            return resp.json()
+            return response_json_value(resp)
         except ValueError:
             return resp.text
+
+    def _deployment_object(
+        self,
+        method: str,
+        path: str,
+        *,
+        deployment_id: str | None = None,
+        params: QueryParams | None = None,
+        json_body: JsonValue = None,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> JsonObject:
+        value = self._deployment_request(
+            method,
+            path,
+            deployment_id=deployment_id,
+            params=params,
+            json_body=json_body,
+            timeout=timeout,
+        )
+        if isinstance(value, dict):
+            return value
+        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
     def list_deployments(
         self,
@@ -63,9 +90,9 @@ class DeploymentsClientMixin:
         platform: str | None = None,
         project_id: str | None = None,
         search: str | None = None,
-    ) -> dict:
+    ) -> JsonObject | str | None:
         """GET /api/v1/deployments"""
-        params: dict[str, Any] = {"page": page, "limit": limit}
+        params: dict[str, str | int] = {"page": page, "limit": limit}
         if status_filter is not None:
             params["status"] = status_filter
         if platform is not None:
@@ -74,69 +101,77 @@ class DeploymentsClientMixin:
             params["project_id"] = project_id
         if search is not None:
             params["search"] = search
-        return self._deployment_request("GET", "/api/v1/deployments", params=params)
+        value = self._deployment_request("GET", "/api/v1/deployments", params=params)
+        if isinstance(value, dict | str) or value is None:
+            return value
+        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
-    def get_deployment(self, deployment_id: str) -> dict:
+    def get_deployment(self, deployment_id: str) -> JsonObject:
         """GET /api/v1/deployments/{id}"""
-        return self._deployment_request(
+        return self._deployment_object(
             "GET",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
         )
 
-    def create_deployment(self, payload: dict) -> dict:
+    def create_deployment(self, payload: JsonObject) -> JsonObject:
         """POST /api/v1/deployments"""
-        return self._deployment_request("POST", "/api/v1/deployments", json_body=payload)
+        return self._deployment_object("POST", "/api/v1/deployments", json_body=payload)
 
-    def update_deployment(self, deployment_id: str, payload: dict) -> dict:
+    def update_deployment(self, deployment_id: str, payload: JsonObject) -> JsonObject:
         """PUT /api/v1/deployments/{id}"""
-        return self._deployment_request(
+        return self._deployment_object(
             "PUT",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
             json_body=payload,
         )
 
-    def delete_deployment(self, deployment_id: str) -> dict | None:
+    def delete_deployment(self, deployment_id: str) -> JsonObject | None:
         """DELETE /api/v1/deployments/{id}"""
-        return self._deployment_request(
+        value = self._deployment_request(
             "DELETE",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
             deployment_id=deployment_id,
         )
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
-    def pause_deployment(self, deployment_id: str) -> dict:
-        return self._deployment_request(
+    def pause_deployment(self, deployment_id: str) -> JsonObject:
+        return self._deployment_object(
             "POST",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/pause",
             deployment_id=deployment_id,
         )
 
-    def resume_deployment(self, deployment_id: str) -> dict:
-        return self._deployment_request(
+    def resume_deployment(self, deployment_id: str) -> JsonObject:
+        return self._deployment_object(
             "POST",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/resume",
             deployment_id=deployment_id,
         )
 
-    def scale_deployment(self, deployment_id: str, num_instances: int) -> dict:
-        return self._deployment_request(
+    def scale_deployment(self, deployment_id: str, num_instances: int) -> JsonObject:
+        return self._deployment_object(
             "PUT",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
             deployment_id=deployment_id,
             params={"num_instances": num_instances},
         )
 
-    def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> dict:
-        return self._deployment_request(
+    def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> JsonObject:
+        return self._deployment_object(
             "POST",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
             deployment_id=deployment_id,
             params={"checkpoint_path": checkpoint_path},
         )
 
-    def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> dict:
-        return self._deployment_request(
+    def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> JsonObject:
+        return self._deployment_object(
             "GET",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
             deployment_id=deployment_id,
@@ -153,8 +188,8 @@ class DeploymentsClientMixin:
         end_time: str | None = None,
         page: int = 1,
         limit: int = 100,
-    ) -> dict:
-        params: dict[str, Any] = {"page": page, "limit": limit}
+    ) -> JsonObject:
+        params: dict[str, str | int] = {"page": page, "limit": limit}
         if level is not None:
             params["level"] = level
         if search is not None:
@@ -163,20 +198,20 @@ class DeploymentsClientMixin:
             params["start_time"] = start_time
         if end_time is not None:
             params["end_time"] = end_time
-        return self._deployment_request(
+        return self._deployment_object(
             "GET",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/logs",
             deployment_id=deployment_id,
             params=params,
         )
 
-    def get_deployment_health_full(self, deployment_id: str) -> dict:
+    def get_deployment_health_full(self, deployment_id: str) -> JsonObject:
         """GET /api/v1/deployments/{id}/health — platform-side health row.
 
         Distinct from :meth:`deployment_health` which hits the *inference*
         endpoint.  This returns the deployment's own health_status column.
         """
-        return self._deployment_request(
+        return self._deployment_object(
             "GET",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
             deployment_id=deployment_id,
@@ -202,8 +237,8 @@ class DeploymentsClientMixin:
                 params=params,
                 headers=headers,
                 stream=True,
-                timeout=_TIMEOUT,
-                allow_redirects=_ALLOW_REDIRECTS,
+                timeout=DEFAULT_TIMEOUT,
+                allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc

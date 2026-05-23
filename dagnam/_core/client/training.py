@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 from dagnam._core.client.base import (
-    _ALLOW_REDIRECTS,
-    _TIMEOUT,
+    ALLOW_REDIRECTS,
     APIError,
-    _is_success_response,
-    _safe_error_body,
+    BaseDagnamClient,
+    DEFAULT_TIMEOUT,
+    is_success_response,
+    safe_error_body_from_response,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment
 from dagnam._core.exceptions import AuthError, TrainingJobNotFoundError
 
 
-class TrainingClientMixin:
+class TrainingClientMixin(BaseDagnamClient):
     """Training resource methods for DagnamClient."""
 
     def open_training_stream(
@@ -39,19 +40,19 @@ class TrainingClientMixin:
                 params=params,
                 headers=headers,
                 stream=True,
-                timeout=_TIMEOUT,
-                allow_redirects=_ALLOW_REDIRECTS,
+                timeout=DEFAULT_TIMEOUT,
+                allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
-        if not _is_success_response(resp):
+        if not is_success_response(resp):
             code = resp.status_code
             if code == 401:
                 raise AuthError("Authentication failed: invalid or expired API key")
             if code == 404:
                 raise TrainingJobNotFoundError(job_id)
-            raise APIError(code, _safe_error_body(resp))
+            raise APIError(code, safe_error_body_from_response(resp))
         return resp

@@ -29,7 +29,7 @@ class TestIsUuid:
             "00000000-0000-0000-0000-000000000000",
         ],
     )
-    def test_valid_uuids(self, value: str):
+    def test_valid_uuids(self, value: str) -> None:
         assert _is_uuid(value) is True
 
     @pytest.mark.parametrize(
@@ -45,7 +45,7 @@ class TestIsUuid:
             "550e8400-e29b-41d4-a716",  # too short
         ],
     )
-    def test_non_uuids(self, value: str):
+    def test_non_uuids(self, value: str) -> None:
         assert _is_uuid(value) is False
 
 
@@ -91,7 +91,7 @@ USER_META = {
 class TestSystemDatasetRouting:
     """Friendly names should route through system dataset endpoints."""
 
-    def test_friendly_name_calls_system_meta(self, tmp_path: Path):
+    def test_friendly_name_calls_system_meta(self, tmp_path: Path) -> None:
         meta = {
             **SYSTEM_META,
             "checksum": "placeholder",
@@ -118,7 +118,7 @@ class TestSystemDatasetRouting:
             mock_resolve.assert_called_once_with(meta)
             assert ds is mock_native_ds
 
-    def test_friendly_name_with_dashes(self, tmp_path: Path):
+    def test_friendly_name_with_dashes(self, tmp_path: Path) -> None:
         """Names like 'imdb-sentiment' are NOT UUIDs and should use system endpoints.
         With unified architecture, system datasets route to native loaders."""
         meta = {
@@ -152,7 +152,7 @@ class TestSystemDatasetRouting:
 class TestUserDatasetRouting:
     """UUID IDs should route through the regular user dataset endpoints."""
 
-    def test_uuid_calls_user_meta(self, tmp_path: Path):
+    def test_uuid_calls_user_meta(self, tmp_path: Path) -> None:
         csv_content = b"a,b\n1,2\n"
         checksum = _sha256(csv_content)
         meta = {**USER_META, "checksum": checksum}
@@ -188,7 +188,7 @@ class TestUserDatasetRouting:
 class TestClientSystemMethods:
     """Verify DagnamClient system dataset methods hit the right URLs."""
 
-    def test_list_system_datasets(self):
+    def test_list_system_datasets(self) -> None:
         client = DagnamClient("http://localhost:8000", "test-key")
         mock_resp = MagicMock()
         mock_resp.ok = True
@@ -202,7 +202,7 @@ class TestClientSystemMethods:
         assert call_url == "http://localhost:8000/api/v1/datasets/system"
         assert result == [{"id": "mnist-digits", "name": "MNIST"}]
 
-    def test_get_system_dataset_meta(self):
+    def test_get_system_dataset_meta(self) -> None:
         client = DagnamClient("http://localhost:8000", "test-key")
         mock_resp = MagicMock()
         mock_resp.ok = True
@@ -215,7 +215,7 @@ class TestClientSystemMethods:
         assert call_url == "http://localhost:8000/api/v1/datasets/system/mnist-digits"
         assert result["id"] == "mnist-digits"
 
-    def test_download_system_dataset(self, tmp_path: Path):
+    def test_download_system_dataset(self, tmp_path: Path) -> None:
         client = DagnamClient("http://localhost:8000", "test-key")
         mock_resp = MagicMock()
         mock_resp.ok = True

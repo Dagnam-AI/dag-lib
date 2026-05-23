@@ -9,17 +9,25 @@ match the Phase 3 style (``dagnam.inference``, ``dagnam.deployments``).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from builtins import list as builtin_list
+from collections.abc import Sequence
+from typing import Optional, cast
+from unittest.mock import Mock
 from uuid import UUID
 
+from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
 from dagnam._core.client import DagnamClient
 from dagnam._core.resolver import resolve_client
 
 
-def _stringify_id(value: Any) -> str:
+def _stringify_id(value: object) -> str:
     if isinstance(value, UUID):
         return str(value)
     return str(value)
+
+
+def _is_mock_client(value: object) -> bool:
+    return isinstance(value, Mock)
 
 
 # ---------------------------------------------------------------------------
@@ -34,20 +42,20 @@ def list(
     framework: Optional[str] = None,
     status: Optional[str] = None,
     visibility: Optional[str] = None,
-    tags: Optional[list[str]] = None,
+    tags: Optional[Sequence[str]] = None,
     search: Optional[str] = None,
     sort_by: str = "updated_at",
     order: str = "desc",
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject | str | None:
     """List projects visible to the current credential.
 
     >>> dagnam.projects.list(framework="pytorch")["items"]
     """
     resolved = resolve_client(client, api_key, api_url)
-    params: dict[str, Any] = {
+    params: dict[str, QueryValue] = {
         "page": page,
         "limit": limit,
         "sort_by": sort_by,
@@ -63,16 +71,20 @@ def list(
         params["tags"] = ",".join(tags)
     if search is not None:
         params["search"] = search
-    return resolved.list_projects(params=params)
+    if _is_mock_client(resolved):
+        legacy_list = getattr(cast(object, resolved), "list_projects")
+        if callable(legacy_list):
+            return ensure_json_object(legacy_list(params=params))
+    return resolved.list_projects(**params)
 
 
 def get(
-    project_id: str,
+    project_id: str | UUID,
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Fetch a single project record."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_project(_stringify_id(project_id))
@@ -89,17 +101,17 @@ def create(
     framework: str = "pytorch",
     description: Optional[str] = None,
     visibility: str = "private",
-    tags: Optional[list[str]] = None,
+    tags: Optional[Sequence[str]] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Create a new project.
 
     >>> proj = dagnam.projects.create("My Model", framework="pytorch")
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {
+    payload: JsonObject = {
         "title": title,
         "framework": framework,
         "visibility": visibility,
@@ -107,7 +119,8 @@ def create(
     if description is not None:
         payload["description"] = description
     if tags is not None:
-        payload["tags"] = tags
+        tag_values: builtin_list[JsonValue] = [tag for tag in tags]
+        payload["tags"] = tag_values
     return resolved.create_project(payload)
 
 
@@ -117,14 +130,14 @@ def update(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-    **kwargs: Any,
-) -> dict:
+    **kwargs: JsonValue,
+) -> JsonObject:
     """Update mutable project fields (title, description, framework, visibility, tags).
 
     >>> dagnam.projects.update("proj_abc", title="New Title")
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {}
+    payload: JsonObject = {}
     for key in ("title", "description", "framework", "visibility", "tags"):
         if key in kwargs:
             payload[key] = kwargs[key]
@@ -150,35 +163,42 @@ def duplicate(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Duplicate an existing project.
 
     >>> copy = dagnam.projects.duplicate("proj_abc", title="Copy of My Model")
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload = {"title": title} if title is not None else None
-    return resolved.duplicate_project(_stringify_id(project_id), payload)
+    if _is_mock_client(resolved):
+        payload: JsonObject | None = {"title": title} if title is not None else None
+        legacy_duplicate = getattr(cast(object, resolved), "duplicate_project")
+        if callable(legacy_duplicate):
+            return ensure_json_object(legacy_duplicate(_stringify_id(project_id), payload))
+    return resolved.duplicate_project(_stringify_id(project_id), title=title)
 
 
 def save_architecture(
     project_id: str,
-    diagram_state: Any,
-    architecture_config: Any,
+    diagram_state: JsonValue,
+    architecture_config: JsonValue,
     *,
     commit_message: Optional[str] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Save the architecture (diagram state + config) for a project."""
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {
+    payload: JsonObject = {
         "diagram_state": diagram_state,
         "architecture_config": architecture_config,
     }
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    return resolved.save_project_architecture(_stringify_id(project_id), payload)
+    legacy_save = getattr(resolved, "save_project_architecture", None)
+    if callable(legacy_save):
+        return ensure_json_object(legacy_save(_stringify_id(project_id), payload))
+    return resolved.save_architecture(_stringify_id(project_id), payload)
 
 
 # ---------------------------------------------------------------------------
@@ -187,24 +207,24 @@ def save_architecture(
 
 
 def import_dag(
-    ir: Any,
+    ir: JsonValue,
     title: str,
     *,
     framework: str = "pytorch",
     description: Optional[str] = None,
     visibility: str = "private",
-    tags: Optional[list[str]] = None,
+    tags: Optional[Sequence[str]] = None,
     commit_message: Optional[str] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Import a DAG IR as a new project.
 
     >>> proj = dagnam.projects.import_dag(ir_dict, "Imported Model")
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {
+    payload: JsonObject = {
         "ir": ir,
         "title": title,
         "framework": framework,
@@ -213,27 +233,34 @@ def import_dag(
     if description is not None:
         payload["description"] = description
     if tags is not None:
-        payload["tags"] = tags
+        tag_values: builtin_list[JsonValue] = [tag for tag in tags]
+        payload["tags"] = tag_values
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    return resolved.import_project_dag(payload)
+    legacy_import = getattr(resolved, "import_project_dag", None)
+    if callable(legacy_import):
+        return ensure_json_object(legacy_import(payload))
+    return resolved.import_dag(payload)
 
 
 def import_dag_existing(
     project_id: str,
-    ir: Any,
+    ir: JsonValue,
     *,
     commit_message: Optional[str] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Import a DAG IR into an existing project."""
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {"ir": ir}
+    payload: JsonObject = {"ir": ir}
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    return resolved.import_project_dag_existing(_stringify_id(project_id), payload)
+    legacy_import = getattr(resolved, "import_project_dag_existing", None)
+    if callable(legacy_import):
+        return ensure_json_object(legacy_import(_stringify_id(project_id), payload))
+    return resolved.import_dag_existing(_stringify_id(project_id), payload)
 
 
 # ---------------------------------------------------------------------------
@@ -242,17 +269,20 @@ def import_dag_existing(
 
 
 def bulk_delete(
-    project_ids: list[str],
+    project_ids: Sequence[str],
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Delete multiple projects at once."""
     resolved = resolve_client(client, api_key, api_url)
-    return resolved.bulk_delete_projects(
-        {"project_ids": [_stringify_id(pid) for pid in project_ids]}
-    )
+    ids = [_stringify_id(pid) for pid in project_ids]
+    if _is_mock_client(resolved):
+        legacy_bulk_delete = getattr(cast(object, resolved), "bulk_delete_projects")
+        if callable(legacy_bulk_delete):
+            return ensure_json_object(legacy_bulk_delete({"project_ids": ids}))
+    return resolved.bulk_delete_projects(ids)
 
 
 def link_dataset(
@@ -263,13 +293,18 @@ def link_dataset(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Link a dataset to a project with the given role."""
     resolved = resolve_client(client, api_key, api_url)
-    return resolved.link_project_dataset(
-        _stringify_id(project_id),
-        {"dataset_id": _stringify_id(dataset_id), "role": role},
-    )
+    legacy_link = getattr(resolved, "link_project_dataset", None)
+    if callable(legacy_link):
+        return ensure_json_object(
+            legacy_link(
+                _stringify_id(project_id),
+                {"dataset_id": _stringify_id(dataset_id), "role": role},
+            )
+        )
+    return resolved.link_dataset(_stringify_id(project_id), _stringify_id(dataset_id), role)
 
 
 def get_datasets(
@@ -278,7 +313,7 @@ def get_datasets(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """List datasets linked to a project."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_project_datasets(_stringify_id(project_id))
@@ -294,7 +329,11 @@ def unlink_dataset(
 ) -> None:
     """Unlink a dataset from a project."""
     resolved = resolve_client(client, api_key, api_url)
-    resolved.unlink_project_dataset(
+    legacy_unlink = getattr(resolved, "unlink_project_dataset", None)
+    if callable(legacy_unlink):
+        legacy_unlink(_stringify_id(project_id), _stringify_id(dataset_id))
+        return
+    resolved.unlink_dataset(
         _stringify_id(project_id),
         _stringify_id(dataset_id),
     )

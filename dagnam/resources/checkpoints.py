@@ -11,29 +11,33 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from dagnam._types import JsonObject
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
 from dagnam._core.resolver import resolve_client
-from dagnam.data.cache import _cache_dir_name, compute_file_checksum, evict_lru, touch_cache
+from dagnam.data.cache import cache_dir_name, compute_file_checksum, evict_lru, touch_cache
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CHECKPOINT_CACHE_DIR: Path = Path.home() / ".dagnam" / "checkpoints"
 
 
-def _pick_latest(checkpoints: list[dict]) -> dict:
+def pick_latest(checkpoints: list[JsonObject]) -> JsonObject:
     if not checkpoints:
         raise CheckpointNotFoundError("<no checkpoints for job>")
     # Prefer is_best, then highest epoch/step, then most recent created_at.
     best = [c for c in checkpoints if c.get("is_best")]
     pool = best if best else checkpoints
 
-    def sort_key(c: dict):
+    def sort_key(c: JsonObject) -> tuple[int, int, str]:
+        epoch = c.get("epoch", -1)
+        step = c.get("step", -1)
+        created_at = c.get("created_at", "")
         return (
-            c.get("epoch", -1),
-            c.get("step", -1),
-            c.get("created_at", ""),
+            epoch if isinstance(epoch, int) else -1,
+            step if isinstance(step, int) else -1,
+            created_at if isinstance(created_at, str) else "",
         )
 
     return sorted(pool, key=sort_key)[-1]
@@ -62,12 +66,12 @@ def download_checkpoint(
 
     if checkpoint_id is None:
         checkpoints = resolved.list_checkpoints(job_id)
-        picked = _pick_latest(checkpoints)
+        picked = pick_latest(checkpoints)
         checkpoint_id = str(picked["id"])
 
     base = Path(cache_dir) if cache_dir is not None else DEFAULT_CHECKPOINT_CACHE_DIR
-    job_dir = base / _cache_dir_name(job_id)
-    dest = job_dir / f"{_cache_dir_name(checkpoint_id)}.pt"
+    job_dir = base / cache_dir_name(job_id)
+    dest = job_dir / f"{cache_dir_name(checkpoint_id)}.pt"
 
     # Cache hit: bump access time and return. Integrity was verified at download.
     if dest.exists():
@@ -99,7 +103,10 @@ def download_checkpoint(
     )
     if max_bytes is not None:
         try:
-            evict_lru(max_size_bytes=max_bytes, base_dir=base)
+            evict_lru(
+                max_size_bytes=max_bytes if isinstance(max_bytes, int) else None,
+                base_dir=base,
+            )
         except Exception as exc:
             logger.warning("Checkpoint LRU eviction failed: %s", exc)
 

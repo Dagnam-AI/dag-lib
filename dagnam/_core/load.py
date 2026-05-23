@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 
+from dagnam._types import JsonObject, ensure_json_object
 from dagnam._core.auth import get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
@@ -41,6 +42,33 @@ _UUID_RE = re.compile(
 def _is_uuid(s: str) -> bool:
     """Return True if *s* looks like a standard UUID (8-4-4-4-12 hex)."""
     return bool(_UUID_RE.match(s))
+
+
+def _required_meta_str(meta: JsonObject, key: str) -> str:
+    value = meta.get(key)
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"Dataset metadata field {key!r} must be a string")
+
+
+def _optional_meta_str(meta: JsonObject, key: str) -> str | None:
+    value = meta.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"Dataset metadata field {key!r} must be a string when provided")
+
+
+def _optional_meta_int(meta: JsonObject, key: str) -> int | None:
+    value = meta.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"Dataset metadata field {key!r} must be an integer when provided")
+    if isinstance(value, int):
+        return value
+    raise ValueError(f"Dataset metadata field {key!r} must be an integer when provided")
 
 
 def load_dataset(
@@ -83,9 +111,10 @@ def load_dataset(
 
     cache_dir_path: Path | None = Path(cache_dir) if cache_dir is not None else None
     cache_key = f"{dataset_id}@{version}" if version else dataset_id
-    effective_download_url = presigned_url or download_url or meta.get("download_url")
+    checksum = _required_meta_str(meta, "checksum")
+    effective_download_url = presigned_url or download_url or _optional_meta_str(meta, "download_url")
 
-    if is_cached(cache_key, meta["checksum"], base_dir=cache_dir_path):
+    if is_cached(cache_key, checksum, base_dir=cache_dir_path):
         cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
         ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
         return DagnamDataset(cached_meta, ds_cache_dir)
@@ -98,23 +127,23 @@ def load_dataset(
             dataset_id,
             ds_cache_dir,
             download_url=effective_download_url,
-            filename=meta.get("filename"),
+            filename=_optional_meta_str(meta, "filename"),
             version=version,
             resume=resume,
         )
 
     local_checksum = compute_file_checksum(downloaded_file)
-    expected_checksum = meta["checksum"].removeprefix("sha256:")
+    expected_checksum = checksum.removeprefix("sha256:")
     if local_checksum != expected_checksum:
         raise ChecksumError(
             f"Checksum mismatch for dataset '{dataset_id}': "
-            f"expected {meta['checksum']}, got {local_checksum}"
+            f"expected {checksum}, got {local_checksum}"
         )
 
     save_metadata(cache_key, meta, base_dir=cache_dir_path)
-    save_checksum(cache_key, meta["checksum"], base_dir=cache_dir_path)
+    save_checksum(cache_key, checksum, base_dir=cache_dir_path)
     touch_cache(cache_key, base_dir=cache_dir_path)
-    max_cache = get_config_value("max_cache_size", None)
+    max_cache = _optional_meta_int({"max_cache_size": get_config_value("max_cache_size", None)}, "max_cache_size")
     evict_lru(max_size_bytes=max_cache, base_dir=cache_dir_path)
 
     return DagnamDataset(meta, ds_cache_dir)
@@ -132,13 +161,13 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
         dataset_dir = Path(storage_path) / dataset_id
         legacy_meta = dataset_dir / "meta.json"
         if legacy_meta.exists():
-            meta = json.loads(legacy_meta.read_text(encoding="utf-8"))
+            meta = ensure_json_object(json.loads(legacy_meta.read_text(encoding="utf-8")))
             return DagnamDataset(meta, dataset_dir)
         raise FileNotFoundError(
             f"Sidecar metadata not found at {meta_path} and no legacy meta.json at {legacy_meta}"
         )
 
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta = ensure_json_object(json.loads(meta_path.read_text(encoding="utf-8")))
 
     if meta.get("source_type") == "system":
         try:
@@ -149,7 +178,7 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
             pass
 
     file_path_str = meta.get("file_path")
-    if file_path_str:
+    if isinstance(file_path_str, str) and file_path_str:
         file_path = Path(file_path_str)
         if file_path.exists():
             return DagnamDataset(meta, file_path.parent)

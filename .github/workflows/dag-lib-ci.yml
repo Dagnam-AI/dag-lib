@@ -26,10 +26,7 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check
       - name: Type check
-        # Soft-gated until the codebase is fully typed. Remove
-        # `continue-on-error` once pyright passes cleanly.
         run: uv run --with "pyright>=1.1.380" pyright
-        continue-on-error: true
       - name: Build
         run: uv build
       - name: Check distribution metadata

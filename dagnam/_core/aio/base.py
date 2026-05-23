@@ -10,12 +10,12 @@ except ImportError as _exc:
     ) from _exc
 
 import re
-from typing import Any
 
-from dagnam._core.client.common import bearer_headers, inference_headers, safe_response_text
+from dagnam._types import FormData, JsonValue, QueryParams, UploadFiles
+from dagnam._core.client.common import bearer_headers, safe_response_text
 from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
 
-_TIMEOUT = 30
+DEFAULT_TIMEOUT = 30
 _WINDOWS_RESERVED_FILENAMES = {
     "con",
     "prn",
@@ -33,7 +33,7 @@ class BaseAsyncDagnamClient:
         self,
         api_url: str,
         api_key: str,
-        timeout: int = _TIMEOUT,
+        timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
@@ -49,18 +49,15 @@ class BaseAsyncDagnamClient:
     def _headers(self) -> dict[str, str]:
         return bearer_headers(self.api_key)
 
-    def _inference_headers(self) -> dict[str, str]:
-        return inference_headers(self.api_key)
-
     async def _request(
         self,
         method: str,
         path: str,
         *,
-        params: dict | None = None,
-        json: Any = None,
-        data: dict | None = None,
-        files: Any = None,
+        params: QueryParams | None = None,
+        json: JsonValue = None,
+        data: FormData | None = None,
+        files: UploadFiles | None = None,
         headers: dict[str, str] | None = None,
         timeout: int | None = None,
     ) -> httpx.Response:
@@ -82,8 +79,8 @@ class BaseAsyncDagnamClient:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
 
-def _raise_for_job(resp: httpx.Response, job_id: str) -> None:
-    """Map training-job response errors (mirrors sync client._raise_for_job)."""
+def raise_for_job_response(resp: httpx.Response, job_id: str) -> None:
+    """Map training-job response errors (mirrors sync client.raise_for_job_response)."""
     if 200 <= resp.status_code < 300:
         return
     code = resp.status_code
@@ -94,7 +91,7 @@ def _raise_for_job(resp: httpx.Response, job_id: str) -> None:
     raise APIError(code, safe_response_text(resp))
 
 
-def _parse_cd(header: str | None) -> str:
+def parse_content_disposition_filename(header: str | None) -> str:
     """Extract filename from Content-Disposition header."""
     if not header:
         return "data"

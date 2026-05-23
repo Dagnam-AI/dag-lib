@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence, Sized
+from typing import TYPE_CHECKING, cast
+
+import numpy as np
+
+from dagnam.data.dataset._typing import DatasetMixinBase
 from dagnam.data.dataset.hooks import _TransformDataset, _with_collate, _wrap_collate
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
+if TYPE_CHECKING:
+    from torch import Tensor
+    from torch._C import Generator
+    from torch.utils.data import DataLoader, Dataset
 
-class PytorchDatasetMixin:
+TransformFn = Callable[[object], object]
+CollateFn = Callable[[object], object]
+TensorFactory = Callable[..., "Tensor"]
+
+
+class PytorchDatasetMixin(DatasetMixinBase):
     """Pytorch conversion methods."""
 
     def to_pytorch_loader(
@@ -19,13 +34,13 @@ class PytorchDatasetMixin:
         test_ratio: float = 0.1,
         seed: int = 42,
         column_roles: dict[str, str] | None = None,
-        transform=None,
-        target_transform=None,
-        collate_fn=None,
-        batch_transform=None,
-        waveform_transform=None,
-        spectrogram_transform=None,
-    ) -> torch.utils.data.DataLoader:  # noqa: F821
+        transform: TransformFn | None = None,
+        target_transform: TransformFn | None = None,
+        collate_fn: CollateFn | None = None,
+        batch_transform: CollateFn | None = None,
+        waveform_transform: TransformFn | None = None,
+        spectrogram_transform: TransformFn | None = None,
+    ) -> "DataLoader[object]":
         """Create a PyTorch DataLoader for the specified split.
 
         When ``_native_train`` / ``_native_test`` are set (system datasets),
@@ -49,7 +64,8 @@ class PytorchDatasetMixin:
             raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'.")
 
         try:
-            import torch  # noqa: F401
+            import torch
+            del torch
         except ImportError:
             raise ImportError(
                 "PyTorch is required for to_pytorch_loader(). "
@@ -149,10 +165,10 @@ class PytorchDatasetMixin:
         shuffle: bool,
         val_ratio: float,
         seed: int,
-        transform=None,
-        target_transform=None,
-        collate_fn=None,
-    ) -> torch.utils.data.DataLoader:  # noqa: F821
+        transform: TransformFn | None = None,
+        target_transform: TransformFn | None = None,
+        collate_fn: CollateFn | None = None,
+    ) -> "DataLoader[object]":
         """Build a DataLoader from native train/test datasets."""
         import torch
         from torch.utils.data import DataLoader, random_split
@@ -175,23 +191,32 @@ class PytorchDatasetMixin:
             )
 
         # Handle torchvision map-style datasets
+        if native_train is None:
+            raise ValueError("No native PyTorch dataset is available")
+
         if split == "test":
-            ds = native_test if native_test is not None else native_train
+            ds = cast("Dataset[object]", native_test if native_test is not None else native_train)
         elif split == "val":
-            n_val = int(len(native_train) * val_ratio)
-            n_train = len(native_train) - n_val
+            train_dataset = cast(Sized, native_train)
+            n_val = int(len(train_dataset) * val_ratio)
+            n_train = len(train_dataset) - n_val
+            torch_dataset = cast("Dataset[object]", native_train)
+            generator = cast("Generator", getattr(torch, "Generator")().manual_seed(seed))
             _, ds = random_split(
-                native_train,
+                torch_dataset,
                 [n_train, n_val],
-                generator=torch.Generator().manual_seed(seed),
+                generator=generator,
             )
         else:  # train
-            n_val = int(len(native_train) * val_ratio)
-            n_train = len(native_train) - n_val
+            train_dataset = cast(Sized, native_train)
+            n_val = int(len(train_dataset) * val_ratio)
+            n_train = len(train_dataset) - n_val
+            torch_dataset = cast("Dataset[object]", native_train)
+            generator = cast("Generator", getattr(torch, "Generator")().manual_seed(seed))
             ds, _ = random_split(
-                native_train,
+                torch_dataset,
                 [n_train, n_val],
-                generator=torch.Generator().manual_seed(seed),
+                generator=generator,
             )
 
         if transform is not None or target_transform is not None:
@@ -215,39 +240,48 @@ class PytorchDatasetMixin:
         shuffle: bool,
         val_ratio: float,
         seed: int,
-        transform=None,
-        target_transform=None,
-        collate_fn=None,
-    ) -> torch.utils.data.DataLoader:  # noqa: F821
+        transform: TransformFn | None = None,
+        target_transform: TransformFn | None = None,
+        collate_fn: CollateFn | None = None,
+    ) -> "DataLoader[object]":
         """Build a DataLoader from numpy array tuples (e.g. IMDB)."""
-        import numpy as np
         import torch
         from torch.utils.data import DataLoader, TensorDataset
+        tensor = cast(TensorFactory, getattr(torch, "tensor"))
+        torch_long = getattr(torch, "long")
+        torch_float32 = getattr(torch, "float32")
 
+        if not isinstance(self._native_train, tuple):
+            raise ValueError("Native numpy loader requires train arrays")
         x_train, y_train = self._native_train
-        x_test, y_test = self._native_test
+        if isinstance(self._native_test, tuple):
+            x_test, y_test = self._native_test
+        else:
+            x_test, y_test = (), ()
 
         if split == "test":
             # IMDB sequences are variable-length object arrays — pad them
-            if x_test.dtype == object:
-                x_test = self._pad_sequences(x_test)
-            x_t = torch.from_numpy(np.asarray(x_test)).long()
-            y_t = torch.from_numpy(np.asarray(y_test)).float().unsqueeze(1)
+            if np.asarray(x_test, dtype=object).dtype == object:
+                x_test = self._pad_sequences(cast(Sequence[Sequence[int]], x_test))
+            x_t = tensor(np.asarray(x_test), dtype=torch_long)
+            y_t = tensor(np.asarray(y_test), dtype=torch_float32).unsqueeze(1)
             ds = TensorDataset(x_t, y_t)
         else:
-            if x_train.dtype == object:
-                x_train = self._pad_sequences(x_train)
+            if np.asarray(x_train, dtype=object).dtype == object:
+                x_train = self._pad_sequences(cast(Sequence[Sequence[int]], x_train))
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
-                x = torch.from_numpy(np.asarray(x_train[-n_val:])).long()
-                y = torch.from_numpy(np.asarray(y_train[-n_val:])).float().unsqueeze(1)
+                x = tensor(np.asarray(x_train[-n_val:]), dtype=torch_long)
+                y = tensor(np.asarray(y_train[-n_val:]), dtype=torch_float32).unsqueeze(1)
             else:
-                x = torch.from_numpy(np.asarray(x_train[:-n_val] if n_val > 0 else x_train)).long()
-                y = (
-                    torch.from_numpy(np.asarray(y_train[:-n_val] if n_val > 0 else y_train))
-                    .float()
-                    .unsqueeze(1)
+                x = tensor(
+                    np.asarray(x_train[:-n_val] if n_val > 0 else x_train),
+                    dtype=torch_long,
                 )
+                y = tensor(
+                    np.asarray(y_train[:-n_val] if n_val > 0 else y_train),
+                    dtype=torch_float32,
+                ).unsqueeze(1)
             ds = TensorDataset(x, y)
 
         if transform is not None or target_transform is not None:

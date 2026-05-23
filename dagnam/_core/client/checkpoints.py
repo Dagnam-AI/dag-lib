@@ -4,22 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dagnam._types import JsonObject, ensure_json_array
 from dagnam._core.client.base import (
-    _ALLOW_REDIRECTS,
-    _TIMEOUT,
+    ALLOW_REDIRECTS,
     APIError,
-    _is_success_response,
-    _safe_error_body,
+    BaseDagnamClient,
+    DEFAULT_TIMEOUT,
+    is_success_response,
+    safe_error_body_from_response,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment
 from dagnam._core.exceptions import AuthError, CheckpointNotFoundError
 
 
-class CheckpointsClientMixin:
+class CheckpointsClientMixin(BaseDagnamClient):
     """Checkpoints resource methods for DagnamClient."""
 
-    def list_checkpoints(self, job_id: str) -> list[dict]:
+    def list_checkpoints(self, job_id: str) -> list[JsonObject]:
         """GET /api/v1/training/jobs/{job_id}/checkpoints"""
         job_path = quote_path_segment(job_id)
         url = f"{self.api_url}/api/v1/training/jobs/{job_path}/checkpoints"
@@ -27,15 +29,19 @@ class CheckpointsClientMixin:
             resp = requests.get(
                 url,
                 headers=self._headers(),
-                timeout=_TIMEOUT,
-                allow_redirects=_ALLOW_REDIRECTS,
+                timeout=DEFAULT_TIMEOUT,
+                allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_job(resp, job_id)
-        return resp.json()
+        self.raise_for_job_response(resp, job_id)
+        return [
+            item
+            for item in ensure_json_array(resp.json())
+            if isinstance(item, dict)
+        ]
 
     def download_checkpoint_stream(
         self, job_id: str, checkpoint_id: str, dest_path: Path
@@ -53,13 +59,13 @@ class CheckpointsClientMixin:
         )
         resp = self._get_stream(url)
 
-        if not _is_success_response(resp):
+        if not is_success_response(resp):
             code = resp.status_code
             if code == 401:
                 raise AuthError("Authentication failed: invalid or expired API key")
             if code == 404:
                 raise CheckpointNotFoundError(checkpoint_id)
-            raise APIError(code, _safe_error_body(resp))
+            raise APIError(code, safe_error_body_from_response(resp))
 
         expected_checksum = resp.headers.get("X-Checksum-SHA256")
         written = self._stream_response_to_file(resp, Path(dest_path))

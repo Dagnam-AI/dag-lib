@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def test_new_public_resource_imports_match_top_level_exports():
+def test_new_public_resource_imports_match_top_level_exports() -> None:
     import dagnam
     from dagnam.resources import datasets, deployments, hub, projects
 
@@ -13,14 +13,14 @@ def test_new_public_resource_imports_match_top_level_exports():
     assert dagnam.projects is projects
 
 
-def test_legacy_resource_imports_remain_compatible():
+def test_legacy_resource_imports_remain_compatible() -> None:
     from dagnam.resources import datasets, datasets_upload
 
     assert datasets_upload.upload is datasets.upload
     assert datasets_upload.upload_from_url is datasets.upload_from_url
 
 
-def test_loader_modules_use_target_names():
+def test_loader_modules_use_target_names() -> None:
     from dagnam.data.loaders import audio, csv, flax, image_folder, json_array, media, system, tf
 
     assert csv.create_pytorch_loader is not None
@@ -33,7 +33,7 @@ def test_loader_modules_use_target_names():
     assert flax.create_flax_dataset is not None
 
 
-def test_core_load_and_package_facades_are_importable():
+def test_core_load_and_package_facades_are_importable() -> None:
     from dagnam._core import DagnamClient
     from dagnam._core.load import _is_uuid, load_dataset
     import dagnam.aio

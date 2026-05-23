@@ -49,8 +49,9 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.28",
-    "pandas>=1.5",
+    "polars>=1.0",
     "tqdm>=4.60",
+    "typing_extensions>=4.12",
 ]
 
 [project.optional-dependencies]
@@ -134,6 +135,8 @@ skip_covered = true
 include = ["dagnam", "tests"]
 exclude = ["**/__pycache__", ".venv"]
 pythonVersion = "3.10"
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "strict"
 reportMissingImports = "error"
 reportMissingTypeStubs = "warning"

@@ -1,6 +1,7 @@
 """Unit tests for dagnam.datasets upload helpers."""
 
 from __future__ import annotations
+from tests.typing_helpers import JsonObject
 
 from unittest.mock import MagicMock
 
@@ -12,12 +13,12 @@ from dagnam._core.exceptions import UploadError
 from dagnam._core.lro import LongRunningOperation
 
 
-def _client(**overrides) -> MagicMock:
+def _client(**overrides: JsonObject) -> MagicMock:
     return MagicMock(spec=DagnamClient, **overrides)
 
 
 class TestUpload:
-    def test_upload_delegates(self):
+    def test_upload_delegates(self) -> None:
         c = _client(upload_dataset=MagicMock(return_value={"id": "ds1"}))
         out = datasets_upload.upload(
             "data.csv",
@@ -41,7 +42,7 @@ class TestUpload:
         )
         assert out["id"] == "ds1"
 
-    def test_upload_passes_progress_cb(self):
+    def test_upload_passes_progress_cb(self) -> None:
         cb = MagicMock()
         c = _client(upload_dataset=MagicMock(return_value={"id": "ds1"}))
         datasets_upload.upload(
@@ -56,7 +57,7 @@ class TestUpload:
 
 
 class TestUploadFromUrl:
-    def test_returns_lro(self):
+    def test_returns_lro(self) -> None:
         c = _client(
             upload_dataset_from_url=MagicMock(
                 return_value={"task_id": "t1", "status": "pending"},
@@ -80,7 +81,7 @@ class TestUploadFromUrl:
             visibility="private",
         )
 
-    def test_lro_polls_task_status(self):
+    def test_lro_polls_task_status(self) -> None:
         c = _client(
             upload_dataset_from_url=MagicMock(
                 return_value={"task_id": "t1", "status": "pending"},
@@ -103,7 +104,7 @@ class TestUploadFromUrl:
 
 
 class TestErrorPropagation:
-    def test_upload_propagates_upload_error(self):
+    def test_upload_propagates_uploaderror(self) -> None:
         c = _client()
         c.upload_dataset.side_effect = UploadError("too large")
         with pytest.raises(UploadError):
@@ -115,7 +116,7 @@ class TestErrorPropagation:
                 client=c,
             )
 
-    def test_upload_from_url_propagates_upload_error(self):
+    def test_upload_from_url_propagates_uploaderror(self) -> None:
         c = _client()
         c.upload_dataset_from_url.side_effect = UploadError("bad url")
         with pytest.raises(UploadError):

@@ -1,6 +1,7 @@
 """Unit tests for dagnam.training (SSE event streaming)."""
 
 from __future__ import annotations
+from tests.typing_helpers import JsonObject
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,31 +10,31 @@ import pytest
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import StreamError
-from dagnam.resources.training import _parse_event, stream_training
+from dagnam.resources.training import parse_event, stream_training
 
 
-def _sse(event: str, data: str, id: str | None = None, retry: str | None = None):
+def _sse(event: str, data: str, id: str | None = None, retry: str | None = None) -> None:
     return SimpleNamespace(event=event, data=data, id=id, retry=retry)
 
 
 class TestParseEvent:
-    def test_decodes_json_payload(self):
-        ev = _parse_event(_sse("metric", '{"loss": 0.5}', id="1"))
+    def test_decodes_json_payload(self) -> None:
+        ev = parse_event(_sse("metric", '{"loss": 0.5}', id="1"))
         assert ev.event == "metric"
         assert ev.data == {"loss": 0.5}
         assert ev.id == "1"
 
-    def test_non_json_falls_back_to_string(self):
-        ev = _parse_event(_sse("log", "plain text"))
+    def test_non_json_falls_back_to_string(self) -> None:
+        ev = parse_event(_sse("log", "plain text"))
         assert ev.data == "plain text"
 
-    def test_empty_data_becomes_empty_dict(self):
-        ev = _parse_event(_sse("heartbeat", ""))
+    def test_empty_data_becomes_empty_dict(self) -> None:
+        ev = parse_event(_sse("heartbeat", ""))
         assert ev.data == {}
 
 
 class _FakeSSE:
-    def __init__(self, events):
+    def __init__(self, events: list[JsonObject]) -> None:
         self._events = events
 
     def events(self):
@@ -42,7 +43,7 @@ class _FakeSSE:
 
 
 class TestStreamTraining:
-    def test_yields_events_until_terminal(self):
+    def test_yields_events_until_terminal(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.open_training_stream.return_value = MagicMock()
         events = [
@@ -56,7 +57,7 @@ class TestStreamTraining:
         assert [e.event for e in out] == ["metric", "metric", "complete"]
         assert out[0].data == {"epoch": 1, "loss": 0.5}
 
-    def test_skips_heartbeats_by_default(self):
+    def test_skips_heartbeats_by_default(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.open_training_stream.return_value = MagicMock()
         events = [
@@ -68,7 +69,7 @@ class TestStreamTraining:
             out = list(stream_training("job_1", client=client))
         assert [e.event for e in out] == ["metric", "stream_end"]
 
-    def test_include_heartbeats(self):
+    def test_include_heartbeats(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.open_training_stream.return_value = MagicMock()
         events = [
@@ -79,7 +80,7 @@ class TestStreamTraining:
             out = list(stream_training("job_1", client=client, include_heartbeats=True))
         assert [e.event for e in out] == ["heartbeat", "complete"]
 
-    def test_reconnects_with_last_event_id(self):
+    def test_reconnects_with_last_event_id(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.open_training_stream.return_value = MagicMock()
 
@@ -93,7 +94,7 @@ class TestStreamTraining:
         ]
         fake_iter = iter(batches)
 
-        def fake_sse_client(response):
+        def fake_sse_client(response: object):
             return _FakeSSE(next(fake_iter))
 
         with (
@@ -110,7 +111,7 @@ class TestStreamTraining:
         assert second_call.kwargs.get("last_event_id") == "e1"
         assert [e.event for e in out] == ["metric", "metric", "complete"]
 
-    def test_reconnect_exhaustion_raises(self):
+    def test_reconnect_exhaustion_raises(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.open_training_stream.return_value = MagicMock()
         with (

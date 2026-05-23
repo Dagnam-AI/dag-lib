@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from dagnam.cli.common import _error
+from dagnam.cli.common import error
 
 
-def _cmd_deployments_list(args: argparse.Namespace) -> None:
+def cmd_deployments_list(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -22,22 +22,22 @@ def _cmd_deployments_list(args: argparse.Namespace) -> None:
             limit=args.limit,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_deployments_get(args: argparse.Namespace) -> None:
+def cmd_deployments_get(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         result = dagnam.deployments.get(args.deployment_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_deployments_create(args: argparse.Namespace) -> None:
+def cmd_deployments_create(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -56,44 +56,44 @@ def _cmd_deployments_create(args: argparse.Namespace) -> None:
             .result()
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_deployments_pause(args: argparse.Namespace) -> None:
+def cmd_deployments_pause(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         dagnam.deployments.pause(args.deployment_id).wait()
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(f"Deployment {args.deployment_id} paused.")
 
 
-def _cmd_deployments_resume(args: argparse.Namespace) -> None:
+def cmd_deployments_resume(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         dagnam.deployments.resume(args.deployment_id).wait()
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(f"Deployment {args.deployment_id} resumed.")
 
 
-def _cmd_deployments_delete(args: argparse.Namespace) -> None:
+def cmd_deployments_delete(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         dagnam.deployments.delete(args.deployment_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(f"Deployment {args.deployment_id} deleted.")
 
 
-def _cmd_deployments_logs(args: argparse.Namespace) -> None:
+def cmd_deployments_logs(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -105,16 +105,16 @@ def _cmd_deployments_logs(args: argparse.Namespace) -> None:
             limit=args.limit,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_deployments_metrics(args: argparse.Namespace) -> None:
+def cmd_deployments_metrics(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         result = dagnam.deployments.metrics(args.deployment_id, time_range=args.time_range)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))

@@ -6,10 +6,10 @@ import argparse
 import json
 import shutil
 
-from dagnam.cli.common import _dir_size, _human_size
+from dagnam.cli.common import dir_size, human_size
 
 
-def _cmd_cache_list(_args: argparse.Namespace) -> None:
+def cmd_cache_list(_args: argparse.Namespace) -> None:
     from dagnam.data import cache as _cache
 
     if not _cache.DEFAULT_CACHE_DIR.exists():
@@ -29,7 +29,7 @@ def _cmd_cache_list(_args: argparse.Namespace) -> None:
                 name = meta.get("name", "unknown")
             except (json.JSONDecodeError, OSError):
                 pass
-        size = _dir_size(child)
+        size = dir_size(child)
         entries.append((dataset_id, name, size))
 
     if not entries:
@@ -40,16 +40,16 @@ def _cmd_cache_list(_args: argparse.Namespace) -> None:
     print(header)
     print("-" * len(header))
     for dataset_id, name, size in entries:
-        print(f"{dataset_id:<40} {name:<25} {_human_size(size):>10}")
+        print(f"{dataset_id:<40} {name:<25} {human_size(size):>10}")
 
 
-def _cmd_cache_clear(_args: argparse.Namespace) -> None:
+def cmd_cache_clear(_args: argparse.Namespace) -> None:
     from dagnam.data import cache as _cache
 
     if not _cache.DEFAULT_CACHE_DIR.exists():
         print("Cache is already empty.")
         return
 
-    total = _dir_size(_cache.DEFAULT_CACHE_DIR)
+    total = dir_size(_cache.DEFAULT_CACHE_DIR)
     shutil.rmtree(_cache.DEFAULT_CACHE_DIR)
-    print(f"Cleared cache. Freed {_human_size(total)}.")
+    print(f"Cleared cache. Freed {human_size(total)}.")

@@ -8,13 +8,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from importlib import import_module
 import json
 import random
 import time
-from typing import Optional
+from typing import Optional, Protocol, cast
 
 import requests
 
+from dagnam._types import JsonObject, ensure_json_object
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import StreamError
 from dagnam._core.resolver import resolve_client
@@ -29,24 +31,50 @@ class TrainingEvent:
     """Parsed SSE event from a training stream."""
 
     event: str  # e.g. "metric", "log", "progress", "heartbeat", "complete"
-    data: dict | str  # JSON-decoded payload if possible, else raw string
+    data: JsonObject | str  # JSON-decoded payload if possible, else raw string
     id: Optional[str] = None
     retry: Optional[int] = None
 
 
-def _parse_event(raw) -> TrainingEvent:
-    event_type = getattr(raw, "event", None) or "message"
-    data_str = getattr(raw, "data", "") or ""
+class RawSSEEvent(Protocol):
+    event: object
+    data: object
+    id: object
+    retry: object
+
+
+class SSEClientInstance(Protocol):
+    def events(self) -> Iterator[RawSSEEvent]: ...
+
+
+class SSEClientFactory(Protocol):
+    def __call__(self, event_source: object) -> SSEClientInstance: ...
+
+
+class SSEClientModule(Protocol):
+    SSEClient: SSEClientFactory
+
+
+def parse_event(raw: RawSSEEvent) -> TrainingEvent:
+    raw_event_type = raw.event or "message"
+    event_type = raw_event_type if isinstance(raw_event_type, str) else str(raw_event_type)
+    raw_data = raw.data or ""
+    data_str = raw_data if isinstance(raw_data, str) else str(raw_data)
     try:
-        data = json.loads(data_str) if data_str else {}
+        loaded: object = cast(object, json.loads(data_str)) if data_str else cast(object, {})
+        data = ensure_json_object(cast(object, loaded)) if isinstance(loaded, dict) else data_str
     except (json.JSONDecodeError, ValueError):
         data = data_str
 
-    event_id = getattr(raw, "id", None)
-    retry_attr = getattr(raw, "retry", None)
-    try:
-        retry = int(retry_attr) if retry_attr is not None else None
-    except (TypeError, ValueError):
+    raw_event_id = raw.id
+    event_id = raw_event_id if isinstance(raw_event_id, str) else None
+    retry_attr = raw.retry
+    if isinstance(retry_attr, str | bytes | int | float | bool):
+        try:
+            retry = int(retry_attr)
+        except ValueError:
+            retry = None
+    else:
         retry = None
 
     return TrainingEvent(event=event_type, data=data, id=event_id, retry=retry)
@@ -72,7 +100,7 @@ def stream_training(
     ...         print(ev.data["epoch"], ev.data["loss"])
     """
     try:
-        import sseclient  # type: ignore[import]
+        sseclient = cast(SSEClientModule, import_module("sseclient"))
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "sseclient-py is required for dagnam.stream_training. "
@@ -88,7 +116,7 @@ def stream_training(
         try:
             sse = sseclient.SSEClient(response)
             for raw in sse.events():
-                ev = _parse_event(raw)
+                ev = parse_event(raw)
                 if ev.id:
                     cursor = ev.id
                 if ev.event == "heartbeat" and not include_heartbeats:

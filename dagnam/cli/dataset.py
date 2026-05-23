@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 
-from dagnam.cli.common import _error
+from dagnam.cli.common import error
 
 
-def _cmd_dataset_list(args: argparse.Namespace) -> None:
+def cmd_dataset_list(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
     from dagnam._core.exceptions import DagnamError
@@ -16,13 +16,13 @@ def _cmd_dataset_list(args: argparse.Namespace) -> None:
         api_key = get_api_key()
         api_url = get_api_url()
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     client = DagnamClient(api_url, api_key)
     try:
         datasets = client.list_datasets()
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     if not datasets:
         print("No datasets found.")
@@ -42,7 +42,7 @@ def _cmd_dataset_list(args: argparse.Namespace) -> None:
         )
 
 
-def _cmd_dataset_download(args: argparse.Namespace) -> None:
+def cmd_dataset_download(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
     from dagnam.data.cache import DEFAULT_CACHE_DIR
@@ -51,12 +51,12 @@ def _cmd_dataset_download(args: argparse.Namespace) -> None:
     try:
         dagnam.load_dataset(dataset_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     print(f"Dataset '{dataset_id}' downloaded to {DEFAULT_CACHE_DIR / dataset_id}")
 
 
-def _cmd_dataset_info(args: argparse.Namespace) -> None:
+def cmd_dataset_info(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
     from dagnam._core.exceptions import DagnamError
@@ -67,13 +67,13 @@ def _cmd_dataset_info(args: argparse.Namespace) -> None:
         api_key = get_api_key()
         api_url = get_api_url()
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     client = DagnamClient(api_url, api_key)
     try:
         meta = client.get_dataset_meta(dataset_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     for key, value in meta.items():
         if isinstance(value, dict):

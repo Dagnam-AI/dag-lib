@@ -7,6 +7,7 @@ config file, ``dagnam.configure()``, or explicit override).
 
 from __future__ import annotations
 
+from dagnam._types import JsonArray, JsonObject
 from typing import Optional
 
 from dagnam._core.client import DagnamClient
@@ -15,13 +16,13 @@ from dagnam._core.resolver import resolve_client
 
 def inference(
     deployment_id: str,
-    inputs: dict,
+    inputs: JsonObject,
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
     timeout: int = 30,
-) -> dict:
+) -> JsonObject:
     """Call a deployed model's /predict endpoint.
 
     >>> result = dagnam.inference("dep_abc123", {"text": "hello"})
@@ -32,13 +33,13 @@ def inference(
 
 def inference_batch(
     deployment_id: str,
-    inputs: list,
+    inputs: JsonArray,
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
     timeout: int = 30,
-) -> list:
+) -> JsonArray:
     """Batch-predict against a deployed model.
 
     >>> results = dagnam.inference_batch("dep_abc123", [{"x": 1}, {"x": 2}])
@@ -53,7 +54,7 @@ def deployment_health(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Check a deployment's health status.
 
     >>> health = dagnam.deployment_health("dep_abc123")

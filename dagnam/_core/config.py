@@ -6,7 +6,7 @@ Reads persistent configuration from ~/.dagnam/config.json.
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from dagnam._types import JsonObject, JsonValue, ensure_json_object
 
 CONFIG_DIR: Path = Path.home() / ".dagnam"
 CONFIG_FILE: Path = CONFIG_DIR / "config.json"
@@ -14,10 +14,10 @@ CONFIG_FILE: Path = CONFIG_DIR / "config.json"
 _logger = logging.getLogger(__name__)
 
 
-def load_config() -> dict:
+def load_config() -> JsonObject:
     """Read ~/.dagnam/config.json. Returns empty dict if file doesn't exist or is malformed."""
     try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        return ensure_json_object(json.loads(CONFIG_FILE.read_text(encoding="utf-8")))
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError as exc:
@@ -31,6 +31,6 @@ def load_config() -> dict:
         return {}
 
 
-def get_config_value(key: str, default: Any = None) -> Any:
+def get_config_value(key: str, default: JsonValue = None) -> JsonValue:
     """Get a single value from the config file."""
     return load_config().get(key, default)

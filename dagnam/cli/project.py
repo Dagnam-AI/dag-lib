@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from dagnam.cli.common import _error
+from dagnam.cli.common import error
 
 
-def _cmd_projects_list(args: argparse.Namespace) -> None:
+def cmd_projects_list(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -20,22 +20,22 @@ def _cmd_projects_list(args: argparse.Namespace) -> None:
             limit=args.limit,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_projects_get(args: argparse.Namespace) -> None:
+def cmd_projects_get(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         result = dagnam.projects.get(args.project_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_projects_create(args: argparse.Namespace) -> None:
+def cmd_projects_create(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -47,27 +47,27 @@ def _cmd_projects_create(args: argparse.Namespace) -> None:
             visibility=args.visibility,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_projects_delete(args: argparse.Namespace) -> None:
+def cmd_projects_delete(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         dagnam.projects.delete(args.project_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(f"Project {args.project_id} deleted.")
 
 
-def _cmd_projects_duplicate(args: argparse.Namespace) -> None:
+def cmd_projects_duplicate(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         result = dagnam.projects.duplicate(args.project_id, title=args.title)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))

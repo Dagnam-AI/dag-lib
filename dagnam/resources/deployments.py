@@ -11,8 +11,9 @@ match the Phase 3 style (``dagnam.inference``, ``dagnam.stream_training``).
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from typing import Any, Optional
+from dagnam._types import JsonMapping, JsonObject
+from collections.abc import Iterator
+from typing import Optional
 from uuid import UUID
 
 from dagnam._core.client import DagnamClient
@@ -26,16 +27,20 @@ _PAUSED_STATES = frozenset({"paused"})
 _FAILED_STATES = frozenset({"failed"})
 
 
-def _stringify_id(value: Any) -> str:
+def _stringify_id(value: object) -> str:
     if isinstance(value, UUID):
         return str(value)
     return str(value)
 
 
+def _json_object_from_mapping(value: JsonMapping) -> JsonObject:
+    return {str(key): item for key, item in value.items()}
+
+
 def _lifecycle_lro(
     client: DagnamClient,
     deployment_id: str,
-    initial: Mapping[str, Any],
+    initial: JsonMapping,
     *,
     success_states: frozenset[str],
     name: str,
@@ -68,7 +73,7 @@ def list(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject | str | None:
     """List deployments visible to the current credential.
 
     >>> dagnam.deployments.list(status="running")["items"]
@@ -85,12 +90,12 @@ def list(
 
 
 def get(
-    deployment_id: str,
+    deployment_id: str | UUID,
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Fetch a single deployment record."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_deployment(_stringify_id(deployment_id))
@@ -102,7 +107,7 @@ def health(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Return the platform-side health row for a deployment."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_deployment_health_full(_stringify_id(deployment_id))
@@ -115,7 +120,7 @@ def metrics(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Fetch aggregated deployment metrics for the given time range."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_deployment_metrics(_stringify_id(deployment_id), time_range=time_range)
@@ -133,7 +138,7 @@ def logs(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Fetch paginated deployment logs."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_deployment_logs(
@@ -167,7 +172,7 @@ def create(
     min_instances: Optional[int] = None,
     max_instances: Optional[int] = None,
     region: Optional[str] = None,
-    config: Optional[Mapping[str, Any]] = None,
+    config: Optional[JsonMapping] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
@@ -190,7 +195,7 @@ def create(
     >>> dep = op.wait(timeout=300).result()
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {
+    payload: JsonObject = {
         "name": name,
         "project_id": _stringify_id(project_id),
         "checkpoint_path": checkpoint_path,
@@ -211,7 +216,7 @@ def create(
     if region is not None:
         payload["region"] = region
     if config is not None:
-        payload["config"] = dict(config)
+        payload["config"] = _json_object_from_mapping(config)
 
     initial = resolved.create_deployment(payload)
     deployment_id = _stringify_id(initial["id"])
@@ -233,14 +238,14 @@ def update(
     auto_scaling_enabled: Optional[bool] = None,
     min_instances: Optional[int] = None,
     max_instances: Optional[int] = None,
-    config: Optional[Mapping[str, Any]] = None,
+    config: Optional[JsonMapping] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Update mutable deployment fields (non-lifecycle)."""
     resolved = resolve_client(client, api_key, api_url)
-    payload: dict[str, Any] = {}
+    payload: JsonObject = {}
     for key, value in (
         ("name", name),
         ("instance_type", instance_type),
@@ -252,7 +257,7 @@ def update(
         if value is not None:
             payload[key] = value
     if config is not None:
-        payload["config"] = dict(config)
+        payload["config"] = _json_object_from_mapping(config)
     return resolved.update_deployment(_stringify_id(deployment_id), payload)
 
 
@@ -262,7 +267,7 @@ def delete(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> Optional[dict]:
+) -> Optional[JsonObject]:
     """Soft-delete a deployment."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.delete_deployment(_stringify_id(deployment_id))

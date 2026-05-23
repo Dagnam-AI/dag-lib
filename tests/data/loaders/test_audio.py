@@ -15,7 +15,7 @@ from dagnam.data.dataset import DagnamDataset
 class TestAudioFolderDispatch:
     """Tests that DagnamDataset dispatches audio_folder to the audio loader."""
 
-    def test_audio_folder_dispatches_to_loader(self, tmp_path: Path):
+    def test_audio_folder_dispatches_to_loader(self, tmp_path: Path) -> None:
         """audio_folder format routes to audio_loader.create_pytorch_loader."""
         ds = DagnamDataset(
             {
@@ -44,7 +44,7 @@ class TestAudioFolderDispatch:
         assert call_kwargs["batch_size"] == 2
         assert call_kwargs["num_workers"] == 0
 
-    def test_audio_dataset_type_dispatches_to_audio_loader(self, tmp_path: Path):
+    def test_audio_dataset_type_dispatches_to_audio_loader(self, tmp_path: Path) -> None:
         """dataset_type='audio' with non-tabular format routes to audio loader."""
         ds = DagnamDataset(
             {
@@ -66,7 +66,7 @@ class TestAudioFolderDispatch:
         assert result == "audio_loader"
         mock_create.assert_called_once()
 
-    def test_audio_import_error_message(self, tmp_path: Path):
+    def test_audio_importerror_message(self, tmp_path: Path) -> None:
         """Raises ImportError with helpful message when torchaudio is missing."""
         ds = DagnamDataset(
             {
@@ -89,7 +89,7 @@ class TestAudioFolderDispatch:
         ):
             ds.to_pytorch_loader(split="train", batch_size=2, num_workers=0)
 
-    def test_csv_audio_dataset_uses_csv_loader(self, tmp_path: Path):
+    def test_csv_audio_dataset_uses_csv_loader(self, tmp_path: Path) -> None:
         """CSV format with audio dataset_type still uses csv_loader."""
         (tmp_path / "data.csv").write_text("feature,label\n1.0,yes\n2.0,no\n", encoding="utf-8")
         ds = DagnamDataset(

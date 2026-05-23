@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from dagnam.cli.common import _error
+from dagnam.cli.common import error
 
 
-def _cmd_codegen_generate(args: argparse.Namespace) -> None:
+def cmd_codegen_generate(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -17,14 +17,14 @@ def _cmd_codegen_generate(args: argparse.Namespace) -> None:
             args.project_id,
             framework=args.framework,
             version_id=args.version_id,
-            **{"async": getattr(args, "async")},
+            async_mode=getattr(args, "async"),
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_codegen_preview(args: argparse.Namespace) -> None:
+def cmd_codegen_preview(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -35,22 +35,22 @@ def _cmd_codegen_preview(args: argparse.Namespace) -> None:
             version_id=args.version_id,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_codegen_validate(args: argparse.Namespace) -> None:
+def cmd_codegen_validate(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         result = dagnam.codegen.validate(args.project_id, version_id=args.version_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))
 
 
-def _cmd_codegen_download(args: argparse.Namespace) -> None:
+def cmd_codegen_download(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -59,8 +59,8 @@ def _cmd_codegen_download(args: argparse.Namespace) -> None:
             args.project_id,
             framework=args.framework,
             version_id=args.version_id,
-            output=args.output,
+            dest=args.output,
         )
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(json.dumps(result, indent=2, default=str))

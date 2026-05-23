@@ -5,6 +5,8 @@ methods exercise the real request-construction path without hitting a network.
 """
 
 from __future__ import annotations
+from tests.typing_helpers import RespxMockRouter
+
 
 from pathlib import Path
 
@@ -15,8 +17,8 @@ import respx
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.aio.base import (
     BaseAsyncDagnamClient,
-    _parse_cd,
-    _raise_for_job,
+    parse_content_disposition_filename,
+    raise_for_job_response,
     _sanitize_filename,
 )
 from dagnam._core.exceptions import (
@@ -55,17 +57,17 @@ def mock():
 # ---------------------------------------------------------------- base helpers
 
 
-def test_parse_cd_quoted() -> None:
-    assert _parse_cd('attachment; filename="x.csv"') == "x.csv"
+def testparse_content_disposition_filename_quoted() -> None:
+    assert parse_content_disposition_filename('attachment; filename="x.csv"') == "x.csv"
 
 
-def test_parse_cd_unquoted() -> None:
-    assert _parse_cd("attachment; filename=x.csv") == "x.csv"
+def testparse_content_disposition_filename_unquoted() -> None:
+    assert parse_content_disposition_filename("attachment; filename=x.csv") == "x.csv"
 
 
-def test_parse_cd_default() -> None:
-    assert _parse_cd(None) == "data"
-    assert _parse_cd("inline") == "data"
+def testparse_content_disposition_filename_default() -> None:
+    assert parse_content_disposition_filename(None) == "data"
+    assert parse_content_disposition_filename("inline") == "data"
 
 
 def test_sanitize_filename_rejects_unsafe() -> None:
@@ -74,27 +76,36 @@ def test_sanitize_filename_rejects_unsafe() -> None:
             _sanitize_filename(bad)
 
 
-def test_raise_for_job_2xx_returns():
+async def test_async_base_has_no_inference_headers_method() -> None:
+    c = BaseAsyncDagnamClient("https://x", "sk_key")
+    try:
+        assert not hasattr(c, "_inference_headers")
+        assert c._headers() == {"Authorization": "Bearer sk_key"}
+    finally:
+        await c._client.aclose()
+
+
+def testraise_for_job_response_2xx_returns() -> None:
     r = httpx.Response(200)
-    _raise_for_job(r, "job1")
+    raise_for_job_response(r, "job1")
 
 
-def test_raise_for_job_401():
+def testraise_for_job_response_401() -> None:
     with pytest.raises(AuthError):
-        _raise_for_job(httpx.Response(401), "job1")
+        raise_for_job_response(httpx.Response(401), "job1")
 
 
-def test_raise_for_job_404():
+def testraise_for_job_response_404() -> None:
     with pytest.raises(TrainingJobNotFoundError):
-        _raise_for_job(httpx.Response(404), "job1")
+        raise_for_job_response(httpx.Response(404), "job1")
 
 
-def test_raise_for_job_500():
+def testraise_for_job_response_500() -> None:
     with pytest.raises(APIError):
-        _raise_for_job(httpx.Response(500, text="boom"), "job1")
+        raise_for_job_response(httpx.Response(500, text="boom"), "job1")
 
 
-async def test_base_request_connection_error_wraps():
+async def test_base_request_connectionerror_wraps() -> None:
     base = BaseAsyncDagnamClient(API, "k")
     try:
         with respx.mock(base_url=API) as r:
@@ -105,7 +116,7 @@ async def test_base_request_connection_error_wraps():
         await base._client.aclose()
 
 
-async def test_base_request_timeout_wraps():
+async def test_base_request_timeout_wraps() -> None:
     base = BaseAsyncDagnamClient(API, "k")
     try:
         with respx.mock(base_url=API) as r:
@@ -119,33 +130,33 @@ async def test_base_request_timeout_wraps():
 # ---------------------------------------------------------------- hub
 
 
-async def test_async_list_hub_models(client, mock):
+async def test_async_list_hub_models(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/models").mock(return_value=httpx.Response(200, json={"items": []}))
     assert await client.list_hub_models() == {"items": []}
 
 
-async def test_async_get_hub_model_404(client, mock):
+async def test_async_get_hub_model_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/models/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(HubModelNotFoundError):
         await client.get_hub_model("missing")
 
 
-async def test_async_create_hub_model(client, mock):
+async def test_async_create_hub_model(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/hub/models").mock(return_value=httpx.Response(200, json={"id": "m1"}))
     assert await client.create_hub_model({}) == {"id": "m1"}
 
 
-async def test_async_update_hub_model(client, mock):
+async def test_async_update_hub_model(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.put("/api/v1/hub/models/m1").mock(return_value=httpx.Response(200, json={"id": "m1"}))
     assert await client.update_hub_model("m1", {}) == {"id": "m1"}
 
 
-async def test_async_delete_hub_model(client, mock):
+async def test_async_delete_hub_model(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.delete("/api/v1/hub/models/m1").mock(return_value=httpx.Response(204))
     assert await client.delete_hub_model("m1") is None
 
 
-async def test_async_hub_misc(client, mock):
+async def test_async_hub_misc(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/models/m1/files").mock(return_value=httpx.Response(200, json={}))
     mock.get("/api/v1/hub/models/m1/download").mock(return_value=httpx.Response(200, json={}))
     mock.get("/api/v1/hub/models/m1/versions").mock(return_value=httpx.Response(200, json=[]))
@@ -178,14 +189,14 @@ async def test_async_hub_misc(client, mock):
     await client.list_hub_starred()
 
 
-async def test_async_hub_text_response(client, mock):
+async def test_async_hub_text_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/categories").mock(
         return_value=httpx.Response(200, text="plain", headers={"Content-Type": "text/plain"})
     )
     assert await client.list_hub_categories() == "plain"
 
 
-async def test_async_hub_empty_response(client, mock):
+async def test_async_hub_empty_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/categories").mock(return_value=httpx.Response(204))
     assert await client.list_hub_categories() is None
 
@@ -193,7 +204,7 @@ async def test_async_hub_empty_response(client, mock):
 # ---------------------------------------------------------------- projects
 
 
-async def test_async_projects_full_surface(client, mock):
+async def test_async_projects_full_surface(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects").mock(return_value=httpx.Response(200, json={"items": []}))
     mock.get("/api/v1/projects/p1").mock(return_value=httpx.Response(200, json={"id": "p1"}))
     mock.post("/api/v1/projects").mock(return_value=httpx.Response(200, json={"id": "p1"}))
@@ -224,20 +235,20 @@ async def test_async_projects_full_surface(client, mock):
     await client.unlink_dataset("p1", "d1")
 
 
-async def test_async_get_project_404(client, mock):
+async def test_async_get_project_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(ProjectNotFoundError):
         await client.get_project("missing")
 
 
-async def test_async_projects_text_response(client, mock):
+async def test_async_projects_text_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects").mock(
         return_value=httpx.Response(200, text="plain", headers={"Content-Type": "text/plain"})
     )
     assert await client.list_projects() == "plain"
 
 
-async def test_async_projects_empty_response(client, mock):
+async def test_async_projects_empty_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects").mock(return_value=httpx.Response(204))
     assert await client.list_projects() is None
 
@@ -245,7 +256,7 @@ async def test_async_projects_empty_response(client, mock):
 # ---------------------------------------------------------------- deployments
 
 
-async def test_async_deployments_full_surface(client, mock):
+async def test_async_deployments_full_surface(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/deployments").mock(return_value=httpx.Response(200, json={"items": []}))
     mock.get("/api/v1/deployments/dep1").mock(return_value=httpx.Response(200, json={"id": "dep1"}))
     mock.post("/api/v1/deployments").mock(return_value=httpx.Response(200, json={}))
@@ -285,7 +296,7 @@ async def test_async_deployments_full_surface(client, mock):
     await client.get_deployment_health_full("dep1")
 
 
-async def test_async_get_deployment_404(client, mock):
+async def test_async_get_deployment_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/deployments/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         await client.get_deployment("missing")
@@ -294,27 +305,27 @@ async def test_async_get_deployment_404(client, mock):
 # ---------------------------------------------------------------- inference
 
 
-async def test_async_predict(client, mock):
+async def test_async_predict(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/inference/dep1/predict").mock(
         return_value=httpx.Response(200, json={"y": 1})
     )
     assert await client.predict("dep1", {"x": 1}) == {"y": 1}
 
 
-async def test_async_predict_404(client, mock):
+async def test_async_predict_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/inference/missing/predict").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         await client.predict("missing", {})
 
 
-async def test_async_predict_batch(client, mock):
+async def test_async_predict_batch(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/inference/dep1/predict/batch").mock(
         return_value=httpx.Response(200, json=[{"y": 1}, {"y": 2}])
     )
     assert await client.predict_batch("dep1", [{"x": 1}, {"x": 2}]) == [{"y": 1}, {"y": 2}]
 
 
-async def test_async_deployment_health(client, mock):
+async def test_async_deployment_health(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/inference/dep1/health").mock(
         return_value=httpx.Response(200, json={"status": "healthy"})
     )
@@ -324,39 +335,39 @@ async def test_async_deployment_health(client, mock):
 # ---------------------------------------------------------------- datasets
 
 
-async def test_async_list_datasets_with_and_without_search(client, mock):
+async def test_async_list_datasets_with_and_without_search(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     route = mock.get("/api/v1/datasets/browse").mock(return_value=httpx.Response(200, json=[]))
     await client.list_datasets(search="cifar")
     assert "search=cifar" in str(route.calls[0].request.url)
     await client.list_datasets()
 
 
-async def test_async_get_dataset_meta(client, mock):
+async def test_async_get_dataset_meta(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/ds1/meta").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
     assert await client.get_dataset_meta("ds1") == {"id": "ds1"}
 
 
-async def test_async_dataset_404(client, mock):
+async def test_async_dataset_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/missing/meta").mock(return_value=httpx.Response(404))
     with pytest.raises(DatasetNotFoundError):
         await client.get_dataset_meta("missing")
 
 
-async def test_async_list_system_datasets(client, mock):
+async def test_async_list_system_datasets(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/system").mock(
         return_value=httpx.Response(200, json=[{"id": "iris"}])
     )
     assert await client.list_system_datasets() == [{"id": "iris"}]
 
 
-async def test_async_get_system_dataset_meta(client, mock):
+async def test_async_get_system_dataset_meta(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/system/iris").mock(
         return_value=httpx.Response(200, json={"id": "iris"})
     )
     assert await client.get_system_dataset_meta("iris") == {"id": "iris"}
 
 
-async def test_async_download_dataset(client, mock, tmp_path: Path):
+async def test_async_download_dataset(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     mock.get("/api/v1/datasets/ds1/download").mock(
         return_value=httpx.Response(
             200,
@@ -368,7 +379,7 @@ async def test_async_download_dataset(client, mock, tmp_path: Path):
     assert out.read_bytes() == b"data"
 
 
-async def test_async_download_system_dataset(client, mock, tmp_path: Path):
+async def test_async_download_system_dataset(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     mock.get("/api/v1/datasets/system/iris/download").mock(
         return_value=httpx.Response(
             200,
@@ -380,7 +391,7 @@ async def test_async_download_system_dataset(client, mock, tmp_path: Path):
     assert out.read_bytes() == b"iris"
 
 
-async def test_async_upload_dataset(client, mock, tmp_path: Path):
+async def test_async_upload_dataset(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     fp = tmp_path / "x.csv"
     fp.write_text("a,b\n1,2")
     mock.post("/api/v1/datasets/upload").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
@@ -395,7 +406,7 @@ async def test_async_upload_dataset(client, mock, tmp_path: Path):
     assert result == {"id": "ds1"}
 
 
-async def test_async_upload_dataset_from_url(client, mock):
+async def test_async_upload_dataset_from_url(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/datasets/upload-url").mock(
         return_value=httpx.Response(200, json={"task_id": "t1"})
     )
@@ -409,7 +420,7 @@ async def test_async_upload_dataset_from_url(client, mock):
     assert result == {"task_id": "t1"}
 
 
-async def test_async_get_dataset_task_status(client, mock):
+async def test_async_get_dataset_task_status(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/tasks/t1").mock(
         return_value=httpx.Response(200, json={"status": "done"})
     )
@@ -419,20 +430,20 @@ async def test_async_get_dataset_task_status(client, mock):
 # ---------------------------------------------------------------- checkpoints
 
 
-async def test_async_list_checkpoints(client, mock):
+async def test_async_list_checkpoints(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/training/jobs/job1/checkpoints").mock(
         return_value=httpx.Response(200, json=[{"id": "c1"}])
     )
     assert await client.list_checkpoints("job1") == [{"id": "c1"}]
 
 
-async def test_async_list_checkpoints_404(client, mock):
+async def test_async_list_checkpoints_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/training/jobs/job1/checkpoints").mock(return_value=httpx.Response(404))
     with pytest.raises(TrainingJobNotFoundError):
         await client.list_checkpoints("job1")
 
 
-async def test_async_download_checkpoint(client, mock, tmp_path: Path):
+async def test_async_download_checkpoint(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
     mock.get(url).mock(
         return_value=httpx.Response(200, content=b"weights", headers={"x-checksum-sha256": "abc"})
@@ -443,21 +454,21 @@ async def test_async_download_checkpoint(client, mock, tmp_path: Path):
     assert checksum == "abc"
 
 
-async def test_async_download_checkpoint_401(client, mock, tmp_path: Path):
+async def test_async_download_checkpoint_401(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
     mock.get(url).mock(return_value=httpx.Response(401))
     with pytest.raises(AuthError):
         await client.download_checkpoint("job1", "ck1", tmp_path / "x")
 
 
-async def test_async_download_checkpoint_404(client, mock, tmp_path: Path):
+async def test_async_download_checkpoint_404(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
     mock.get(url).mock(return_value=httpx.Response(404))
     with pytest.raises(CheckpointNotFoundError):
         await client.download_checkpoint("job1", "ck1", tmp_path / "x")
 
 
-async def test_async_download_checkpoint_500(client, mock, tmp_path: Path):
+async def test_async_download_checkpoint_500(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
     mock.get(url).mock(return_value=httpx.Response(500, text="boom"))
     with pytest.raises(APIError):
@@ -467,7 +478,7 @@ async def test_async_download_checkpoint_500(client, mock, tmp_path: Path):
 # ---------------------------------------------------------------- codegen
 
 
-async def test_async_generate_code_default(client, mock):
+async def test_async_generate_code_default(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     route = mock.post("/api/v1/projects/p1/generate-code").mock(
         return_value=httpx.Response(200, json={"task_id": "t1"})
     )
@@ -480,25 +491,25 @@ async def test_async_generate_code_default(client, mock):
     assert "async_mode=true" in str(route.calls[0].request.url)
 
 
-async def test_async_generate_code_explicit_payload(client, mock):
+async def test_async_generate_code_explicit_payload(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/projects/p1/generate-code").mock(return_value=httpx.Response(200, json={}))
     await client.generate_code("p1", payload={"custom": True})
 
 
-async def test_async_preview_code(client, mock):
+async def test_async_preview_code(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/p1/code-preview").mock(return_value=httpx.Response(200, json={}))
     await client.preview_code("p1", "pytorch", version_id="v1")
     await client.preview_code("p1", "pytorch")
 
 
-async def test_async_validate_code(client, mock):
+async def test_async_validate_code(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.post("/api/v1/projects/p1/validate").mock(return_value=httpx.Response(200, json={}))
     await client.validate_code("p1", version_id="v1")
     await client.validate_code("p1")
     await client.validate_architecture("p1")
 
 
-async def test_async_download_code_returns_bytes(client, mock):
+async def test_async_download_code_returns_bytes(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/p1/download-code").mock(
         return_value=httpx.Response(200, content=b"<code>")
     )
@@ -506,7 +517,7 @@ async def test_async_download_code_returns_bytes(client, mock):
     assert out == b"<code>"
 
 
-async def test_async_download_code_to_file(client, mock, tmp_path: Path):
+async def test_async_download_code_to_file(client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path) -> None:
     mock.get("/api/v1/projects/p1/download-code").mock(
         return_value=httpx.Response(200, content=b"<code>")
     )
@@ -516,20 +527,20 @@ async def test_async_download_code_to_file(client, mock, tmp_path: Path):
     assert dest.read_bytes() == b"<code>"
 
 
-async def test_async_download_code_zip_alias(client, mock):
+async def test_async_download_code_zip_alias(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/p1/download-code").mock(
         return_value=httpx.Response(200, content=b"x")
     )
     assert await client.download_code_zip("p1", "pytorch") == b"x"
 
 
-async def test_async_codegen_text_response(client, mock):
+async def test_async_codegen_text_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/p1/code-preview").mock(
         return_value=httpx.Response(200, text="plain", headers={"Content-Type": "text/plain"})
     )
     assert await client.preview_code("p1", "pytorch") == "plain"
 
 
-async def test_async_codegen_empty_response(client, mock):
+async def test_async_codegen_empty_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/projects/p1/code-preview").mock(return_value=httpx.Response(204))
     assert await client.preview_code("p1", "pytorch") is None

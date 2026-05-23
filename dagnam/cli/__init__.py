@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dagnam.cli.common import _dir_size, _error, _human_size
-from dagnam.cli.main import _build_parser, main
+from dagnam.cli.common import dir_size, error, human_size
+from dagnam.cli.main import build_parser, main
 
-__all__ = ["_build_parser", "_dir_size", "_error", "_human_size", "main"]
+__all__ = ["build_parser", "dir_size", "error", "human_size", "main"]

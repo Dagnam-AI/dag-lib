@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -29,17 +28,40 @@ from dagnam._core.exceptions import (
 )
 
 
-def _resp(status: int, *, text: str = "", content_type: str | None = None, content: bytes = b""):
-    headers: dict[str, str] = {}
-    if content_type is not None:
-        headers["Content-Type"] = content_type
-    return SimpleNamespace(
-        status_code=status,
-        ok=200 <= status < 300,
-        text=text,
-        content=content or text.encode(),
-        headers=headers,
-    )
+class _Resp:
+    def __init__(
+        self,
+        status: int,
+        *,
+        text: object = "",
+        content_type: str | None = None,
+        content: bytes = b"",
+        content_marker: object = b"",
+    ) -> None:
+        self.status_code = status
+        self.ok = 200 <= status < 300
+        self.text = text
+        self.content = content or str(text).encode()
+        self.headers: dict[str, str] = {}
+        self._content = content_marker
+        if content_type is not None:
+            self.headers["Content-Type"] = content_type
+
+
+class _StatuslessResp:
+    def __init__(self, *, ok: object = True) -> None:
+        self.ok = ok
+        self.text = ""
+        self.content = b""
+        self.headers: dict[str, str] = {}
+
+    @property
+    def status_code(self) -> object:
+        return None
+
+
+def _resp(status: int, *, text: object = "", content_type: str | None = None, content: bytes = b"") -> _Resp:
+    return _Resp(status, text=text, content_type=content_type, content=content)
 
 
 # build_url --------------------------------------------------------------
@@ -69,25 +91,20 @@ def test_bearer_headers_without_extras() -> None:
     assert common.bearer_headers("KEY") == {"Authorization": "Bearer KEY"}
 
 
-def test_inference_headers_sets_both_keys() -> None:
-    assert common.inference_headers("KEY") == {
-        "Authorization": "Bearer KEY",
-        "X-API-Key": "KEY",
-    }
+def test_inference_headers_removed() -> None:
+    assert not hasattr(common, "inference_headers")
 
 
 # safe_response_text -----------------------------------------------------
 
 
 def test_safe_response_text_streaming_with_type() -> None:
-    r = SimpleNamespace(
-        _content=False, headers={"Content-Type": "application/json"}, content=b"", text=""
-    )
+    r = _Resp(200, content_type="application/json", content_marker=False)
     assert common.safe_response_text(r) == "<streaming application/json body omitted>"
 
 
 def test_safe_response_text_streaming_without_type() -> None:
-    r = SimpleNamespace(_content=False, headers={}, content=b"", text="")
+    r = _Resp(200, content_marker=False)
     assert common.safe_response_text(r) == "<streaming response body omitted>"
 
 
@@ -111,7 +128,11 @@ def test_safe_response_text_handles_decode_failure() -> None:
         _content = b"abcd"
 
         @property
-        def text(self):
+        def status_code(self) -> int:
+            return 400
+
+        @property
+        def text(self) -> str:
             raise UnicodeDecodeError("utf-8", b"", 0, 1, "boom")
 
     assert common.safe_response_text(_BadText()) == "<4 bytes; failed to decode body>"
@@ -123,15 +144,19 @@ def test_safe_response_text_tolerates_missing_headers_attribute() -> None:
         text = "ok"
 
         @property
-        def headers(self):
+        def headers(self) -> dict[str, str]:
             raise AttributeError("no headers")
+
+        @property
+        def status_code(self) -> int:
+            return 200
 
     # getattr default kicks in; text path returns "ok"
     assert common.safe_response_text(_NoHeaders()) == "ok"
 
 
 def test_safe_response_text_coerces_non_string_text() -> None:
-    r = SimpleNamespace(headers={"Content-Type": "text/plain"}, content=b"123", text=123)
+    r = _Resp(400, content_type="text/plain", content=b"123", text=123)
     assert common.safe_response_text(r) == "123"
 
 
@@ -143,13 +168,13 @@ def test_raise_for_generic_no_op_on_2xx() -> None:
 
 
 def test_raise_for_generic_uses_ok_attribute_when_no_status_code() -> None:
-    r = SimpleNamespace(ok=True, status_code=None, text="", headers={}, content=b"")
+    r = _StatuslessResp()
     # _ok returns True via ok attribute (status_code is not int)
     # But raise_for_generic also reads status_code with int(...); short-circuit on _ok
     common.raise_for_generic(r)
 
 
-def test_raise_for_generic_401_raises_auth_error() -> None:
+def test_raise_for_generic_401_raises_autherror() -> None:
     with pytest.raises(AuthError):
         common.raise_for_generic(_resp(401))
 
@@ -360,5 +385,5 @@ def test_raise_for_upload_other_code() -> None:
 
 
 def test_ok_returns_false_for_unknown_response_shape() -> None:
-    r = SimpleNamespace(status_code=None, ok=None)
+    r = _StatuslessResp(ok=None)
     assert common._ok(r) is False

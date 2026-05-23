@@ -1,6 +1,9 @@
 """Unit tests for dagnam.codegen module."""
 
 from __future__ import annotations
+from tests.typing_helpers import JsonObject
+from pathlib import Path
+
 
 from unittest.mock import MagicMock
 
@@ -12,12 +15,12 @@ from dagnam._core.exceptions import CodegenError, CodegenValidationError
 from dagnam._core.lro import LongRunningOperation
 
 
-def _client(**overrides) -> MagicMock:
+def _client(**overrides: JsonObject) -> MagicMock:
     return MagicMock(spec=DagnamClient, **overrides)
 
 
 class TestGenerate:
-    def test_sync_returns_dict(self):
+    def test_sync_returns_dict(self) -> None:
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1", "code": "..."}))
         out = codegen.generate("p1", client=c)
         c.generate_code.assert_called_once_with(
@@ -25,7 +28,7 @@ class TestGenerate:
         )
         assert out["task_id"] == "t1"
 
-    def test_async_returns_lro(self):
+    def test_async_returns_lro(self) -> None:
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1", "status": "pending"}))
         op = codegen.generate("p1", async_mode=True, client=c)
         c.generate_code.assert_called_once_with(
@@ -34,7 +37,7 @@ class TestGenerate:
         assert isinstance(op, LongRunningOperation)
         assert op.initial()["task_id"] == "t1"
 
-    def test_passes_framework_and_version(self):
+    def test_passes_framework_and_version(self) -> None:
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1"}))
         codegen.generate("p1", framework="tensorflow", version_id="v2", client=c)
         c.generate_code.assert_called_once_with(
@@ -43,7 +46,7 @@ class TestGenerate:
 
 
 class TestPreview:
-    def test_preview_delegates(self):
+    def test_preview_delegates(self) -> None:
         c = _client(preview_code=MagicMock(return_value={"code": "import torch"}))
         out = codegen.preview("p1", framework="pytorch", client=c)
         c.preview_code.assert_called_once_with("p1", framework="pytorch", version_id=None)
@@ -51,7 +54,7 @@ class TestPreview:
 
 
 class TestValidate:
-    def test_validate_delegates(self):
+    def test_validate_delegates(self) -> None:
         c = _client(validate_code=MagicMock(return_value={"valid": True}))
         out = codegen.validate("p1", version_id="v1", client=c)
         c.validate_code.assert_called_once_with("p1", version_id="v1")
@@ -59,13 +62,13 @@ class TestValidate:
 
 
 class TestDownload:
-    def test_download_returns_bytes_when_no_dest(self):
+    def test_download_returns_bytes_when_no_dest(self) -> None:
         c = _client(download_code=MagicMock(return_value=b"code"))
         out = codegen.download("p1", client=c)
         c.download_code.assert_called_once_with("p1", framework="pytorch", version_id=None)
         assert out == b"code"
 
-    def test_download_writes_to_dest(self, tmp_path):
+    def test_download_writes_to_dest(self, tmp_path: Path) -> None:
         c = _client(download_code=MagicMock(return_value=b"code"))
         dest = tmp_path / "out.zip"
         result = codegen.download("p1", dest=dest, client=c)
@@ -74,7 +77,7 @@ class TestDownload:
 
 
 class TestStatus:
-    def test_status_delegates(self):
+    def test_status_delegates(self) -> None:
         c = _client(get_code_status=MagicMock(return_value={"status": "completed"}))
         out = codegen.status("p1", "t1", client=c)
         c.get_code_status.assert_called_once_with("p1", "t1")
@@ -82,13 +85,13 @@ class TestStatus:
 
 
 class TestErrorPropagation:
-    def test_generate_propagates_codegen_error(self):
+    def test_generate_propagates_codegenerror(self) -> None:
         c = _client()
         c.generate_code.side_effect = CodegenError("boom")
         with pytest.raises(CodegenError):
             codegen.generate("p1", client=c)
 
-    def test_validate_propagates_validation_error(self):
+    def test_validate_propagates_validationerror(self) -> None:
         c = _client(validate_code=MagicMock(side_effect=CodegenValidationError("invalid arch")))
         with pytest.raises(CodegenValidationError):
             codegen.validate("p1", client=c)

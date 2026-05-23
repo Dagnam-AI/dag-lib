@@ -1,16 +1,19 @@
+from tests.typing_helpers import JsonObject
+from pathlib import Path
+
 """Unit tests for DagnamDataset class."""
 
 import json
 from unittest.mock import patch
 
-import pandas as pd
+import polars as pl
 import pytest
 
 from dagnam.data.dataset import DagnamDataset
 
 
 @pytest.fixture
-def data_dir(tmp_path):
+def data_dir(tmp_path: Path):
     """Create a temporary data directory."""
     d = tmp_path / "dataset_cache"
     d.mkdir()
@@ -43,7 +46,7 @@ def meta():
 
 
 class TestInit:
-    def test_attributes_from_meta(self, meta, data_dir):
+    def test_attributes_from_meta(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         assert ds.id == "ds-001"
         assert ds.name == "Test Dataset"
@@ -56,7 +59,7 @@ class TestInit:
         assert ds._data_dir == data_dir
         assert ds._data is None  # lazy
 
-    def test_optional_fields_default_to_none(self, data_dir):
+    def test_optional_fields_default_to_none(self, data_dir: Path) -> None:
         minimal = {
             "id": "ds-002",
             "name": "Minimal",
@@ -76,7 +79,7 @@ class TestInit:
 
 
 class TestInfo:
-    def test_info_keys(self, meta, data_dir):
+    def test_info_keys(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         info = ds.info
         expected_keys = {
@@ -91,7 +94,7 @@ class TestInfo:
         }
         assert set(info.keys()) == expected_keys
 
-    def test_info_values(self, meta, data_dir):
+    def test_info_values(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         info = ds.info
         assert info["id"] == "ds-001"
@@ -105,85 +108,85 @@ class TestInfo:
 
 
 # ------------------------------------------------------------------
-# to_pandas() tests
+# to_polars() tests
 # ------------------------------------------------------------------
 
 
-class TestToPandas:
-    def test_csv_loading(self, meta, data_dir):
+class TestToPolars:
+    def test_csv_loading(self, meta: JsonObject, data_dir: Path) -> None:
         csv_file = data_dir / "data.csv"
         csv_file.write_text("x,y\n1,2\n3,4\n")
         ds = DagnamDataset(meta, data_dir)
-        df = ds.to_pandas()
-        assert isinstance(df, pd.DataFrame)
+        df = ds.to_polars()
+        assert isinstance(df, pl.DataFrame)
         assert list(df.columns) == ["x", "y"]
-        assert len(df) == 2
+        assert df.height == 2
 
-    def test_tsv_loading(self, meta, data_dir):
+    def test_tsv_loading(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "tsv"
         tsv_file = data_dir / "data.tsv"
         tsv_file.write_text("x\ty\n1\t2\n3\t4\n")
         ds = DagnamDataset(meta, data_dir)
-        df = ds.to_pandas()
+        df = ds.to_polars()
         assert list(df.columns) == ["x", "y"]
-        assert len(df) == 2
+        assert df.height == 2
 
-    def test_json_loading(self, meta, data_dir):
+    def test_json_loading(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "json"
         records = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
         json_file = data_dir / "data.json"
         json_file.write_text(json.dumps(records))
         ds = DagnamDataset(meta, data_dir)
-        df = ds.to_pandas()
-        assert len(df) == 2
+        df = ds.to_polars()
+        assert df.height == 2
         assert "a" in df.columns
 
-    def test_jsonl_loading(self, meta, data_dir):
+    def test_jsonl_loading(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "jsonl"
         lines = '{"a":1,"b":2}\n{"a":3,"b":4}\n'
         jsonl_file = data_dir / "data.jsonl"
         jsonl_file.write_text(lines)
         ds = DagnamDataset(meta, data_dir)
-        df = ds.to_pandas()
-        assert len(df) == 2
+        df = ds.to_polars()
+        assert df.height == 2
 
-    def test_caching_after_first_call(self, meta, data_dir):
+    def test_caching_after_first_call(self, meta: JsonObject, data_dir: Path) -> None:
         csv_file = data_dir / "data.csv"
         csv_file.write_text("x\n1\n2\n")
         ds = DagnamDataset(meta, data_dir)
-        df1 = ds.to_pandas()
-        df2 = ds.to_pandas()
+        df1 = ds.to_polars()
+        df2 = ds.to_polars()
         assert df1 is df2  # same object, not re-parsed
 
-    def test_unsupported_format_raises_value_error(self, meta, data_dir):
+    def test_unsupported_format_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "parquet"
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Cannot load format 'parquet' as DataFrame"):
-            ds.to_pandas()
+            ds.to_polars()
 
-    def test_missing_file_raises_file_not_found(self, meta, data_dir):
+    def test_missing_file_raises_file_not_found(self, meta: JsonObject, data_dir: Path) -> None:
         # No CSV file in data_dir
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(FileNotFoundError, match="No data file matching"):
-            ds.to_pandas()
+            ds.to_polars()
 
-    def test_json_excludes_meta_json(self, meta, data_dir):
+    def test_json_excludes_meta_json(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "json"
         # Only meta.json present — should raise FileNotFoundError
         meta_file = data_dir / "meta.json"
         meta_file.write_text(json.dumps({"id": "test"}))
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(FileNotFoundError):
-            ds.to_pandas()
+            ds.to_polars()
 
-    def test_json_finds_non_meta_json(self, meta, data_dir):
+    def test_json_finds_non_meta_json(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "json"
         # meta.json should be skipped, data.json should be found
         (data_dir / "meta.json").write_text(json.dumps({"id": "test"}))
         (data_dir / "data.json").write_text(json.dumps([{"a": 1}]))
         ds = DagnamDataset(meta, data_dir)
-        df = ds.to_pandas()
-        assert len(df) == 1
+        df = ds.to_polars()
+        assert df.height == 1
 
 
 # ------------------------------------------------------------------
@@ -192,18 +195,18 @@ class TestToPandas:
 
 
 class TestToPytorchLoader:
-    def test_import_error_when_torch_missing(self, meta, data_dir):
+    def test_importerror_when_torch_missing(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with patch.dict("sys.modules", {"torch": None}):
             with pytest.raises(ImportError, match="PyTorch is required"):
                 ds.to_pytorch_loader()
 
-    def test_invalid_split_raises_value_error(self, meta, data_dir):
+    def test_invalid_split_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unknown split: foo"):
             ds.to_pytorch_loader(split="foo")
 
-    def test_unsupported_format_raises_value_error(self, meta, data_dir):
+    def test_unsupported_format_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "parquet"
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unsupported format for PyTorch loader: parquet"):
@@ -216,18 +219,18 @@ class TestToPytorchLoader:
 
 
 class TestToTensorflowDataset:
-    def test_import_error_when_tensorflow_missing(self, meta, data_dir):
+    def test_importerror_when_tensorflow_missing(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with patch.dict("sys.modules", {"tensorflow": None}):
             with pytest.raises(ImportError, match="TensorFlow is required"):
                 ds.to_tensorflow_dataset()
 
-    def test_invalid_split_raises_value_error(self, meta, data_dir):
+    def test_invalid_split_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unknown split: foo"):
             ds.to_tensorflow_dataset(split="foo")
 
-    def test_unsupported_format_raises_value_error(self, meta, data_dir):
+    def test_unsupported_format_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "parquet"
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unsupported format for TensorFlow dataset: parquet"):
@@ -240,18 +243,18 @@ class TestToTensorflowDataset:
 
 
 class TestToFlaxDataset:
-    def test_import_error_when_jax_missing(self, meta, data_dir):
+    def test_importerror_when_jax_missing(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with patch.dict("sys.modules", {"jax": None}):
             with pytest.raises(ImportError, match="JAX is required"):
                 ds.to_flax_dataset()
 
-    def test_invalid_split_raises_value_error(self, meta, data_dir):
+    def test_invalid_split_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unknown split: foo"):
             ds.to_flax_dataset(split="foo")
 
-    def test_unsupported_format_raises_value_error(self, meta, data_dir):
+    def test_unsupported_format_raises_valueerror(self, meta: JsonObject, data_dir: Path) -> None:
         meta["format"] = "parquet"
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unsupported format for Flax dataset: parquet"):

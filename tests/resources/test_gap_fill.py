@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -18,14 +20,46 @@ from dagnam._core.exceptions import (
     ChecksumError,
     StreamError,
 )
-from dagnam._core.lro import LongRunningOperation, _freeze
+from dagnam._core.lro import LongRunningOperation, freeze
 from dagnam.resources import checkpoints as ck_module, training as tr_module
-from dagnam.resources.training import _parse_event
+from dagnam.resources.training import RawSSEEvent, parse_event
+from tests.typing_helpers import LogCapture, PytestMonkeyPatch
+
+ScriptEvent = RawSSEEvent | requests.exceptions.RequestException
+
+
+def _sleep_noop(_seconds: float) -> None:
+    return None
+
+
+def _zero_jitter(_lower: float, _upper: float) -> float:
+    return 0.0
+
+
+def _actual_different(_path: Path) -> str:
+    return "actual-different"
+
+
+def _different_checksum(_path: Path) -> str:
+    return "different"
+
+
+def _checkpoint_cache_limit(_key: str, _default: object | None = None) -> int:
+    return 1024
+
+
+def _raw_event(
+    event: str,
+    data: str,
+    event_id: str | None = None,
+    retry: object | None = None,
+) -> RawSSEEvent:
+    return cast(RawSSEEvent, SimpleNamespace(event=event, data=data, id=event_id, retry=retry))
 
 # ---------------------------------------------------------------- deployments
 
 
-def test_deployments_stringify_uuid_branch():
+def test_deployments_stringify_uuid_branch() -> None:
     client = MagicMock(spec=DagnamClient)
     client.get_deployment.return_value = {"id": "x"}
     dep_id = uuid4()
@@ -33,19 +67,19 @@ def test_deployments_stringify_uuid_branch():
     client.get_deployment.assert_called_once_with(str(dep_id))
 
 
-def test_deployments_health():
+def test_deployments_health() -> None:
     client = MagicMock(spec=DagnamClient)
     client.get_deployment_health_full.return_value = {"status": "healthy"}
     assert deployments.health("dep1", client=client) == {"status": "healthy"}
 
 
-def test_deployments_metrics():
+def test_deployments_metrics() -> None:
     client = MagicMock(spec=DagnamClient)
     client.get_deployment_metrics.return_value = {"qps": 1}
     assert deployments.metrics("dep1", client=client, time_range="1h") == {"qps": 1}
 
 
-def test_deployments_create_with_optional_fields():
+def test_deployments_create_with_optional_fields() -> None:
     client = MagicMock(spec=DagnamClient)
     client.create_deployment.return_value = {"id": "dep1", "status": "deploying"}
     deployments.create(
@@ -72,7 +106,7 @@ def test_deployments_create_with_optional_fields():
     assert payload["config"] == {"x": 1}
 
 
-def test_deployments_update_with_config():
+def test_deployments_update_with_config() -> None:
     client = MagicMock(spec=DagnamClient)
     client.update_deployment.return_value = {"id": "dep1"}
     deployments.update("dep1", client=client, name="new", config={"k": "v"})
@@ -81,20 +115,20 @@ def test_deployments_update_with_config():
     assert payload["config"] == {"k": "v"}
 
 
-def test_deployments_delete():
+def test_deployments_delete() -> None:
     client = MagicMock(spec=DagnamClient)
     client.delete_deployment.return_value = None
     assert deployments.delete("dep1", client=client) is None
 
 
-def test_deployments_resume_returns_lro():
+def test_deployments_resume_returns_lro() -> None:
     client = MagicMock(spec=DagnamClient)
     client.resume_deployment.return_value = {"id": "dep1", "status": "running"}
     op = deployments.resume("dep1", client=client)
     assert isinstance(op, LongRunningOperation)
 
 
-def test_deployments_stream_events_delegates_to_iter_with_reconnect():
+def test_deployments_stream_events_delegates_to_iter_with_reconnect() -> None:
     """stream_events builds an _open callback and calls iter_with_reconnect."""
     client = MagicMock(spec=DagnamClient)
     fake_response = MagicMock()
@@ -118,7 +152,7 @@ def test_deployments_stream_events_delegates_to_iter_with_reconnect():
 # ---------------------------------------------------------------- projects
 
 
-def test_projects_stringify_uuid_branch():
+def test_projects_stringify_uuid_branch() -> None:
     client = MagicMock(spec=DagnamClient)
     client.get_project.return_value = {"id": "x"}
     pid = uuid4()
@@ -126,7 +160,7 @@ def test_projects_stringify_uuid_branch():
     client.get_project.assert_called_once_with(str(pid))
 
 
-def test_projects_create_with_description():
+def test_projects_create_with_description() -> None:
     client = MagicMock(spec=DagnamClient)
     client.create_project.return_value = {"id": "p1"}
     projects.create("title", client=client, description="d")
@@ -134,7 +168,7 @@ def test_projects_create_with_description():
     assert payload["description"] == "d"
 
 
-def test_projects_import_dag_with_description_tags_commit():
+def test_projects_import_dag_with_description_tags_commit() -> None:
     # NOTE: resources.projects calls client.import_project_dag(), which is not
     # part of the strict DagnamClient interface — use a loose mock.
     client = MagicMock()
@@ -153,7 +187,7 @@ def test_projects_import_dag_with_description_tags_commit():
     assert payload["commit_message"] == "msg"
 
 
-def test_projects_import_dag_existing_with_commit():
+def test_projects_import_dag_existing_with_commit() -> None:
     client = MagicMock()
     client.import_project_dag_existing.return_value = {"id": "p1"}
     projects.import_dag_existing("p1", {"ir": "..."}, client=client, commit_message="msg")
@@ -161,7 +195,7 @@ def test_projects_import_dag_existing_with_commit():
     assert payload["commit_message"] == "msg"
 
 
-def test_projects_save_architecture_with_commit():
+def test_projects_save_architecture_with_commit() -> None:
     client = MagicMock()
     client.save_project_architecture.return_value = {"version_id": "v1"}
     projects.save_architecture("p1", {"d": 1}, {"a": 1}, client=client, commit_message="m")
@@ -172,7 +206,7 @@ def test_projects_save_architecture_with_commit():
 # ---------------------------------------------------------------- hub
 
 
-def test_hub_stringify_uuid_branch():
+def test_hub_stringify_uuid_branch() -> None:
     client = MagicMock()
     client.hub_get.return_value = {"id": "m1"}
     mid = uuid4()
@@ -180,7 +214,7 @@ def test_hub_stringify_uuid_branch():
     client.hub_get.assert_called_once_with(str(mid))
 
 
-def test_hub_create_with_metadata():
+def test_hub_create_with_metadata() -> None:
     client = MagicMock()
     client.hub_create.return_value = {"id": "m1"}
     hub.create(
@@ -198,39 +232,39 @@ def test_hub_create_with_metadata():
 # ---------------------------------------------------------------- training stream gaps
 
 
-def test_parse_event_invalid_retry():
-    raw = SimpleNamespace(event="x", data="{}", id=None, retry="not-int")
-    ev = _parse_event(raw)
+def testparse_event_invalid_retry() -> None:
+    raw = _raw_event("x", "{}", retry="not-int")
+    ev = parse_event(raw)
     assert ev.retry is None
 
 
 class _FakeSSE:
-    def __init__(self, events):
-        self._events = events
+    def __init__(self, events: Sequence[ScriptEvent]) -> None:
+        self._events = list(events)
 
-    def events(self):
+    def events(self) -> Iterator[RawSSEEvent]:
         for e in self._events:
             if isinstance(e, Exception):
                 raise e
             yield e
 
 
-def _setup_fake_sseclient(monkeypatch, scripts):
+def _setup_fake_sseclient(monkeypatch: PytestMonkeyPatch, scripts: Sequence[Sequence[ScriptEvent]]) -> None:
     import sys
 
     iterator = iter(scripts)
 
     class _SSEClient:
-        def __init__(self, response):
+        def __init__(self, response: object) -> None:
             self._client = _FakeSSE(next(iterator))
 
-        def events(self):
+        def events(self) -> Iterator[RawSSEEvent]:
             return self._client.events()
 
     monkeypatch.setitem(sys.modules, "sseclient", SimpleNamespace(SSEClient=_SSEClient))
 
 
-def test_stream_training_skips_heartbeats(monkeypatch):
+def test_stream_training_skips_heartbeats(monkeypatch: PytestMonkeyPatch) -> None:
     client = MagicMock(spec=DagnamClient)
     fake_resp = MagicMock()
     fake_resp.close = MagicMock()
@@ -240,8 +274,8 @@ def test_stream_training_skips_heartbeats(monkeypatch):
         monkeypatch,
         [
             [
-                SimpleNamespace(event="heartbeat", data="{}", id=None, retry=None),
-                SimpleNamespace(event="complete", data="{}", id=None, retry=None),
+                _raw_event("heartbeat", "{}"),
+                _raw_event("complete", "{}"),
             ]
         ],
     )
@@ -250,7 +284,7 @@ def test_stream_training_skips_heartbeats(monkeypatch):
     assert [e.event for e in events] == ["complete"]
 
 
-def test_stream_training_reconnects_on_transport_error(monkeypatch):
+def test_stream_training_reconnects_on_transporterror(monkeypatch: PytestMonkeyPatch) -> None:
     client = MagicMock(spec=DagnamClient)
     fake_resp = MagicMock()
     fake_resp.close = MagicMock()
@@ -260,14 +294,14 @@ def test_stream_training_reconnects_on_transport_error(monkeypatch):
         monkeypatch,
         [
             [
-                SimpleNamespace(event="metric", data='{"loss":1}', id="e1", retry=None),
+                _raw_event("metric", '{"loss":1}', event_id="e1"),
                 requests.exceptions.ConnectionError("boom"),
             ],
-            [SimpleNamespace(event="complete", data="{}", id=None, retry=None)],
+            [_raw_event("complete", "{}")],
         ],
     )
-    monkeypatch.setattr(tr_module.time, "sleep", lambda _s: None)
-    monkeypatch.setattr(tr_module.random, "uniform", lambda _a, _b: 0.0)
+    monkeypatch.setattr(tr_module.time, "sleep", _sleep_noop)
+    monkeypatch.setattr(tr_module.random, "uniform", _zero_jitter)
 
     events = list(tr_module.stream_training("job1", client=client))
     assert [e.event for e in events] == ["metric", "complete"]
@@ -275,7 +309,7 @@ def test_stream_training_reconnects_on_transport_error(monkeypatch):
     assert client.open_training_stream.call_args_list[1].kwargs == {"last_event_id": "e1"}
 
 
-def test_stream_training_close_error_swallowed(monkeypatch):
+def test_stream_training_closeerror_swallowed(monkeypatch: PytestMonkeyPatch) -> None:
     client = MagicMock(spec=DagnamClient)
     fake_resp = MagicMock()
     fake_resp.close = MagicMock(side_effect=RuntimeError("close blew up"))
@@ -283,14 +317,14 @@ def test_stream_training_close_error_swallowed(monkeypatch):
 
     _setup_fake_sseclient(
         monkeypatch,
-        [[SimpleNamespace(event="complete", data="{}", id=None, retry=None)]],
+        [[_raw_event("complete", "{}")]],
     )
 
     events = list(tr_module.stream_training("job1", client=client))
     assert [e.event for e in events] == ["complete"]
 
 
-def test_stream_training_gives_up_after_max_attempts(monkeypatch):
+def test_stream_training_gives_up_after_max_attempts(monkeypatch: PytestMonkeyPatch) -> None:
     client = MagicMock(spec=DagnamClient)
     fake_resp = MagicMock()
     fake_resp.close = MagicMock()
@@ -304,8 +338,8 @@ def test_stream_training_gives_up_after_max_attempts(monkeypatch):
             [requests.exceptions.ConnectionError("c")],
         ],
     )
-    monkeypatch.setattr(tr_module.time, "sleep", lambda _s: None)
-    monkeypatch.setattr(tr_module.random, "uniform", lambda _a, _b: 0.0)
+    monkeypatch.setattr(tr_module.time, "sleep", _sleep_noop)
+    monkeypatch.setattr(tr_module.random, "uniform", _zero_jitter)
 
     with pytest.raises(StreamError, match="dropped after 2"):
         list(tr_module.stream_training("job1", client=client, max_reconnects=2))
@@ -314,43 +348,43 @@ def test_stream_training_gives_up_after_max_attempts(monkeypatch):
 # ---------------------------------------------------------------- checkpoints gaps
 
 
-def test_pick_latest_raises_on_empty():
+def testpick_latest_raises_on_empty() -> None:
     with pytest.raises(CheckpointNotFoundError):
-        ck_module._pick_latest([])
+        ck_module.pick_latest([])
 
 
-def test_download_checkpoint_checksum_mismatch_unlinks(tmp_path, monkeypatch):
+def test_download_checkpoint_checksum_mismatch_unlinks(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 
-    def fake_stream(_job, _ck, dest):
+    def fake_stream(_job: object, _ck: object, dest: Path):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"bad-bytes")
         return dest, "expected-sha256"
 
     client.download_checkpoint_stream.side_effect = fake_stream
-    monkeypatch.setattr(ck_module, "compute_file_checksum", lambda _path: "actual-different")
+    monkeypatch.setattr(ck_module, "compute_file_checksum", _actual_different)
 
     with pytest.raises(ChecksumError):
         ck_module.download_checkpoint("job1", "ck1", client=client, cache_dir=cache)
 
 
-def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(tmp_path, monkeypatch):
+def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 
-    def fake_stream(_job, _ck, dest):
+    def fake_stream(_job: object, _ck: object, dest: Path):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"bad")
         return dest, "expected-sha"
 
     client.download_checkpoint_stream.side_effect = fake_stream
-    monkeypatch.setattr(ck_module, "compute_file_checksum", lambda _p: "different")
+    monkeypatch.setattr(ck_module, "compute_file_checksum", _different_checksum)
 
     # Patch Path.unlink to raise — exception path must be swallowed.
     original_unlink = Path.unlink
 
-    def _raising_unlink(self, *args, **kwargs):
+    def _raising_unlink(self: Path, *args: object, **kwargs: object) -> None:
         raise OSError("locked")
 
     monkeypatch.setattr(Path, "unlink", _raising_unlink)
@@ -361,17 +395,17 @@ def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(tmp_path,
         monkeypatch.setattr(Path, "unlink", original_unlink)
 
 
-def test_download_checkpoint_eviction_failure_is_logged(tmp_path, monkeypatch, caplog):
+def test_download_checkpoint_eviction_failure_is_logged(tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: LogCapture) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 
-    def fake_stream(_job, _ck, dest):
+    def fake_stream(_job: object, _ck: object, dest: Path):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"ok")
         return dest, None
 
     client.download_checkpoint_stream.side_effect = fake_stream
-    monkeypatch.setattr(ck_module, "get_config_value", lambda key, default=None: 1024)
+    monkeypatch.setattr(ck_module, "get_config_value", _checkpoint_cache_limit)
     monkeypatch.setattr(ck_module, "evict_lru", MagicMock(side_effect=OSError("disk full")))
 
     import logging
@@ -384,7 +418,7 @@ def test_download_checkpoint_eviction_failure_is_logged(tmp_path, monkeypatch, c
 # ---------------------------------------------------------------- LRO tail
 
 
-def test_lro_requires_at_least_one_success_state():
+def test_lro_requires_at_least_one_success_state() -> None:
     with pytest.raises(ValueError, match="success_state"):
         LongRunningOperation(
             poll=lambda: {"status": "x"},
@@ -392,7 +426,7 @@ def test_lro_requires_at_least_one_success_state():
         )
 
 
-def test_lro_name_property():
+def test_lro_name_property() -> None:
     op = LongRunningOperation(
         poll=lambda: {"status": "running"},
         success_states={"running"},
@@ -401,7 +435,7 @@ def test_lro_name_property():
     assert op.name == "testop"
 
 
-def test_lro_done_false_when_not_polled():
+def test_lro_done_false_when_not_polled() -> None:
     op = LongRunningOperation(
         poll=lambda: {"status": "running"},
         success_states={"running"},
@@ -409,7 +443,7 @@ def test_lro_done_false_when_not_polled():
     assert op.done() is False
 
 
-def test_lro_result_with_explicit_failure_message():
+def test_lro_result_with_explicit_failure_message() -> None:
     op = LongRunningOperation(
         poll=lambda: {"status": "failed", "error_message": "OOM"},
         success_states={"running"},
@@ -419,7 +453,7 @@ def test_lro_result_with_explicit_failure_message():
         op.result()
 
 
-def test_lro_status_force_polls():
+def test_lro_status_force_polls() -> None:
     poll = MagicMock(return_value={"status": "running"})
     op = LongRunningOperation(poll=poll, success_states={"running"})
     op.status()
@@ -429,7 +463,7 @@ def test_lro_status_force_polls():
 # ---------------------------------------------------------------- _core/__init__ no-aio branch
 
 
-def test_core_init_handles_missing_aio(monkeypatch):
+def test_core_init_handles_missing_aio(monkeypatch: PytestMonkeyPatch) -> None:
     """When the aio subpackage fails to import, _core falls back to None."""
     import sys
 
@@ -459,5 +493,5 @@ def test_core_init_handles_missing_aio(monkeypatch):
 # ---------------------------------------------------------------- _freeze
 
 
-def test_freeze_handles_none():
-    assert _freeze(None) == frozenset()
+def test_freeze_handles_none() -> None:
+    assert freeze(None) == frozenset()

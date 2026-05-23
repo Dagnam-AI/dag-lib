@@ -2,25 +2,108 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from importlib import import_module
+from typing import TYPE_CHECKING, Protocol, cast
 
+import numpy as np
+import numpy.typing as npt
+
+from dagnam._types import SupportsNumpy, TensorflowDataset
 from dagnam.data.loaders.audio.dataset import (
     AudioFolderDataset,
-    _collect_audio_files,
-    _resolve_audio_split_dir,
+    collect_audio_files,
+    resolve_audio_split_dir,
 )
-from dagnam.data.loaders.audio.io import _collect_audio_samples, _load_waveform_py
+from dagnam.data.loaders.audio.io import collect_audio_samples, load_waveform_py
 from dagnam.data.loaders.media import discover_class_folders, ensure_extracted, split_indices
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
-    from torch.utils.data import DataLoader
+    import jax
+    from torch.utils.data import DataLoader, Dataset
 
-    from dagnam.data.dataset import DagnamDataset
+    from dagnam.data.dataset._typing import DatasetMixinBase
+    from dagnam.data.loaders.flax import FlaxBatch
+
+WaveformArray = npt.NDArray[np.float32]
+SampleTransform = Callable[[object], object]
+TensorflowMapTransform = Callable[[object, object], object]
+WaveformTransform = Callable[[npt.ArrayLike], npt.ArrayLike]
+JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
+BatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
+
+
+class TensorValue(Protocol):
+    """TensorFlow tensor surface used by this adapter."""
+
+    def numpy(self) -> object: ...
+
+    def set_shape(self, shape: Sequence[int | None]) -> None: ...
+
+
+class TensorflowAudioDatasetFactory(Protocol):
+    """TensorFlow dataset factory used by this adapter."""
+
+    def from_tensor_slices(self, tensors: object) -> TensorflowDataset: ...
+
+
+class TensorflowAudioDataNamespace(Protocol):
+    """TensorFlow data namespace used by this adapter."""
+
+    AUTOTUNE: object
+    Dataset: TensorflowAudioDatasetFactory
+
+
+class TensorflowAudioModule(Protocol):
+    """TensorFlow module surface used by the audio adapter."""
+
+    data: TensorflowAudioDataNamespace
+    float32: object
+    int64: object
+
+    def py_function(
+        self,
+        func: Callable[..., object],
+        inp: Sequence[object],
+        Tout: Sequence[object],
+    ) -> tuple[TensorValue, TensorValue]: ...
+
+
+def _load_tensorflow() -> TensorflowAudioModule:
+    return cast(TensorflowAudioModule, import_module("tensorflow"))
+
+
+def _decode_path_tensor(value: object) -> str:
+    if isinstance(value, SupportsNumpy):
+        value = value.numpy()
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _decode_label_tensor(value: object) -> np.int64:
+    if isinstance(value, SupportsNumpy):
+        value = value.numpy()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, str | bytes | int | float | bool):
+        return np.int64(value)
+    raise TypeError(f"Expected TensorFlow scalar label, got {type(value).__name__}")
+
+
+def _int_setting(value: object, default: int) -> int:
+    if isinstance(value, bool | dict | list) or value is None:
+        return default
+    if isinstance(value, str | int | float):
+        return int(value)
+    return default
 
 
 def create_pytorch_loader(
-    dagnam_ds: DagnamDataset,
+    dagnam_ds: DatasetMixinBase,
     split: str = "train",
     batch_size: int = 32,
     num_workers: int = 4,
@@ -31,11 +114,11 @@ def create_pytorch_loader(
     sample_rate: int | None = None,
     n_mels: int = 64,
     max_duration_sec: float = 5.0,
-    waveform_transform=None,
-    spectrogram_transform=None,
-    target_transform=None,
-    collate_fn=None,
-) -> DataLoader:
+    waveform_transform: SampleTransform | None = None,
+    spectrogram_transform: SampleTransform | None = None,
+    target_transform: SampleTransform | None = None,
+    collate_fn: Callable[[object], object] | None = None,
+) -> DataLoader[object]:
     """Create a PyTorch DataLoader from an audio-folder dataset.
 
     Requires ``torchaudio`` to be installed.
@@ -62,7 +145,6 @@ def create_pytorch_loader(
         ImportError: If torch or torchaudio is not installed.
     """
     try:
-        import torch  # noqa: F401
         from torch.utils.data import DataLoader, Subset
     except ImportError:
         raise ImportError(
@@ -70,7 +152,7 @@ def create_pytorch_loader(
         )
 
     try:
-        import torchaudio  # noqa: F401
+        import_module("torchaudio")
     except ImportError:
         raise ImportError(
             "torchaudio is required for audio folder loading. "
@@ -89,25 +171,25 @@ def create_pytorch_loader(
     if sample_rate is None:
         sample_rate = 16000
         if hasattr(dagnam_ds, "_raw_meta"):
-            audio_cfg = dagnam_ds._raw_meta.get("audio", {})
-            if audio_cfg:
-                sample_rate = audio_cfg.get("sample_rate", 16000)
-                n_mels = audio_cfg.get("n_mels", n_mels)
+            audio_cfg = dagnam_ds.raw_meta.get("audio", {})
+            if isinstance(audio_cfg, dict):
+                sample_rate = _int_setting(audio_cfg.get("sample_rate"), 16000)
+                n_mels = _int_setting(audio_cfg.get("n_mels"), n_mels)
 
     # Ensure archives are extracted
-    data_root = ensure_extracted(dagnam_ds._data_dir)
+    data_root = ensure_extracted(dagnam_ds.data_dir)
 
     # Discover folder layout
     layout = discover_class_folders(data_root)
 
     # Build the dataset
     if layout.has_explicit_splits:
-        split_dir = _resolve_audio_split_dir(data_root, split, layout.splits)
-        files, labels, class_names = _collect_audio_files(split_dir)
+        split_dir = resolve_audio_split_dir(data_root, split, layout.splits)
+        files, labels, _class_names = collect_audio_files(split_dir)
     else:
-        files, labels, class_names = _collect_audio_files(data_root)
+        files, labels, _class_names = collect_audio_files(data_root)
 
-    dataset = AudioFolderDataset(
+    dataset: object = AudioFolderDataset(
         file_paths=files,
         labels=labels,
         target_sample_rate=sample_rate,
@@ -125,10 +207,10 @@ def create_pytorch_loader(
             n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
         )
         split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        dataset = Subset(dataset, split_map[split])
+        dataset = cast("Dataset[object]", Subset(cast("Dataset[object]", dataset), split_map[split]))
 
-    return DataLoader(
-        dataset,
+    loader = DataLoader(
+        cast("Dataset[object]", dataset),
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
@@ -136,10 +218,11 @@ def create_pytorch_loader(
         drop_last=(split == "train"),
         collate_fn=collate_fn,
     )
+    return loader
 
 
 def create_tensorflow_dataset(
-    dagnam_ds: DagnamDataset,
+    dagnam_ds: DatasetMixinBase,
     split: str = "train",
     batch_size: int = 32,
     shuffle: bool | None = None,
@@ -148,9 +231,9 @@ def create_tensorflow_dataset(
     seed: int = 42,
     sample_rate: int = 16000,
     max_duration_sec: float = 5.0,
-    map_fn=None,
-    batch_map_fn=None,
-):
+    map_fn: TensorflowMapTransform | None = None,
+    batch_map_fn: TensorflowMapTransform | None = None,
+) -> TensorflowDataset:
     """Create a tf.data.Dataset from an audio-folder dataset.
 
     Uses ``tf.audio.decode_wav`` for WAV; MP3/FLAC files are decoded on the
@@ -159,28 +242,22 @@ def create_tensorflow_dataset(
     can apply the generated MelSpectrogram layer. Pads/truncates to a fixed
     sample count per batch.
     """
-    import numpy as np
-    import tensorflow as tf
-
+    tf = _load_tensorflow()
     if shuffle is None:
         shuffle = split == "train"
 
-    samples, _classes = _collect_audio_samples(dagnam_ds, split, val_ratio, test_ratio, seed)
+    samples, _classes = collect_audio_samples(dagnam_ds, split, val_ratio, test_ratio, seed)
     target_len = int(max_duration_sec * sample_rate)
 
     paths = np.array([str(s[0]) for s in samples])
     labels = np.array([s[1] for s in samples], dtype=np.int64)
 
-    def _load_one(path_tensor, label_tensor):
-        path_str = (
-            path_tensor.numpy().decode("utf-8") if hasattr(path_tensor, "numpy") else path_tensor
-        )
-        waveform = _load_waveform_py(path_str, sample_rate, target_len)
-        return waveform.astype(np.float32), np.int64(
-            label_tensor.numpy() if hasattr(label_tensor, "numpy") else label_tensor
-        )
+    def _load_one(path_tensor: object, label_tensor: object) -> tuple[WaveformArray, np.int64]:
+        path_str = _decode_path_tensor(path_tensor)
+        waveform: WaveformArray = load_waveform_py(path_str, sample_rate, target_len)
+        return waveform.astype(np.float32), _decode_label_tensor(label_tensor)
 
-    def _map(path, label):
+    def _map(path: object, label: object) -> tuple[TensorValue, TensorValue]:
         waveform, lbl = tf.py_function(_load_one, [path, label], [tf.float32, tf.int64])
         waveform.set_shape([target_len])
         lbl.set_shape([])
@@ -199,7 +276,7 @@ def create_tensorflow_dataset(
 
 
 def create_flax_dataset(
-    dagnam_ds: DagnamDataset,
+    dagnam_ds: DatasetMixinBase,
     split: str = "train",
     batch_size: int = 32,
     shuffle: bool | None = None,
@@ -208,9 +285,9 @@ def create_flax_dataset(
     seed: int = 42,
     sample_rate: int = 16000,
     max_duration_sec: float = 5.0,
-    transform_fn=None,
-    batch_transform_fn=None,
-) -> list:
+    transform_fn: WaveformTransform | None = None,
+    batch_transform_fn: BatchTransform | None = None,
+) -> list["FlaxBatch"]:
     """Create a list of FlaxBatch from an audio-folder dataset.
 
     Loads waveforms eagerly into a list of JAX arrays. Suitable for small
@@ -218,14 +295,13 @@ def create_flax_dataset(
     per-batch ``jnp.asarray`` in the training loop.
     """
     import jax.numpy as jnp
-    import numpy as np
-
     from dagnam.data.loaders.flax import FlaxBatch
+    as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
 
     if shuffle is None:
         shuffle = split == "train"
 
-    samples, _classes = _collect_audio_samples(dagnam_ds, split, val_ratio, test_ratio, seed)
+    samples, _classes = collect_audio_samples(dagnam_ds, split, val_ratio, test_ratio, seed)
     target_len = int(max_duration_sec * sample_rate)
 
     if shuffle:
@@ -236,16 +312,16 @@ def create_flax_dataset(
     batches: list[FlaxBatch] = []
     for start in range(0, len(samples), batch_size):
         chunk = samples[start : start + batch_size]
-        waves = []
-        labels = []
+        waves: list[WaveformArray] = []
+        labels: list[int] = []
         for path, label in chunk:
-            w = _load_waveform_py(str(path), sample_rate, target_len)
+            w: WaveformArray = load_waveform_py(str(path), sample_rate, target_len)
             if transform_fn is not None:
-                w = transform_fn(w)
+                w = cast(WaveformArray, transform_fn(w))
             waves.append(w)
             labels.append(label)
-        x = jnp.asarray(np.stack(waves).astype(np.float32))
-        y = jnp.asarray(np.array(labels, dtype=np.int64))
+        x = as_jax_array(np.stack(waves).astype(np.float32))
+        y = as_jax_array(np.array(labels, dtype=np.int64))
         batch = FlaxBatch(features=x, labels=y)
         if batch_transform_fn is not None:
             feat, lbl = batch_transform_fn(batch.features, batch.labels)

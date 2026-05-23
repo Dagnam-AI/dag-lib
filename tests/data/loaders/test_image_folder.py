@@ -27,7 +27,7 @@ from dagnam.data.loaders.media import (
 class TestDiscoverClassFolders:
     """Tests for discover_class_folders utility."""
 
-    def test_explicit_splits_with_class_folders(self, tmp_path: Path):
+    def test_explicit_splits_with_class_folders(self, tmp_path: Path) -> None:
         """Discovers train/val/test splits with class subdirectories."""
         for split in ("train", "val", "test"):
             for cls in ("cat", "dog"):
@@ -40,7 +40,7 @@ class TestDiscoverClassFolders:
         assert layout.class_names == ["cat", "dog"]
         assert set(layout.splits) == {"train", "val", "test"}
 
-    def test_unsplit_class_folders(self, tmp_path: Path):
+    def test_unsplit_class_folders(self, tmp_path: Path) -> None:
         """Discovers class folders without explicit splits."""
         for cls in ("cat", "dog", "bird"):
             d = tmp_path / cls
@@ -53,7 +53,7 @@ class TestDiscoverClassFolders:
         assert layout.class_names == ["bird", "cat", "dog"]
         assert layout.splits == []
 
-    def test_partial_splits_treated_as_unsplit(self, tmp_path: Path):
+    def test_partial_splits_treated_as_unsplit(self, tmp_path: Path) -> None:
         """Only train folder present — treated as unsplit."""
         for cls in ("a", "b"):
             d = tmp_path / "train" / cls
@@ -65,7 +65,7 @@ class TestDiscoverClassFolders:
         assert layout.has_explicit_splits is True
         assert set(layout.splits) == {"train"}
 
-    def test_empty_directory_returns_empty_layout(self, tmp_path: Path):
+    def test_empty_directory_returns_empty_layout(self, tmp_path: Path) -> None:
         """Empty directory returns layout with no classes."""
         layout = discover_class_folders(tmp_path)
         assert layout.has_explicit_splits is False
@@ -76,7 +76,7 @@ class TestDiscoverClassFolders:
 class TestSplitIndices:
     """Tests for deterministic split_indices utility."""
 
-    def test_basic_split(self):
+    def test_basic_split(self) -> None:
         """Splits indices deterministically."""
         train, val, test = split_indices(100, val_ratio=0.1, test_ratio=0.1, seed=42)
         assert len(train) == 80
@@ -87,19 +87,19 @@ class TestSplitIndices:
         assert set(train) & set(test) == set()
         assert set(val) & set(test) == set()
 
-    def test_deterministic(self):
+    def test_deterministic(self) -> None:
         """Same seed produces same split."""
         result1 = split_indices(50, val_ratio=0.2, test_ratio=0.1, seed=123)
         result2 = split_indices(50, val_ratio=0.2, test_ratio=0.1, seed=123)
         assert result1 == result2
 
-    def test_different_seeds_differ(self):
+    def test_different_seeds_differ(self) -> None:
         """Different seeds produce different splits."""
         result1 = split_indices(50, val_ratio=0.2, test_ratio=0.1, seed=1)
         result2 = split_indices(50, val_ratio=0.2, test_ratio=0.1, seed=2)
         assert result1 != result2
 
-    def test_zero_val_and_test(self):
+    def test_zero_val_and_test(self) -> None:
         """All indices go to train when val/test ratios are 0."""
         train, val, test = split_indices(20, val_ratio=0.0, test_ratio=0.0, seed=42)
         assert len(train) == 20
@@ -110,7 +110,7 @@ class TestSplitIndices:
 class TestFolderLayout:
     """Tests for FolderLayout dataclass."""
 
-    def test_immutable(self):
+    def test_immutable(self) -> None:
         """FolderLayout is frozen."""
         layout = FolderLayout(
             has_explicit_splits=True,
@@ -125,7 +125,7 @@ class TestFolderLayout:
 class TestSafeArchiveExtraction:
     """Archive extraction must not write outside the cache directory."""
 
-    def test_zip_path_traversal_is_rejected(self, tmp_path: Path):
+    def test_zip_path_traversal_is_rejected(self, tmp_path: Path) -> None:
         archive = tmp_path / "bad.zip"
         with zipfile.ZipFile(archive, "w") as zf:
             zf.writestr("../escape.txt", "owned")
@@ -135,7 +135,7 @@ class TestSafeArchiveExtraction:
 
         assert not (tmp_path.parent / "escape.txt").exists()
 
-    def test_zip_decompression_bomb_is_rejected(self, tmp_path: Path):
+    def test_zip_decompression_bomb_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
             def infolist(self):
                 info = zipfile.ZipInfo("huge.bin")
@@ -148,7 +148,7 @@ class TestSafeArchiveExtraction:
         with pytest.raises(ValueError, match="Archive is too large"):
             _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
 
-    def test_tar_decompression_bomb_is_rejected(self, tmp_path: Path):
+    def test_tar_decompression_bomb_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
             def getmembers(self):
                 info = tarfile.TarInfo("huge.bin")
@@ -161,7 +161,7 @@ class TestSafeArchiveExtraction:
         with pytest.raises(ValueError, match="Archive is too large"):
             _safe_extract_tar(Archive(), tmp_path)  # type: ignore[arg-type]
 
-    def test_zip_symlink_member_is_rejected(self, tmp_path: Path):
+    def test_zip_symlink_member_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
             def infolist(self):
                 info = zipfile.ZipInfo("link")
@@ -175,7 +175,7 @@ class TestSafeArchiveExtraction:
         with pytest.raises(ValueError, match="Unsafe archive member link"):
             _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
 
-    def test_tar_special_member_is_rejected(self, tmp_path: Path):
+    def test_tar_special_member_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
             def getmembers(self):
                 info = tarfile.TarInfo("device")
@@ -188,7 +188,7 @@ class TestSafeArchiveExtraction:
         with pytest.raises(ValueError, match="Unsafe archive member type"):
             _safe_extract_tar(Archive(), tmp_path)  # type: ignore[arg-type]
 
-    def test_tar_path_traversal_is_rejected(self, tmp_path: Path):
+    def test_tar_path_traversal_is_rejected(self, tmp_path: Path) -> None:
         archive = tmp_path / "bad.tar"
         payload = b"owned"
         info = tarfile.TarInfo("../escape.txt")
@@ -206,7 +206,7 @@ class TestSafeArchiveExtraction:
 class TestPytorchExtra:
     """Packaging metadata must install image loader dependencies."""
 
-    def test_pytorch_extra_includes_torchvision(self):
+    def test_pytorch_extra_includes_torchvision(self) -> None:
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
         assert 'pytorch = ["torch>=2.0", "torchvision>=0.15"]' in pyproject
 
@@ -219,7 +219,7 @@ class TestPytorchExtra:
 class TestImageFolderDispatch:
     """Tests that DagnamDataset dispatches image_folder to the image loader."""
 
-    def test_image_folder_dispatches_to_loader(self, tmp_path: Path):
+    def test_image_folder_dispatches_to_loader(self, tmp_path: Path) -> None:
         """image_folder format routes to image_folder_loader.create_pytorch_loader."""
         ds = DagnamDataset(
             {
@@ -247,7 +247,7 @@ class TestImageFolderDispatch:
         assert call_kwargs["batch_size"] == 2
         assert call_kwargs["num_workers"] == 0
 
-    def test_image_folder_raises_import_error_without_torch(self, tmp_path: Path):
+    def test_image_folder_raises_importerror_without_torch(self, tmp_path: Path) -> None:
         """Raises ImportError when torch is not available."""
         ds = DagnamDataset(
             {

@@ -9,7 +9,7 @@ from dagnam.data.dataset import DagnamDataset
 class TestColumnRolesForwarding:
     """Tests that column_roles is forwarded to tabular loaders."""
 
-    def test_to_pytorch_loader_forwards_column_roles_to_csv_loader(self, tmp_path: Path):
+    def test_to_pytorch_loader_forwards_column_roles_to_csv_loader(self, tmp_path: Path) -> None:
         """column_roles kwarg is passed through to csv_loader."""
         (tmp_path / "data.csv").write_text("x,label,ignore_me\n1,a,0\n2,b,1\n", encoding="utf-8")
         ds = DagnamDataset(
@@ -43,7 +43,7 @@ class TestColumnRolesForwarding:
             "ignore_me": "ignore",
         }
 
-    def test_to_pytorch_loader_forwards_column_roles_to_json_loader(self, tmp_path: Path):
+    def test_to_pytorch_loader_forwards_column_roles_to_json_loader(self, tmp_path: Path) -> None:
         """column_roles kwarg is passed through to json_loader."""
         (tmp_path / "data.jsonl").write_text(
             '{"x": 1, "label": "a"}\n{"x": 2, "label": "b"}\n',
@@ -79,7 +79,7 @@ class TestColumnRolesForwarding:
             "label": "target",
         }
 
-    def test_column_roles_none_by_default(self, tmp_path: Path):
+    def test_column_roles_none_by_default(self, tmp_path: Path) -> None:
         """column_roles defaults to None when not provided."""
         (tmp_path / "data.csv").write_text("x,label\n1,a\n2,b\n", encoding="utf-8")
         ds = DagnamDataset(
@@ -105,7 +105,7 @@ class TestColumnRolesForwarding:
         call_kwargs = mock_create.call_args.kwargs
         assert call_kwargs.get("column_roles") is None
 
-    def test_column_roles_not_passed_to_image_loader(self, tmp_path: Path):
+    def test_column_roles_not_passed_to_image_loader(self, tmp_path: Path) -> None:
         """column_roles is NOT passed to image_folder_loader."""
         ds = DagnamDataset(
             {
@@ -133,7 +133,7 @@ class TestColumnRolesForwarding:
         call_kwargs = mock_create.call_args.kwargs
         assert "column_roles" not in call_kwargs
 
-    def test_column_roles_not_passed_to_audio_loader(self, tmp_path: Path):
+    def test_column_roles_not_passed_to_audio_loader(self, tmp_path: Path) -> None:
         """column_roles is NOT passed to audio_loader."""
         ds = DagnamDataset(
             {

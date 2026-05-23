@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dagnam._core.aio.base import _parse_cd as _parse_async_filename
+from dagnam._core.aio.base import parse_content_disposition_filename as _parse_async_filename
 from dagnam._core.client import DagnamClient
-from dagnam._core.client.base import _parse_filename
+from dagnam._core.client.base import parse_content_disposition_filename
 
 
-def _mock_response(status_code, headers, chunks):
+def _mock_response(status_code: int, headers: dict[str, str], chunks: list[bytes]) -> None:
     """Create a mock requests.Response for streaming."""
     resp = MagicMock()
     resp.ok = 200 <= status_code < 300
@@ -23,7 +23,7 @@ def _mock_response(status_code, headers, chunks):
 class TestSignedDownload:
     """Tests for presigned URL download (no auth header)."""
 
-    def test_signed_download_omits_auth_header(self, tmp_path: Path):
+    def test_signed_download_omits_auth_header(self, tmp_path: Path) -> None:
         """When download_url is provided, auth header is omitted."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -42,7 +42,7 @@ class TestSignedDownload:
         call_kwargs = mock_get.call_args.kwargs
         assert call_kwargs.get("headers") == {}
 
-    def test_signed_download_uses_provided_url(self, tmp_path: Path):
+    def test_signed_download_uses_provided_url(self, tmp_path: Path) -> None:
         """Uses the provided download_url instead of constructing one."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -62,7 +62,7 @@ class TestSignedDownload:
         call_args = mock_get.call_args
         assert call_args.args[0] == "https://signed.test/file?token=abc"
 
-    def test_normal_download_includes_auth_header(self, tmp_path: Path):
+    def test_normal_download_includes_auth_header(self, tmp_path: Path) -> None:
         """Normal download (no download_url) includes auth header."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -83,7 +83,7 @@ class TestSignedDownload:
 class TestResumableDownload:
     """Tests for resumable download with Range header."""
 
-    def test_full_download_writes_part_then_renames(self, tmp_path: Path):
+    def test_full_download_writes_part_then_renames(self, tmp_path: Path) -> None:
         """A full download writes to .part first, then atomically renames."""
         client = DagnamClient("https://api.test", "secret")
 
@@ -107,7 +107,7 @@ class TestResumableDownload:
         assert path.read_bytes() == b"hello"
         assert not (tmp_path / "data.csv.part").exists()
 
-    def test_resume_sends_range_and_appends(self, tmp_path: Path):
+    def test_resume_sends_range_and_appends(self, tmp_path: Path) -> None:
         """Resumes download by sending Range header and appending to .part file."""
         # Create a partial download
         part_file = tmp_path / "data.csv.part"
@@ -133,7 +133,7 @@ class TestResumableDownload:
         # Verify content was appended
         assert path.read_bytes() == b"hello world"
 
-    def test_resume_restarts_on_200(self, tmp_path: Path):
+    def test_resume_restarts_on_200(self, tmp_path: Path) -> None:
         """If server returns 200 instead of 206, restart full download."""
         # Create a partial download
         part_file = tmp_path / "data.csv.part"
@@ -154,7 +154,7 @@ class TestResumableDownload:
         # Full content replaces partial
         assert path.read_bytes() == b"hello world"
 
-    def test_no_resume_when_no_part_file(self, tmp_path: Path):
+    def test_no_resume_when_no_part_file(self, tmp_path: Path) -> None:
         """No Range header when there's no .part file."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -173,7 +173,7 @@ class TestResumableDownload:
         assert "Range" not in call_kwargs.get("headers", {})
         assert path.read_bytes() == b"hello"
 
-    def test_resume_disabled_ignores_part_file(self, tmp_path: Path):
+    def test_resume_disabled_ignores_part_file(self, tmp_path: Path) -> None:
         """When resume=False, ignores existing .part file."""
         part_file = tmp_path / "data.csv.part"
         part_file.write_bytes(b"old data")
@@ -194,7 +194,7 @@ class TestResumableDownload:
         # Part file should be cleaned up
         assert not part_file.exists()
 
-    def test_filename_from_content_disposition(self, tmp_path: Path):
+    def test_filename_from_content_disposition(self, tmp_path: Path) -> None:
         """Extracts filename from Content-Disposition header."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -210,7 +210,7 @@ class TestResumableDownload:
 
         assert path.name == "my_data.csv"
 
-    def test_content_disposition_path_traversal_is_rejected(self, tmp_path: Path):
+    def test_content_disposition_path_traversal_is_rejected(self, tmp_path: Path) -> None:
         """Server-provided filenames cannot escape the output directory."""
         client = DagnamClient("https://api.test", "secret")
         resp = _mock_response(
@@ -230,17 +230,17 @@ class TestResumableDownload:
 
 
 class TestContentDispositionFilename:
-    def test_rejects_empty_dot_and_parent_names(self):
+    def test_rejects_empty_dot_and_parent_names(self) -> None:
         for value in ('attachment; filename=""', "attachment; filename=.", "filename=.."):
             with pytest.raises(ValueError, match="Unsafe filename"):
-                _parse_filename(value)
+                parse_content_disposition_filename(value)
 
-    def test_rejects_slash_and_backslash_paths(self):
+    def test_rejects_slash_and_backslash_paths(self) -> None:
         for value in ('attachment; filename="../x.csv"', 'attachment; filename="..\\x.csv"'):
             with pytest.raises(ValueError, match="Unsafe filename"):
-                _parse_filename(value)
+                parse_content_disposition_filename(value)
 
-    def test_rejects_windows_special_paths(self):
+    def test_rejects_windows_special_paths(self) -> None:
         for value in (
             'attachment; filename="C:escape.txt"',
             'attachment; filename="file.txt:ads"',
@@ -248,9 +248,9 @@ class TestContentDispositionFilename:
             'attachment; filename="nul.txt"',
         ):
             with pytest.raises(ValueError, match="Unsafe filename"):
-                _parse_filename(value)
+                parse_content_disposition_filename(value)
 
-    def test_async_parser_rejects_windows_special_paths(self):
+    def test_async_parser_rejects_windows_special_paths(self) -> None:
         for value in (
             'attachment; filename="C:escape.txt"',
             'attachment; filename="file.txt:ads"',

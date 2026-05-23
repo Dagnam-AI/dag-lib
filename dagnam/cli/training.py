@@ -7,10 +7,18 @@ from dataclasses import asdict
 import json
 import sys
 
-from dagnam.cli.common import _error, _human_size
+from dagnam.cli.common import error, human_size
 
 
-def _cmd_checkpoint_list(args: argparse.Namespace) -> None:
+def _numeric_json_value(value: object, default: int = 0) -> int | float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return value
+    return default
+
+
+def cmd_checkpoint_list(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
     from dagnam._core.exceptions import DagnamError
@@ -19,7 +27,7 @@ def _cmd_checkpoint_list(args: argparse.Namespace) -> None:
         client = DagnamClient(get_api_url(), get_api_key())
         checkpoints = client.list_checkpoints(args.job_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
 
     if not checkpoints:
         print("No checkpoints found.")
@@ -34,22 +42,22 @@ def _cmd_checkpoint_list(args: argparse.Namespace) -> None:
             f"{cp.get('step', 0):>8} "
             f"{cp.get('is_best', False)!s:<6} "
             f"{cp.get('is_final', False)!s:<6} "
-            f"{_human_size(cp.get('file_size') or 0):>10}"
+            f"{human_size(_numeric_json_value(cp.get('file_size'))):>10}"
         )
 
 
-def _cmd_checkpoint_download(args: argparse.Namespace) -> None:
+def cmd_checkpoint_download(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
     try:
         path = dagnam.download_checkpoint(args.job_id, args.checkpoint_id)
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     print(str(path))
 
 
-def _cmd_stream(args: argparse.Namespace) -> None:
+def cmd_stream(args: argparse.Namespace) -> None:
     import dagnam
     from dagnam._core.exceptions import DagnamError
 
@@ -63,6 +71,6 @@ def _cmd_stream(args: argparse.Namespace) -> None:
             else:
                 print(f"[{ev.event}] {ev.data}")
     except DagnamError as exc:
-        _error(str(exc))
+        error(str(exc))
     except KeyboardInterrupt:
         sys.exit(130)

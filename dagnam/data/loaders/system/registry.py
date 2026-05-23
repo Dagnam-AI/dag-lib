@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
+from dagnam._types import JsonObject
 from dagnam._core.exceptions import DatasetNotFoundError
 from dagnam.data.loaders.system.torchvision import (
-    _load_cifar10,
-    _load_cifar100,
-    _load_fashion_mnist,
-    _load_imdb,
-    _load_mnist,
-    _load_oxford_pets,
-    _load_speech_commands,
-    _load_wikitext2,
+    load_cifar10,
+    load_cifar100,
+    load_fashion_mnist,
+    load_imdb,
+    load_mnist,
+    load_oxford_pets,
+    load_speech_commands,
+    load_wikitext2,
 )
 
 if TYPE_CHECKING:
     from dagnam.data.dataset import DagnamDataset
 
+TransformFn = Callable[[object], object]
+NativeLoader = Callable[[JsonObject, TransformFn | None], "DagnamDataset"]
 
-def resolve_system_dataset(meta: dict, transform=None) -> DagnamDataset:
+
+def resolve_system_dataset(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     """Load a system dataset using its native library internally.
 
     Matches on the dataset name (case-insensitive, fuzzy).  Returns a
@@ -29,12 +34,13 @@ def resolve_system_dataset(meta: dict, transform=None) -> DagnamDataset:
     Raises:
         DatasetNotFoundError: If no native loader exists for the dataset.
     """
-    name = meta.get("name", "").lower()
+    name_value = meta.get("name", "")
+    name = name_value.lower() if isinstance(name_value, str) else ""
 
     # Exact-match first, then substring
-    loader = _NATIVE_LOADERS.get(name)
+    loader = NATIVE_LOADERS.get(name)
     if loader is None:
-        for key, fn in _NATIVE_LOADERS.items():
+        for key, fn in NATIVE_LOADERS.items():
             if key in name or name in key:
                 loader = fn
                 break
@@ -45,24 +51,24 @@ def resolve_system_dataset(meta: dict, transform=None) -> DagnamDataset:
             f"Contact support or use a user-uploaded version."
         )
 
-    return loader(meta, transform=transform)
+    return loader(meta, transform)
 
 
-_NATIVE_LOADERS: dict[str, Any] = {
-    "mnist handwritten digits": _load_mnist,
-    "mnist": _load_mnist,
-    "cifar-10": _load_cifar10,
-    "cifar10": _load_cifar10,
-    "cifar-100": _load_cifar100,
-    "cifar100": _load_cifar100,
-    "fashion mnist": _load_fashion_mnist,
-    "fashion-mnist": _load_fashion_mnist,
-    "fashionmnist": _load_fashion_mnist,
-    "imdb movie reviews": _load_imdb,
-    "imdb": _load_imdb,
-    "oxford-iiit pet dataset": _load_oxford_pets,
-    "oxford pets": _load_oxford_pets,
-    "speech commands": _load_speech_commands,
-    "wikitext-2": _load_wikitext2,
-    "wikitext2": _load_wikitext2,
+NATIVE_LOADERS: dict[str, NativeLoader] = {
+    "mnist handwritten digits": load_mnist,
+    "mnist": load_mnist,
+    "cifar-10": load_cifar10,
+    "cifar10": load_cifar10,
+    "cifar-100": load_cifar100,
+    "cifar100": load_cifar100,
+    "fashion mnist": load_fashion_mnist,
+    "fashion-mnist": load_fashion_mnist,
+    "fashionmnist": load_fashion_mnist,
+    "imdb movie reviews": load_imdb,
+    "imdb": load_imdb,
+    "oxford-iiit pet dataset": load_oxford_pets,
+    "oxford pets": load_oxford_pets,
+    "speech commands": load_speech_commands,
+    "wikitext-2": load_wikitext2,
+    "wikitext2": load_wikitext2,
 }

@@ -18,11 +18,12 @@ threads.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 import time
-from typing import Any, Callable, FrozenSet, Optional
+from typing import Callable, FrozenSet, Optional
 
 from dagnam._core.exceptions import LROFailedError, LROTimeoutError
+from dagnam._types import JsonMapping
 
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_POLL_MIN = 2.0
@@ -33,6 +34,10 @@ _DEFAULT_FAILURE_STATES: FrozenSet[str] = frozenset({"failed"})
 
 def _freeze(values: Optional[Iterable[str]]) -> FrozenSet[str]:
     return frozenset(values or ())
+
+
+def freeze(values: Optional[Iterable[str]]) -> FrozenSet[str]:
+    return _freeze(values)
 
 
 class LongRunningOperation:
@@ -46,13 +51,13 @@ class LongRunningOperation:
     def __init__(
         self,
         *,
-        poll: Callable[[], Mapping[str, Any]],
+        poll: Callable[[], JsonMapping],
         success_states: Iterable[str],
         failure_states: Iterable[str] = _DEFAULT_FAILURE_STATES,
         state_key: str = "status",
         error_key: str = "error_message",
         name: str = "operation",
-        initial: Optional[Mapping[str, Any]] = None,
+        initial: Optional[JsonMapping] = None,
         poll_min: float = DEFAULT_POLL_MIN,
         poll_max: float = DEFAULT_POLL_MAX,
     ) -> None:
@@ -62,9 +67,9 @@ class LongRunningOperation:
         if not self._success:
             raise ValueError("LongRunningOperation requires at least one success_state")
         self._state_key = state_key
-        self._error_key = error_key
+        self.error_key = error_key
         self._name = name
-        self._latest: Optional[Mapping[str, Any]] = dict(initial) if initial else None
+        self._latest: Optional[JsonMapping] = initial
         self._poll_min = max(0.1, float(poll_min))
         self._poll_max = max(self._poll_min, float(poll_max))
 
@@ -76,16 +81,20 @@ class LongRunningOperation:
     def name(self) -> str:
         return self._name
 
-    def initial(self) -> Optional[Mapping[str, Any]]:
-        """Payload captured at construction (if any) — never re-polled."""
+    def configure_polling(self, min_interval: float, max_interval: float) -> None:
+        self._poll_min = min_interval
+        self._poll_max = max(min_interval, max_interval)
+
+    def initial(self) -> Optional[JsonMapping]:
+        """Payload captured at construction (if object) — never re-polled."""
         return self._latest
 
-    def status(self) -> Mapping[str, Any]:
+    def status(self) -> JsonMapping:
         """Force one poll and return the latest payload."""
         self._latest = self._poll()
         return self._latest
 
-    def _current_state(self, payload: Mapping[str, Any]) -> str:
+    def _current_state(self, payload: JsonMapping) -> str:
         value = payload.get(self._state_key)
         return str(value) if value is not None else ""
 
@@ -152,7 +161,7 @@ class LongRunningOperation:
     # Result extraction
     # ------------------------------------------------------------------
 
-    def result(self) -> Mapping[str, Any]:
+    def result(self) -> JsonMapping:
         """Return the final payload, or raise if the operation failed.
 
         Callers are expected to have ``wait()``-ed first (or otherwise
@@ -165,9 +174,7 @@ class LongRunningOperation:
             )
         state = self._current_state(self._latest)
         if state in self._failure:
-            detail = (
-                self._latest.get(self._error_key) if isinstance(self._latest, Mapping) else None
-            )
+            detail = self._latest.get(self.error_key)
             raise LROFailedError(state, detail if isinstance(detail, str) else None)
         if state in self._success:
             return self._latest

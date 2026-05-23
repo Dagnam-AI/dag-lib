@@ -63,7 +63,7 @@ import dagnam
 dataset = dagnam.load_dataset("550e8400-e29b-41d4-a716-446655440000")
 
 print(dataset.info)
-df = dataset.to_pandas()
+df = dataset.to_polars()
 
 train_loader = dataset.to_pytorch_loader(
     split="train",
@@ -125,7 +125,7 @@ the `.part` file when the server supports HTTP ranges.
 ### Framework Adapters
 
 ```python
-df = dataset.to_pandas()
+df = dataset.to_polars()
 
 loader = dataset.to_pytorch_loader(
     split="train",
@@ -163,7 +163,7 @@ loader = dataset.to_pytorch_loader(
 
 ### Supported Dataset Formats
 
-| Format | pandas | PyTorch | TensorFlow | Flax/JAX |
+| Format | polars | PyTorch | TensorFlow | Flax/JAX |
 | --- | :---: | :---: | :---: | :---: |
 | CSV | yes | yes | yes | yes |
 | TSV | yes | yes | yes | yes |

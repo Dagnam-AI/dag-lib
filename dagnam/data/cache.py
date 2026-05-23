@@ -10,13 +10,24 @@ import json
 from pathlib import Path
 import shutil
 import time
+from typing import TypedDict
 from urllib.parse import quote
+
+from dagnam._types import JsonObject, ensure_json_object
 
 DEFAULT_CACHE_DIR: Path = Path.home() / ".dagnam" / "datasets"
 DEFAULT_MAX_CACHE_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
 
 
-def _cache_dir_name(dataset_id: str) -> str:
+class CacheInfo(TypedDict):
+    """Metadata for one cached dataset directory."""
+
+    dataset_id: str
+    size_bytes: int
+    last_access: float | None
+
+
+def cache_dir_name(dataset_id: str) -> str:
     """Return a single filesystem-safe cache directory name for a dataset key."""
     raw = str(dataset_id)
     if raw == "":
@@ -33,7 +44,7 @@ def get_cache_dir(dataset_id: str, base_dir: Path | None = None) -> Path:
     Creates the directory (including parents) if it doesn't exist.
     """
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
-    cache_dir = base / _cache_dir_name(dataset_id)
+    cache_dir = base / cache_dir_name(dataset_id)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
@@ -66,13 +77,13 @@ def get_cache_size(base_dir: Path | None = None) -> int:
     return sum(f.stat().st_size for f in base.rglob("*") if f.is_file())
 
 
-def get_cache_info(base_dir: Path | None = None) -> list[dict]:
+def get_cache_info(base_dir: Path | None = None) -> list[CacheInfo]:
     """Return info about each cached dataset."""
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
     if not base.exists():
         return []
 
-    entries = []
+    entries: list[CacheInfo] = []
     for child in base.iterdir():
         if not child.is_dir():
             continue
@@ -102,7 +113,8 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
     if max_size_bytes is None:
         from dagnam._core.config import get_config_value
 
-        max_size_bytes = get_config_value("max_cache_size", DEFAULT_MAX_CACHE_BYTES)
+        configured_size = get_config_value("max_cache_size", DEFAULT_MAX_CACHE_BYTES)
+        max_size_bytes = configured_size if isinstance(configured_size, int) else DEFAULT_MAX_CACHE_BYTES
 
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
     if not base.exists():
@@ -129,20 +141,20 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
     return evicted
 
 
-def save_metadata(dataset_id: str, meta: dict, base_dir: Path | None = None) -> None:
+def save_metadata(dataset_id: str, meta: JsonObject, base_dir: Path | None = None) -> None:
     """Write meta.json to cache directory."""
     cache_dir = get_cache_dir(dataset_id, base_dir)
     meta_file = cache_dir / "meta.json"
     meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def load_metadata(dataset_id: str, base_dir: Path | None = None) -> dict:
+def load_metadata(dataset_id: str, base_dir: Path | None = None) -> JsonObject:
     """Read meta.json from cache directory. Returns empty dict if file doesn't exist."""
     cache_dir = get_cache_dir(dataset_id, base_dir)
     meta_file = cache_dir / "meta.json"
     if not meta_file.exists():
         return {}
-    return json.loads(meta_file.read_text(encoding="utf-8"))
+    return ensure_json_object(json.loads(meta_file.read_text(encoding="utf-8")))
 
 
 def save_checksum(dataset_id: str, checksum: str, base_dir: Path | None = None) -> None:

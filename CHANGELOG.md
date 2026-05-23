@@ -20,7 +20,7 @@ First public PyPI release of the official Dagnam.AI Python SDK.
 - Dataset loading with API-key authentication, metadata lookup, local caching,
   SHA-256 verification, LRU eviction, resumable downloads, presigned download
   URLs, and dataset version selection.
-- `DagnamDataset` adapters for pandas, PyTorch, TensorFlow, and Flax/JAX.
+- `DagnamDataset` adapters for polars, PyTorch, TensorFlow, and Flax/JAX.
 - Tabular CSV, TSV, JSON, and JSONL loaders with deterministic train/validation
   and test splits.
 - Image-folder and audio-folder dataset loaders with archive extraction,

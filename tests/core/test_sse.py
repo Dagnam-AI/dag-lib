@@ -1,6 +1,9 @@
 """Coverage for ``dagnam._core.sse`` — event parsing + reconnect loop."""
 
 from __future__ import annotations
+from collections.abc import Iterator, Sequence
+from tests.typing_helpers import PytestMonkeyPatch
+
 
 from types import SimpleNamespace
 
@@ -17,11 +20,21 @@ from dagnam._core.sse import (
 
 
 class _FakeRawEvent:
-    def __init__(self, *, event=None, data="", id=None, retry=None):
+    def __init__(
+        self,
+        *,
+        event: object = None,
+        data: object = "",
+        id: object = None,
+        retry: object = None,
+    ) -> None:
         self.event = event
         self.data = data
         self.id = id
         self.retry = retry
+
+
+RawScriptEntry = _FakeRawEvent | requests.exceptions.ConnectionError
 
 
 def test_parse_raw_event_with_json_payload() -> None:
@@ -70,33 +83,35 @@ class _ExplodingResponse:
 class _FakeSSE:
     """Minimal sseclient.SSEClient stand-in driven by a scripted event list."""
 
-    def __init__(self, raw_events):
+    def __init__(self, raw_events: Sequence[RawScriptEntry]) -> None:
         self._raw_events = raw_events
 
-    def events(self):
+    def events(self) -> Iterator[_FakeRawEvent]:
         for entry in self._raw_events:
             if isinstance(entry, Exception):
                 raise entry
             yield entry
 
 
-def _install_fake_sseclient(monkeypatch: pytest.MonkeyPatch, scripts):
+def _install_fake_sseclient(
+    monkeypatch: PytestMonkeyPatch, scripts: Sequence[Sequence[RawScriptEntry]]
+) -> None:
     """scripts: iterable of lists of raw-event-or-exception sequences, one per connection."""
 
     iterator = iter(scripts)
 
     class _SSEClient:
-        def __init__(self, response):  # response unused
+        def __init__(self, response: object) -> None:  # response unused
             self._client = _FakeSSE(next(iterator))
 
-        def events(self):
+        def events(self) -> Iterator[_FakeRawEvent]:
             return self._client.events()
 
     fake_module = SimpleNamespace(SSEClient=_SSEClient)
     monkeypatch.setitem(__import__("sys").modules, "sseclient", fake_module)
 
 
-def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch):
+def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch: PytestMonkeyPatch) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -111,7 +126,7 @@ def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch):
 
     responses: list[_FakeResponse] = []
 
-    def open_stream(cursor):
+    def open_stream(cursor: str | None) -> _FakeResponse:
         assert cursor is None or isinstance(cursor, str)
         r = _FakeResponse()
         responses.append(r)
@@ -127,7 +142,7 @@ def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch):
     assert responses[0].closed is True
 
 
-def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch):
+def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch: PytestMonkeyPatch) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -138,7 +153,7 @@ def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch):
         ],
     )
 
-    def open_stream(_cursor):
+    def open_stream(_cursor: str | None) -> _FakeResponse:
         return _FakeResponse()
 
     events = list(
@@ -151,7 +166,7 @@ def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch):
     assert [e.event for e in events] == ["heartbeat", "stream_end"]
 
 
-def test_iter_with_reconnect_reconnects_after_transport_error(monkeypatch):
+def test_iter_with_reconnect_reconnects_after_transporterror(monkeypatch: PytestMonkeyPatch) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -164,11 +179,14 @@ def test_iter_with_reconnect_reconnects_after_transport_error(monkeypatch):
             ],
         ],
     )
-    monkeypatch.setattr(sse_mod.time, "sleep", lambda _s: None)
+    def sleep(_seconds: float) -> None:
+        return None
 
-    cursors_seen: list = []
+    monkeypatch.setattr(sse_mod.time, "sleep", sleep)
 
-    def open_stream(cursor):
+    cursors_seen: list[str | None] = []
+
+    def open_stream(cursor: str | None) -> _FakeResponse:
         cursors_seen.append(cursor)
         return _FakeResponse()
 
@@ -183,7 +201,7 @@ def test_iter_with_reconnect_reconnects_after_transport_error(monkeypatch):
     assert cursors_seen == [None, "cursor-1"]
 
 
-def test_iter_with_reconnect_swallows_close_errors(monkeypatch):
+def test_iter_with_reconnect_swallows_closeerrors(monkeypatch: PytestMonkeyPatch) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -191,7 +209,7 @@ def test_iter_with_reconnect_swallows_close_errors(monkeypatch):
         ],
     )
 
-    def open_stream(_cursor):
+    def open_stream(_cursor: str | None) -> _ExplodingResponse:
         return _ExplodingResponse()
 
     events = list(
@@ -203,7 +221,7 @@ def test_iter_with_reconnect_swallows_close_errors(monkeypatch):
     assert [e.event for e in events] == ["complete"]
 
 
-def test_iter_with_reconnect_gives_up_after_max_attempts(monkeypatch):
+def test_iter_with_reconnect_gives_up_after_max_attempts(monkeypatch: PytestMonkeyPatch) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -212,10 +230,16 @@ def test_iter_with_reconnect_gives_up_after_max_attempts(monkeypatch):
             [requests.exceptions.ConnectionError("boom")],
         ],
     )
-    monkeypatch.setattr(sse_mod.time, "sleep", lambda _s: None)
-    monkeypatch.setattr(sse_mod.random, "uniform", lambda _a, _b: 0.0)
+    def sleep(_seconds: float) -> None:
+        return None
 
-    def open_stream(_cursor):
+    def uniform(_start: float, _stop: float) -> float:
+        return 0.0
+
+    monkeypatch.setattr(sse_mod.time, "sleep", sleep)
+    monkeypatch.setattr(sse_mod.random, "uniform", uniform)
+
+    def open_stream(_cursor: str | None) -> _FakeResponse:
         return _FakeResponse()
 
     with pytest.raises(StreamError, match="dropped after 2 reconnect attempts"):

@@ -1,360 +1,230 @@
-"""Command-line interface for the dagnam client library."""
+"""Command-line parser and entry point."""
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import getpass
-import sys
-
-from dagnam.cli.cache import _cmd_cache_clear, _cmd_cache_list
-from dagnam.cli.codegen import (
-    _cmd_codegen_download,
-    _cmd_codegen_generate,
-    _cmd_codegen_preview,
-    _cmd_codegen_validate,
-)
-from dagnam.cli.dataset import _cmd_dataset_download, _cmd_dataset_info, _cmd_dataset_list
-from dagnam.cli.deployment import (
-    _cmd_deployments_create,
-    _cmd_deployments_delete,
-    _cmd_deployments_get,
-    _cmd_deployments_list,
-    _cmd_deployments_logs,
-    _cmd_deployments_metrics,
-    _cmd_deployments_pause,
-    _cmd_deployments_resume,
-)
-from dagnam.cli.hub import (
-    _cmd_hub_featured,
-    _cmd_hub_fork,
-    _cmd_hub_get,
-    _cmd_hub_search,
-    _cmd_hub_star,
-    _cmd_hub_trending,
-    _cmd_hub_unstar,
-)
-from dagnam.cli.inference import (
-    _cmd_inference_batch,
-    _cmd_inference_health,
-    _cmd_inference_run,
-)
-from dagnam.cli.login import _cmd_login
-from dagnam.cli.project import (
-    _cmd_projects_create,
-    _cmd_projects_delete,
-    _cmd_projects_duplicate,
-    _cmd_projects_get,
-    _cmd_projects_list,
-)
-from dagnam.cli.training import _cmd_checkpoint_download, _cmd_checkpoint_list, _cmd_stream
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="dagnam",
-        description="Dagnam.AI CLI — manage datasets and local cache.",
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level ``dagnam`` CLI parser."""
+    from dagnam.cli.cache import cmd_cache_clear, cmd_cache_list
+    from dagnam.cli.codegen import (
+        cmd_codegen_download,
+        cmd_codegen_generate,
+        cmd_codegen_preview,
+        cmd_codegen_validate,
     )
-    subparsers = parser.add_subparsers(dest="command")
-
-    # --- login ---
-    login_parser = subparsers.add_parser("login", help="Save API key")
-    login_parser.add_argument(
-        "--api-url",
-        default=None,
-        help="Custom API URL (default: https://api.dagnam.ai)",
+    from dagnam.cli.dataset import cmd_dataset_download, cmd_dataset_info, cmd_dataset_list
+    from dagnam.cli.deployment import (
+        cmd_deployments_create,
+        cmd_deployments_delete,
+        cmd_deployments_get,
+        cmd_deployments_list,
+        cmd_deployments_logs,
+        cmd_deployments_metrics,
+        cmd_deployments_pause,
+        cmd_deployments_resume,
     )
-
-    # --- dataset ---
-    dataset_parser = subparsers.add_parser("dataset", help="Dataset operations")
-    ds_sub = dataset_parser.add_subparsers(dest="dataset_command")
-
-    ds_sub.add_parser("list", help="List available datasets")
-
-    dl_parser = ds_sub.add_parser("download", help="Download a dataset")
-    dl_parser.add_argument("dataset_id", help="Dataset ID to download")
-
-    info_parser = ds_sub.add_parser("info", help="Show dataset metadata")
-    info_parser.add_argument("dataset_id", help="Dataset ID to inspect")
-
-    # --- cache ---
-    cache_parser = subparsers.add_parser("cache", help="Local cache operations")
-    cache_sub = cache_parser.add_subparsers(dest="cache_command")
-
-    cache_sub.add_parser("list", help="List cached datasets")
-    cache_sub.add_parser("clear", help="Delete all cached datasets")
-
-    # --- inference ---
-    inf_parser = subparsers.add_parser("inference", help="Call a deployed model")
-    inf_sub = inf_parser.add_subparsers(dest="inference_command")
-
-    inf_run = inf_sub.add_parser("run", help="Single prediction")
-    inf_run.add_argument("deployment_id", help="Deployment ID")
-    inf_run.add_argument(
-        "--input",
-        required=True,
-        help='JSON literal (e.g. \'{"text":"hi"}\') or @path/to/input.json',
+    from dagnam.cli.hub import (
+        cmd_hub_featured,
+        cmd_hub_fork,
+        cmd_hub_get,
+        cmd_hub_search,
+        cmd_hub_star,
+        cmd_hub_trending,
+        cmd_hub_unstar,
     )
-
-    inf_batch = inf_sub.add_parser("batch", help="Batch prediction")
-    inf_batch.add_argument("deployment_id", help="Deployment ID")
-    inf_batch.add_argument(
-        "--inputs",
-        required=True,
-        help="JSON array literal or @path/to/inputs.json",
+    from dagnam.cli.inference import (
+        cmd_inference_batch,
+        cmd_inference_health,
+        cmd_inference_run,
     )
-
-    inf_health = inf_sub.add_parser("health", help="Check deployment health")
-    inf_health.add_argument("deployment_id", help="Deployment ID")
-
-    # --- checkpoint ---
-    ck_parser = subparsers.add_parser("checkpoint", help="Training checkpoint operations")
-    ck_sub = ck_parser.add_subparsers(dest="checkpoint_command")
-
-    ck_list = ck_sub.add_parser("list", help="List checkpoints for a training job")
-    ck_list.add_argument("job_id", help="Training job ID")
-
-    ck_dl = ck_sub.add_parser("download", help="Download a checkpoint")
-    ck_dl.add_argument("job_id", help="Training job ID")
-    ck_dl.add_argument(
-        "checkpoint_id",
-        nargs="?",
-        default=None,
-        help="Checkpoint ID (default: latest/best)",
+    from dagnam.cli.login import cmd_login
+    from dagnam.cli.project import (
+        cmd_projects_create,
+        cmd_projects_delete,
+        cmd_projects_duplicate,
+        cmd_projects_get,
+        cmd_projects_list,
     )
+    from dagnam.cli.training import cmd_checkpoint_download, cmd_checkpoint_list, cmd_stream
 
-    # --- stream ---
-    stream_parser = subparsers.add_parser("stream", help="Tail live training events via SSE")
-    stream_parser.add_argument("job_id", help="Training job ID")
-    stream_parser.add_argument("--json", action="store_true", help="Emit one JSON object per line")
-    stream_parser.add_argument("--heartbeats", action="store_true", help="Include heartbeat events")
+    parser = argparse.ArgumentParser(prog="dagnam")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # --- deployments ---
-    dep_parser = subparsers.add_parser("deployments", help="Deployment operations")
-    dep_sub = dep_parser.add_subparsers(dest="deployments_command")
+    def _login(args: argparse.Namespace) -> None:
+        cmd_login(args, getpass.getpass)
 
-    dep_list = dep_sub.add_parser("list", help="List deployments")
-    dep_list.add_argument("--status")
-    dep_list.add_argument("--platform")
-    dep_list.add_argument("--project-id")
-    dep_list.add_argument("--search")
-    dep_list.add_argument("--page", type=int)
-    dep_list.add_argument("--limit", type=int)
+    login = subparsers.add_parser("login")
+    login.add_argument("--api-url")
+    login.set_defaults(func=_login)
 
-    dep_get = dep_sub.add_parser("get", help="Get deployment details")
-    dep_get.add_argument("deployment_id")
+    dataset = subparsers.add_parser("dataset")
+    dataset_sub = dataset.add_subparsers(dest="dataset_command", required=True)
+    dataset_list = dataset_sub.add_parser("list")
+    dataset_list.add_argument("--api-url")
+    dataset_list.add_argument("--api-key")
+    dataset_list.add_argument("--type", default="all")
+    dataset_list.add_argument("--search")
+    dataset_list.set_defaults(func=cmd_dataset_list)
+    dataset_info = dataset_sub.add_parser("info")
+    dataset_info.add_argument("dataset_id")
+    dataset_info.add_argument("--api-url")
+    dataset_info.add_argument("--api-key")
+    dataset_info.set_defaults(func=cmd_dataset_info)
+    dataset_download = dataset_sub.add_parser("download")
+    dataset_download.add_argument("dataset_id")
+    dataset_download.add_argument("--output-dir", default=".")
+    dataset_download.set_defaults(func=cmd_dataset_download)
 
-    dep_create = dep_sub.add_parser("create", help="Create a deployment")
-    dep_create.add_argument("--name", required=True)
-    dep_create.add_argument("--project-id", required=True)
-    dep_create.add_argument("--checkpoint-path", required=True)
-    dep_create.add_argument("--platform", required=True)
-    dep_create.add_argument("--deployment-type", required=True)
-    dep_create.add_argument("--instance-type", required=True)
-    dep_create.add_argument("--num-instances", type=int)
+    cache = subparsers.add_parser("cache")
+    cache_sub = cache.add_subparsers(dest="cache_command", required=True)
+    cache_sub.add_parser("list").set_defaults(func=cmd_cache_list)
+    cache_sub.add_parser("clear").set_defaults(func=cmd_cache_clear)
 
-    dep_pause = dep_sub.add_parser("pause", help="Pause a deployment")
-    dep_pause.add_argument("deployment_id")
+    projects = subparsers.add_parser("projects")
+    project_sub = projects.add_subparsers(dest="project_command", required=True)
+    project_list = project_sub.add_parser("list")
+    project_list.add_argument("--framework")
+    project_list.add_argument("--search")
+    project_list.add_argument("--page", type=int, default=1)
+    project_list.add_argument("--limit", type=int, default=20)
+    project_list.set_defaults(func=cmd_projects_list)
+    project_get = project_sub.add_parser("get")
+    project_get.add_argument("project_id")
+    project_get.set_defaults(func=cmd_projects_get)
+    project_create = project_sub.add_parser("create")
+    project_create.add_argument("--title", required=True)
+    project_create.add_argument("--framework", default="pytorch")
+    project_create.add_argument("--description")
+    project_create.add_argument("--visibility", default="private")
+    project_create.set_defaults(func=cmd_projects_create)
+    project_delete = project_sub.add_parser("delete")
+    project_delete.add_argument("project_id")
+    project_delete.set_defaults(func=cmd_projects_delete)
+    project_dup = project_sub.add_parser("duplicate")
+    project_dup.add_argument("project_id")
+    project_dup.add_argument("--title")
+    project_dup.set_defaults(func=cmd_projects_duplicate)
 
-    dep_resume = dep_sub.add_parser("resume", help="Resume a deployment")
-    dep_resume.add_argument("deployment_id")
+    deployments = subparsers.add_parser("deployments")
+    deployment_sub = deployments.add_subparsers(dest="deployment_command", required=True)
+    deployment_list = deployment_sub.add_parser("list")
+    deployment_list.add_argument("--status")
+    deployment_list.add_argument("--platform")
+    deployment_list.add_argument("--project-id")
+    deployment_list.add_argument("--search")
+    deployment_list.add_argument("--page", type=int, default=1)
+    deployment_list.add_argument("--limit", type=int, default=20)
+    deployment_list.set_defaults(func=cmd_deployments_list)
+    deployment_get = deployment_sub.add_parser("get")
+    deployment_get.add_argument("deployment_id")
+    deployment_get.set_defaults(func=cmd_deployments_get)
+    deployment_create = deployment_sub.add_parser("create")
+    deployment_create.add_argument("--project-id", required=True)
+    deployment_create.add_argument("--name", required=True)
+    deployment_create.add_argument("--checkpoint-path", required=True)
+    deployment_create.add_argument("--platform", required=True)
+    deployment_create.add_argument("--deployment-type", required=True)
+    deployment_create.add_argument("--instance-type", required=True)
+    deployment_create.add_argument("--num-instances", type=int, default=1)
+    deployment_create.set_defaults(func=cmd_deployments_create)
+    for command_name, handler in {
+        "pause": cmd_deployments_pause,
+        "resume": cmd_deployments_resume,
+        "delete": cmd_deployments_delete,
+        "logs": cmd_deployments_logs,
+        "metrics": cmd_deployments_metrics,
+    }.items():
+        command = deployment_sub.add_parser(command_name)
+        command.add_argument("deployment_id")
+        if command_name == "logs":
+            command.add_argument("--level")
+            command.add_argument("--search")
+            command.add_argument("--limit", type=int, default=100)
+        if command_name == "metrics":
+            command.add_argument("--time-range", default="24h")
+        command.set_defaults(func=handler)
 
-    dep_del = dep_sub.add_parser("delete", help="Delete a deployment")
-    dep_del.add_argument("deployment_id")
+    inference = subparsers.add_parser("inference")
+    inference_sub = inference.add_subparsers(dest="inference_command", required=True)
+    run = inference_sub.add_parser("run")
+    run.add_argument("deployment_id")
+    run.add_argument("--input", required=True)
+    run.set_defaults(func=cmd_inference_run)
+    batch = inference_sub.add_parser("batch")
+    batch.add_argument("deployment_id")
+    batch.add_argument("--inputs", required=True)
+    batch.set_defaults(func=cmd_inference_batch)
+    health = inference_sub.add_parser("health")
+    health.add_argument("deployment_id")
+    health.set_defaults(func=cmd_inference_health)
 
-    dep_logs = dep_sub.add_parser("logs", help="Get deployment logs")
-    dep_logs.add_argument("deployment_id")
-    dep_logs.add_argument("--level")
-    dep_logs.add_argument("--search")
-    dep_logs.add_argument("--limit", type=int)
+    codegen = subparsers.add_parser("codegen")
+    codegen_sub = codegen.add_subparsers(dest="codegen_command", required=True)
+    for command_name, handler in {
+        "generate": cmd_codegen_generate,
+        "preview": cmd_codegen_preview,
+        "validate": cmd_codegen_validate,
+        "download": cmd_codegen_download,
+    }.items():
+        command = codegen_sub.add_parser(command_name)
+        command.add_argument("project_id")
+        command.add_argument("--framework", default="pytorch")
+        command.add_argument("--version-id")
+        command.add_argument("--async", action="store_true")
+        command.add_argument("--output")
+        command.set_defaults(func=handler)
 
-    dep_metrics = dep_sub.add_parser("metrics", help="Get deployment metrics")
-    dep_metrics.add_argument("deployment_id")
-    dep_metrics.add_argument("--time-range")
-
-    # --- hub ---
-    hub_parser = subparsers.add_parser("hub", help="Model hub operations")
-    hub_sub = hub_parser.add_subparsers(dest="hub_command")
-
-    hub_search = hub_sub.add_parser("search", help="Search models")
+    hub = subparsers.add_parser("hub")
+    hub_sub = hub.add_subparsers(dest="hub_command", required=True)
+    hub_search = hub_sub.add_parser("search")
     hub_search.add_argument("--search")
-    hub_search.add_argument("--framework")
     hub_search.add_argument("--task-type")
-    hub_search.add_argument("--sort-by")
-    hub_search.add_argument("--page", type=int)
-    hub_search.add_argument("--limit", type=int)
+    hub_search.add_argument("--framework")
+    hub_search.add_argument("--sort-by", default="popular")
+    hub_search.add_argument("--page", type=int, default=1)
+    hub_search.add_argument("--limit", type=int, default=20)
+    hub_search.set_defaults(func=cmd_hub_search)
+    for command_name, handler in {
+        "get": cmd_hub_get,
+        "star": cmd_hub_star,
+        "unstar": cmd_hub_unstar,
+        "fork": cmd_hub_fork,
+    }.items():
+        command = hub_sub.add_parser(command_name)
+        command.add_argument("model_id")
+        command.set_defaults(func=handler)
+    hub_sub.add_parser("featured").set_defaults(func=cmd_hub_featured)
+    hub_trending = hub_sub.add_parser("trending")
+    hub_trending.add_argument("--days", type=int, default=7)
+    hub_trending.set_defaults(func=cmd_hub_trending)
 
-    hub_get = hub_sub.add_parser("get", help="Get model details")
-    hub_get.add_argument("model_id")
+    checkpoint = subparsers.add_parser("checkpoint")
+    checkpoint_sub = checkpoint.add_subparsers(dest="checkpoint_command", required=True)
+    checkpoint_list = checkpoint_sub.add_parser("list")
+    checkpoint_list.add_argument("job_id")
+    checkpoint_list.set_defaults(func=cmd_checkpoint_list)
+    checkpoint_download = checkpoint_sub.add_parser("download")
+    checkpoint_download.add_argument("job_id")
+    checkpoint_download.add_argument("checkpoint_id", nargs="?", default="latest")
+    checkpoint_download.set_defaults(func=cmd_checkpoint_download)
 
-    hub_star = hub_sub.add_parser("star", help="Star a model")
-    hub_star.add_argument("model_id")
-
-    hub_unstar = hub_sub.add_parser("unstar", help="Unstar a model")
-    hub_unstar.add_argument("model_id")
-
-    hub_fork = hub_sub.add_parser("fork", help="Fork a model")
-    hub_fork.add_argument("model_id")
-
-    hub_sub.add_parser("featured", help="List featured models")
-
-    hub_trending = hub_sub.add_parser("trending", help="List trending models")
-    hub_trending.add_argument("--days", type=int)
-
-    # --- projects ---
-    proj_parser = subparsers.add_parser("projects", help="Project operations")
-    proj_sub = proj_parser.add_subparsers(dest="projects_command")
-
-    proj_list = proj_sub.add_parser("list", help="List projects")
-    proj_list.add_argument("--framework")
-    proj_list.add_argument("--search")
-    proj_list.add_argument("--page", type=int)
-    proj_list.add_argument("--limit", type=int)
-
-    proj_get = proj_sub.add_parser("get", help="Get project details")
-    proj_get.add_argument("project_id")
-
-    proj_create = proj_sub.add_parser("create", help="Create a project")
-    proj_create.add_argument("--title", required=True)
-    proj_create.add_argument("--framework")
-    proj_create.add_argument("--description")
-    proj_create.add_argument("--visibility")
-
-    proj_del = proj_sub.add_parser("delete", help="Delete a project")
-    proj_del.add_argument("project_id")
-
-    proj_dup = proj_sub.add_parser("duplicate", help="Duplicate a project")
-    proj_dup.add_argument("project_id")
-    proj_dup.add_argument("--title")
-
-    # --- codegen ---
-    cg_parser = subparsers.add_parser("codegen", help="Code generation operations")
-    cg_sub = cg_parser.add_subparsers(dest="codegen_command")
-
-    cg_gen = cg_sub.add_parser("generate", help="Generate code")
-    cg_gen.add_argument("project_id")
-    cg_gen.add_argument("--framework")
-    cg_gen.add_argument("--version-id")
-    cg_gen.add_argument("--async", action="store_true", dest="async")
-
-    cg_preview = cg_sub.add_parser("preview", help="Preview generated code")
-    cg_preview.add_argument("project_id")
-    cg_preview.add_argument("--framework")
-    cg_preview.add_argument("--version-id")
-
-    cg_validate = cg_sub.add_parser("validate", help="Validate project for codegen")
-    cg_validate.add_argument("project_id")
-    cg_validate.add_argument("--version-id")
-
-    cg_download = cg_sub.add_parser("download", help="Download generated code")
-    cg_download.add_argument("project_id")
-    cg_download.add_argument("--framework")
-    cg_download.add_argument("--version-id")
-    cg_download.add_argument("--output")
+    stream = subparsers.add_parser("stream")
+    stream.add_argument("job_id")
+    stream.add_argument("--heartbeats", action="store_true")
+    stream.add_argument("--json", action="store_true")
+    stream.set_defaults(func=cmd_stream)
 
     return parser
 
 
-def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    if args.command is None:
-        parser.print_help()
-        sys.exit(2)
-
-    if args.command == "login":
-        _cmd_login(args, getpass.getpass)
-    elif args.command == "dataset":
-        if getattr(args, "dataset_command", None) is None:
-            parser.parse_args(["dataset", "--help"])
-        elif args.dataset_command == "list":
-            _cmd_dataset_list(args)
-        elif args.dataset_command == "download":
-            _cmd_dataset_download(args)
-        elif args.dataset_command == "info":
-            _cmd_dataset_info(args)
-    elif args.command == "cache":
-        if getattr(args, "cache_command", None) is None:
-            parser.parse_args(["cache", "--help"])
-        elif args.cache_command == "list":
-            _cmd_cache_list(args)
-        elif args.cache_command == "clear":
-            _cmd_cache_clear(args)
-    elif args.command == "inference":
-        if getattr(args, "inference_command", None) is None:
-            parser.parse_args(["inference", "--help"])
-        elif args.inference_command == "run":
-            _cmd_inference_run(args)
-        elif args.inference_command == "batch":
-            _cmd_inference_batch(args)
-        elif args.inference_command == "health":
-            _cmd_inference_health(args)
-    elif args.command == "checkpoint":
-        if getattr(args, "checkpoint_command", None) is None:
-            parser.parse_args(["checkpoint", "--help"])
-        elif args.checkpoint_command == "list":
-            _cmd_checkpoint_list(args)
-        elif args.checkpoint_command == "download":
-            _cmd_checkpoint_download(args)
-    elif args.command == "stream":
-        _cmd_stream(args)
-    elif args.command == "deployments":
-        if getattr(args, "deployments_command", None) is None:
-            parser.parse_args(["deployments", "--help"])
-        elif args.deployments_command == "list":
-            _cmd_deployments_list(args)
-        elif args.deployments_command == "get":
-            _cmd_deployments_get(args)
-        elif args.deployments_command == "create":
-            _cmd_deployments_create(args)
-        elif args.deployments_command == "pause":
-            _cmd_deployments_pause(args)
-        elif args.deployments_command == "resume":
-            _cmd_deployments_resume(args)
-        elif args.deployments_command == "delete":
-            _cmd_deployments_delete(args)
-        elif args.deployments_command == "logs":
-            _cmd_deployments_logs(args)
-        elif args.deployments_command == "metrics":
-            _cmd_deployments_metrics(args)
-    elif args.command == "hub":
-        if getattr(args, "hub_command", None) is None:
-            parser.parse_args(["hub", "--help"])
-        elif args.hub_command == "search":
-            _cmd_hub_search(args)
-        elif args.hub_command == "get":
-            _cmd_hub_get(args)
-        elif args.hub_command == "star":
-            _cmd_hub_star(args)
-        elif args.hub_command == "unstar":
-            _cmd_hub_unstar(args)
-        elif args.hub_command == "fork":
-            _cmd_hub_fork(args)
-        elif args.hub_command == "featured":
-            _cmd_hub_featured(args)
-        elif args.hub_command == "trending":
-            _cmd_hub_trending(args)
-    elif args.command == "projects":
-        if getattr(args, "projects_command", None) is None:
-            parser.parse_args(["projects", "--help"])
-        elif args.projects_command == "list":
-            _cmd_projects_list(args)
-        elif args.projects_command == "get":
-            _cmd_projects_get(args)
-        elif args.projects_command == "create":
-            _cmd_projects_create(args)
-        elif args.projects_command == "delete":
-            _cmd_projects_delete(args)
-        elif args.projects_command == "duplicate":
-            _cmd_projects_duplicate(args)
-    elif args.command == "codegen":
-        if getattr(args, "codegen_command", None) is None:
-            parser.parse_args(["codegen", "--help"])
-        elif args.codegen_command == "generate":
-            _cmd_codegen_generate(args)
-        elif args.codegen_command == "preview":
-            _cmd_codegen_preview(args)
-        elif args.codegen_command == "validate":
-            _cmd_codegen_validate(args)
-        elif args.codegen_command == "download":
-            _cmd_codegen_download(args)
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command-line interface."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    handler = getattr(args, "func")
+    handler(args)
+    return 0

@@ -16,17 +16,18 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     TrainingJobNotFoundError,
 )
+from dagnam._types import ResponseLike
 
 _CHUNK_SIZE = 8192  # 8KB
-_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
+DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
 
 # For streaming downloads, requests' single-int timeout only applies to the
 # initial connect + header phase. Once headers arrive, a stalled body will hang
 # forever. We pass a (connect, read) tuple so the per-chunk read timeout fires
 # on dead sockets mid-download and the loop can fail fast.
-_STREAM_CONNECT_TIMEOUT = 30  # seconds
-_STREAM_READ_TIMEOUT = 60  # seconds — per-chunk read timeout
-_ALLOW_REDIRECTS = False
+STREAM_CONNECT_TIMEOUT = 30  # seconds
+STREAM_READ_TIMEOUT = 60  # seconds — per-chunk read timeout
+ALLOW_REDIRECTS = False
 _WINDOWS_RESERVED_FILENAMES = {
     "con",
     "prn",
@@ -37,14 +38,14 @@ _WINDOWS_RESERVED_FILENAMES = {
 }
 
 
-def _is_success_response(response: requests.Response) -> bool:
+def is_success_response(response: ResponseLike) -> bool:
     code = getattr(response, "status_code", None)
     if isinstance(code, int):
         return 200 <= code < 300
     return bool(getattr(response, "ok", False))
 
 
-def _safe_error_body(response: requests.Response) -> str:
+def safe_error_body_from_response(response: ResponseLike) -> str:
     """Extract a short, log-safe error body from a failed HTTP response."""
     return safe_response_text(response)
 
@@ -62,14 +63,14 @@ class BaseDagnamClient:
     @staticmethod
     def _raise_for_status(response: requests.Response, dataset_id: str) -> None:
         """Map HTTP error codes to library exceptions."""
-        if _is_success_response(response):
+        if is_success_response(response):
             return
         code = response.status_code
         if code == 401:
             raise AuthError("Authentication failed: invalid or expired API key")
         if code == 404:
             raise DatasetNotFoundError(dataset_id)
-        raise APIError(code, _safe_error_body(response))
+        raise APIError(code, safe_error_body_from_response(response))
 
     @staticmethod
     def _stream_response_to_file(resp: requests.Response, dest: Path) -> Path:
@@ -105,9 +106,9 @@ class BaseDagnamClient:
             return requests.get(
                 url,
                 headers=self._headers(),
-                timeout=(_STREAM_CONNECT_TIMEOUT, _STREAM_READ_TIMEOUT),
+                timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT),
                 stream=True,
-                allow_redirects=_ALLOW_REDIRECTS,
+                allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
@@ -136,28 +137,28 @@ class BaseDagnamClient:
 
     @staticmethod
     def _raise_for_deployment(response: requests.Response, deployment_id: str) -> None:
-        if _is_success_response(response):
+        if is_success_response(response):
             return
         code = response.status_code
         if code == 401:
             raise AuthError("Authentication failed: invalid or expired API key")
         if code == 404:
             raise DeploymentNotFoundError(deployment_id)
-        raise APIError(code, _safe_error_body(response))
+        raise APIError(code, safe_error_body_from_response(response))
 
     @staticmethod
-    def _raise_for_job(response: requests.Response, job_id: str) -> None:
-        if _is_success_response(response):
+    def raise_for_job_response(response: requests.Response, job_id: str) -> None:
+        if is_success_response(response):
             return
         code = response.status_code
         if code == 401:
             raise AuthError("Authentication failed: invalid or expired API key")
         if code == 404:
             raise TrainingJobNotFoundError(job_id)
-        raise APIError(code, _safe_error_body(response))
+        raise APIError(code, safe_error_body_from_response(response))
 
 
-def _parse_filename(header: str | None) -> str:
+def parse_content_disposition_filename(header: str | None) -> str:
     """Extract filename from a Content-Disposition header value.
 
     Supports both ``filename="name"`` and ``filename=name`` forms.

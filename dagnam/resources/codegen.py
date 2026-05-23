@@ -9,6 +9,7 @@ task reaches ``completed`` or ``failed``.
 
 from __future__ import annotations
 
+from dagnam._types import JsonObject
 from pathlib import Path
 from typing import Optional, Union
 
@@ -26,7 +27,7 @@ def generate(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> Union[dict, LongRunningOperation]:
+) -> Union[JsonObject, LongRunningOperation]:
     """Generate code for a project.
 
     When *async_mode* is ``True``, return an LRO that polls
@@ -45,9 +46,11 @@ def generate(
     )
     if not async_mode:
         return resp
-    task_id = resp["task_id"]
+    task_id_value = resp.get("task_id")
+    if not isinstance(task_id_value, str):
+        raise ValueError("Code generation response did not include a string task_id")
     return LongRunningOperation(
-        poll=lambda: resolved.get_code_status(project_id, task_id),
+        poll=lambda: resolved.get_code_status(project_id, task_id_value),
         success_states={"completed"},
         failure_states={"failed"},
         state_key="status",
@@ -64,7 +67,7 @@ def preview(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject | str | None:
     """Preview generated code without persisting it."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.preview_code(
@@ -81,7 +84,7 @@ def validate(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Validate a project's code generation readiness."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.validate_code(project_id, version_id=version_id)
@@ -108,6 +111,8 @@ def download(
         framework=framework,
         version_id=version_id,
     )
+    if not isinstance(data, bytes):
+        raise TypeError("Expected generated code bytes when no destination path is provided")
     if dest is not None:
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +128,7 @@ def status(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Check the status of a code generation task."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_code_status(project_id, task_id)

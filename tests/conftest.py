@@ -1,3 +1,5 @@
+from pathlib import Path
+
 """Shared test fixtures for the dagnam client library."""
 
 import json
@@ -6,7 +8,7 @@ import pytest
 
 
 @pytest.fixture
-def cache_dir(tmp_path):
+def cache_dir(tmp_path: Path):
     """Temporary cache directory for dataset storage during tests."""
     d = tmp_path / "dagnam_cache"
     d.mkdir()

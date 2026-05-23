@@ -7,12 +7,12 @@ split helpers used by image_folder_loader and audio_loader.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Iterable
 from pathlib import Path
 import random
 import shutil
 import stat
 import tarfile
-from typing import List, Tuple
 import zipfile
 
 # Standard split folder names recognized by the discovery logic.
@@ -61,8 +61,8 @@ class FolderLayout:
     """
 
     has_explicit_splits: bool
-    class_names: List[str]
-    splits: List[str]
+    class_names: list[str]
+    splits: list[str]
     root: Path
 
 
@@ -139,7 +139,7 @@ def split_indices(
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     seed: int = 42,
-) -> Tuple[List[int], List[int], List[int]]:
+) -> tuple[list[int], list[int], list[int]]:
     """Deterministically split indices into train/val/test sets.
 
     Uses a seeded random shuffle to ensure reproducibility across runs.
@@ -269,7 +269,7 @@ def _zip_member_is_symlink(member: zipfile.ZipInfo) -> bool:
     return file_type == stat.S_IFLNK
 
 
-def _validate_archive_size(member_sizes, member_count: int) -> None:
+def _validate_archive_size(member_sizes: Iterable[int], member_count: int) -> None:
     if member_count > _MAX_ARCHIVE_MEMBERS:
         raise ValueError(f"Archive has too many members: {member_count}")
 

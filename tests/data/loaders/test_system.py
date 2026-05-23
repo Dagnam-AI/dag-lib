@@ -22,7 +22,7 @@ from dagnam.data.dataset import DagnamDataset
 class TestDagnamDatasetNativeFields:
     """Verify _native_train/_native_test fields on DagnamDataset."""
 
-    def test_default_native_fields_are_none(self, tmp_path: Path):
+    def test_default_native_fields_are_none(self, tmp_path: Path) -> None:
         meta = {
             "id": "test-id",
             "name": "Test",
@@ -32,10 +32,10 @@ class TestDagnamDatasetNativeFields:
             "num_classes": 2,
         }
         ds = DagnamDataset(meta, tmp_path)
-        assert ds._native_train is None
-        assert ds._native_test is None
+        assert ds.native_train is None
+        assert ds.native_test is None
 
-    def test_native_fields_set_via_constructor(self, tmp_path: Path):
+    def test_native_fields_set_via_constructor(self, tmp_path: Path) -> None:
         meta = {
             "id": "test-id",
             "name": "Test",
@@ -47,8 +47,8 @@ class TestDagnamDatasetNativeFields:
         train_ds = MagicMock()
         test_ds = MagicMock()
         ds = DagnamDataset(meta, tmp_path, _native_train=train_ds, _native_test=test_ds)
-        assert ds._native_train is train_ds
-        assert ds._native_test is test_ds
+        assert ds.native_train is train_ds
+        assert ds.native_test is test_ds
 
 
 # ------------------------------------------------------------------
@@ -59,35 +59,35 @@ class TestDagnamDatasetNativeFields:
 class TestResolveSystemDataset:
     """Verify system dataset name matching."""
 
-    def test_unknown_dataset_raises(self):
+    def test_unknown_dataset_raises(self) -> None:
         from dagnam.data.loaders.system import resolve_system_dataset
 
         meta = {"name": "totally-unknown-dataset", "dataset_type": "tabular"}
         with pytest.raises(DatasetNotFoundError):
             resolve_system_dataset(meta)
 
-    def test_exact_match_mnist(self):
+    def test_exact_match_mnist(self) -> None:
         """MNIST should match via exact key."""
-        from dagnam.data.loaders.system import _NATIVE_LOADERS
+        from dagnam.data.loaders.system import NATIVE_LOADERS
 
-        assert "mnist" in _NATIVE_LOADERS
-        assert "mnist handwritten digits" in _NATIVE_LOADERS
+        assert "mnist" in NATIVE_LOADERS
+        assert "mnist handwritten digits" in NATIVE_LOADERS
 
-    def test_exact_match_cifar10(self):
-        from dagnam.data.loaders.system import _NATIVE_LOADERS
+    def test_exact_match_cifar10(self) -> None:
+        from dagnam.data.loaders.system import NATIVE_LOADERS
 
-        assert "cifar-10" in _NATIVE_LOADERS
-        assert "cifar10" in _NATIVE_LOADERS
+        assert "cifar-10" in NATIVE_LOADERS
+        assert "cifar10" in NATIVE_LOADERS
 
-    def test_exact_match_imdb(self):
-        from dagnam.data.loaders.system import _NATIVE_LOADERS
+    def test_exact_match_imdb(self) -> None:
+        from dagnam.data.loaders.system import NATIVE_LOADERS
 
-        assert "imdb" in _NATIVE_LOADERS
-        assert "imdb movie reviews" in _NATIVE_LOADERS
+        assert "imdb" in NATIVE_LOADERS
+        assert "imdb movie reviews" in NATIVE_LOADERS
 
 
 class TestVerifiedSystemDownloads:
-    def test_download_helper_rejects_non_https_urls(self, tmp_path: Path):
+    def test_download_helper_rejects_non_https_urls(self, tmp_path: Path) -> None:
         from dagnam.data.loaders.system import torchvision
 
         with pytest.raises(ValueError, match="HTTPS"):
@@ -97,11 +97,11 @@ class TestVerifiedSystemDownloads:
                 "0" * 64,
             )
 
-    def test_download_helper_verifies_sha256(self, tmp_path: Path):
+    def test_download_helper_verifies_sha256(self, tmp_path: Path) -> None:
         from dagnam.data.loaders.system import torchvision
 
         class Response:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.headers = {"Content-Length": "3"}
 
             def raise_for_status(self):
@@ -110,10 +110,10 @@ class TestVerifiedSystemDownloads:
             def iter_content(self, chunk_size: int):
                 yield b"bad"
 
-            def __enter__(self):
+            def __enter__(self) -> None:
                 return self
 
-            def __exit__(self, exc_type, exc, tb):
+            def __exit__(self, exc_type: type[BaseException] | None, exc: object, tb: object) -> None:
                 return None
 
         with patch(
@@ -138,7 +138,7 @@ class TestVerifiedSystemDownloads:
 class TestSourceTypeDetection:
     """Verify that load_dataset routes system datasets to native loaders."""
 
-    def test_uuid_with_system_source_type_routes_to_native(self, tmp_path: Path):
+    def test_uuid_with_system_source_type_routes_to_native(self, tmp_path: Path) -> None:
         """When /meta returns source_type=system, route to native loader."""
         meta = {
             "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -180,7 +180,7 @@ class TestSourceTypeDetection:
 class TestLoadInternal:
     """Verify sidecar metadata loading for server-side training."""
 
-    def test_reads_sidecar_for_user_dataset(self, tmp_path: Path):
+    def test_reads_sidecar_for_user_dataset(self, tmp_path: Path) -> None:
         """User dataset sidecar → direct file read."""
         dataset_id = "550e8400-e29b-41d4-a716-446655440000"
         meta_dir = tmp_path / ".dagnam_meta"
@@ -215,7 +215,7 @@ class TestLoadInternal:
         assert ds.name == "User Dataset"
         assert ds._data_dir == data_dir
 
-    def test_reads_sidecar_for_system_dataset(self, tmp_path: Path):
+    def test_reads_sidecar_for_system_dataset(self, tmp_path: Path) -> None:
         """System dataset sidecar → native loader."""
         dataset_id = "system-mnist-id"
         meta_dir = tmp_path / ".dagnam_meta"
@@ -252,7 +252,7 @@ class TestLoadInternal:
         mock_resolve.assert_called_once_with(meta)
         assert ds is mock_native_ds
 
-    def test_missing_sidecar_raises(self, tmp_path: Path):
+    def test_missing_sidecar_raises(self, tmp_path: Path) -> None:
         """Missing sidecar file raises FileNotFoundError."""
         meta_dir = tmp_path / ".dagnam_meta"
         meta_dir.mkdir()
@@ -269,7 +269,7 @@ class TestLoadInternal:
         ):
             _load_internal("nonexistent-id")
 
-    def test_internal_dataset_id_cannot_escape_meta_dir(self, tmp_path: Path):
+    def test_internal_dataset_id_cannot_escape_meta_dir(self, tmp_path: Path) -> None:
         """Internal sidecar lookup must not accept path-like dataset IDs."""
         meta_dir = tmp_path / ".dagnam_meta"
         meta_dir.mkdir()

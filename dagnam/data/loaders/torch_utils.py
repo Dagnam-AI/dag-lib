@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 
+
 def should_pin_memory() -> bool:
     """Return whether PyTorch pinned memory should be requested."""
     import torch
-
     accelerator = getattr(torch, "accelerator", None)
     is_accelerator_available = getattr(accelerator, "is_available", None)
     if callable(is_accelerator_available):

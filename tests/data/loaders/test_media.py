@@ -1,6 +1,8 @@
 """Coverage for dagnam.data.loaders.media — archive + folder discovery."""
 
 from __future__ import annotations
+from pathlib import Path
+
 
 import io
 import tarfile
@@ -21,13 +23,13 @@ from dagnam.data.loaders.media import (
 # ---------------------------------------------------------------- discover_class_folders
 
 
-def test_discover_class_folders_missing_root(tmp_path):
+def test_discover_class_folders_missing_root(tmp_path: Path) -> None:
     layout = discover_class_folders(tmp_path / "does-not-exist")
     assert layout.class_names == []
     assert not layout.has_explicit_splits
 
 
-def test_discover_class_folders_unsplit_layout(tmp_path):
+def test_discover_class_folders_unsplit_layout(tmp_path: Path) -> None:
     (tmp_path / "cat").mkdir()
     (tmp_path / "cat" / "a.jpg").write_bytes(b"x")
     (tmp_path / "dog").mkdir()
@@ -39,7 +41,7 @@ def test_discover_class_folders_unsplit_layout(tmp_path):
     assert layout.class_names == ["cat", "dog"]
 
 
-def test_discover_class_folders_split_layout(tmp_path):
+def test_discover_class_folders_split_layout(tmp_path: Path) -> None:
     for split in ("train", "val"):
         for cls in ("cat", "dog"):
             d = tmp_path / split / cls
@@ -51,7 +53,7 @@ def test_discover_class_folders_split_layout(tmp_path):
     assert layout.class_names == ["cat", "dog"]
 
 
-def test_discover_class_folders_split_dirs_without_classes_fall_through(tmp_path):
+def test_discover_class_folders_split_dirs_without_classes_fall_through(tmp_path: Path) -> None:
     # train/ exists but is empty — falls back to unsplit detection on root subdirs.
     (tmp_path / "train").mkdir()
     (tmp_path / "alpha").mkdir()
@@ -64,7 +66,7 @@ def test_discover_class_folders_split_dirs_without_classes_fall_through(tmp_path
 # ---------------------------------------------------------------- split_indices
 
 
-def test_split_indices_partitions_completely():
+def test_split_indices_partitions_completely() -> None:
     train, val, test = split_indices(100, val_ratio=0.2, test_ratio=0.1, seed=0)
     assert len(train) + len(val) + len(test) == 100
     assert set(train).isdisjoint(val)
@@ -75,18 +77,18 @@ def test_split_indices_partitions_completely():
 # ---------------------------------------------------------------- ensure_extracted
 
 
-def test_ensure_extracted_no_archive_returns_data_dir(tmp_path):
+def test_ensure_extracted_no_archive_returns_data_dir(tmp_path: Path) -> None:
     assert ensure_extracted(tmp_path) == tmp_path
 
 
-def test_ensure_extracted_already_extracted(tmp_path):
+def test_ensure_extracted_already_extracted(tmp_path: Path) -> None:
     e = tmp_path / "_extracted"
     e.mkdir()
     (e / "data").write_bytes(b"x")
     assert ensure_extracted(tmp_path) == e
 
 
-def test_ensure_extracted_zip_with_single_top_level_dir(tmp_path):
+def test_ensure_extracted_zip_with_single_top_level_dir(tmp_path: Path) -> None:
     archive = tmp_path / "data.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("root/file.txt", "hi")
@@ -96,7 +98,7 @@ def test_ensure_extracted_zip_with_single_top_level_dir(tmp_path):
     assert (result / "file.txt").read_text() == "hi"
 
 
-def test_ensure_extracted_zip_multiple_top_level(tmp_path):
+def test_ensure_extracted_zip_multiple_top_level(tmp_path: Path) -> None:
     archive = tmp_path / "data.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("a/x.txt", "a")
@@ -105,7 +107,7 @@ def test_ensure_extracted_zip_multiple_top_level(tmp_path):
     assert result == tmp_path / "_extracted"
 
 
-def test_ensure_extracted_tar(tmp_path):
+def test_ensure_extracted_tar(tmp_path: Path) -> None:
     archive = tmp_path / "data.tar.gz"
     with tarfile.open(archive, "w:gz") as tf:
         data = b"hello"
@@ -116,7 +118,7 @@ def test_ensure_extracted_tar(tmp_path):
     assert (result / "file.txt").read_text() == "hello"
 
 
-def test_ensure_extracted_unknown_archive_returns_data_dir(tmp_path):
+def test_ensure_extracted_unknown_archive_returns_data_dir(tmp_path: Path) -> None:
     # File matches the glob but is neither zip nor tar.
     (tmp_path / "stray.zip").write_bytes(b"not really a zip")
     assert ensure_extracted(tmp_path) == tmp_path
@@ -125,20 +127,20 @@ def test_ensure_extracted_unknown_archive_returns_data_dir(tmp_path):
 # ---------------------------------------------------------------- archive safety
 
 
-def test_validate_archive_size_too_many_members():
+def test_validate_archive_size_too_many_members() -> None:
     with pytest.raises(ValueError, match="too many"):
         _validate_archive_size(
             (1 for _ in range(_MAX_ARCHIVE_MEMBERS + 1)), _MAX_ARCHIVE_MEMBERS + 1
         )
 
 
-def test_validate_archive_size_too_large():
+def test_validate_archive_size_too_large() -> None:
     big = 10 * 1024 * 1024 * 1024  # 10 GB single member
     with pytest.raises(ValueError, match="too large"):
         _validate_archive_size((big,), 1)
 
 
-def test_safe_extract_zip_rejects_path_traversal(tmp_path):
+def test_safe_extract_zip_rejects_path_traversal(tmp_path: Path) -> None:
     archive_path = tmp_path / "evil.zip"
     with zipfile.ZipFile(archive_path, "w") as zf:
         zf.writestr("../escape.txt", "evil")
@@ -147,7 +149,7 @@ def test_safe_extract_zip_rejects_path_traversal(tmp_path):
             _safe_extract_zip(zf, tmp_path / "out")
 
 
-def test_safe_extract_tar_rejects_symlink_member(tmp_path):
+def test_safe_extract_tar_rejects_symlink_member(tmp_path: Path) -> None:
     archive_path = tmp_path / "evil.tar"
     with tarfile.open(archive_path, "w") as tf:
         info = tarfile.TarInfo(name="link")
@@ -161,7 +163,7 @@ def test_safe_extract_tar_rejects_symlink_member(tmp_path):
             _safe_extract_tar(tf, out)
 
 
-def test_safe_extract_tar_rejects_special_member(tmp_path):
+def test_safe_extract_tar_rejects_special_member(tmp_path: Path) -> None:
     archive_path = tmp_path / "weird.tar"
     with tarfile.open(archive_path, "w") as tf:
         info = tarfile.TarInfo(name="fifo")

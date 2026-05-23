@@ -2,8 +2,17 @@
 
 from dagnam.data.loaders.csv import *
 from dagnam.data.loaders.csv import (
-    _FEATURE_ROLES,
-    _TARGET_ROLES,
-    _detect_label_column,
-    _split_by_roles,
+    FEATURE_ROLES,
+    TARGET_ROLES,
+    create_pytorch_loader,
+    detect_label_column,
+    split_by_roles,
 )
+
+__all__ = [
+    "FEATURE_ROLES",
+    "TARGET_ROLES",
+    "create_pytorch_loader",
+    "detect_label_column",
+    "split_by_roles",
+]

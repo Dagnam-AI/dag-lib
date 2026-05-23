@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from importlib import import_module
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import pandas as pd
-
-from dagnam.data.loaders.csv import _detect_label_column
+from dagnam._types import TensorflowDataset, TensorflowModule
+from dagnam.data._polars_utils import factorize, numeric_columns
+from dagnam.data.loaders.csv import detect_label_column
 
 if TYPE_CHECKING:
-    import tensorflow as tf
-
-    from dagnam.data.dataset import DagnamDataset
+    from dagnam.data.dataset._typing import DatasetMixinBase
 
 
 def create_tensorflow_dataset(
-    dagnam_ds: DagnamDataset,
+    dagnam_ds: DatasetMixinBase,
     split: str,
     batch_size: int,
     shuffle: bool,
@@ -25,34 +25,38 @@ def create_tensorflow_dataset(
     test_ratio: float,
     seed: int,
     column_roles: dict[str, str] | None = None,
-    map_fn=None,
-    batch_map_fn=None,
-) -> tf.data.Dataset:
+    map_fn: Callable[..., object] | None = None,
+    batch_map_fn: Callable[..., object] | None = None,
+) -> TensorflowDataset:
     """Create a tf.data.Dataset from a tabular dataset.
 
     Uses the same label detection, encoding, and splitting logic as the
     PyTorch loader. ``column_roles`` overrides automatic label detection.
     """
-    import tensorflow as tf
+    tf_data = cast(TensorflowModule, import_module("tensorflow")).data
+    df = dagnam_ds.to_polars()
 
-    df = dagnam_ds.to_pandas()
-
-    label_col = _detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
+    label_col = detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
 
     # Label encoding — get numpy arrays directly
+    label_series = df[label_col]
     if dagnam_ds.class_names:
-        mapping = {name: idx for idx, name in enumerate(dagnam_ds.class_names)}
-        labels = df[label_col].map(mapping).values.astype(np.int64)
+        mapping: dict[object, int] = {
+            name: idx for idx, name in enumerate(dagnam_ds.class_names)
+        }
+        labels = np.array(
+            [mapping[v] for v in label_series.to_list()], dtype=np.int64
+        )
     else:
-        labels, _ = pd.factorize(df[label_col])
-        labels = labels.astype(np.int64)
+        labels = factorize(label_series)
 
     # Feature encoding
     feature_cols = [c for c in df.columns if c != label_col]
-    features = df[feature_cols].select_dtypes(include="number").values.astype(np.float32)
+    numeric_cols = numeric_columns(df, feature_cols)
+    features = df.select(numeric_cols).to_numpy().astype(np.float32)
 
     # Deterministic split (same logic as csv_loader)
-    n = len(df)
+    n = df.height
     n_test = int(n * test_ratio)
     n_val = int(n * val_ratio)
     n_train = n - n_val - n_test
@@ -70,7 +74,7 @@ def create_tensorflow_dataset(
     split_features = features[split_indices]
     split_labels = labels[split_indices]
 
-    ds = tf.data.Dataset.from_tensor_slices((split_features, split_labels))
+    ds = tf_data.Dataset.from_tensor_slices((split_features, split_labels))
 
     if shuffle:
         ds = ds.shuffle(buffer_size=len(split_indices), seed=seed)
@@ -83,6 +87,6 @@ def create_tensorflow_dataset(
     if batch_map_fn is not None:
         ds = ds.map(batch_map_fn)
 
-    ds = ds.prefetch(tf.data.AUTOTUNE)
+    ds = ds.prefetch(tf_data.AUTOTUNE)
 
     return ds

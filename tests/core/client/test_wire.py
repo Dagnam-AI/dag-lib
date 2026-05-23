@@ -5,6 +5,9 @@ and query params — without running a real server.
 """
 
 from __future__ import annotations
+from pathlib import Path
+from tests.typing_helpers import RequestsMocker
+
 
 import hashlib
 
@@ -33,7 +36,7 @@ def rmock():
         yield m
 
 
-def test_predict_sends_bearer_and_api_key(client, rmock):
+def test_predict_sends_bearer_only(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/inference/dep_1/predict"
     rmock.post(url, json={"label": "ok"})
 
@@ -42,11 +45,11 @@ def test_predict_sends_bearer_and_api_key(client, rmock):
     assert result == {"label": "ok"}
     req = rmock.last_request
     assert req.headers["Authorization"] == "Bearer k"
-    assert req.headers["X-API-Key"] == "k"
+    assert "X-API-Key" not in req.headers
     assert req.json() == {"x": 1}
 
 
-def test_predict_batch_wraps_inputs(client, rmock):
+def test_predict_batch_wraps_inputs(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/inference/dep_1/predict/batch"
     rmock.post(url, json=[{"y": 1}, {"y": 2}])
 
@@ -56,14 +59,14 @@ def test_predict_batch_wraps_inputs(client, rmock):
     assert rmock.last_request.json() == {"inputs": [{"x": 1}, {"x": 2}]}
 
 
-def test_deployment_health_get(client, rmock):
+def test_deployment_health_get(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/inference/dep_1/health"
     rmock.get(url, json={"status": "healthy"})
 
     assert client.deployment_health("dep_1") == {"status": "healthy"}
 
 
-def test_path_identifiers_are_percent_encoded(client, rmock):
+def test_path_identifiers_are_percent_encoded(client: DagnamClient, rmock: RequestsMocker) -> None:
     """Untrusted identifiers must not inject extra URL path/query syntax."""
     url = f"{API}/api/v1/datasets/tenant%2Fdata%3Fversion%3Dlatest/meta"
     rmock.get(url, json={"id": "tenant/data?version=latest"})
@@ -76,7 +79,7 @@ def test_path_identifiers_are_percent_encoded(client, rmock):
     )
 
 
-def test_checkpoint_download_streams_and_returns_checksum(client, rmock, tmp_path):
+def test_checkpoint_download_streams_and_returns_checksum(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
     body = b"weights-bytes"
     sha = hashlib.sha256(body).hexdigest()
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
@@ -99,7 +102,7 @@ def test_checkpoint_download_streams_and_returns_checksum(client, rmock, tmp_pat
     assert rmock.last_request.headers["Authorization"] == "Bearer k"
 
 
-def test_sse_uses_api_key_query_param_not_header(client, rmock):
+def test_sse_uses_api_key_query_param_not_header(client: DagnamClient, rmock: RequestsMocker) -> None:
     """Contract: SSE auth goes in ?api_key=..., NOT in a custom header."""
     url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
     rmock.get(url, text="")
@@ -114,7 +117,7 @@ def test_sse_uses_api_key_query_param_not_header(client, rmock):
     assert "X-API-Key" not in req.headers
 
 
-def test_inference_404_maps_to_deployment_error(client, rmock):
+def test_inference_404_maps_to_deploymenterror(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/inference/dep_404/predict"
     rmock.post(url, status_code=404, text="not found")
 
@@ -122,7 +125,7 @@ def test_inference_404_maps_to_deployment_error(client, rmock):
         client.predict("dep_404", {"x": 1})
 
 
-def test_checkpoint_401_maps_to_auth_error(client, rmock, tmp_path):
+def test_checkpoint_401_maps_to_autherror(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
     rmock.get(url, status_code=401, text="unauthorized")
 
@@ -130,7 +133,7 @@ def test_checkpoint_401_maps_to_auth_error(client, rmock, tmp_path):
         client.download_checkpoint_stream("job_1", "ck_1", tmp_path / "x.pt")
 
 
-def test_checkpoint_404_maps_to_checkpoint_not_found(client, rmock, tmp_path):
+def test_checkpoint_404_maps_to_checkpoint_not_found(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_bad/download"
     rmock.get(url, status_code=404, text="not found")
 
@@ -138,7 +141,7 @@ def test_checkpoint_404_maps_to_checkpoint_not_found(client, rmock, tmp_path):
         client.download_checkpoint_stream("job_1", "ck_bad", tmp_path / "x.pt")
 
 
-def test_checkpoint_redirect_is_rejected_not_written(client, rmock, tmp_path):
+def test_checkpoint_redirect_is_rejected_not_written(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
     rmock.get(url, status_code=302, headers={"Location": "https://evil.test/ck.pt"})
     dest = tmp_path / "x.pt"
@@ -149,7 +152,7 @@ def test_checkpoint_redirect_is_rejected_not_written(client, rmock, tmp_path):
     assert not dest.exists()
 
 
-def test_sse_redirect_is_rejected(client, rmock):
+def test_sse_redirect_is_rejected(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
     rmock.get(url, status_code=302, headers={"Location": "https://evil.test/stream"})
 
@@ -157,7 +160,7 @@ def test_sse_redirect_is_rejected(client, rmock):
         client.open_training_stream("job_1")
 
 
-def test_codegen_generate_posts_framework_and_version(client, rmock):
+def test_codegen_generate_posts_framework_and_version(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/projects/p1/generate-code"
     rmock.post(url, json={"files": []})
 
@@ -169,7 +172,7 @@ def test_codegen_generate_posts_framework_and_version(client, rmock):
     assert req.qs == {}
 
 
-def test_codegen_generate_async_sets_query_param(client, rmock):
+def test_codegen_generate_async_sets_query_param(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/projects/p1/generate-code"
     rmock.post(url, json={"task_id": "t1", "status": "pending"})
 
@@ -180,7 +183,7 @@ def test_codegen_generate_async_sets_query_param(client, rmock):
     assert rmock.last_request.json() == {"framework": "pytorch"}
 
 
-def test_codegen_preview_uses_project_preview_route(client, rmock):
+def test_codegen_preview_uses_project_preview_route(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/projects/p1/code-preview"
     rmock.get(url, json={"files": []})
 
@@ -191,7 +194,7 @@ def test_codegen_preview_uses_project_preview_route(client, rmock):
     assert rmock.last_request.qs["version_id"] == ["v4"]
 
 
-def test_codegen_validate_posts_to_project_route(client, rmock):
+def test_codegen_validate_posts_to_project_route(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/projects/p1/validate"
     rmock.post(url, json={"is_valid": True})
 
@@ -199,14 +202,14 @@ def test_codegen_validate_posts_to_project_route(client, rmock):
     assert rmock.last_request.qs["version_id"] == ["v1"]
 
 
-def test_codegen_status_uses_project_status_route(client, rmock):
+def test_codegen_status_uses_project_status_route(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/projects/p1/code-status/t1"
     rmock.get(url, json={"status": "completed"})
 
     assert client.get_code_status("p1", "t1") == {"status": "completed"}
 
 
-def test_codegen_download_uses_project_download_route(client, rmock, tmp_path):
+def test_codegen_download_uses_project_download_route(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
     body = b"zip-bytes"
     url = f"{API}/api/v1/projects/p1/download-code"
     rmock.get(url, content=body)

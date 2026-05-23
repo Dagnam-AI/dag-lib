@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+from typing import NoReturn
 
 
-def _human_size(nbytes: int | float) -> str:
+def human_size(nbytes: int | float) -> str:
     """Format byte count as a human-readable string."""
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if abs(nbytes) < 1024:
@@ -16,7 +17,7 @@ def _human_size(nbytes: int | float) -> str:
     return f"{nbytes:.1f} PB"
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     """Recursively compute total size of a directory in bytes."""
     total = 0
     for f in path.rglob("*"):
@@ -25,13 +26,13 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def _error(msg: str) -> None:
+def error(msg: str) -> NoReturn:
     """Print an error message to stderr and exit."""
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
-def _load_json_arg(value: str) -> object:
+def load_json_arg(value: str) -> object:
     """Parse --input/--inputs as JSON literal or @path/to/file.json."""
     if value.startswith("@"):
         path = Path(value[1:])

@@ -11,7 +11,7 @@ from dagnam._core.client import DagnamClient
 class TestClientVersionQuery:
     """Tests that DagnamClient sends version query params."""
 
-    def test_get_dataset_meta_sends_version_query(self):
+    def test_get_dataset_meta_sends_version_query(self) -> None:
         """version param is sent as query parameter."""
         client = DagnamClient("https://api.test", "key")
         resp = MagicMock()
@@ -25,7 +25,7 @@ class TestClientVersionQuery:
         call_kwargs = mock_get.call_args.kwargs
         assert call_kwargs["params"] == {"version": "v2"}
 
-    def test_get_dataset_meta_no_version_no_params(self):
+    def test_get_dataset_meta_no_version_no_params(self) -> None:
         """No params sent when version is None."""
         client = DagnamClient("https://api.test", "key")
         resp = MagicMock()
@@ -39,7 +39,7 @@ class TestClientVersionQuery:
         call_kwargs = mock_get.call_args.kwargs
         assert call_kwargs.get("params") is None
 
-    def test_get_system_dataset_meta_sends_version_query(self):
+    def test_get_system_dataset_meta_sends_version_query(self) -> None:
         """version param is sent for system dataset meta."""
         client = DagnamClient("https://api.test", "key")
         resp = MagicMock()
@@ -57,7 +57,7 @@ class TestClientVersionQuery:
 class TestVersionedCacheKey:
     """Tests that versioned datasets use version-aware cache keys."""
 
-    def test_load_dataset_uses_versioned_cache_key(self, tmp_path: Path):
+    def test_load_dataset_uses_versioned_cache_key(self, tmp_path: Path) -> None:
         """Cache directory uses {dataset_id}@{version} format."""
         body = b"a,b\n1,2\n"
         checksum = "sha256:" + hashlib.sha256(body).hexdigest()
@@ -99,7 +99,7 @@ class TestVersionedCacheKey:
         assert ds._data_dir.name == f"{dataset_id}@v2"
         mock_download.assert_not_called()
 
-    def test_load_dataset_passes_version_and_filename_to_download(self, tmp_path: Path):
+    def test_load_dataset_passes_version_and_filename_to_download(self, tmp_path: Path) -> None:
         """Version and metadata filename are forwarded to the download endpoint."""
         body = b"a,b\n1,2\n"
         checksum = "sha256:" + hashlib.sha256(body).hexdigest()
@@ -133,7 +133,7 @@ class TestVersionedCacheKey:
         assert mock_download.call_args.kwargs["version"] == "v2"
         assert mock_download.call_args.kwargs["filename"] == "versioned.csv"
 
-    def test_load_dataset_unversioned_uses_plain_id(self, tmp_path: Path):
+    def test_load_dataset_unversioned_uses_plain_id(self, tmp_path: Path) -> None:
         """Without version, cache directory uses plain dataset_id."""
         body = b"a,b\n1,2\n"
         checksum = "sha256:" + hashlib.sha256(body).hexdigest()

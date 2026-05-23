@@ -1,25 +1,28 @@
 """Patch the remaining CLI / loader / dataset gaps."""
 
 from __future__ import annotations
+from pathlib import Path
+from tests.typing_helpers import JsonObject, PytestMonkeyPatch, StrCapture
 
-import pandas as pd
+
+import polars as pl
 import pytest
 
 from dagnam.cli import main as cli_main
-from dagnam.cli.common import _human_size
-from dagnam.data.loaders.csv import _detect_label_column, _split_by_roles
+from dagnam.cli.common import human_size
+from dagnam.data.loaders.csv import detect_label_column, split_by_roles
 
 # ---------------------------------------------------------------- cli/common
 
 
-def test_human_size_petabytes() -> None:
-    assert _human_size(2 * 1024**5) == "2.0 PB"
+def testhuman_size_petabytes() -> None:
+    assert human_size(2 * 1024**5) == "2.0 PB"
 
 
 # ---------------------------------------------------------------- cli/cache edge cases
 
 
-def test_cache_list_skips_files_and_bad_meta(tmp_path, monkeypatch, capsys):
+def test_cache_list_skips_files_and_bad_meta(tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
     cache_dir = tmp_path / "datasets"
     cache_dir.mkdir()
     # A file at the top level — should be skipped (not a dir).
@@ -37,7 +40,7 @@ def test_cache_list_skips_files_and_bad_meta(tmp_path, monkeypatch, capsys):
     assert "stray.txt" not in out
 
 
-def test_cache_clear_when_already_empty(tmp_path, monkeypatch, capsys):
+def test_cache_clear_when_already_empty(tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
     missing = tmp_path / "nope"
     monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", missing)
     monkeypatch.setattr("sys.argv", ["dagnam", "cache", "clear"])
@@ -48,7 +51,7 @@ def test_cache_clear_when_already_empty(tmp_path, monkeypatch, capsys):
 # ---------------------------------------------------------------- cli/dataset auth error in info
 
 
-def test_dataset_info_auth_error_exits(tmp_path, monkeypatch):
+def test_dataset_info_autherror_exits(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     from pathlib import Path
 
     monkeypatch.delenv("DAGNAM_API_KEY", raising=False)
@@ -61,25 +64,25 @@ def test_dataset_info_auth_error_exits(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- csv loader role branches
 
 
-def test_detect_label_column_uses_roles_priority():
-    df = pd.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
-    assert _detect_label_column(df, None, column_roles={"b": "target"}) == "b"
-    assert _detect_label_column(df, None, column_roles={"b": "label"}) == "b"
+def testdetect_label_column_uses_roles_priority() -> None:
+    df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
+    assert detect_label_column(df, None, column_roles={"b": "target"}) == "b"
+    assert detect_label_column(df, None, column_roles={"b": "label"}) == "b"
 
 
-def test_split_by_roles_raises_when_no_target_column():
-    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+def testsplit_by_roles_raises_when_no_target_column() -> None:
+    df = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
     with pytest.raises(ValueError, match="target column"):
-        _split_by_roles(df, {"a": "feature", "b": "ignore"})
+        split_by_roles(df, {"a": "feature", "b": "ignore"})
 
 
-def test_create_pytorch_loader_with_explicit_column_roles(tmp_path, sample_metadata):
-    """Exercises the create_pytorch_loader branch that calls _split_by_roles."""
+def test_create_pytorch_loader_with_explicit_column_roles(tmp_path: Path, sample_metadata: JsonObject) -> None:
+    """Exercises the create_pytorch_loader branch that calls split_by_roles."""
     from dagnam.data.dataset import DagnamDataset
     from dagnam.data.loaders.csv import create_pytorch_loader
 
     csv_path = tmp_path / "data.csv"
-    csv_path.write_text("x,y,label\n1.0,2.0,0\n3.0,4.0,1\n5.0,6.0,0\n7.0,8.0,1\n9.0,10.0,0\n")
+    csv_path.write_text("x,y,label\n1.0,2.0,a\n3.0,4.0,b\n5.0,6.0,a\n7.0,8.0,b\n9.0,10.0,a\n")
 
     meta = dict(sample_metadata)
     meta["filename"] = "data.csv"

@@ -2,24 +2,123 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 import hashlib
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlparse
 
 import requests
 
-from dagnam.data.loaders.system.common import _SYSTEM_CACHE_ROOT
+from dagnam._types import IndexedDataset, JsonObject, NativeSplit
+from dagnam.data.loaders.system.common import SYSTEM_CACHE_ROOT
 
 if TYPE_CHECKING:
     from dagnam.data.dataset import DagnamDataset
 
 _IMDB_URL = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/imdb.npz"
 _IMDB_SHA256 = "69664113be75683a8fe16e3ed0ab59fda8886cb3cd7ada244f7d9544e4676b9f"
+IMDB_SHA256 = _IMDB_SHA256
 _DOWNLOAD_TIMEOUT = (30, 60)
+TransformFn = Callable[[object], object]
 
 
-def _sha256(path: Path) -> str:
+class TorchVisionTransformsModule(Protocol):
+    """TorchVision transform constructors used by system datasets."""
+
+    def Compose(self, transforms: Sequence[TransformFn]) -> TransformFn: ...
+
+    def ToTensor(self) -> TransformFn: ...
+
+    def Normalize(self, mean: Sequence[float], std: Sequence[float]) -> TransformFn: ...
+
+    def Resize(self, size: tuple[int, int]) -> TransformFn: ...
+
+
+class TorchVisionDatasetsModule(Protocol):
+    """TorchVision dataset constructors used by system datasets."""
+
+    def MNIST(
+        self,
+        *,
+        root: str,
+        train: bool,
+        download: bool,
+        transform: TransformFn | None,
+    ) -> IndexedDataset: ...
+
+    def CIFAR10(
+        self,
+        *,
+        root: str,
+        train: bool,
+        download: bool,
+        transform: TransformFn | None,
+    ) -> IndexedDataset: ...
+
+    def CIFAR100(
+        self,
+        *,
+        root: str,
+        train: bool,
+        download: bool,
+        transform: TransformFn | None,
+    ) -> IndexedDataset: ...
+
+    def FashionMNIST(
+        self,
+        *,
+        root: str,
+        train: bool,
+        download: bool,
+        transform: TransformFn | None,
+    ) -> IndexedDataset: ...
+
+    def OxfordIIITPet(
+        self,
+        *,
+        root: str,
+        split: str,
+        download: bool,
+        transform: TransformFn | None,
+    ) -> IndexedDataset: ...
+
+
+class TorchaudioDatasetsModule(Protocol):
+    """Torchaudio dataset constructors used by system datasets."""
+
+    def SPEECHCOMMANDS(self, *, root: str, download: bool, subset: str) -> IndexedDataset: ...
+
+
+class TorchaudioModule(Protocol):
+    """Torchaudio module surface used by system datasets."""
+
+    datasets: TorchaudioDatasetsModule
+
+
+class TorchTextDatasetsModule(Protocol):
+    """TorchText dataset constructors used by system datasets."""
+
+    def WikiText2(self, *, root: str, split: str) -> Iterable[str]: ...
+
+
+def _load_torchvision() -> tuple[TorchVisionDatasetsModule, TorchVisionTransformsModule]:
+    return (
+        cast(TorchVisionDatasetsModule, import_module("torchvision.datasets")),
+        cast(TorchVisionTransformsModule, import_module("torchvision.transforms")),
+    )
+
+
+def _load_torchaudio() -> TorchaudioModule:
+    return cast(TorchaudioModule, import_module("torchaudio"))
+
+
+def _load_torchtext_datasets() -> TorchTextDatasetsModule:
+    return cast(TorchTextDatasetsModule, import_module("torchtext.datasets"))
+
+
+def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
@@ -27,7 +126,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
+def download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
     """Download an HTTPS file and atomically install it only if SHA-256 matches."""
     if urlparse(url).scheme != "https":
         raise ValueError("System dataset downloads must use HTTPS URLs")
@@ -42,7 +141,7 @@ def _download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
                     if chunk:
                         fh.write(chunk)
 
-        actual = _sha256(tmp)
+        actual = sha256(tmp)
         if actual != expected_sha256:
             tmp.unlink(missing_ok=True)
             raise ValueError(
@@ -54,19 +153,18 @@ def _download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
         raise
 
 
-def _ensure_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
-    if dest.exists() and _sha256(dest) == expected_sha256:
+def ensure_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
+    if dest.exists() and sha256(dest) == expected_sha256:
         return
     dest.unlink(missing_ok=True)
-    _download_verified_file(url, dest, expected_sha256)
+    download_verified_file(url, dest, expected_sha256)
 
 
-def _load_mnist(meta: dict, transform=None) -> DagnamDataset:
-    from torchvision import datasets, transforms
-
+def load_mnist(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "mnist"
+    datasets, transforms = _load_torchvision()
+    cache = SYSTEM_CACHE_ROOT / "mnist"
     cache.mkdir(parents=True, exist_ok=True)
 
     # When the caller passes a custom transform, honor it as-is (caller owns normalization).
@@ -88,12 +186,11 @@ def _load_mnist(meta: dict, transform=None) -> DagnamDataset:
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_cifar10(meta: dict, transform=None) -> DagnamDataset:
-    from torchvision import datasets, transforms
-
+def load_cifar10(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "cifar10"
+    datasets, transforms = _load_torchvision()
+    cache = SYSTEM_CACHE_ROOT / "cifar10"
     cache.mkdir(parents=True, exist_ok=True)
 
     base_transform = (
@@ -117,12 +214,11 @@ def _load_cifar10(meta: dict, transform=None) -> DagnamDataset:
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_cifar100(meta: dict, transform=None) -> DagnamDataset:
-    from torchvision import datasets, transforms
-
+def load_cifar100(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "cifar100"
+    datasets, transforms = _load_torchvision()
+    cache = SYSTEM_CACHE_ROOT / "cifar100"
     cache.mkdir(parents=True, exist_ok=True)
 
     base_transform = (
@@ -146,12 +242,11 @@ def _load_cifar100(meta: dict, transform=None) -> DagnamDataset:
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_fashion_mnist(meta: dict, transform=None) -> DagnamDataset:
-    from torchvision import datasets, transforms
-
+def load_fashion_mnist(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "fashion_mnist"
+    datasets, transforms = _load_torchvision()
+    cache = SYSTEM_CACHE_ROOT / "fashion_mnist"
     cache.mkdir(parents=True, exist_ok=True)
 
     base_transform = (
@@ -175,19 +270,18 @@ def _load_fashion_mnist(meta: dict, transform=None) -> DagnamDataset:
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_imdb(meta: dict, transform=None) -> DagnamDataset:
+def load_imdb(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     """Load IMDB via direct npz download (no TensorFlow dependency)."""
     import numpy as np
-
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "imdb"
+    cache = SYSTEM_CACHE_ROOT / "imdb"
     cache.mkdir(parents=True, exist_ok=True)
     npz_path = cache / "imdb.npz"
 
-    _ensure_verified_file(_IMDB_URL, npz_path, _IMDB_SHA256)
+    ensure_verified_file(_IMDB_URL, npz_path, IMDB_SHA256)
 
-    # Build a simple pandas DataFrame so the existing to_pytorch_loader
+    # Build a simple polars DataFrame so the existing to_pytorch_loader
     # file-based path can work.  However, we also set _native_train/test
     # as numpy arrays for direct use.
     # The upstream Keras IMDB npz stores ragged review sequences as object arrays,
@@ -205,12 +299,11 @@ def _load_imdb(meta: dict, transform=None) -> DagnamDataset:
     )
 
 
-def _load_oxford_pets(meta: dict, transform=None) -> DagnamDataset:
-    from torchvision import datasets, transforms
-
+def load_oxford_pets(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "oxford_pets"
+    datasets, transforms = _load_torchvision()
+    cache = SYSTEM_CACHE_ROOT / "oxford_pets"
     cache.mkdir(parents=True, exist_ok=True)
 
     base_transform = transform
@@ -242,15 +335,14 @@ def _load_oxford_pets(meta: dict, transform=None) -> DagnamDataset:
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def _load_speech_commands(meta: dict, transform=None) -> DagnamDataset:
+def load_speech_commands(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "speech_commands"
+    cache = SYSTEM_CACHE_ROOT / "speech_commands"
     cache.mkdir(parents=True, exist_ok=True)
 
     try:
-        import torchaudio
-
+        torchaudio = _load_torchaudio()
         train_ds = torchaudio.datasets.SPEECHCOMMANDS(
             root=str(cache),
             download=True,
@@ -267,24 +359,26 @@ def _load_speech_commands(meta: dict, transform=None) -> DagnamDataset:
         return DagnamDataset(meta, cache)
 
 
-def _load_wikitext2(meta: dict, transform=None) -> DagnamDataset:
+def load_wikitext2(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
-    cache = _SYSTEM_CACHE_ROOT / "wikitext2"
+    cache = SYSTEM_CACHE_ROOT / "wikitext2"
     cache.mkdir(parents=True, exist_ok=True)
 
     try:
-        from torchtext.datasets import WikiText2
+        torchtext_datasets = _load_torchtext_datasets()
 
         # torchtext returns iterators, not map-style datasets
         # Store as native for custom handling
-        train_iter = WikiText2(root=str(cache), split="train")
-        test_iter = WikiText2(root=str(cache), split="test")
+        train_iter = torchtext_datasets.WikiText2(root=str(cache), split="train")
+        test_iter = torchtext_datasets.WikiText2(root=str(cache), split="test")
+        train_items: NativeSplit = cast(NativeSplit, list(train_iter))
+        test_items: NativeSplit = cast(NativeSplit, list(test_iter))
         return DagnamDataset(
             meta,
             cache,
-            _native_train=list(train_iter),
-            _native_test=list(test_iter),
+            _native_train=train_items,
+            _native_test=test_items,
         )
     except (ImportError, Exception):
         return DagnamDataset(meta, cache)

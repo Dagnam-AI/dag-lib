@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
-from dagnam.resources.checkpoints import _pick_latest, download_checkpoint
+from dagnam.resources.checkpoints import pick_latest, download_checkpoint
 
 
 def _sha256(data: bytes) -> str:
@@ -18,15 +19,15 @@ def _sha256(data: bytes) -> str:
 
 
 @pytest.fixture
-def ck_cache(tmp_path) -> Path:
+def ck_cache(tmp_path: Path) -> Path:
     d = tmp_path / "checkpoints"
     d.mkdir()
     return d
 
 
 class TestPickLatest:
-    def test_prefers_best(self):
-        c = _pick_latest(
+    def test_prefers_best(self) -> None:
+        c = pick_latest(
             [
                 {"id": "a", "epoch": 5, "step": 100, "is_best": False, "created_at": "t1"},
                 {"id": "b", "epoch": 3, "step": 60, "is_best": True, "created_at": "t2"},
@@ -34,8 +35,8 @@ class TestPickLatest:
         )
         assert c["id"] == "b"
 
-    def test_falls_back_to_highest_epoch(self):
-        c = _pick_latest(
+    def test_falls_back_to_highest_epoch(self) -> None:
+        c = pick_latest(
             [
                 {"id": "a", "epoch": 1, "step": 10, "is_best": False},
                 {"id": "b", "epoch": 5, "step": 50, "is_best": False},
@@ -44,24 +45,24 @@ class TestPickLatest:
         )
         assert c["id"] == "b"
 
-    def test_empty_raises(self):
+    def test_empty_raises(self) -> None:
         with pytest.raises(CheckpointNotFoundError):
-            _pick_latest([])
+            pick_latest([])
 
 
 class TestDownloadCheckpoint:
-    def _fake_download(self, body: bytes):
+    def _fake_download(self, body: bytes) -> tuple[Callable[[str, str, Path], tuple[Path, str]], str]:
         """Return a DagnamClient.download_checkpoint_stream side_effect."""
         expected_sha = _sha256(body)
 
-        def _side_effect(job_id, checkpoint_id, dest):
+        def _side_effect(job_id: str, checkpoint_id: str, dest: Path) -> tuple[Path, str]:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(body)
             return dest, expected_sha
 
         return _side_effect, expected_sha
 
-    def test_downloads_explicit_checkpoint(self, ck_cache):
+    def test_downloads_explicit_checkpoint(self, ck_cache: Path) -> None:
         body = b"weights-bytes"
         side, _ = self._fake_download(body)
         client = MagicMock(spec=DagnamClient)
@@ -72,7 +73,7 @@ class TestDownloadCheckpoint:
         assert path.read_bytes() == body
         assert path == ck_cache / "job_1" / "ck_1.pt"
 
-    def test_cache_hit_skips_download(self, ck_cache):
+    def test_cache_hit_skips_download(self, ck_cache: Path) -> None:
         cached = ck_cache / "job_1" / "ck_1.pt"
         cached.parent.mkdir(parents=True)
         cached.write_bytes(b"already-here")
@@ -82,8 +83,8 @@ class TestDownloadCheckpoint:
         assert path == cached
         client.download_checkpoint_stream.assert_not_called()
 
-    def test_checksum_mismatch_raises_and_removes(self, ck_cache):
-        def side_effect(job_id, checkpoint_id, dest):
+    def test_checksum_mismatch_raises_and_removes(self, ck_cache: Path) -> None:
+        def side_effect(job_id: str, checkpoint_id: str, dest: Path):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(b"actual-bytes")
             return dest, "deadbeef" * 8  # wrong sha
@@ -96,7 +97,7 @@ class TestDownloadCheckpoint:
 
         assert not (ck_cache / "job_1" / "ck_1.pt").exists()
 
-    def test_picks_latest_when_id_omitted(self, ck_cache):
+    def test_picks_latest_when_id_omitted(self, ck_cache: Path) -> None:
         body = b"x"
         side, _ = self._fake_download(body)
         client = MagicMock(spec=DagnamClient)
@@ -110,7 +111,7 @@ class TestDownloadCheckpoint:
         assert path == ck_cache / "job_1" / "new.pt"
         client.list_checkpoints.assert_called_once_with("job_1")
 
-    def test_checkpoint_cache_paths_cannot_escape_cache_dir(self, ck_cache, tmp_path):
+    def test_checkpoint_cache_paths_cannot_escape_cache_dir(self, ck_cache: Path, tmp_path: Path) -> None:
         body = b"weights"
         side, _ = self._fake_download(body)
         client = MagicMock(spec=DagnamClient)

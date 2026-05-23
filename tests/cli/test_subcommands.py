@@ -1,21 +1,38 @@
 """End-to-end CLI coverage via argparse + main() with mocked facades."""
 
 from __future__ import annotations
+from pathlib import Path
+from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
+
 
 import json
+import argparse
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from dagnam.cli import main as cli_main
+from dagnam.cli import login as login_mod
+
+
+def _bad_key_prompt(_prompt: str) -> str:
+    return "bad-key"
+
+
+def _good_key_prompt(_prompt: str) -> str:
+    return "good-key"
+
+
+def _key_prompt(_prompt: str) -> str:
+    return "k"
 
 
 @pytest.fixture
-def run_cli(monkeypatch):
+def run_cli(monkeypatch: PytestMonkeyPatch):
     """Helper to set sys.argv and invoke main(); returns nothing — use capsys."""
 
-    def _run(argv: list[str]):
+    def _run(argv: list[str]) -> None:
         monkeypatch.setattr("sys.argv", ["dagnam", *argv])
         cli_main()
 
@@ -29,7 +46,7 @@ def run_cli(monkeypatch):
     "subcmd",
     ["dataset", "cache", "inference", "checkpoint", "deployments", "hub", "projects", "codegen"],
 )
-def test_subcommand_without_action_prints_help_and_exits(subcmd, monkeypatch):
+def test_subcommand_without_action_prints_help_and_exits(subcmd: str, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["dagnam", subcmd])
     with pytest.raises(SystemExit):
         cli_main()
@@ -38,14 +55,14 @@ def test_subcommand_without_action_prints_help_and_exits(subcmd, monkeypatch):
 # ---------------------------------------------------------------- dataset
 
 
-def test_dataset_list_empty(run_cli, capsys, monkeypatch):
+def test_dataset_list_empty(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["dataset", "list"])
     assert "No datasets found" in capsys.readouterr().out
 
 
-def test_dataset_list_with_rows(run_cli, capsys, monkeypatch):
+def test_dataset_list_with_rows(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch(
         "dagnam._core.client.DagnamClient.list_datasets",
@@ -65,7 +82,7 @@ def test_dataset_list_with_rows(run_cli, capsys, monkeypatch):
     assert "Iris" in out
 
 
-def test_dataset_list_auth_error_exits(run_cli, monkeypatch, tmp_path):
+def test_dataset_list_autherror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
     from pathlib import Path
 
     monkeypatch.delenv("DAGNAM_API_KEY", raising=False)
@@ -75,7 +92,7 @@ def test_dataset_list_auth_error_exits(run_cli, monkeypatch, tmp_path):
         run_cli(["dataset", "list"])
 
 
-def test_dataset_list_api_error_exits(run_cli, monkeypatch):
+def test_dataset_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -87,7 +104,7 @@ def test_dataset_list_api_error_exits(run_cli, monkeypatch):
             run_cli(["dataset", "list"])
 
 
-def test_dataset_info(run_cli, capsys, monkeypatch):
+def test_dataset_info(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch(
         "dagnam._core.client.DagnamClient.get_dataset_meta",
@@ -104,7 +121,7 @@ def test_dataset_info(run_cli, capsys, monkeypatch):
     assert "class_names: a, b" in out
 
 
-def test_dataset_info_api_error_exits(run_cli, monkeypatch):
+def test_dataset_info_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -116,14 +133,14 @@ def test_dataset_info_api_error_exits(run_cli, monkeypatch):
             run_cli(["dataset", "info", "ds-1"])
 
 
-def test_dataset_download(run_cli, capsys, monkeypatch):
+def test_dataset_download(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch("dagnam.load_dataset", return_value=None):
         run_cli(["dataset", "download", "ds-1"])
     assert "downloaded" in capsys.readouterr().out
 
 
-def test_dataset_download_api_error_exits(run_cli, monkeypatch):
+def test_dataset_download_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -135,7 +152,7 @@ def test_dataset_download_api_error_exits(run_cli, monkeypatch):
 # ---------------------------------------------------------------- cache
 
 
-def test_cache_clear(run_cli, capsys, tmp_path, monkeypatch):
+def test_cache_clear(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     cache_dir = tmp_path / "datasets"
     cache_dir.mkdir()
     (cache_dir / "ds-1").mkdir()
@@ -146,7 +163,7 @@ def test_cache_clear(run_cli, capsys, tmp_path, monkeypatch):
     assert "Cleared" in out or "cleared" in out.lower()
 
 
-def test_cache_list_with_entries(run_cli, capsys, tmp_path, monkeypatch):
+def test_cache_list_with_entries(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     cache_dir = tmp_path / "datasets"
     cache_dir.mkdir()
     sub = cache_dir / "ds-1"
@@ -161,18 +178,18 @@ def test_cache_list_with_entries(run_cli, capsys, tmp_path, monkeypatch):
 # ---------------------------------------------------------------- inference
 
 
-def test_inference_run(run_cli, capsys):
+def test_inference_run(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.inference", return_value={"label": "ok"}):
         run_cli(["inference", "run", "dep-1", "--input", '{"x":1}'])
     assert json.loads(capsys.readouterr().out) == {"label": "ok"}
 
 
-def test_inference_run_bad_json(run_cli, monkeypatch):
+def test_inference_run_bad_json(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
     with pytest.raises(SystemExit):
         run_cli(["inference", "run", "dep-1", "--input", "not-json"])
 
 
-def test_inference_run_api_error_exits(run_cli):
+def test_inference_run_apierror_exits(run_cli: CliRunner) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.inference", side_effect=APIError(500, "boom")):
@@ -180,23 +197,23 @@ def test_inference_run_api_error_exits(run_cli):
             run_cli(["inference", "run", "dep-1", "--input", '{"x":1}'])
 
 
-def test_inference_batch(run_cli, capsys):
+def test_inference_batch(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.inference_batch", return_value=[{"y": 1}, {"y": 2}]):
         run_cli(["inference", "batch", "dep-1", "--inputs", '[{"x":1},{"x":2}]'])
     assert json.loads(capsys.readouterr().out) == [{"y": 1}, {"y": 2}]
 
 
-def test_inference_batch_rejects_non_array(run_cli):
+def test_inference_batch_rejects_non_array(run_cli: CliRunner) -> None:
     with pytest.raises(SystemExit):
         run_cli(["inference", "batch", "dep-1", "--inputs", '{"x":1}'])
 
 
-def test_inference_batch_bad_json(run_cli):
+def test_inference_batch_bad_json(run_cli: CliRunner) -> None:
     with pytest.raises(SystemExit):
         run_cli(["inference", "batch", "dep-1", "--inputs", "garbage"])
 
 
-def test_inference_batch_api_error_exits(run_cli):
+def test_inference_batch_apierror_exits(run_cli: CliRunner) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.inference_batch", side_effect=APIError(500, "boom")):
@@ -204,7 +221,7 @@ def test_inference_batch_api_error_exits(run_cli):
             run_cli(["inference", "batch", "dep-1", "--inputs", "[1,2]"])
 
 
-def test_inference_batch_loads_from_file(run_cli, tmp_path, capsys):
+def test_inference_batch_loads_from_file(run_cli: CliRunner, tmp_path: Path, capsys: StrCapture) -> None:
     fp = tmp_path / "data.json"
     fp.write_text("[1, 2, 3]")
     with mock.patch("dagnam.inference_batch", return_value=[1, 2, 3]):
@@ -212,7 +229,7 @@ def test_inference_batch_loads_from_file(run_cli, tmp_path, capsys):
     assert "1" in capsys.readouterr().out
 
 
-def test_inference_batch_file_read_error_exits(run_cli, tmp_path):
+def test_inference_batch_file_readerror_exits(run_cli: CliRunner, tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         run_cli(
             [
@@ -225,13 +242,13 @@ def test_inference_batch_file_read_error_exits(run_cli, tmp_path):
         )
 
 
-def test_inference_health(run_cli, capsys):
+def test_inference_health(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.deployment_health", return_value={"status": "healthy"}):
         run_cli(["inference", "health", "dep-1"])
     assert json.loads(capsys.readouterr().out) == {"status": "healthy"}
 
 
-def test_inference_health_api_error_exits(run_cli):
+def test_inference_health_apierror_exits(run_cli: CliRunner) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.deployment_health", side_effect=APIError(500, "boom")):
@@ -242,14 +259,14 @@ def test_inference_health_api_error_exits(run_cli):
 # ---------------------------------------------------------------- checkpoint
 
 
-def test_checkpoint_list_empty(run_cli, capsys, monkeypatch):
+def test_checkpoint_list_empty(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch("dagnam._core.client.DagnamClient.list_checkpoints", return_value=[]):
         run_cli(["checkpoint", "list", "job-1"])
     assert "No checkpoints" in capsys.readouterr().out
 
 
-def test_checkpoint_list_with_rows(run_cli, capsys, monkeypatch):
+def test_checkpoint_list_with_rows(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch(
         "dagnam._core.client.DagnamClient.list_checkpoints",
@@ -270,7 +287,7 @@ def test_checkpoint_list_with_rows(run_cli, capsys, monkeypatch):
     assert "True" in out
 
 
-def test_checkpoint_list_api_error_exits(run_cli, monkeypatch):
+def test_checkpoint_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -282,13 +299,13 @@ def test_checkpoint_list_api_error_exits(run_cli, monkeypatch):
             run_cli(["checkpoint", "list", "job-1"])
 
 
-def test_checkpoint_download(run_cli, capsys, monkeypatch):
+def test_checkpoint_download(run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     with mock.patch("dagnam.download_checkpoint", return_value="/some/path"):
         run_cli(["checkpoint", "download", "job-1"])
     assert "/some/path" in capsys.readouterr().out
 
 
-def test_checkpoint_download_api_error_exits(run_cli):
+def test_checkpoint_download_apierror_exits(run_cli: CliRunner) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.download_checkpoint", side_effect=APIError(500, "boom")):
@@ -299,14 +316,14 @@ def test_checkpoint_download_api_error_exits(run_cli):
 # ---------------------------------------------------------------- stream
 
 
-def test_stream_emits_human_readable(run_cli, capsys):
+def test_stream_emits_human_readable(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake_event = SimpleNamespace(event="progress", data={"step": 1}, id="e1", retry=None)
     with mock.patch("dagnam.stream_training", return_value=iter([fake_event])):
         run_cli(["stream", "job-1"])
     assert "[progress]" in capsys.readouterr().out
 
 
-def test_stream_json_mode(run_cli, capsys):
+def test_stream_json_mode(run_cli: CliRunner, capsys: StrCapture) -> None:
     # asdict requires a dataclass; use the real SSEEvent.
     from dagnam._core.sse import SSEEvent
 
@@ -321,18 +338,14 @@ def test_stream_json_mode(run_cli, capsys):
     }
 
 
-def test_stream_keyboard_interrupt_exits_130(run_cli):
-    def _raise():
-        raise KeyboardInterrupt()
-        yield  # pragma: no cover - generator marker
-
+def test_stream_keyboard_interrupt_exits_130(run_cli: CliRunner) -> None:
     with mock.patch("dagnam.stream_training", side_effect=KeyboardInterrupt):
         with pytest.raises(SystemExit) as exc_info:
             run_cli(["stream", "job-1"])
     assert exc_info.value.code == 130
 
 
-def test_stream_api_error_exits(run_cli):
+def test_stream_apierror_exits(run_cli: CliRunner) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.stream_training", side_effect=APIError(500, "boom")):
@@ -343,21 +356,21 @@ def test_stream_api_error_exits(run_cli):
 # ---------------------------------------------------------------- deployments
 
 
-def test_deployments_list(run_cli, capsys):
+def test_deployments_list(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(list=mock.Mock(return_value={"items": []}))
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "list"])
     assert "items" in capsys.readouterr().out
 
 
-def test_deployments_get(run_cli, capsys):
+def test_deployments_get(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(get=mock.Mock(return_value={"id": "dep-1"}))
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "get", "dep-1"])
     assert "dep-1" in capsys.readouterr().out
 
 
-def test_deployments_create_wait_result(run_cli, capsys):
+def test_deployments_create_wait_result(run_cli: CliRunner, capsys: StrCapture) -> None:
     create_chain = mock.Mock()
     create_chain.wait.return_value.result.return_value = {"id": "dep-1"}
     fake = SimpleNamespace(create=mock.Mock(return_value=create_chain))
@@ -383,7 +396,7 @@ def test_deployments_create_wait_result(run_cli, capsys):
     assert '"id": "dep-1"' in capsys.readouterr().out
 
 
-def test_deployments_pause(run_cli, capsys):
+def test_deployments_pause(run_cli: CliRunner, capsys: StrCapture) -> None:
     chain = mock.Mock()
     chain.wait.return_value = None
     fake = SimpleNamespace(pause=mock.Mock(return_value=chain))
@@ -392,7 +405,7 @@ def test_deployments_pause(run_cli, capsys):
     assert "paused" in capsys.readouterr().out
 
 
-def test_deployments_resume(run_cli, capsys):
+def test_deployments_resume(run_cli: CliRunner, capsys: StrCapture) -> None:
     chain = mock.Mock()
     chain.wait.return_value = None
     fake = SimpleNamespace(resume=mock.Mock(return_value=chain))
@@ -401,21 +414,21 @@ def test_deployments_resume(run_cli, capsys):
     assert "resumed" in capsys.readouterr().out
 
 
-def test_deployments_delete(run_cli, capsys):
+def test_deployments_delete(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(delete=mock.Mock(return_value=None))
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "delete", "dep-1"])
     assert "deleted" in capsys.readouterr().out
 
 
-def test_deployments_logs(run_cli, capsys):
+def test_deployments_logs(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(logs=mock.Mock(return_value={"items": []}))
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "logs", "dep-1", "--level", "ERROR"])
     assert "items" in capsys.readouterr().out
 
 
-def test_deployments_metrics(run_cli, capsys):
+def test_deployments_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(metrics=mock.Mock(return_value={"qps": 1}))
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "metrics", "dep-1"])
@@ -450,7 +463,7 @@ def test_deployments_metrics(run_cli, capsys):
         ["deployments", "metrics", "x"],
     ],
 )
-def test_deployments_api_errors_exit(run_cli, cmd_args):
+def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(
@@ -471,21 +484,21 @@ def test_deployments_api_errors_exit(run_cli, cmd_args):
 # ---------------------------------------------------------------- hub
 
 
-def test_hub_search(run_cli, capsys):
+def test_hub_search(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(search=mock.Mock(return_value={"items": []}))
     with mock.patch("dagnam.hub", fake):
         run_cli(["hub", "search", "--search", "vit"])
     assert "items" in capsys.readouterr().out
 
 
-def test_hub_get(run_cli, capsys):
+def test_hub_get(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(get=mock.Mock(return_value={"id": "m1"}))
     with mock.patch("dagnam.hub", fake):
         run_cli(["hub", "get", "m1"])
     assert "m1" in capsys.readouterr().out
 
 
-def test_hub_star_unstar_fork_featured_trending(run_cli, capsys):
+def test_hub_star_unstar_fork_featured_trending(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(
         star=mock.Mock(return_value={"ok": True}),
         unstar=mock.Mock(return_value={"ok": True}),
@@ -514,7 +527,7 @@ def test_hub_star_unstar_fork_featured_trending(run_cli, capsys):
         (["hub", "trending"], "trending"),
     ],
 )
-def test_hub_api_errors_exit(run_cli, cmd_args, attr):
+def test_hub_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(**{attr: mock.Mock(side_effect=APIError(500, "boom"))})
@@ -526,7 +539,7 @@ def test_hub_api_errors_exit(run_cli, cmd_args, attr):
 # ---------------------------------------------------------------- projects
 
 
-def test_projects_list_get_create_delete_duplicate(run_cli, capsys):
+def test_projects_list_get_create_delete_duplicate(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(
         list=mock.Mock(return_value={"items": []}),
         get=mock.Mock(return_value={"id": "p1"}),
@@ -554,7 +567,7 @@ def test_projects_list_get_create_delete_duplicate(run_cli, capsys):
         (["projects", "duplicate", "p1"], "duplicate"),
     ],
 )
-def test_projects_api_errors_exit(run_cli, cmd_args, attr):
+def test_projects_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(**{attr: mock.Mock(side_effect=APIError(500, "boom"))})
@@ -566,7 +579,7 @@ def test_projects_api_errors_exit(run_cli, cmd_args, attr):
 # ---------------------------------------------------------------- codegen
 
 
-def test_codegen_generate_preview_validate_download(run_cli, capsys):
+def test_codegen_generate_preview_validate_download(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(
         generate=mock.Mock(return_value={"task_id": "t1"}),
         preview=mock.Mock(return_value={"code": "..."}),
@@ -590,7 +603,7 @@ def test_codegen_generate_preview_validate_download(run_cli, capsys):
         (["codegen", "download", "p1"], "download"),
     ],
 )
-def test_codegen_api_errors_exit(run_cli, cmd_args, attr):
+def test_codegen_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(**{attr: mock.Mock(side_effect=APIError(500, "boom"))})
@@ -602,12 +615,35 @@ def test_codegen_api_errors_exit(run_cli, cmd_args, attr):
 # ---------------------------------------------------------------- login
 
 
-def test_login_api_error_exits(run_cli, tmp_path, monkeypatch):
+def test_web_url_from_api_url_prod() -> None:
+    assert login_mod._web_url_from_api_url("https://api.dagnam.ai") == "https://dagnam.ai"
+
+
+def test_web_url_from_api_url_local() -> None:
+    assert login_mod._web_url_from_api_url("http://localhost:8000") == "http://localhost:5173"
+
+
+def test_web_url_from_api_url_unknown() -> None:
+    assert login_mod._web_url_from_api_url("https://corp.internal") == ""
+
+
+def test_login_prints_help_block(capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(login_mod, "error", lambda msg: (_ for _ in ()).throw(SystemExit(msg)))
+
+    ns = argparse.Namespace(api_url="http://localhost:8000")
+    with pytest.raises(SystemExit):
+        login_mod.cmd_login(ns, getpass_func=lambda _p: "sk_will_fail")
+    out = capsys.readouterr().out
+    assert "Don't have an API key yet?" in out
+    assert "http://localhost:5173" in out
+
+
+def test_login_apierror_exits(run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     config_dir = tmp_path / ".dagnam"
     config_file = config_dir / "config.json"
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
-    monkeypatch.setattr("getpass.getpass", lambda _prompt: "bad-key")
+    monkeypatch.setattr("getpass.getpass", _bad_key_prompt)
     from dagnam._core.exceptions import AuthError
 
     with mock.patch(
@@ -618,14 +654,14 @@ def test_login_api_error_exits(run_cli, tmp_path, monkeypatch):
             run_cli(["login"])
 
 
-def test_login_preserves_existing_config(run_cli, tmp_path, monkeypatch):
+def test_login_preserves_existing_config(run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     config_dir = tmp_path / ".dagnam"
     config_dir.mkdir()
     config_file = config_dir / "config.json"
     config_file.write_text(json.dumps({"other": "kept"}))
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
-    monkeypatch.setattr("getpass.getpass", lambda _prompt: "good-key")
+    monkeypatch.setattr("getpass.getpass", _good_key_prompt)
     with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login"])
     data = json.loads(config_file.read_text())
@@ -633,26 +669,26 @@ def test_login_preserves_existing_config(run_cli, tmp_path, monkeypatch):
     assert data["other"] == "kept"
 
 
-def test_login_with_custom_api_url(run_cli, tmp_path, monkeypatch):
+def test_login_with_custom_api_url(run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     config_dir = tmp_path / ".dagnam"
     config_file = config_dir / "config.json"
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
-    monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
+    monkeypatch.setattr("getpass.getpass", _key_prompt)
     with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login", "--api-url", "https://custom"])
     data = json.loads(config_file.read_text())
     assert data["api_url"] == "https://custom"
 
 
-def test_login_corrupt_existing_config_starts_fresh(run_cli, tmp_path, monkeypatch):
+def test_login_corrupt_existing_config_starts_fresh(run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
     config_dir = tmp_path / ".dagnam"
     config_dir.mkdir()
     config_file = config_dir / "config.json"
     config_file.write_text("not json {{{")
     monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
-    monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
+    monkeypatch.setattr("getpass.getpass", _key_prompt)
     with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
         run_cli(["login"])
     data = json.loads(config_file.read_text())

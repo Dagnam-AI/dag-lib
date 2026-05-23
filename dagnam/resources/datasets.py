@@ -8,7 +8,8 @@ server-side ingestion completes.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from dagnam._types import JsonObject
+from typing import Callable, Optional
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
@@ -27,11 +28,11 @@ def upload(
     description: Optional[str] = None,
     visibility: str = "private",
     license: Optional[str] = None,
-    progress_cb: Optional[Callable[[int, int], Any]] = None,
+    progress_cb: Optional[Callable[[int, int], object]] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> dict:
+) -> JsonObject:
     """Upload a local dataset file.
 
     >>> result = dagnam.datasets.upload(
@@ -85,14 +86,16 @@ def upload_from_url(
         description=description,
         visibility=visibility,
     )
-    task_id = initial["task_id"]
+    task_id_value = initial.get("task_id")
+    if not isinstance(task_id_value, str):
+        raise ValueError("Dataset upload response did not include a string task_id")
     return LongRunningOperation(
-        poll=lambda: resolved.get_dataset_task_status(task_id),
+        poll=lambda: resolved.get_dataset_task_status(task_id_value),
         success_states=_SUCCESS_STATES,
         failure_states=_FAILURE_STATES,
         state_key="status",
         error_key="error_message",
-        name=f"datasets.upload_from_url({task_id})",
+        name=f"datasets.upload_from_url({task_id_value})",
         initial=initial,
     )
 
