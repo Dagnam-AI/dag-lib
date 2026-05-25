@@ -6,19 +6,21 @@ plus ``sys.platform = 'linux'`` for the duration of the test.
 """
 
 from __future__ import annotations
+
 from collections.abc import Callable
-from pathlib import Path
-from tests.typing_helpers import PytestMonkeyPatch
-
-
 import json
+from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 
 import dagnam.cli.login as login_mod
 from dagnam.cli.login import _lock_down_config_path
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import PytestMonkeyPatch
 
 
 def _noop_chmod(_path: Path | str, _mode: int) -> None:

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import TYPE_CHECKING, Protocol, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from dagnam._types import JsonObject, TensorflowDataset
 from dagnam.data.loaders.system.common import SYSTEM_CACHE_ROOT
@@ -43,6 +44,18 @@ def _load_tfds() -> TensorflowDatasetsModule:
     return cast(TensorflowDatasetsModule, import_module("tensorflow_datasets"))
 
 
+def _load_supervised_split(tfds: Any, name: str, split: str, cache: Path) -> TensorflowDataset:
+    try:
+        return cast(
+            TensorflowDataset,
+            tfds.load(name, split=split, as_supervised=True, data_dir=str(cache)),
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return cast(TensorflowDataset, tfds.load(name, split, True, cache))
+
+
 def resolve_tfds_name(meta: JsonObject) -> str | None:
     """Return the tensorflow_datasets name for a system dataset, or None."""
     raw_name = meta.get("name", "")
@@ -80,8 +93,8 @@ def resolve_system_dataset_tf(meta: JsonObject) -> DagnamDataset:
     cache = SYSTEM_CACHE_ROOT / tfds_name
     cache.mkdir(parents=True, exist_ok=True)
 
-    train_ds = tfds.load(tfds_name, split="train", as_supervised=True, data_dir=str(cache))
-    test_ds = tfds.load(tfds_name, split="test", as_supervised=True, data_dir=str(cache))
+    train_ds = _load_supervised_split(tfds, tfds_name, "train", cache)
+    test_ds = _load_supervised_split(tfds, tfds_name, "test", cache)
 
     return DagnamDataset(
         meta,

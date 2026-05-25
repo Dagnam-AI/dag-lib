@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import csv
+from pathlib import Path
 from typing import cast
 
 import polars as pl
 from typing_extensions import override
 
 from dagnam.data.dataset._typing import DatasetMixinBase
+
+
+def _read_csv_with_detected_separator(data_file: Path) -> pl.DataFrame:
+    with open(data_file, encoding="utf-8", newline="") as handle:
+        sample = handle.read(4096)
+
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        separator = dialect.delimiter
+    except csv.Error:
+        separator = ","
+
+    return pl.read_csv(data_file, separator=separator)
 
 
 class PolarsDatasetMixin(DatasetMixinBase):
@@ -36,7 +51,7 @@ class PolarsDatasetMixin(DatasetMixinBase):
         data_file = self._find_data_file()
 
         if fmt == "csv":
-            self._data = pl.read_csv(data_file)
+            self._data = _read_csv_with_detected_separator(data_file)
         elif fmt == "tsv":
             self._data = pl.read_csv(data_file, separator="\t")
         elif fmt == "json":
@@ -44,4 +59,4 @@ class PolarsDatasetMixin(DatasetMixinBase):
         elif fmt == "jsonl":
             self._data = pl.read_ndjson(data_file)
 
-        return cast(pl.DataFrame, self._data)
+        return cast("pl.DataFrame", self._data)

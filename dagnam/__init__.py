@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from dagnam._core.auth import configure, get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import ChecksumError
-from dagnam._core.load import load_dataset
 from dagnam._core.lro import LongRunningOperation
 from dagnam.data.cache import (
     compute_file_checksum,
@@ -18,13 +19,17 @@ from dagnam.data.cache import (
     save_metadata,
     touch_cache,
 )
-from dagnam.data.dataset import DagnamDataset
 from dagnam.resources import codegen, datasets, deployments, hub, projects
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.inference import deployment_health, inference, inference_batch
 from dagnam.resources.training import TrainingEvent, stream_training
 
 __version__ = "0.1.0"
+
+_LAZY_EXPORTS = {
+    "DagnamDataset": ("dagnam.data.dataset", "DagnamDataset"),
+    "load_dataset": ("dagnam._core.load", "load_dataset"),
+}
 
 __all__ = [
     "ChecksumError",
@@ -57,3 +62,16 @@ __all__ = [
     "stream_training",
     "touch_cache",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Load optional/heavy public exports only when callers request them."""
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    from importlib import import_module
+
+    module_name, attr_name = _LAZY_EXPORTS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value

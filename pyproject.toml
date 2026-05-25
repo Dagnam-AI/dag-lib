@@ -5,7 +5,7 @@ description = "Official Python SDK for Dagnam.AI - datasets, training, model hub
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 authors = [
     { name = "Angad Sandhu", email = "angad@dagnam.ai" },
 ]
@@ -40,8 +40,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -134,7 +132,7 @@ skip_covered = true
 [tool.pyright]
 include = ["dagnam", "tests"]
 exclude = ["**/__pycache__", ".venv"]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "strict"
@@ -145,7 +143,7 @@ reportUnusedImport = "error"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 src = ["dagnam", "tests"]
 
 [tool.ruff.lint]

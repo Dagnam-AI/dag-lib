@@ -38,3 +38,41 @@ def load_json_arg(value: str) -> object:
         path = Path(value[1:])
         return json.loads(path.read_text(encoding="utf-8"))
     return json.loads(value)
+
+
+def print_json(value: object) -> None:
+    """Print a JSON value with stable CLI formatting."""
+    print(json.dumps(value, indent=2, default=str))
+
+
+def write_json_file(path: str | Path, value: object) -> None:
+    """Write a JSON value to disk with the same formatting used by verbose output."""
+    Path(path).write_text(json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8")
+
+
+def resolve_version() -> str:
+    """Return the installed dagnam version, falling back to the in-tree __version__.
+
+    Uses installed package metadata as the source of truth (so it reflects the
+    actually-installed wheel and never drifts from pyproject), and only imports
+    the heavy top-level package on the fallback path used for source checkouts.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("dagnam")
+    except PackageNotFoundError:
+        from dagnam import __version__
+
+        return __version__
+
+
+def mask_key(key: str) -> str:
+    """Mask a secret, revealing only a short prefix and suffix.
+
+    Short secrets (<= 10 chars) are fully masked so nothing meaningful leaks.
+    Uses an ASCII ellipsis to stay safe on legacy Windows code pages.
+    """
+    if len(key) <= 10:
+        return "*" * len(key)
+    return f"{key[:6]}...{key[-4:]}"

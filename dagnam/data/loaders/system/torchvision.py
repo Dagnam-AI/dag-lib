@@ -153,6 +153,9 @@ def download_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
         raise
 
 
+_download_verified_file = download_verified_file
+
+
 def ensure_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
     if dest.exists() and sha256(dest) == expected_sha256:
         return

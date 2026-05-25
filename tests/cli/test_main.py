@@ -1,17 +1,19 @@
 """Unit tests for dagnam.cli module."""
 
 from __future__ import annotations
-from pathlib import Path
-from tests.typing_helpers import PytestMonkeyPatch, StrCapture
-
 
 import importlib
 import json
+from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 
 from dagnam.cli import build_parser, human_size, main
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import PytestMonkeyPatch, StrCapture
 
 cli_main_module = importlib.import_module("dagnam.cli.main")
 
@@ -115,6 +117,22 @@ class TestCacheClear:
         main()
         assert not cache.exists()
         assert "freed" in capsys.readouterr().out.lower()
+
+
+class TestVersionFlag:
+    def test_long_flag(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "--version"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        assert capsys.readouterr().out.startswith("dagnam ")
+
+    def test_short_flag(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "-v"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        assert capsys.readouterr().out.startswith("dagnam ")
 
 
 class TestBuildParser:

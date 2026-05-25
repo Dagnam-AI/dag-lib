@@ -16,7 +16,8 @@ is still marked alpha while the platform API continues to mature.
 pip install dagnam
 ```
 
-Python 3.9 or newer is required.
+Python 3.12 is supported. The SDK targets this runtime so `dagnam[all]`
+installs every optional integration from the published dependency set.
 
 Optional framework extras:
 

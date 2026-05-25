@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 import numpy as np
@@ -29,6 +30,15 @@ class TfdsModule(Protocol):
     def load(self, name: str, *, split: str, as_supervised: bool, data_dir: str) -> object: ...
 
     def as_numpy(self, dataset: object) -> Iterable[TfdsSample]: ...
+
+
+def _load_supervised_split(tfds: TfdsModule, name: str, split: str, cache: Path) -> object:
+    try:
+        return tfds.load(name, split=split, as_supervised=True, data_dir=str(cache))
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return tfds.load(name, split, True, cache)  # type: ignore[call-arg]
 
 
 def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
@@ -95,7 +105,7 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
         return as_jax_array(np.asarray(xs))
 
     def _load_split(split: str, batch_size: int = 128) -> list["FlaxBatch"]:
-        ds = tfds.load(tfds_name, split=split, as_supervised=True, data_dir=str(cache))
+        ds = _load_supervised_split(tfds, tfds_name, split, cache)
         batches: list[FlaxBatch] = []
         xs: list[FeatureSample] = []
         ys: list[int] = []

@@ -1,9 +1,9 @@
 """Patch the remaining CLI / loader / dataset gaps."""
 
 from __future__ import annotations
-from pathlib import Path
-from tests.typing_helpers import JsonObject, PytestMonkeyPatch, StrCapture
 
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 import pytest
@@ -11,6 +11,9 @@ import pytest
 from dagnam.cli import main as cli_main
 from dagnam.cli.common import human_size
 from dagnam.data.loaders.csv import detect_label_column, split_by_roles
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import JsonObject, PytestMonkeyPatch, StrCapture
 
 # ---------------------------------------------------------------- cli/common
 

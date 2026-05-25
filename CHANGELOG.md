@@ -10,6 +10,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Release-process documentation for maintainers.
+- CLI version and account inspection commands: `dagnam --version`, `-v`,
+  `version`, `whoami`, `logout`, and read-only `config list` / `config get`.
+- Expanded CLI help text with command descriptions, examples, and argument
+  descriptions.
+
+### Changed
+
+- Set the supported Python runtime to Python 3.12 so `dagnam[all]` includes
+  every optional integration.
 
 ## [0.1.0] - 2026-05-10
 
@@ -54,5 +63,5 @@ First public PyPI release of the official Dagnam.AI Python SDK.
 
 ### Compatibility
 
-- Python `>=3.9`.
+- Python `>=3.12,<3.13`.
 - Dagnam backend `>=0.5.0, <0.7.0`.
