@@ -74,3 +74,24 @@ def cmd_stream(args: argparse.Namespace) -> None:
         error(str(exc))
     except KeyboardInterrupt:
         sys.exit(130)
+
+
+def cmd_training_attach(args: argparse.Namespace) -> None:
+    """Attach a local metrics JSONL file or child process to a Dagnam job."""
+    from dagnam._core.exceptions import AuthError, DagnamError
+    from dagnam.training_attach import run_training_attach
+
+    try:
+        code = run_training_attach(
+            job_id=args.job_id,
+            metrics_path=args.metrics_path,
+            command=args.command,
+            replay=args.replay,
+        )
+    except AuthError:
+        error("Not logged in. Run 'dagnam login'.")
+    except FileNotFoundError as exc:
+        error(str(exc))
+    except DagnamError as exc:
+        error(str(exc))
+    sys.exit(code)

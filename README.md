@@ -54,6 +54,46 @@ dagnam login
 By default the SDK talks to `https://api.dagnam.ai`. Override it with
 `DAGNAM_API_URL`, `dagnam.configure(api_url=...)`, or per-call `api_url=...`.
 
+## Local Generated-Code Metrics
+
+Generated training projects install `dagnam` through their `requirements.txt`.
+When running generated training locally, install the project requirements,
+authenticate the SDK, and choose a persistent metrics JSONL path:
+
+```bash
+pip install -r requirements.txt
+dagnam login
+dagnam config set training_metrics_path ./dagnam_metrics.jsonl
+```
+
+Generated `train.py` imports `dagnam.training` and writes progress, metrics,
+logs, system events, and structured errors to the metrics path. The path
+resolution order is `DAGNAM_METRICS_PATH`, then
+`~/.dagnam/config.json.training_metrics_path`, then `./dagnam_metrics.jsonl`.
+Platform-launched Dagnam jobs set `DAGNAM_METRICS_PATH` explicitly, so the job
+page can stream live progress through the backend.
+
+Standalone local runs write metrics locally and do not upload them by
+themselves. To view a laptop-local run in the hosted Dagnam frontend, attach the
+run to a job explicitly:
+
+```bash
+dagnam training attach <job-id> -- python train.py
+```
+
+If training is already running and writing JSONL metrics, watch the file:
+
+```bash
+dagnam training attach <job-id> --metrics-path ./dagnam_metrics.jsonl
+```
+
+The attach command uses the credentials from `dagnam login`, sets
+`DAGNAM_METRICS_PATH` for child commands, uploads metrics to the job-scoped
+backend ingest endpoint, and lets the existing frontend job stream show live
+progress. If no path is configured, metrics still write to
+`./dagnam_metrics.jsonl` with a one-time warning, but they will not appear in
+the hosted frontend until you run `dagnam training attach`.
+
 ## Quick Start
 
 Load a dataset, inspect metadata, and create a framework loader:

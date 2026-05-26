@@ -181,3 +181,59 @@ class TestConfig:
 
         assert exc_info.value.code == 1
         assert "api_key" in capsys.readouterr().err
+
+    def test_set_training_metrics_path_preserves_existing_config(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            '{"api_key": "sk_abcdefghijklmnop", "api_url": "https://e.test"}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dagnam", "config", "set", "training_metrics_path", "./dagnam_metrics.jsonl"],
+        )
+
+        main()
+
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert data["api_key"] == "sk_abcdefghijklmnop"
+        assert data["api_url"] == "https://e.test"
+        assert data["training_metrics_path"] == "./dagnam_metrics.jsonl"
+        assert "training_metrics_path" in capsys.readouterr().out
+
+    def test_unset_training_metrics_path_preserves_credentials(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "api_key": "sk_abcdefghijklmnop",
+                    "training_metrics_path": "./dagnam_metrics.jsonl",
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "unset", "training_metrics_path"])
+
+        main()
+
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert data == {"api_key": "sk_abcdefghijklmnop"}
+        assert "training_metrics_path" in capsys.readouterr().out
+
+    def test_set_rejects_unsupported_config_key(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "set", "api_key", "sk_nope"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        assert "Unsupported config key" in capsys.readouterr().err

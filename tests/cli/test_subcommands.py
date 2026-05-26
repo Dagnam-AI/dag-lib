@@ -807,6 +807,40 @@ def test_login_preserves_existing_config(
     assert data["other"] == "kept"
 
 
+def test_login_persists_training_metrics_path(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    config_dir = tmp_path / ".dagnam"
+    config_file = config_dir / "config.json"
+    metrics_path = tmp_path / "metrics" / "events.jsonl"
+    monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+    monkeypatch.setattr("getpass.getpass", _good_key_prompt)
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
+        run_cli(["login", "--training-metrics-path", str(metrics_path)])
+    data = json.loads(config_file.read_text())
+    assert data["api_key"] == "good-key"
+    assert data["training_metrics_path"] == str(metrics_path)
+
+
+def test_login_warns_when_training_metrics_path_missing(
+    run_cli: CliRunner,
+    tmp_path: Path,
+    monkeypatch: PytestMonkeyPatch,
+    capsys: StrCapture,
+) -> None:
+    config_dir = tmp_path / ".dagnam"
+    config_file = config_dir / "config.json"
+    monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+    monkeypatch.setattr("getpass.getpass", _good_key_prompt)
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
+        run_cli(["login"])
+    out = capsys.readouterr().out
+    assert "Local training metrics path is not configured" in out
+    assert "dagnam config set training_metrics_path ./dagnam_metrics.jsonl" in out
+
+
 def test_login_with_custom_api_url(
     run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch
 ) -> None:

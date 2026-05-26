@@ -53,6 +53,30 @@ class TestHelpText:
         assert exc_info.value.code == 0
         assert "Config key to read" in capsys.readouterr().out
 
+    def test_config_set_help_mentions_training_metrics_path(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "set", "--help"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "training_metrics_path" in out
+
+    def test_login_help_mentions_training_metrics_path(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "login", "--help"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "--training-metrics-path" in out
+
     def test_version_help_includes_environment_info(
         self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
     ) -> None:

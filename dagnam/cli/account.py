@@ -12,6 +12,8 @@ from typing import Any
 
 from dagnam.cli.common import error, mask_key, resolve_version
 
+_MUTABLE_CONFIG_KEYS = {"training_metrics_path"}
+
 
 def cmd_version(args: argparse.Namespace) -> None:
     """Print version plus interpreter/platform info for bug reports."""
@@ -115,3 +117,29 @@ def cmd_config_get(args: argparse.Namespace) -> None:
     if args.key == "api_key" and isinstance(value, str):
         value = mask_key(value)
     print(value)
+
+
+def cmd_config_set(args: argparse.Namespace) -> None:
+    """Set a supported saved config value while preserving other keys."""
+    from dagnam._core import config as _cfg
+
+    if args.key not in _MUTABLE_CONFIG_KEYS:
+        error(f"Unsupported config key for set: {args.key}")
+
+    config = _read_config_file(_cfg.CONFIG_FILE) or {}
+    config[args.key] = args.value
+    _write_config_securely(_cfg.CONFIG_FILE, config)
+    print(f"Set {args.key} = {args.value}")
+
+
+def cmd_config_unset(args: argparse.Namespace) -> None:
+    """Unset a supported saved config value while preserving other keys."""
+    from dagnam._core import config as _cfg
+
+    if args.key not in _MUTABLE_CONFIG_KEYS:
+        error(f"Unsupported config key for unset: {args.key}")
+
+    config = _read_config_file(_cfg.CONFIG_FILE) or {}
+    config.pop(args.key, None)
+    _write_config_securely(_cfg.CONFIG_FILE, config)
+    print(f"Unset {args.key}")

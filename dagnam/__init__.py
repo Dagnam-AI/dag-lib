@@ -23,6 +23,14 @@ from dagnam.resources import codegen, datasets, deployments, hub, projects
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.inference import deployment_health, inference, inference_batch
 from dagnam.resources.training import TrainingEvent, stream_training
+from dagnam.training import (
+    report_error,
+    report_log,
+    report_metric,
+    report_progress,
+    report_system,
+    write_training_state,
+)
 
 __version__ = "0.1.0"
 
@@ -57,10 +65,16 @@ __all__ = [
     "load_dataset",
     "load_metadata",
     "projects",
+    "report_error",
+    "report_log",
+    "report_metric",
+    "report_progress",
+    "report_system",
     "save_checksum",
     "save_metadata",
     "stream_training",
     "touch_cache",
+    "write_training_state",
 ]
 
 

@@ -108,6 +108,9 @@ def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | Non
     config["api_key"] = api_key
     if api_url != "https://api.dagnam.ai":
         config["api_url"] = api_url
+    training_metrics_path = getattr(args, "training_metrics_path", None)
+    if training_metrics_path:
+        config["training_metrics_path"] = training_metrics_path
 
     # Write atomically with restrictive permissions from the start: create the
     # file via os.open with O_CREAT | O_WRONLY | O_TRUNC and mode 0o600 so the
@@ -129,3 +132,9 @@ def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | Non
         except OSError:
             pass
     print(f"Credentials saved to {_cfg.CONFIG_FILE}")
+    if not config.get("training_metrics_path"):
+        print(
+            "Local training metrics path is not configured. To view local training "
+            "progress in Dagnam, run: dagnam config set training_metrics_path "
+            "./dagnam_metrics.jsonl"
+        )

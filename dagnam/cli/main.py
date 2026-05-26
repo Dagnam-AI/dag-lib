@@ -12,6 +12,8 @@ def build_parser() -> argparse.ArgumentParser:
     from dagnam.cli.account import (
         cmd_config_get,
         cmd_config_list,
+        cmd_config_set,
+        cmd_config_unset,
         cmd_logout,
         cmd_version,
         cmd_whoami,
@@ -57,7 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_projects_get,
         cmd_projects_list,
     )
-    from dagnam.cli.training import cmd_checkpoint_download, cmd_checkpoint_list, cmd_stream
+    from dagnam.cli.training import (
+        cmd_checkpoint_download,
+        cmd_checkpoint_list,
+        cmd_stream,
+        cmd_training_attach,
+    )
 
     parser = argparse.ArgumentParser(
         prog="dagnam",
@@ -98,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Log in to Dagnam.AI and save credentials to ~/.dagnam/config.json.",
     )
     login.add_argument("--api-url", help="API base URL (default: https://api.dagnam.ai).")
+    login.add_argument(
+        "--training-metrics-path",
+        help="Persist the local generated-training metrics JSONL path.",
+    )
     login.set_defaults(func=_login)
 
     dataset = subparsers.add_parser(
@@ -414,6 +425,26 @@ def build_parser() -> argparse.ArgumentParser:
     stream.add_argument("--json", action="store_true", help="Emit raw JSON events.")
     stream.set_defaults(func=cmd_stream)
 
+    training_cmd = subparsers.add_parser(
+        "training",
+        help="Manage training job helpers.",
+        description="Attach local training metrics to a Dagnam job.",
+    )
+    training_sub = training_cmd.add_subparsers(dest="training_command", required=True)
+    attach = training_sub.add_parser(
+        "attach",
+        help="Upload local JSONL training metrics for a job.",
+        description=(
+            "Attach a local training run to a Dagnam job. Use '--' before a "
+            "training command, for example: dagnam training attach <job-id> -- python train.py"
+        ),
+    )
+    attach.add_argument("job_id", help="ID of the training job.")
+    attach.add_argument("--metrics-path", help="Metrics JSONL path to watch.")
+    attach.add_argument("--replay", action="store_true", help="Upload existing file contents first.")
+    attach.add_argument("command", nargs="*", help="Command to run after '--'.")
+    attach.set_defaults(func=cmd_training_attach)
+
     version_cmd = subparsers.add_parser(
         "version",
         help="Show version and environment info.",
@@ -437,8 +468,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_cmd = subparsers.add_parser(
         "config",
-        help="Inspect saved configuration.",
-        description="Read values from ~/.dagnam/config.json (read-only).",
+        help="Inspect and update saved configuration.",
+        description="Read and update supported values in ~/.dagnam/config.json.",
     )
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
     config_list = config_sub.add_parser(
@@ -450,6 +481,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     config_get.add_argument("key", help="Config key to read, e.g. api_url.")
     config_get.set_defaults(func=cmd_config_get)
+    config_set = config_sub.add_parser(
+        "set",
+        help="Set a config value.",
+        description="Set a supported config value such as training_metrics_path.",
+    )
+    config_set.add_argument("key", help="Config key to set, e.g. training_metrics_path.")
+    config_set.add_argument("value", help="Value to save.")
+    config_set.set_defaults(func=cmd_config_set)
+    config_unset = config_sub.add_parser(
+        "unset",
+        help="Unset a config value.",
+        description="Unset a supported config value such as training_metrics_path.",
+    )
+    config_unset.add_argument("key", help="Config key to unset, e.g. training_metrics_path.")
+    config_unset.set_defaults(func=cmd_config_unset)
 
     return parser
 
