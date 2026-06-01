@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from dagnam.cli.common import error, print_json, write_json_file
+from dagnam.cli.common import error, print_json
+from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 
 def _collection_items(result: object) -> list[object]:
@@ -14,34 +15,40 @@ def _collection_items(result: object) -> list[object]:
     return result if isinstance(result, list) else []
 
 
-def _print_models(result: object) -> None:
+def _render_models(result: object) -> str:
     items = _collection_items(result)
     if not items:
-        print("No hub models found.")
-        return
-
-    header = f"{'ID':<36} {'NAME':<32} {'FRAMEWORK':<12} {'TASK':<20}"
-    print(header)
-    print("-" * len(header))
+        return "No hub models found."
+    rows: list[dict[str, object]] = []
     for item in items:
         model = item if isinstance(item, dict) else {"name": item}
-        name = str(model.get("name") or model.get("title") or "-")[:32]
-        framework = str(model.get("framework") or "-")[:12]
-        task = str(model.get("task_type") or model.get("task") or "-")[:20]
-        model_id = model.get("id") or "-"
-        print(f"{model_id!s:<36} {name:<32} {framework:<12} {task:<20}")
-
-    total = result.get("total") if isinstance(result, dict) else len(items)
-    print(f"Total: {total} model{'s' if total != 1 else ''}")
+        rows.append(
+            {
+                **model,
+                "name": model.get("name") or model.get("title") or "-",
+                "framework": model.get("framework") or "-",
+                "task": model.get("task_type") or model.get("task") or "-",
+            }
+        )
+    table = render_table(
+        (
+            Column("ID", "id", 36),
+            Column("Name", "name", 32),
+            Column("Framework", "framework", 12),
+            Column("Task", "task", 20),
+        ),
+        rows,
+    )
+    return f"{table}\n{pagination_footer(result)}" if isinstance(result, dict) else table
 
 
 def _emit_collection(args: argparse.Namespace, result: object) -> None:
-    if args.output:
-        write_json_file(args.output, result)
-    if args.verbose:
-        print_json(result)
-    else:
-        _print_models(result)
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_models,
+    )
 
 
 def cmd_hub_search(args: argparse.Namespace) -> None:

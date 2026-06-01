@@ -11,7 +11,11 @@ from pathlib import Path
 import sys
 
 from dagnam._types import JsonObject, ensure_json_object
-from dagnam.cli.common import error
+from dagnam.cli.common import error, format_ascii_art
+
+DEFAULT_TRAINING_METRICS_PATH = (
+    Path.home() / ".dagnam" / "training-metrics" / "dagnam_metrics.jsonl"
+)
 
 
 def _web_url_from_api_url(api_url: str) -> str:
@@ -53,7 +57,11 @@ def _lock_down_config_path(config_dir: Path, config_file: Path) -> None:
             error(f"Refusing to overwrite config file not owned by current user: {config_file}")
 
 
-def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | None = None) -> None:
+def cmd_login(
+    args: argparse.Namespace,
+    getpass_func: Callable[[str], str] | None = None,
+    input_func: Callable[[str], str] | None = None,
+) -> None:
     from dagnam._core import config as _cfg
     from dagnam._core.client import DagnamClient
     from dagnam._core.exceptions import DagnamError
@@ -61,6 +69,7 @@ def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | Non
     api_url = getattr(args, "api_url", None) or "https://api.dagnam.ai"
     web_url = _web_url_from_api_url(api_url)
 
+    print(f"{format_ascii_art()}\n")
     print("Log in to Dagnam.\n")
     print("Don't have an API key yet?")
     if web_url:
@@ -109,8 +118,16 @@ def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | Non
     if api_url != "https://api.dagnam.ai":
         config["api_url"] = api_url
     training_metrics_path = getattr(args, "training_metrics_path", None)
-    if training_metrics_path:
-        config["training_metrics_path"] = training_metrics_path
+    if not training_metrics_path:
+        default_path = str(DEFAULT_TRAINING_METRICS_PATH)
+        stdin = getattr(sys, "stdin", None)
+        if stdin is not None and stdin.isatty():
+            entered = (input_func or input)(f"Training metrics path [{default_path}]: ").strip()
+            training_metrics_path = entered or default_path
+        else:
+            training_metrics_path = default_path
+    config["training_metrics_path"] = training_metrics_path
+    print(f"Training metrics path: {training_metrics_path}")
 
     # Write atomically with restrictive permissions from the start: create the
     # file via os.open with O_CREAT | O_WRONLY | O_TRUNC and mode 0o600 so the
@@ -132,9 +149,3 @@ def cmd_login(args: argparse.Namespace, getpass_func: Callable[[str], str] | Non
         except OSError:
             pass
     print(f"Credentials saved to {_cfg.CONFIG_FILE}")
-    if not config.get("training_metrics_path"):
-        print(
-            "Local training metrics path is not configured. To view local training "
-            "progress in Dagnam, run: dagnam config set training_metrics_path "
-            "./dagnam_metrics.jsonl"
-        )

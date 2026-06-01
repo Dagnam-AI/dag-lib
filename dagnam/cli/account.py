@@ -11,15 +11,24 @@ import sys
 from typing import Any
 
 from dagnam.cli.common import error, mask_key, resolve_version
+from dagnam.cli.presentation import Column, emit_result, render_table
 
 _MUTABLE_CONFIG_KEYS = {"training_metrics_path"}
 
 
 def cmd_version(args: argparse.Namespace) -> None:
     """Print version plus interpreter/platform info for bug reports."""
-    print(f"dagnam {resolve_version()}")
-    print(f"Python {platform.python_version()}")
-    print(platform.platform())
+    payload = {
+        "dagnam": resolve_version(),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return
+    print(f"dagnam {payload['dagnam']}")
+    print(f"Python {payload['python']}")
+    print(payload["platform"])
 
 
 def cmd_whoami(args: argparse.Namespace) -> None:
@@ -39,7 +48,7 @@ def cmd_whoami(args: argparse.Namespace) -> None:
 
     print(f"API URL: {get_api_url()}")
     print(f"API key: {mask_key(api_key)}")
-    print(f"Source:  {source}")
+    print(f"Source: {source}")
 
 
 def _read_config_file(path: Path) -> dict[str, Any] | None:
@@ -111,6 +120,9 @@ def cmd_config_get(args: argparse.Namespace) -> None:
 
     config = _read_config_file(_cfg.CONFIG_FILE) or {}
     if args.key not in config:
+        if args.key in _MUTABLE_CONFIG_KEYS:
+            print(f"{args.key} is not configured")
+            return
         error(f"Config key not found: {args.key}")
 
     value = config[args.key]
@@ -143,3 +155,71 @@ def cmd_config_unset(args: argparse.Namespace) -> None:
     config.pop(args.key, None)
     _write_config_securely(_cfg.CONFIG_FILE, config)
     print(f"Unset {args.key}")
+
+
+def _usage_value(entry: dict[str, Any], key: str) -> Any:
+    value = entry.get(key)
+    return value if value is not None else "-"
+
+
+def _render_usage(snapshot: object) -> str:
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    plan = snapshot.get("plan") if isinstance(snapshot, dict) else None
+    plan = plan if isinstance(plan, dict) else {}
+    plan_name = plan.get("display_name") or plan.get("code") or "-"
+    lines = [f"Plan: {plan_name}"]
+    if snapshot.get("read_only_grace"):
+        lines.append("Status: READ-ONLY GRACE (usage limit reached)")
+    if snapshot.get("pending_plan"):
+        lines.append(f"Pending plan: {snapshot['pending_plan']}")
+
+    limits = snapshot.get("limits") if isinstance(snapshot, dict) else None
+    limits = limits if isinstance(limits, list) else []
+    if not limits:
+        return "\n".join([*lines, "No limit information returned."])
+    rows: list[dict[str, object]] = []
+    for item in limits:
+        entry = item if isinstance(item, dict) else {}
+        current = entry.get("current")
+        limit = entry.get("limit")
+        if isinstance(current, int | float) and isinstance(limit, int | float):
+            remaining: Any = max(limit - current, 0)
+        else:
+            remaining = "unlimited" if limit is None else "-"
+        limit_display = "unlimited" if limit is None else limit
+        rows.append(
+            {
+                "key": entry.get("key", "-"),
+                "current": _usage_value(entry, "current"),
+                "limit": limit_display,
+                "remaining": remaining,
+            }
+        )
+    table = render_table(
+        (
+            Column("Limit", "key", 32),
+            Column("Used", "current", 12, "right"),
+            Column("Limit", "limit", 12, "right"),
+            Column("Remaining", "remaining", 12, "right"),
+        ),
+        rows,
+    )
+    return "\n".join([*lines, "", table])
+
+
+def cmd_usage(args: argparse.Namespace) -> None:
+    """Print the caller's plan and real-time usage against plan limits."""
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        snapshot = dagnam.account.entitlements()
+    except DagnamError as exc:
+        error(str(exc))
+
+    emit_result(
+        snapshot,
+        output=args.output,
+        json_stdout=args.json,
+        render_human=_render_usage,
+    )

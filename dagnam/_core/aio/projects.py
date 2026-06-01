@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dagnam._core.aio.base import BaseAsyncDagnamClient
+from dagnam._core.client.common import quote_path_segment, raise_for_project, response_json_value
 from dagnam._types import (
     FormData,
     JsonObject,
@@ -11,9 +13,6 @@ from dagnam._types import (
     UploadFiles,
     ensure_json_object,
 )
-
-from dagnam._core.aio.base import BaseAsyncDagnamClient
-from dagnam._core.client.common import quote_path_segment, raise_for_project, response_json_value
 
 
 class AsyncProjectsMixin(BaseAsyncDagnamClient):
@@ -84,7 +83,7 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
     async def save_architecture(self, project_id: str, payload: JsonObject) -> JsonObject:
         return ensure_json_object(await self._project_req(
             "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/architecture",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/save",
             project_id=project_id,
             json_body=payload,
         ))

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dagnam.cli import main
+from dagnam.cli.common import format_ascii_art
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, StrCapture
@@ -23,6 +24,7 @@ class TestHelpText:
 
         assert exc_info.value.code == 0
         out = capsys.readouterr().out
+        assert format_ascii_art() in out
         assert "Official CLI for Dagnam.AI" in out
         assert "Examples:" in out
         assert "version" in out

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dagnam.resources import (
+    account,
     checkpoints,
     codegen,
     datasets,
@@ -16,6 +17,7 @@ from dagnam.resources import (
 datasets_upload = datasets
 
 __all__ = [
+    "account",
     "checkpoints",
     "codegen",
     "datasets",

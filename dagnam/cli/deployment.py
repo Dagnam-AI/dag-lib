@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from dagnam.cli.common import error, print_json, write_json_file
+from dagnam.cli.common import error, print_json
+from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 
 def _collection_items(result: object) -> list[object]:
@@ -18,31 +19,52 @@ def _date(value: object) -> str:
     return str(value or "-").split("T", maxsplit=1)[0]
 
 
-def _print_deployments(result: object) -> None:
+def _redact_deployment_secrets(deployment: object) -> object:
+    if not isinstance(deployment, dict):
+        return deployment
+    result = dict(deployment)
+    if "api_key" in result:
+        result["api_key"] = "<redacted>"
+    return result
+
+
+def _redact_deployment_collection(result: object) -> object:
+    if not isinstance(result, dict):
+        return result
+    sanitized = dict(result)
+    items = sanitized.get("items")
+    if isinstance(items, list):
+        sanitized["items"] = [_redact_deployment_secrets(item) for item in items]
+    return sanitized
+
+
+def _render_deployments(result: object) -> str:
     items = _collection_items(result)
     if not items:
-        print("No deployments found.")
-        return
-
-    header = f"{'ID':<36} {'NAME':<28} {'STATUS':<12} {'PLATFORM':<12} {'UPDATED':<10}"
-    print(header)
-    print("-" * len(header))
+        return "No deployments found."
+    rows: list[dict[str, object]] = []
     for item in items:
         deployment = item if isinstance(item, dict) else {}
-        name = str(deployment.get("name") or deployment.get("title") or "-")[:28]
-        status = str(deployment.get("status") or "-")[:12]
-        platform = str(deployment.get("platform") or "-")[:12]
-        deployment_id = deployment.get("id") or "-"
-        print(
-            f"{deployment_id!s:<36} "
-            f"{name:<28} "
-            f"{status:<12} "
-            f"{platform:<12} "
-            f"{_date(deployment.get('updated_at')):<10}"
+        rows.append(
+            {
+                **deployment,
+                "name": deployment.get("name") or deployment.get("title") or "-",
+                "status": deployment.get("status") or "-",
+                "platform": deployment.get("platform") or "-",
+                "updated": _date(deployment.get("updated_at")),
+            }
         )
-
-    total = result.get("total") if isinstance(result, dict) else len(items)
-    print(f"Total: {total} deployment{'s' if total != 1 else ''}")
+    table = render_table(
+        (
+            Column("ID", "id", 36),
+            Column("Name", "name", 28),
+            Column("Status", "status", 12),
+            Column("Platform", "platform", 12),
+            Column("Updated", "updated", 10),
+        ),
+        rows,
+    )
+    return f"{table}\n{pagination_footer(result)}"
 
 
 def cmd_deployments_list(args: argparse.Namespace) -> None:
@@ -60,12 +82,13 @@ def cmd_deployments_list(args: argparse.Namespace) -> None:
         )
     except DagnamError as exc:
         error(str(exc))
-    if args.output:
-        write_json_file(args.output, result)
-    if args.verbose:
-        print_json(result)
-    else:
-        _print_deployments(result)
+    result = _redact_deployment_collection(result)
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_deployments,
+    )
 
 
 def cmd_deployments_get(args: argparse.Namespace) -> None:
@@ -76,7 +99,7 @@ def cmd_deployments_get(args: argparse.Namespace) -> None:
         result = dagnam.deployments.get(args.deployment_id)
     except DagnamError as exc:
         error(str(exc))
-    print_json(result)
+    print_json(_redact_deployment_secrets(result))
 
 
 def cmd_deployments_create(args: argparse.Namespace) -> None:

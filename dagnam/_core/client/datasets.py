@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dagnam._types import JsonObject
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     parse_content_disposition_filename,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment, response_json_array, response_json_object
+from dagnam._types import JsonObject
 
 
 class DatasetsClientMixin(BaseDagnamClient):
@@ -101,7 +101,13 @@ class DatasetsClientMixin(BaseDagnamClient):
         self._raise_for_status(resp, dataset_id)
         return response_json_object(resp)
 
-    def download_system_dataset(self, dataset_id: str, output_dir: Path) -> Path:
+    def download_system_dataset(
+        self,
+        dataset_id: str,
+        output_dir: Path,
+        *,
+        show_progress: bool = True,
+    ) -> Path:
         """Stream-download a system dataset file with a tqdm progress bar.
 
         GET /api/v1/datasets/system/{dataset_id}/download
@@ -113,7 +119,11 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._get_stream(url)
         self._raise_for_status(resp, dataset_id)
         filename = parse_content_disposition_filename(resp.headers.get("Content-Disposition"))
-        return self._stream_response_to_file(resp, Path(output_dir) / filename)
+        return self._stream_response_to_file(
+            resp,
+            Path(output_dir) / filename,
+            show_progress=show_progress,
+        )
 
     def download_dataset(
         self,
@@ -124,6 +134,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         filename: str | None = None,
         version: str | None = None,
         resume: bool = True,
+        show_progress: bool = True,
     ) -> Path:
         """Stream-download a dataset file with optional resume support.
 
@@ -203,19 +214,19 @@ class DatasetsClientMixin(BaseDagnamClient):
         # Handle resume logic
         if "Range" in headers and resp.status_code == 206:
             # Append to existing partial file
-            self._append_stream_to_file(resp, part_path)
+            self._append_stream_to_file(resp, part_path, show_progress=show_progress)
             # Rename .part to final filename
             part_path.replace(dest)
         elif "Range" in headers and resp.status_code == 200:
             # Server doesn't support Range — restart full download
             part_path.unlink(missing_ok=True)
-            self._stream_response_to_file(resp, part_path)
+            self._stream_response_to_file(resp, part_path, show_progress=show_progress)
             part_path.replace(dest)
         else:
             # Normal full download
             if part_path.exists():
                 part_path.unlink()
-            self._stream_response_to_file(resp, part_path)
+            self._stream_response_to_file(resp, part_path, show_progress=show_progress)
             part_path.replace(dest)
 
         return dest

@@ -1,15 +1,14 @@
 """Wire-level HTTP tests using requests-mock.
 
 Asserts DagnamClient hits the right URLs with the right headers, bodies,
-and query params — without running a real server.
+and query params - without running a real server.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from tests.typing_helpers import RequestsMocker
-
 
 import hashlib
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import requests_mock as rm_module
@@ -20,7 +19,11 @@ from dagnam._core.exceptions import (
     AuthError,
     CheckpointNotFoundError,
     DeploymentNotFoundError,
+    TrainingJobNotFoundError,
 )
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import RequestsMocker
 
 API = "https://api.test"
 
@@ -222,3 +225,167 @@ def test_codegen_download_uses_project_download_route(client: DagnamClient, rmoc
     rmock.get(url, content=body)
     assert client.download_code("p1", dest_path=dest) == dest
     assert dest.read_bytes() == body
+
+
+# --------------------------------------------------------------- training jobs
+
+
+def test_create_training_job_posts_payload(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs"
+    rmock.post(url, status_code=201, json={"id": "j1", "status": "pending"})
+
+    payload = {"project_id": "p1", "framework": "pytorch", "config": {"epochs": 1}}
+    result = client.create_training_job(payload)
+
+    assert result == {"id": "j1", "status": "pending"}
+    req = rmock.last_request
+    assert req.json() == payload
+    assert req.headers["Authorization"] == "Bearer k"
+
+
+def test_create_training_job_over_limit_maps_to_apierror(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    url = f"{API}/api/v1/training/jobs"
+    rmock.post(url, status_code=402, json={"detail": "limit_exceeded"})
+
+    with pytest.raises(APIError) as excinfo:
+        client.create_training_job({"project_id": "p1"})
+    assert excinfo.value.status_code == 402
+
+
+def test_get_training_job(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/j1"
+    rmock.get(url, json={"id": "j1", "status": "running"})
+
+    assert client.get_training_job("j1") == {"id": "j1", "status": "running"}
+
+
+def test_get_training_job_404_maps_to_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    url = f"{API}/api/v1/training/jobs/missing"
+    rmock.get(url, status_code=404, text="not found")
+
+    with pytest.raises(TrainingJobNotFoundError):
+        client.get_training_job("missing")
+
+
+def test_list_training_jobs_passes_query(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs"
+    rmock.get(url, json={"items": [], "total": 0})
+
+    client.list_training_jobs(
+        page=2, limit=5, status_filter="running,completed", project_id="p1"
+    )
+    qs = rmock.last_request.qs
+    assert qs["page"] == ["2"]
+    assert qs["status_filter"] == ["running,completed"]
+    assert qs["project_id"] == ["p1"]
+
+
+def test_cancel_training_job_posts(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/j1/cancel"
+    rmock.post(url, json={"message": "Training job cancelled successfully"})
+
+    assert client.cancel_training_job("j1") == {
+        "message": "Training job cancelled successfully"
+    }
+
+
+def test_cancel_terminal_job_maps_to_apierror(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    url = f"{API}/api/v1/training/jobs/j1/cancel"
+    rmock.post(url, status_code=400, json={"detail": "Cannot cancel job with status completed"})
+
+    with pytest.raises(APIError) as excinfo:
+        client.cancel_training_job("j1")
+    assert excinfo.value.status_code == 400
+
+
+def test_bulk_delete_training_jobs_posts_ids(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/bulk-delete"
+    rmock.post(url, json={"deleted": 2})
+
+    assert client.bulk_delete_training_jobs(["j1", "j2"]) == {"deleted": 2}
+    assert rmock.last_request.json() == {"job_ids": ["j1", "j2"]}
+
+
+def test_training_job_path_is_percent_encoded(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    url = f"{API}/api/v1/training/jobs/a%2Fb/cancel"
+    rmock.post(url, json={"message": "ok"})
+
+    client.cancel_training_job("a/b")
+    assert rmock.last_request.path.lower() == "/api/v1/training/jobs/a%2fb/cancel"
+
+
+def test_training_logs_pass_query(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/job-1/logs"
+    rmock.get(url, json={"items": []})
+
+    assert client.get_training_logs("job-1", log_level="error", page=2, limit=5) == {
+        "items": []
+    }
+    assert rmock.last_request.qs == {
+        "log_level": ["error"],
+        "page": ["2"],
+        "limit": ["5"],
+    }
+
+
+def test_training_metrics_pass_query(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/job-1/metrics"
+    rmock.get(url, json={"items": []})
+
+    assert client.get_training_metrics("job-1", metric_type="train_loss", epoch_summary=True) == {
+        "items": []
+    }
+    assert rmock.last_request.qs == {
+        "metric_type": ["train_loss"],
+        "epoch_summary": ["true"],
+    }
+
+
+def test_training_metrics_summary_wire(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/training/jobs/job-1/metrics/summary"
+    rmock.get(url, json={"best_epoch": 2})
+
+    assert client.get_training_metrics_summary("job-1") == {"best_epoch": 2}
+
+
+# ----------------------------------------------------------------- account/usage
+
+
+def test_get_entitlements(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/users/me/entitlements"
+    rmock.get(url, json={"plan": {"code": "pro"}, "limits": []})
+
+    assert client.get_entitlements() == {"plan": {"code": "pro"}, "limits": []}
+    assert rmock.last_request.headers["Authorization"] == "Bearer k"
+
+
+def test_get_storage_quota(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/datasets/storage/quota"
+    rmock.get(url, json={"used_bytes": 1, "limit_bytes": 100})
+
+    assert client.get_storage_quota() == {"used_bytes": 1, "limit_bytes": 100}
+
+
+def test_get_api_key_usage(client: DagnamClient, rmock: RequestsMocker) -> None:
+    url = f"{API}/api/v1/users/me/api-keys/key_1/usage"
+    rmock.get(url, json={"usage_count": 7})
+
+    assert client.get_api_key_usage("key_1") == {"usage_count": 7}
+
+
+def test_entitlements_401_maps_to_autherror(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    url = f"{API}/api/v1/users/me/entitlements"
+    rmock.get(url, status_code=401, text="unauthorized")
+
+    with pytest.raises(AuthError):
+        client.get_entitlements()

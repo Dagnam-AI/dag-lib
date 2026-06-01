@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dagnam._types import FormData, JsonObject, JsonValue, QueryParams, QueryValue, UploadFiles
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment, requests_query_params
+from dagnam._types import FormData, JsonObject, JsonValue, QueryParams, QueryValue, UploadFiles
 
 
 class ProjectsClientMixin(BaseDagnamClient):
@@ -108,7 +108,7 @@ class ProjectsClientMixin(BaseDagnamClient):
     def save_architecture(self, project_id: str, payload: JsonObject) -> JsonObject:
         value = self._project_request(
             "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/architecture",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/save",
             project_id=project_id,
             json_body=payload,
         )

@@ -57,6 +57,8 @@ class MetricsJsonlTailer:
             line_len = len(raw_bytes) + 1
             event_offset = cursor
             cursor += line_len
+            if event_offset == 0:
+                raw_bytes = raw_bytes.removeprefix(b"\xef\xbb\xbf")
             raw = raw_bytes.rstrip(b"\r").decode("utf-8", errors="replace")
             if not raw.strip():
                 continue
@@ -139,6 +141,8 @@ def run_training_attach(
     retry_initial_interval: float = 1.0,
     retry_max_interval: float = 30.0,
     max_pending: int = 10000,
+    final_upload_attempts: int = 3,
+    child_shutdown_timeout: float = 5.0,
 ) -> int:
     """Run an attach session, optionally launching a child training command."""
     command = list(command or [])
@@ -182,10 +186,10 @@ def run_training_attach(
             if len(pending) >= batch_size:
                 upload_pending()
 
-    def upload_pending() -> None:
+    def upload_pending() -> bool:
         nonlocal upload_backoff
         if not pending:
-            return
+            return True
         try:
             _upload_batch(resolved_client, job_id, pending.copy())
         except Exception as exc:
@@ -197,14 +201,49 @@ def run_training_attach(
             if upload_backoff > 0:
                 time.sleep(upload_backoff)
             upload_backoff = min(max(upload_backoff * 2, retry_initial_interval), retry_max_interval)
-            return
+            return False
         pending.clear()
         upload_backoff = retry_initial_interval
+        return True
+
+    def flush_pending() -> bool:
+        for _ in range(final_upload_attempts):
+            if upload_pending():
+                return True
+        return not pending
+
+    def terminate_child() -> None:
+        if process is None:
+            return
+        if os.name == "nt" and getattr(process, "pid", None) is not None:
+            subprocess.run(  # noqa: S603
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],  # noqa: S607
+                capture_output=True,
+                check=False,
+            )
+            wait = getattr(process, "wait", None)
+            if wait is not None:
+                wait()
+            return
+        process.terminate()
+        wait = getattr(process, "wait", None)
+        if wait is None:
+            return
+        try:
+            wait(timeout=child_shutdown_timeout)
+        except TypeError:
+            wait()
+        except subprocess.TimeoutExpired:
+            process.kill()
+            wait()
 
     process_reaped = False
     try:
         if process is None:
             sys.stdout.write(f"Watching {path} for Dagnam training metrics. Press Ctrl+C to stop.\n")
+            if replay:
+                drain_once()
+                return 0 if flush_pending() else 1
             while True:
                 drain_once()
                 upload_pending()
@@ -216,7 +255,8 @@ def run_training_attach(
             time.sleep(poll_interval)
 
         drain_once()
-        upload_pending()
+        if not flush_pending():
+            return 1
         exit_code = int(process.wait())
         process_reaped = True
         return exit_code
@@ -229,4 +269,4 @@ def run_training_attach(
         # upload error propagates out. Skip only when it already exited and
         # was reaped on the normal path.
         if process is not None and not process_reaped:
-            process.terminate()
+            terminate_child()

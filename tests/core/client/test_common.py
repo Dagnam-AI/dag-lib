@@ -160,6 +160,23 @@ def test_safe_response_text_coerces_non_string_text() -> None:
     assert common.safe_response_text(r) == "123"
 
 
+def test_safe_response_text_unwraps_fastapi_string_detail() -> None:
+    r = _resp(422, text='{"detail":"dataset is required"}', content_type="application/json")
+    assert common.safe_response_text(r) == "dataset is required"
+
+
+def test_safe_response_text_formats_fastapi_validation_detail() -> None:
+    r = _resp(
+        422,
+        text=(
+            '{"detail":[{"type":"missing","loc":["body","project_id"],'
+            '"msg":"Field required","input":{}}]}'
+        ),
+        content_type="application/json",
+    )
+    assert common.safe_response_text(r) == "body.project_id: Field required"
+
+
 # raise_for_generic ------------------------------------------------------
 
 
@@ -346,6 +363,19 @@ def test_raise_for_codegen_500() -> None:
 def test_raise_for_codegen_other_code() -> None:
     with pytest.raises(APIError):
         common.raise_for_codegen(_resp(503))
+
+
+def test_safe_response_text_reads_streaming_json_error_body() -> None:
+    class StreamingJsonResponse:
+        status_code = 500
+        _content = False
+        content = b""
+        text = '{"detail":"Failed to create ZIP file"}'
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "application/json"}
+
+    assert common.safe_response_text(StreamingJsonResponse()) == "Failed to create ZIP file"
 
 
 # raise_for_upload -------------------------------------------------------

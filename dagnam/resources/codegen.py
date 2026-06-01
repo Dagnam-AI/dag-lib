@@ -9,13 +9,13 @@ task reaches ``completed`` or ``failed``.
 
 from __future__ import annotations
 
-from dagnam._types import JsonObject
 from pathlib import Path
 from typing import Optional, Union
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
+from dagnam._types import JsonObject
 
 
 def generate(
@@ -96,6 +96,7 @@ def download(
     framework: str = "pytorch",
     version_id: Optional[str] = None,
     dest: Optional[Union[str, Path]] = None,
+    show_progress: bool = True,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
@@ -103,21 +104,26 @@ def download(
     """Download generated code.
 
     If *dest* is provided, stream to that file path and return the
-    :class:`~pathlib.Path`.  Otherwise return raw bytes.
+    :class:`~pathlib.Path`.  Otherwise return raw bytes.  *show_progress*
+    only applies when streaming to *dest*.
     """
     resolved = resolve_client(client, api_key, api_url)
+    if dest is not None:
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
     data = resolved.download_code(
         project_id,
         framework=framework,
         version_id=version_id,
+        dest_path=dest,
+        show_progress=show_progress,
     )
+    if dest is not None:
+        if not isinstance(data, Path):
+            raise TypeError("Expected generated code download path when destination is provided")
+        return data
     if not isinstance(data, bytes):
         raise TypeError("Expected generated code bytes when no destination path is provided")
-    if dest is not None:
-        dest = Path(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        return dest
     return data
 
 

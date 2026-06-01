@@ -16,11 +16,11 @@ import os
 from pathlib import Path
 import re
 
-from dagnam._types import JsonObject, ensure_json_object
 from dagnam._core.auth import get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import ChecksumError
+from dagnam._types import JsonObject, ensure_json_object
 from dagnam.data.cache import (
     compute_file_checksum,
     evict_lru,
@@ -80,6 +80,7 @@ def load_dataset(
     presigned_url: str | None = None,
     download_url: str | None = None,
     resume: bool = True,
+    show_progress: bool = True,
 ) -> DagnamDataset:
     """Load a dataset by ID. Auto-downloads and caches if needed.
 
@@ -121,7 +122,11 @@ def load_dataset(
 
     ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
     if is_system:
-        downloaded_file = client.download_system_dataset(dataset_id, ds_cache_dir)
+        downloaded_file = client.download_system_dataset(
+            dataset_id,
+            ds_cache_dir,
+            show_progress=show_progress,
+        )
     else:
         downloaded_file = client.download_dataset(
             dataset_id,
@@ -130,6 +135,7 @@ def load_dataset(
             filename=_optional_meta_str(meta, "filename"),
             version=version,
             resume=resume,
+            show_progress=show_progress,
         )
 
     local_checksum = compute_file_checksum(downloaded_file)

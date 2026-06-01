@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dagnam._core.client.account import AccountClientMixin
 from dagnam._core.client.base import BaseDagnamClient
 from dagnam._core.client.checkpoints import CheckpointsClientMixin
 from dagnam._core.client.codegen import CodegenClientMixin
@@ -14,6 +15,7 @@ from dagnam._core.client.training import TrainingClientMixin
 
 
 class DagnamClient(
+    AccountClientMixin,
     DatasetsClientMixin,
     InferenceClientMixin,
     CheckpointsClientMixin,

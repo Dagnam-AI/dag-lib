@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_config_set,
         cmd_config_unset,
         cmd_logout,
+        cmd_usage,
         cmd_version,
         cmd_whoami,
     )
@@ -25,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_codegen_preview,
         cmd_codegen_validate,
     )
-    from dagnam.cli.common import resolve_version
+    from dagnam.cli.common import format_ascii_art, format_version_banner
     from dagnam.cli.dataset import cmd_dataset_download, cmd_dataset_info, cmd_dataset_list
     from dagnam.cli.deployment import (
         cmd_deployments_create,
@@ -53,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     from dagnam.cli.login import cmd_login
     from dagnam.cli.project import (
+        cmd_projects_architecture,
         cmd_projects_create,
         cmd_projects_delete,
         cmd_projects_duplicate,
@@ -64,16 +66,32 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_checkpoint_list,
         cmd_stream,
         cmd_training_attach,
+        cmd_training_cancel,
+        cmd_training_create,
+        cmd_training_delete,
+        cmd_training_get,
+        cmd_training_list,
+        cmd_training_logs,
+        cmd_training_metrics,
+        cmd_training_metrics_summary,
     )
 
     parser = argparse.ArgumentParser(
         prog="dagnam",
-        description="Official CLI for Dagnam.AI datasets, projects, deployments, and training.",
+        description=(
+            f"{format_ascii_art()}\n\n"
+            "Official CLI for Dagnam.AI datasets, projects, deployments, and training."
+        ),
         epilog=(
             "Examples:\n"
             "  dagnam login                         Authenticate with an API key\n"
             "  dagnam dataset list --search mnist   Search available datasets\n"
             "  dagnam projects create --title X     Create a new project\n"
+            "  dagnam training create <pid> ...     Start a training job\n"
+            "  dagnam training attach <jid> -- ... Attach local metrics to a child process\n"
+            "  dagnam config set training_metrics_path <path>\n"
+            "                                       Set the default local metrics JSONL path\n"
+            "  dagnam usage                         Show plan usage and limits\n"
             "  dagnam deployments logs <id>         Tail a deployment's logs\n\n"
             "Docs: https://dagnam.ai/docs"
         ),
@@ -83,16 +101,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--version",
         "-v",
         action="version",
-        version=f"dagnam {resolve_version()}",
+        version=format_version_banner(),
         help="Show the dagnam version and exit.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def _add_collection_output_args(command: argparse.ArgumentParser) -> None:
         command.add_argument(
-            "--verbose",
+            "--json",
             action="store_true",
             help="Print the full JSON response instead of the concise table.",
+        )
+        command.add_argument(
+            "--verbose",
+            action="store_true",
+            help="Compatibility alias for --json.",
         )
         command.add_argument("--output", help="Save the full JSON response to this path.")
 
@@ -123,9 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
     dataset_list.add_argument("--api-url", help="Override the API base URL.")
     dataset_list.add_argument("--api-key", help="Override the API key.")
     dataset_list.add_argument(
-        "--type", default="all", help="Filter by dataset type (default: all)."
+        "--type",
+        default="all",
+        help="Filter by dataset type: image, text, audio, video, tabular, custom, or all.",
     )
     dataset_list.add_argument("--search", help="Filter by name/description substring.")
+    _add_collection_output_args(dataset_list)
     dataset_list.set_defaults(func=cmd_dataset_list)
     dataset_info = dataset_sub.add_parser(
         "info", help="Show dataset metadata.", description="Show metadata for one dataset."
@@ -133,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
     dataset_info.add_argument("dataset_id", help="ID of the dataset to inspect.")
     dataset_info.add_argument("--api-url", help="Override the API base URL.")
     dataset_info.add_argument("--api-key", help="Override the API key.")
+    dataset_info.add_argument(
+        "--show-download-url",
+        action="store_true",
+        help="Include signed download_url values in output. By default these are redacted.",
+    )
+    dataset_info.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    dataset_info.add_argument("--output", help="Write the redacted JSON response to this path.")
     dataset_info.set_defaults(func=cmd_dataset_info)
     dataset_download = dataset_sub.add_parser(
         "download",
@@ -143,6 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
     dataset_download.add_argument(
         "--output-dir", default=".", help="Destination directory (default: current dir)."
     )
+    dataset_download.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable download progress output. Progress is also hidden when stderr is redirected.",
+    )
     dataset_download.set_defaults(func=cmd_dataset_download)
 
     cache = subparsers.add_parser(
@@ -151,12 +189,21 @@ def build_parser() -> argparse.ArgumentParser:
         description="Manage the on-disk dataset cache.",
     )
     cache_sub = cache.add_subparsers(dest="cache_command", required=True)
-    cache_sub.add_parser(
+    cache_list = cache_sub.add_parser(
         "list", help="List cached datasets.", description="List datasets in the local cache."
-    ).set_defaults(func=cmd_cache_list)
-    cache_sub.add_parser(
-        "clear", help="Delete the local cache.", description="Remove all cached datasets."
-    ).set_defaults(func=cmd_cache_clear)
+    )
+    _add_collection_output_args(cache_list)
+    cache_list.set_defaults(func=cmd_cache_list)
+    cache_clear = cache_sub.add_parser(
+        "clear",
+        help="Delete the local cache immediately.",
+        description="Permanently remove cached datasets immediately unless --dry-run is used.",
+    )
+    cache_clear.add_argument("--dataset-id", help="Clear only one cached dataset ID.")
+    cache_clear.add_argument(
+        "--dry-run", action="store_true", help="Show what would be deleted without deleting it."
+    )
+    cache_clear.set_defaults(func=cmd_cache_clear)
 
     projects = subparsers.add_parser(
         "projects",
@@ -179,6 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
         "get", help="Show a project.", description="Show details for one project."
     )
     project_get.add_argument("project_id", help="ID of the project.")
+    _add_collection_output_args(project_get)
     project_get.set_defaults(func=cmd_projects_get)
     project_create = project_sub.add_parser(
         "create", help="Create a project.", description="Create a new project."
@@ -191,6 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     project_create.add_argument(
         "--visibility", default="private", help="private or public (default: private)."
     )
+    project_create.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    project_create.add_argument("--output", help="Write the JSON response to this path.")
     project_create.set_defaults(func=cmd_projects_create)
     project_delete = project_sub.add_parser(
         "delete", help="Delete a project.", description="Delete a project permanently."
@@ -202,7 +252,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     project_dup.add_argument("project_id", help="ID of the project to duplicate.")
     project_dup.add_argument("--title", help="Title for the copy (defaults to a derived name).")
+    project_dup.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    project_dup.add_argument("--output", help="Write the JSON response to this path.")
     project_dup.set_defaults(func=cmd_projects_duplicate)
+    project_arch = project_sub.add_parser(
+        "architecture",
+        help="Save a project's architecture.",
+        description=(
+            "Save the architecture (diagram state + config) for a project, "
+            "creating a new version. Inputs are JSON literals or @path/to/file.json."
+        ),
+    )
+    project_arch.add_argument("project_id", help="ID of the project.")
+    project_arch.add_argument(
+        "--diagram",
+        required=True,
+        help="Diagram state as a JSON literal or @path to a JSON file (required).",
+    )
+    project_arch.add_argument(
+        "--config",
+        required=True,
+        help="Architecture config as a JSON literal or @path to a JSON file (required).",
+    )
+    project_arch.add_argument("--message", help="Optional commit message for the version.")
+    project_arch.set_defaults(func=cmd_projects_architecture)
 
     deployments = subparsers.add_parser(
         "deployments",
@@ -236,7 +309,11 @@ def build_parser() -> argparse.ArgumentParser:
     deployment_create.add_argument(
         "--checkpoint-path", required=True, help="Checkpoint path to deploy (required)."
     )
-    deployment_create.add_argument("--platform", required=True, help="Target platform (required).")
+    deployment_create.add_argument(
+        "--platform",
+        required=True,
+        help="Target platform: fastapi, torchserve, vllm, triton, or custom (required).",
+    )
     deployment_create.add_argument(
         "--deployment-type", required=True, help="Deployment type (required)."
     )
@@ -267,7 +344,9 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command.add_argument("deployment_id", help="ID of the deployment.")
         if command_name == "logs":
-            command.add_argument("--level", help="Filter by log level.")
+            command.add_argument(
+                "--level", help="Filter by log level: debug, info, warning, or error."
+            )
             command.add_argument("--search", help="Filter by message substring.")
             command.add_argument(
                 "--limit", type=int, default=100, help="Max lines (default: 100)."
@@ -288,22 +367,28 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="Run one inference.", description="Send one input to a deployment."
     )
     run.add_argument("deployment_id", help="ID of the deployment.")
-    run.add_argument(
-        "--input", required=True, help="JSON literal, or @path to a JSON file (required)."
-    )
+    run_input = run.add_mutually_exclusive_group(required=True)
+    run_input.add_argument("--input", help="JSON literal, or @path to a JSON file.")
+    run_input.add_argument("--input-file", help="Path to a JSON object file.")
+    run.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    run.add_argument("--output", help="Write the JSON response to this path.")
     run.set_defaults(func=cmd_inference_run)
     batch = inference_sub.add_parser(
         "batch", help="Run batch inference.", description="Send multiple inputs to a deployment."
     )
     batch.add_argument("deployment_id", help="ID of the deployment.")
-    batch.add_argument(
-        "--inputs", required=True, help="JSON array literal, or @path to a JSON file (required)."
-    )
+    batch_input = batch.add_mutually_exclusive_group(required=True)
+    batch_input.add_argument("--inputs", help="JSON array literal, or @path to a JSON file.")
+    batch_input.add_argument("--inputs-file", help="Path to a JSON array file.")
+    batch.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    batch.add_argument("--output", help="Write the JSON response to this path.")
     batch.set_defaults(func=cmd_inference_batch)
     health = inference_sub.add_parser(
         "health", help="Check deployment health.", description="Report deployment health status."
     )
     health.add_argument("deployment_id", help="ID of the deployment.")
+    health.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    health.add_argument("--output", help="Write the JSON response to this path.")
     health.set_defaults(func=cmd_inference_health)
 
     codegen = subparsers.add_parser(
@@ -336,7 +421,21 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--async", action="store_true", help="Run asynchronously and return a job."
         )
-        command.add_argument("--output", help="Write output to this path.")
+        output_help = (
+            "Write the downloaded ZIP to this path."
+            if command_name == "download"
+            else "Write the JSON response to this path."
+        )
+        command.add_argument("--output", help=output_help)
+        if command_name == "download":
+            command.add_argument(
+                "--no-progress",
+                action="store_true",
+                help=(
+                    "Disable download progress output. Progress is also hidden "
+                    "when stderr is redirected."
+                ),
+            )
         command.set_defaults(func=handler)
 
     hub = subparsers.add_parser(
@@ -400,6 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="List checkpoints.", description="List checkpoints for a job."
     )
     checkpoint_list.add_argument("job_id", help="ID of the training job.")
+    _add_collection_output_args(checkpoint_list)
     checkpoint_list.set_defaults(func=cmd_checkpoint_list)
     checkpoint_download = checkpoint_sub.add_parser(
         "download", help="Download a checkpoint.", description="Download a job checkpoint."
@@ -408,8 +508,11 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint_download.add_argument(
         "checkpoint_id",
         nargs="?",
-        default="latest",
+        default=None,
         help="Checkpoint ID (default: latest).",
+    )
+    checkpoint_download.add_argument(
+        "--output-dir", help="Cache the downloaded checkpoint under this directory."
     )
     checkpoint_download.set_defaults(func=cmd_checkpoint_download)
 
@@ -427,10 +530,151 @@ def build_parser() -> argparse.ArgumentParser:
 
     training_cmd = subparsers.add_parser(
         "training",
-        help="Manage training job helpers.",
-        description="Attach local training metrics to a Dagnam job.",
+        help="Create, inspect, and manage training jobs.",
+        description="Create, list, inspect, cancel, delete, or attach metrics to training jobs.",
     )
     training_sub = training_cmd.add_subparsers(dest="training_command", required=True)
+
+    training_create = training_sub.add_parser(
+        "create",
+        help="Create a training job.",
+        description="Create a platform training job for a project.",
+    )
+    training_create.add_argument("project_id", help="ID of the project to train.")
+    training_create.add_argument(
+        "--framework", default="pytorch", help="pytorch, tensorflow, or flax (default: pytorch)."
+    )
+    training_create.add_argument(
+        "--epochs", type=int, required=True, help="Number of training epochs (required)."
+    )
+    training_create.add_argument(
+        "--batch-size", type=int, required=True, help="Training batch size (required)."
+    )
+    training_create.add_argument(
+        "--learning-rate", type=float, required=True, help="Initial learning rate (required)."
+    )
+    training_create.add_argument(
+        "--optimizer",
+        required=True,
+        help="adam, adamw, sgd, rmsprop, or adagrad (required).",
+    )
+    training_create.add_argument(
+        "--loss-function", required=True, help="Loss function name (required)."
+    )
+    training_create.add_argument(
+        "--dataset-id", required=True, help="Training dataset ID (required)."
+    )
+    training_create.add_argument("--val-dataset-id", help="Validation dataset ID (optional).")
+    training_create.add_argument("--test-dataset-id", help="Test dataset ID (optional).")
+    training_create.add_argument(
+        "--train-split", type=float, default=0.8, help="Train split ratio (default: 0.8)."
+    )
+    training_create.add_argument(
+        "--val-split", type=float, default=0.1, help="Validation split ratio (default: 0.1)."
+    )
+    training_create.add_argument(
+        "--test-split", type=float, default=0.1, help="Test split ratio (default: 0.1)."
+    )
+    training_create.add_argument(
+        "--max-duration-seconds", type=int, help="Hard cap on run time, in seconds."
+    )
+    training_create.add_argument(
+        "--confirm-resource-warning",
+        action="store_true",
+        help="Acknowledge a soft resource warning and proceed.",
+    )
+    training_create.add_argument(
+        "--config",
+        help="Advanced TrainingConfig overrides as a JSON literal or @path/to/file.json.",
+    )
+    training_create.set_defaults(func=cmd_training_create)
+
+    training_list = training_sub.add_parser(
+        "list", help="List training jobs.", description="List your training jobs."
+    )
+    training_list.add_argument("--status", help="Filter by status (comma-separated).")
+    training_list.add_argument("--project-id", help="Filter by project ID.")
+    training_list.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
+    training_list.add_argument(
+        "--limit", type=int, default=20, help="Results per page (default: 20)."
+    )
+    _add_collection_output_args(training_list)
+    training_list.set_defaults(func=cmd_training_list)
+
+    training_get = training_sub.add_parser(
+        "get", help="Show a training job.", description="Show details for one training job."
+    )
+    training_get.add_argument("job_id", help="ID of the training job.")
+    _add_collection_output_args(training_get)
+    training_get.set_defaults(func=cmd_training_get)
+
+    training_cancel = training_sub.add_parser(
+        "cancel", help="Cancel a training job.", description="Cancel a non-terminal training job."
+    )
+    training_cancel.add_argument("job_id", help="ID of the training job.")
+    training_cancel.set_defaults(func=cmd_training_cancel)
+
+    training_delete = training_sub.add_parser(
+        "delete",
+        help="Delete training jobs.",
+        description="Delete one or more training jobs (1-100).",
+    )
+    training_delete.add_argument(
+        "job_ids", nargs="+", help="One or more training job IDs to delete."
+    )
+    training_delete.set_defaults(func=cmd_training_delete)
+
+    training_logs = training_sub.add_parser(
+        "logs",
+        help="Show historical training logs.",
+        description="Fetch paginated logs for one training job.",
+    )
+    training_logs.add_argument("job_id", help="ID of the training job.")
+    training_logs.add_argument(
+        "--log-level",
+        choices=("debug", "info", "warning", "error", "critical"),
+        help="Filter by log level.",
+    )
+    training_logs.add_argument("--source", help="Filter by source, such as stdout or system.")
+    training_logs.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
+    training_logs.add_argument(
+        "--limit", type=int, default=100, help="Results per page (default: 100)."
+    )
+    training_logs.add_argument("--output", help="Write the full JSON response to this path.")
+    training_logs.set_defaults(func=cmd_training_logs)
+
+    training_metrics = training_sub.add_parser(
+        "metrics",
+        help="Show historical training metrics.",
+        description="Fetch paginated metrics for one training job.",
+    )
+    training_metrics.add_argument("job_id", help="ID of the training job.")
+    training_metrics.add_argument("--metric-type", help="Filter by metric type.")
+    training_metrics.add_argument("--epoch-start", type=int, help="Start epoch, inclusive.")
+    training_metrics.add_argument("--epoch-end", type=int, help="End epoch, inclusive.")
+    training_metrics.add_argument(
+        "--epoch-summary",
+        action="store_true",
+        help="Return the final metric value for each epoch and metric type.",
+    )
+    training_metrics.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
+    training_metrics.add_argument(
+        "--limit", type=int, default=100, help="Results per page (default: 100)."
+    )
+    training_metrics.add_argument("--output", help="Write the full JSON response to this path.")
+    training_metrics.set_defaults(func=cmd_training_metrics)
+
+    training_metrics_summary = training_sub.add_parser(
+        "metrics-summary",
+        help="Show aggregate training metrics.",
+        description="Fetch aggregate metrics for one training job.",
+    )
+    training_metrics_summary.add_argument("job_id", help="ID of the training job.")
+    training_metrics_summary.add_argument(
+        "--output", help="Write the full JSON response to this path."
+    )
+    training_metrics_summary.set_defaults(func=cmd_training_metrics_summary)
+
     attach = training_sub.add_parser(
         "attach",
         help="Upload local JSONL training metrics for a job.",
@@ -441,7 +685,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attach.add_argument("job_id", help="ID of the training job.")
     attach.add_argument("--metrics-path", help="Metrics JSONL path to watch.")
-    attach.add_argument("--replay", action="store_true", help="Upload existing file contents first.")
+    attach.add_argument(
+        "--replay",
+        action="store_true",
+        help=(
+            "Upload existing file contents first. If no command is provided, "
+            "replay existing events and exit."
+        ),
+    )
     attach.add_argument("command", nargs="*", help="Command to run after '--'.")
     attach.set_defaults(func=cmd_training_attach)
 
@@ -450,6 +701,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show version and environment info.",
         description="Print the dagnam version, Python version, and platform.",
     )
+    version_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     version_cmd.set_defaults(func=cmd_version)
 
     whoami = subparsers.add_parser(
@@ -458,6 +710,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show the resolved API URL, masked API key, and its source.",
     )
     whoami.set_defaults(func=cmd_whoami)
+
+    usage = subparsers.add_parser(
+        "usage",
+        help="Show plan, usage, and remaining limits.",
+        description="Show your plan and real-time usage against plan limits.",
+    )
+    usage.add_argument("--json", action="store_true", help="Print the full entitlement snapshot.")
+    usage.add_argument("--output", help="Write the full entitlement snapshot to this path.")
+    usage.set_defaults(func=cmd_usage)
 
     logout = subparsers.add_parser(
         "logout",
@@ -506,3 +767,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     args.func(args)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -39,6 +39,13 @@ uv run --with pip-audit pip-audit
 The project uses Ruff for linting and formatting, Pyright for static checking,
 and pytest for tests. Prefer existing module patterns over new abstractions.
 
+## Pre-commit Hooks
+
+The tracked `.pre-commit-config.yaml` is temporarily disabled with `repos: []`
+so local Git hooks do not block commits or rewrite files during a commit. Before
+re-enabling the commented workflow, make the checks advisory or move automatic
+fixes to explicit developer commands.
+
 ## Reporting Security Issues
 
 Please do not report vulnerabilities in public issues. Follow

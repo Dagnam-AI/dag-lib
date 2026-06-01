@@ -16,7 +16,7 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     TrainingJobNotFoundError,
 )
-from dagnam._types import ResponseLike
+from dagnam._types import JsonObject, JsonValue, ResponseLike
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
@@ -61,6 +61,18 @@ class BaseDagnamClient:
         return {"Authorization": f"Bearer {self.api_key}"}
 
     @staticmethod
+    def _expect_object(value: JsonValue | str | None) -> JsonObject:
+        """Narrow a decoded response body to a JSON object or raise.
+
+        Shared by the resource mixins so every ``GET``/``POST`` that promises an
+        object body fails loudly (rather than mis-typing) when the backend
+        returns a list, scalar, or empty body.
+        """
+        if isinstance(value, dict):
+            return value
+        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
+
+    @staticmethod
     def _raise_for_status(response: requests.Response, dataset_id: str) -> None:
         """Map HTTP error codes to library exceptions."""
         if is_success_response(response):
@@ -73,7 +85,12 @@ class BaseDagnamClient:
         raise APIError(code, safe_error_body_from_response(response))
 
     @staticmethod
-    def _stream_response_to_file(resp: requests.Response, dest: Path) -> Path:
+    def _stream_response_to_file(
+        resp: requests.Response,
+        dest: Path,
+        *,
+        show_progress: bool = True,
+    ) -> Path:
         """Write a streaming response body to ``dest`` with a tqdm progress bar."""
         total = resp.headers.get("Content-Length")
         total_bytes = int(total) if total is not None else None
@@ -86,7 +103,7 @@ class BaseDagnamClient:
                 unit="B",
                 unit_scale=True,
                 unit_divisor=1024,
-                disable=total_bytes is None,
+                disable=total_bytes is None or not show_progress,
             ) as bar,
         ):
             for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
@@ -116,7 +133,12 @@ class BaseDagnamClient:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
     @staticmethod
-    def _append_stream_to_file(resp: requests.Response, dest: Path) -> None:
+    def _append_stream_to_file(
+        resp: requests.Response,
+        dest: Path,
+        *,
+        show_progress: bool = True,
+    ) -> None:
         """Append streaming response body to an existing file."""
         total = resp.headers.get("Content-Length")
         total_bytes = int(total) if total is not None else None
@@ -128,7 +150,7 @@ class BaseDagnamClient:
                 unit="B",
                 unit_scale=True,
                 unit_divisor=1024,
-                disable=total_bytes is None,
+                disable=total_bytes is None or not show_progress,
             ) as bar,
         ):
             for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):

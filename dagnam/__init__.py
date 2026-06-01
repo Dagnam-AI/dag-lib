@@ -19,10 +19,21 @@ from dagnam.data.cache import (
     save_metadata,
     touch_cache,
 )
-from dagnam.resources import codegen, datasets, deployments, hub, projects
+from dagnam.resources import account, codegen, datasets, deployments, hub, projects
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.inference import deployment_health, inference, inference_batch
-from dagnam.resources.training import TrainingEvent, stream_training
+from dagnam.resources.training import (
+    TrainingEvent,
+    cancel_training_job,
+    create_training_job,
+    delete_training_jobs,
+    get_training_job,
+    list_training_jobs,
+    stream_training,
+    training_logs,
+    training_metrics,
+    training_metrics_summary,
+)
 from dagnam.training import (
     report_error,
     report_log,
@@ -46,10 +57,14 @@ __all__ = [
     "LongRunningOperation",
     "TrainingEvent",
     "__version__",
+    "account",
+    "cancel_training_job",
     "codegen",
     "compute_file_checksum",
     "configure",
+    "create_training_job",
     "datasets",
+    "delete_training_jobs",
     "deployment_health",
     "deployments",
     "download_checkpoint",
@@ -58,10 +73,12 @@ __all__ = [
     "get_api_url",
     "get_cache_dir",
     "get_config_value",
+    "get_training_job",
     "hub",
     "inference",
     "inference_batch",
     "is_cached",
+    "list_training_jobs",
     "load_dataset",
     "load_metadata",
     "projects",
@@ -74,6 +91,9 @@ __all__ = [
     "save_metadata",
     "stream_training",
     "touch_cache",
+    "training_logs",
+    "training_metrics",
+    "training_metrics_summary",
     "write_training_state",
 ]
 

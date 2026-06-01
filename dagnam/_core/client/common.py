@@ -7,20 +7,9 @@ mapping so the sync (``requests``) and async (``httpx``) clients cannot drift.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from urllib.parse import quote
 
-from dagnam._types import (
-    JsonArray,
-    JsonObject,
-    JsonResponseLike,
-    JsonValue,
-    QueryParams,
-    QueryScalar,
-    ResponseLike,
-    ensure_json_array,
-    ensure_json_object,
-    ensure_json_value,
-)
 from dagnam._core.exceptions import (
     APIError,
     ArchitectureVersionNotFoundError,
@@ -40,6 +29,18 @@ from dagnam._core.exceptions import (
     TaskNotFoundError,
     TrainingJobNotFoundError,
     UploadError,
+)
+from dagnam._types import (
+    JsonArray,
+    JsonObject,
+    JsonResponseLike,
+    JsonValue,
+    QueryParams,
+    QueryScalar,
+    ResponseLike,
+    ensure_json_array,
+    ensure_json_object,
+    ensure_json_value,
 )
 
 API_BASE = "/api/v1"
@@ -112,6 +113,38 @@ def _text(resp: ResponseLike) -> str:
     return safe_response_text(resp)
 
 
+def _short_error_text(text: str) -> str:
+    if len(text) > _MAX_ERROR_BODY:
+        return text[:_MAX_ERROR_BODY] + f"... [truncated, {len(text)} chars total]"
+    return text
+
+
+def _format_fastapi_detail(text: str) -> str:
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+    if not isinstance(payload, dict) or "detail" not in payload:
+        return text
+
+    detail = payload["detail"]
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        messages = []
+        for item in detail:
+            if not isinstance(item, dict):
+                continue
+            location = item.get("loc")
+            field = ".".join(str(part) for part in location) if isinstance(location, list) else ""
+            message = item.get("msg")
+            if isinstance(message, str):
+                messages.append(f"{field}: {message}" if field else message)
+        if messages:
+            return "; ".join(messages)
+    return json.dumps(detail, default=str)
+
+
 def safe_response_text(resp: ResponseLike) -> str:
     """Return a short, text-safe response body for exception messages."""
     try:
@@ -122,6 +155,13 @@ def safe_response_text(resp: ResponseLike) -> str:
 
     streaming_marker = getattr(resp, "_content", None)
     if streaming_marker is False:
+        if content_type and any(marker in content_type for marker in _TEXT_CONTENT_MARKERS):
+            try:
+                text_value = str(resp.text)
+            except Exception:
+                text_value = ""
+            if text_value:
+                return _short_error_text(_format_fastapi_detail(text_value))
         if content_type:
             return f"<streaming {content_type} body omitted>"
         return "<streaming response body omitted>"
@@ -143,9 +183,7 @@ def safe_response_text(resp: ResponseLike) -> str:
             body_len = 0
         return f"<{body_len} bytes; failed to decode body>"
     text_value = str(text)
-    if len(text_value) > _MAX_ERROR_BODY:
-        return text_value[:_MAX_ERROR_BODY] + f"... [truncated, {len(text_value)} chars total]"
-    return text_value
+    return _short_error_text(_format_fastapi_detail(text_value))
 
 
 def _ok(resp: ResponseLike) -> bool:

@@ -3,9 +3,51 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shutil
 import sys
 from typing import NoReturn
+
+# dos rebel font: <https://patorjk.com/software/taag/#p=display&f=DOS+Rebel&t=DAGNAM.AI&x=none&v=4&h=3&w=80&we=false>
+DAGNAM_ASCII_ART = r"""
+ ██████████   █████████   █████████ ██████   █████ █████████ ██████   ██████      █████████ █████
+░░███░░░░███ ███░░░░░███ ███░░░░░██░░██████ ░░███ ███░░░░░██░░██████ ██████      ███░░░░░██░░███
+ ░███   ░░██░███    ░██████     ░░░ ░███░███ ░███░███    ░███░███░█████░███     ░███    ░███░███
+ ░███    ░██░██████████░███         ░███░░███░███░███████████░███░░███ ░███     ░███████████░███
+ ░███    ░██░███░░░░░██░███    █████░███ ░░██████░███░░░░░███░███ ░░░  ░███     ░███░░░░░███░███
+ ░███    ███░███    ░██░░███  ░░███ ░███  ░░█████░███    ░███░███      ░███     ░███    ░███░███
+ ██████████ █████   ████░░█████████ █████  ░░█████████   █████████     █████ ██ █████   █████████
+░░░░░░░░░░ ░░░░░   ░░░░░ ░░░░░░░░░ ░░░░░    ░░░░░░░░░   ░░░░░░░░░     ░░░░░ ░░ ░░░░░   ░░░░░░░░░
+"""
+
+def _terminal_width(fallback: int = 80) -> int:
+    """Return the current terminal width, tracking live window resizes.
+
+    Queries the attached terminal device (stdout, then stderr) directly so the
+    width reflects the window's current size. This is preferred over
+    ``shutil.get_terminal_size``, which honors a possibly-stale ``COLUMNS``
+    environment variable and would otherwise pin the banner to an old width
+    after the user resizes the window. Falls back to ``shutil`` (which reads
+    ``COLUMNS`` then the default) only when no terminal is attached, e.g. when
+    output is piped or redirected.
+    """
+    for stream in (sys.__stdout__, sys.__stderr__):
+        try:
+            return os.get_terminal_size(stream.fileno()).columns
+        except (OSError, ValueError, AttributeError):
+            continue
+    return shutil.get_terminal_size(fallback=(fallback, 24)).columns
+
+
+def format_ascii_art(columns: int | None = None) -> str:
+    """Stem banner lines to the available terminal width so they do not wrap.
+
+    Recomputes the width on every call so the banner stays responsive to live
+    terminal resizes rather than freezing at the width seen on first render.
+    """
+    width = columns if columns is not None else _terminal_width()
+    return "\n".join(line[:width].rstrip() for line in DAGNAM_ASCII_ART.strip("\n").splitlines())
 
 
 def human_size(nbytes: int | float) -> str:
@@ -36,7 +78,7 @@ def load_json_arg(value: str) -> object:
     """Parse --input/--inputs as JSON literal or @path/to/file.json."""
     if value.startswith("@"):
         path = Path(value[1:])
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     return json.loads(value)
 
 
@@ -65,6 +107,11 @@ def resolve_version() -> str:
         from dagnam import __version__
 
         return __version__
+
+
+def format_version_banner() -> str:
+    """Return the branded human-readable CLI version string."""
+    return f"{format_ascii_art()}\n\ndagnam {resolve_version()}"
 
 
 def mask_key(key: str) -> str:

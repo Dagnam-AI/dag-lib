@@ -11,11 +11,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from dagnam._types import JsonObject
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
 from dagnam._core.resolver import resolve_client
+from dagnam._types import JsonObject
 from dagnam.data.cache import cache_dir_name, compute_file_checksum, evict_lru, touch_cache
 
 logger = logging.getLogger(__name__)
@@ -26,9 +26,6 @@ DEFAULT_CHECKPOINT_CACHE_DIR: Path = Path.home() / ".dagnam" / "checkpoints"
 def pick_latest(checkpoints: list[JsonObject]) -> JsonObject:
     if not checkpoints:
         raise CheckpointNotFoundError("<no checkpoints for job>")
-    # Prefer is_best, then highest epoch/step, then most recent created_at.
-    best = [c for c in checkpoints if c.get("is_best")]
-    pool = best if best else checkpoints
 
     def sort_key(c: JsonObject) -> tuple[int, int, str]:
         epoch = c.get("epoch", -1)
@@ -40,7 +37,13 @@ def pick_latest(checkpoints: list[JsonObject]) -> JsonObject:
             created_at if isinstance(created_at, str) else "",
         )
 
-    return sorted(pool, key=sort_key)[-1]
+    return sorted(checkpoints, key=sort_key)[-1]
+
+
+def pick_best(checkpoints: list[JsonObject]) -> JsonObject:
+    """Return the newest checkpoint marked best, falling back to latest."""
+    best = [checkpoint for checkpoint in checkpoints if checkpoint.get("is_best")]
+    return pick_latest(best or checkpoints)
 
 
 def download_checkpoint(
@@ -51,11 +54,13 @@ def download_checkpoint(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
     cache_dir: Optional[Path] = None,
+    prefer_best: bool = False,
 ) -> Path:
     """Download (or fetch from cache) a checkpoint file.
 
-    If ``checkpoint_id`` is None, the "best" checkpoint is selected, falling
-    back to the latest by epoch/step.  Returns the local Path.
+    If ``checkpoint_id`` is None, the latest checkpoint is selected by
+    epoch/step. Set ``prefer_best`` to select the best checkpoint first,
+    falling back to the latest. Returns the local Path.
 
     Raises:
         TrainingJobNotFoundError: Job does not exist.
@@ -66,7 +71,7 @@ def download_checkpoint(
 
     if checkpoint_id is None:
         checkpoints = resolved.list_checkpoints(job_id)
-        picked = pick_latest(checkpoints)
+        picked = pick_best(checkpoints) if prefer_best else pick_latest(checkpoints)
         checkpoint_id = str(picked["id"])
 
     base = Path(cache_dir) if cache_dir is not None else DEFAULT_CHECKPOINT_CACHE_DIR

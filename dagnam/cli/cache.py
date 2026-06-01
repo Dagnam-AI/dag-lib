@@ -4,19 +4,35 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import shutil
 
 from dagnam.cli.common import dir_size, human_size
+from dagnam.cli.presentation import Column, emit_result, render_table
 
 
-def cmd_cache_list(_args: argparse.Namespace) -> None:
+def _render_cache(entries: object) -> str:
+    rows = entries if isinstance(entries, list) else []
+    if not rows:
+        return "Cache is empty."
+    return render_table(
+        (
+            Column("ID", "id", 40),
+            Column("Name", "name", 25),
+            Column("Size", "display_size", 10, "right"),
+        ),
+        rows,
+    )
+
+
+def cmd_cache_list(args: argparse.Namespace) -> None:
     from dagnam.data import cache as _cache
 
     if not _cache.DEFAULT_CACHE_DIR.exists():
-        print("Cache is empty.")
+        emit_result([], output=args.output, json_stdout=args.json or args.verbose, render_human=_render_cache)
         return
 
-    entries: list[tuple[str, str, int]] = []
+    entries: list[dict[str, object]] = []
     for child in sorted(_cache.DEFAULT_CACHE_DIR.iterdir()):
         if not child.is_dir():
             continue
@@ -30,26 +46,38 @@ def cmd_cache_list(_args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
         size = dir_size(child)
-        entries.append((dataset_id, name, size))
+        entries.append({"id": dataset_id, "name": name, "size": size, "display_size": human_size(size)})
 
-    if not entries:
-        print("Cache is empty.")
-        return
-
-    header = f"{'ID':<40} {'Name':<25} {'Size':>10}"
-    print(header)
-    print("-" * len(header))
-    for dataset_id, name, size in entries:
-        print(f"{dataset_id:<40} {name:<25} {human_size(size):>10}")
+    emit_result(
+        entries,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_cache,
+    )
 
 
-def cmd_cache_clear(_args: argparse.Namespace) -> None:
+def _cache_target(base: Path, dataset_id: str | None) -> Path:
+    if not dataset_id:
+        return base
+    from dagnam.data.cache import cache_dir_name
+
+    return base / cache_dir_name(dataset_id)
+
+
+def cmd_cache_clear(args: argparse.Namespace) -> None:
     from dagnam.data import cache as _cache
 
-    if not _cache.DEFAULT_CACHE_DIR.exists():
+    target = _cache_target(_cache.DEFAULT_CACHE_DIR, args.dataset_id)
+    label = f"dataset cache {args.dataset_id}" if args.dataset_id else "cache"
+
+    if not target.exists():
         print("Cache is already empty.")
         return
 
-    total = dir_size(_cache.DEFAULT_CACHE_DIR)
-    shutil.rmtree(_cache.DEFAULT_CACHE_DIR)
-    print(f"Cleared cache. Freed {human_size(total)}.")
+    total = dir_size(target)
+    if args.dry_run:
+        print(f"Would clear {label}. Would free {human_size(total)}.")
+        return
+
+    shutil.rmtree(target)
+    print(f"Cleared {label}. Freed {human_size(total)}.")

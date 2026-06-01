@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 from unittest import mock
 
@@ -73,6 +74,18 @@ def test_jsonl_tailer_holds_partial_lines_and_can_replay(tmp_path: Path) -> None
     ]
 
 
+def test_jsonl_tailer_accepts_utf8_bom_on_first_line(tmp_path: Path) -> None:
+    from dagnam.training_attach import MetricsJsonlTailer
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_bytes(b'\xef\xbb\xbf{"type":"metric","step":1}\n')
+    tailer = MetricsJsonlTailer(path, replay=True)
+
+    assert list(tailer.read_available()) == [
+        {"offset": 0, "event": {"type": "metric", "step": 1}},
+    ]
+
+
 def test_jsonl_tailer_starts_at_end_without_replay(tmp_path: Path) -> None:
     from dagnam.training_attach import MetricsJsonlTailer
 
@@ -138,6 +151,57 @@ def test_attach_sets_child_metrics_path_and_uploads_final_drain(tmp_path: Path, 
     assert captured_env["DAGNAM_METRICS_PATH"] == str(metrics_path)
     assert uploaded[0][0]["event_id"] == "job-1:0"
     assert uploaded[0][0]["metrics"] == {"loss": 0.1}
+
+
+def test_attach_replay_without_child_exits_after_existing_events(tmp_path: Path) -> None:
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+    metrics_path.write_text(
+        json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}}) + "\n",
+        encoding="utf-8",
+    )
+    uploaded: list[list[dict[str, object]]] = []
+    client = SimpleNamespace(upload_training_events=lambda _job_id, events: uploaded.append(events) or {"accepted": len(events)})
+
+    code = run_training_attach(
+        job_id="job-1",
+        metrics_path=metrics_path,
+        replay=True,
+        client=client,
+        poll_interval=0,
+    )
+
+    assert code == 0
+    assert uploaded[0][0]["event_id"] == "job-1:0"
+
+
+def test_attach_replay_without_child_fails_when_upload_never_recovers(tmp_path: Path) -> None:
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+    metrics_path.write_text(
+        json.dumps({"type": "metric", "step": 1}) + "\n",
+        encoding="utf-8",
+    )
+    attempts = 0
+
+    def upload(_job_id: str, _events: list[dict[str, object]]) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("temporary outage")
+
+    code = run_training_attach(
+        job_id="job-1",
+        metrics_path=metrics_path,
+        replay=True,
+        client=SimpleNamespace(upload_training_events=upload),
+        retry_initial_interval=0,
+        final_upload_attempts=3,
+    )
+
+    assert code == 1
+    assert attempts == 3
 
 
 def test_attach_retries_upload_errors_while_child_continues(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,6 +346,97 @@ def test_attach_stops_fast_on_terminal_upload_error(tmp_path: Path, monkeypatch:
 
     assert attempts == 1, "terminal auth error must not be retried"
     assert fake_process.terminated, "child must be terminated when attach exits on a terminal error"
+
+
+def test_attach_kills_child_when_terminate_does_not_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dagnam._core.exceptions import AuthError
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+
+    class FakeProcess:
+        terminated = False
+        killed = False
+
+        def poll(self) -> None:
+            metrics_path.write_text(json.dumps({"type": "metric", "step": 1}) + "\n")
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            if timeout is not None and not self.killed:
+                raise subprocess.TimeoutExpired(cmd="train", timeout=timeout)
+            return 0
+
+    process = FakeProcess()
+    monkeypatch.setattr("subprocess.Popen", lambda _command, env: process)
+    client = SimpleNamespace(
+        upload_training_events=lambda *_args: (_ for _ in ()).throw(AuthError("bad key"))
+    )
+
+    with pytest.raises(AuthError):
+        run_training_attach(
+            job_id="job-1",
+            metrics_path=metrics_path,
+            command=["python", "train.py"],
+            client=client,
+            poll_interval=0,
+        )
+
+    assert process.terminated
+    assert process.killed
+
+
+def test_attach_kills_windows_child_process_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dagnam._core.exceptions import AuthError
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+
+    class FakeProcess:
+        pid = 1234
+
+        def poll(self) -> None:
+            metrics_path.write_text(json.dumps({"type": "metric", "step": 1}) + "\n")
+            return None
+
+        def terminate(self) -> None:
+            raise AssertionError("Windows cleanup must terminate the owned process tree")
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    taskkill = mock.Mock()
+    monkeypatch.setattr("dagnam.training_attach.os.name", "nt")
+    monkeypatch.setattr("dagnam.training_attach.subprocess.run", taskkill)
+    monkeypatch.setattr("subprocess.Popen", lambda _command, env: FakeProcess())
+    client = SimpleNamespace(
+        upload_training_events=lambda *_args: (_ for _ in ()).throw(AuthError("bad key"))
+    )
+
+    with pytest.raises(AuthError):
+        run_training_attach(
+            job_id="job-1",
+            metrics_path=metrics_path,
+            command=["python", "train.py"],
+            client=client,
+            poll_interval=0,
+        )
+
+    taskkill.assert_called_once_with(
+        ["taskkill", "/F", "/T", "/PID", "1234"],
+        capture_output=True,
+        check=False,
+    )
 
 
 def test_attach_bounds_backlog_and_drops_oldest_during_outage(

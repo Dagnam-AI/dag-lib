@@ -284,7 +284,7 @@ def test_duplicate_project_with_and_without_title(client: DagnamClient, rmock: R
 
 
 def test_save_architecture(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/projects/p1/architecture", json={"version_id": "v1"})
+    rmock.post(f"{API}/api/v1/projects/p1/save", json={"version_id": "v1"})
     assert client.save_architecture("p1", {"nodes": []}) == {"version_id": "v1"}
 
 

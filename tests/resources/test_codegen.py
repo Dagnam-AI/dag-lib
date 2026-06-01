@@ -1,10 +1,9 @@
 """Unit tests for dagnam.codegen module."""
 
 from __future__ import annotations
-from tests.typing_helpers import JsonObject
+
 from pathlib import Path
-
-
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +12,9 @@ from dagnam import codegen
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import CodegenError, CodegenValidationError
 from dagnam._core.lro import LongRunningOperation
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import JsonObject
 
 
 def _client(**overrides: JsonObject) -> MagicMock:
@@ -65,15 +67,19 @@ class TestDownload:
     def test_download_returns_bytes_when_no_dest(self) -> None:
         c = _client(download_code=MagicMock(return_value=b"code"))
         out = codegen.download("p1", client=c)
-        c.download_code.assert_called_once_with("p1", framework="pytorch", version_id=None)
+        c.download_code.assert_called_once_with(
+            "p1", framework="pytorch", version_id=None, dest_path=None, show_progress=True
+        )
         assert out == b"code"
 
     def test_download_writes_to_dest(self, tmp_path: Path) -> None:
-        c = _client(download_code=MagicMock(return_value=b"code"))
         dest = tmp_path / "out.zip"
+        c = _client(download_code=MagicMock(return_value=dest))
         result = codegen.download("p1", dest=dest, client=c)
+        c.download_code.assert_called_once_with(
+            "p1", framework="pytorch", version_id=None, dest_path=dest, show_progress=True
+        )
         assert result == dest
-        assert dest.read_bytes() == b"code"
 
 
 class TestStatus:

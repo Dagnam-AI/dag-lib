@@ -114,6 +114,7 @@ class CodegenClientMixin(BaseDagnamClient):
         framework: str = "pytorch",
         version_id: str | None = None,
         dest_path: Path | str | None = None,
+        show_progress: bool = True,
     ) -> Path | bytes:
         from dagnam._core.client.common import raise_for_codegen
 
@@ -138,7 +139,9 @@ class CodegenClientMixin(BaseDagnamClient):
         raise_for_codegen(resp)
 
         if dest_path:
-            return self._stream_response_to_file(resp, Path(dest_path))
+            return self._stream_response_to_file(
+                resp, Path(dest_path), show_progress=show_progress
+            )
         return resp.content
 
     def download_code_zip(
@@ -147,12 +150,14 @@ class CodegenClientMixin(BaseDagnamClient):
         framework: str,
         version_id: str | None = None,
         dest_path: Path | str | None = None,
+        show_progress: bool = True,
     ) -> Path | bytes:
         return self.download_code(
             project_id,
             framework=framework,
             version_id=version_id,
             dest_path=dest_path,
+            show_progress=show_progress,
         )
 
     def get_code_status(self, project_id: str, task_id: str) -> JsonObject:

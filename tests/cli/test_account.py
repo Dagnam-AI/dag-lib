@@ -22,6 +22,14 @@ class TestVersionSubcommand:
         assert out.startswith("dagnam ")
         assert "Python " in out
 
+    def test_json_output_is_machine_readable(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "version", "--json"])
+        main()
+        payload = json.loads(capsys.readouterr().out)
+        assert set(payload) == {"dagnam", "platform", "python"}
+
 
 class TestWhoami:
     def test_reads_key_from_config(
@@ -41,6 +49,7 @@ class TestWhoami:
         out = capsys.readouterr().out
         assert "sk_abc...mnop" in out
         assert "config file" in out
+        assert "Source: config file" in out
         assert "sk_abcdefghijklmnop" not in out
 
     def test_env_var_source(
@@ -181,6 +190,16 @@ class TestConfig:
 
         assert exc_info.value.code == 1
         assert "api_key" in capsys.readouterr().err
+
+    def test_get_supported_unset_key_is_informational(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", tmp_path / "missing.json")
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "get", "training_metrics_path"])
+
+        main()
+
+        assert capsys.readouterr().out == "training_metrics_path is not configured\n"
 
     def test_set_training_metrics_path_preserves_existing_config(
         self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture

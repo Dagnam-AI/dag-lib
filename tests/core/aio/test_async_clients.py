@@ -211,7 +211,7 @@ async def test_async_projects_full_surface(client: AsyncDagnamClient, mock: Resp
     mock.put("/api/v1/projects/p1").mock(return_value=httpx.Response(200, json={"id": "p1"}))
     mock.delete("/api/v1/projects/p1").mock(return_value=httpx.Response(204))
     mock.post("/api/v1/projects/p1/duplicate").mock(return_value=httpx.Response(200, json={}))
-    mock.post("/api/v1/projects/p1/architecture").mock(return_value=httpx.Response(200, json={}))
+    mock.post("/api/v1/projects/p1/save").mock(return_value=httpx.Response(200, json={}))
     mock.post("/api/v1/projects/import").mock(return_value=httpx.Response(200, json={}))
     mock.post("/api/v1/projects/p1/import").mock(return_value=httpx.Response(200, json={}))
     mock.post("/api/v1/projects/bulk-delete").mock(return_value=httpx.Response(200, json={}))

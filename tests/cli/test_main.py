@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 from dagnam.cli import build_parser, human_size, main
+from dagnam.cli.common import format_ascii_art
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, StrCapture
@@ -125,14 +126,14 @@ class TestVersionFlag:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
-        assert capsys.readouterr().out.startswith("dagnam ")
+        assert capsys.readouterr().out.startswith(f"{format_ascii_art()}\n\ndagnam ")
 
     def test_short_flag(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
         monkeypatch.setattr("sys.argv", ["dagnam", "-v"])
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
-        assert capsys.readouterr().out.startswith("dagnam ")
+        assert capsys.readouterr().out.startswith(f"{format_ascii_art()}\n\ndagnam ")
 
 
 class TestBuildParser:

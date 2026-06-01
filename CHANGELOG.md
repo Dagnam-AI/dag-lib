@@ -14,11 +14,27 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `version`, `whoami`, `logout`, and read-only `config list` / `config get`.
 - Expanded CLI help text with command descriptions, examples, and argument
   descriptions.
+- Training-job lifecycle SDK + CLI: `dagnam training create/list/get/cancel/
+  delete/logs/metrics/metrics-summary`, including after-the-fact retrieval of
+  historical logs and metrics.
+- `dagnam usage` command and `dagnam.account.*` helpers for plan, entitlement,
+  storage-quota, and per-API-key usage inspection.
+- Width-aware table rendering, pagination footers, and consistent
+  `--json` / `--output` flags across table-printing commands.
+- `--no-progress` flag for `dagnam codegen download` (progress is also hidden
+  automatically when stderr is not a TTY), matching `dagnam dataset download`.
 
 ### Changed
 
 - Set the supported Python runtime to Python 3.12 so `dagnam[all]` includes
   every optional integration.
+- CLI/SDK error messages now unwrap FastAPI `{"detail": ...}` bodies (including
+  422 validation arrays) into concise human-readable text instead of raw JSON.
+- **Breaking (SDK):** `dagnam.download_checkpoint(job_id)` with no
+  `checkpoint_id` now selects the **latest** checkpoint by epoch/step (was
+  best-then-latest). Pass `prefer_best=True` to restore the previous behavior.
+  The `dagnam checkpoint download <job> best` CLI keyword maps to
+  `prefer_best=True`.
 
 ## [0.1.0] - 2026-05-10
 

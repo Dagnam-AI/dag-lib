@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 from pathlib import Path
-from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
-from dagnam.resources.checkpoints import pick_latest, download_checkpoint
+from dagnam.resources.checkpoints import download_checkpoint, pick_best, pick_latest
 
 
 def _sha256(data: bytes) -> str:
@@ -26,14 +26,23 @@ def ck_cache(tmp_path: Path) -> Path:
 
 
 class TestPickLatest:
-    def test_prefers_best(self) -> None:
+    def test_returns_newest_even_when_older_checkpoint_is_best(self) -> None:
         c = pick_latest(
             [
                 {"id": "a", "epoch": 5, "step": 100, "is_best": False, "created_at": "t1"},
                 {"id": "b", "epoch": 3, "step": 60, "is_best": True, "created_at": "t2"},
             ]
         )
-        assert c["id"] == "b"
+        assert c["id"] == "a"
+
+    def test_pick_best_prefers_best_checkpoint(self) -> None:
+        c = pick_best(
+            [
+                {"id": "latest", "epoch": 5, "step": 100, "is_best": False},
+                {"id": "best", "epoch": 3, "step": 60, "is_best": True},
+            ]
+        )
+        assert c["id"] == "best"
 
     def test_falls_back_to_highest_epoch(self) -> None:
         c = pick_latest(
