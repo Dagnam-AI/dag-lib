@@ -15,10 +15,10 @@ from typing import Callable, Optional, Protocol, cast
 
 import requests
 
-from dagnam._types import JsonObject, ensure_json_object
 from dagnam._core.exceptions import StreamError
+from dagnam._types import JsonObject, ensure_json_object
 
-DEFAULT_MAX_RECONNECTS = 5
+DEFAULT_MAX_RECONNECTS = 50
 DEFAULT_BACKOFF_BASE = 1.0
 
 TERMINAL_TRAINING_EVENTS = frozenset({"complete", "failed", "cancelled", "stream_end"})
@@ -74,8 +74,8 @@ def parse_raw_event(raw: object) -> SSEEvent:
     raw_data = getattr(raw, "data", None) or ""
     data_str = raw_data if isinstance(raw_data, str) else str(raw_data)
     try:
-        loaded: object = cast(object, json.loads(data_str)) if data_str else cast(object, {})
-        data = ensure_json_object(cast(object, loaded)) if isinstance(loaded, dict) else data_str
+        loaded: object = cast("object", json.loads(data_str)) if data_str else cast("object", {})
+        data = ensure_json_object(cast("object", loaded)) if isinstance(loaded, dict) else data_str
     except (json.JSONDecodeError, ValueError):
         data = data_str
 
@@ -110,7 +110,7 @@ def iter_with_reconnect(
     ``open_stream`` before returning).
     """
     try:
-        sseclient = cast(SSEClientModule, import_module("sseclient"))
+        sseclient = cast("SSEClientModule", import_module("sseclient"))
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "sseclient-py is required for SSE streams. "
@@ -121,6 +121,7 @@ def iter_with_reconnect(
     cursor = last_event_id
 
     while True:
+        made_progress = False
         response = open_stream(cursor)
         try:
             sse = sseclient.SSEClient(response)
@@ -128,6 +129,8 @@ def iter_with_reconnect(
                 ev = parse_raw_event(raw)
                 if ev.id:
                     cursor = ev.id
+                made_progress = True
+                attempts = 0
                 if ev.event == "heartbeat" and not include_heartbeats:
                     continue
                 yield ev
@@ -141,8 +144,12 @@ def iter_with_reconnect(
             except Exception:
                 pass
 
-        attempts += 1
-        if attempts > max_reconnects:
-            raise StreamError(f"{resource_label} dropped after {max_reconnects} reconnect attempts")
-        delay = backoff_base * (2 ** (attempts - 1))
-        time.sleep(delay + random.uniform(0, delay * 0.1))
+        if not made_progress:
+            attempts += 1
+            if attempts > max_reconnects:
+                raise StreamError(
+                    f"{resource_label} dropped after {max_reconnects} reconnect attempts"
+                )
+        delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
+        if delay:
+            time.sleep(delay + random.uniform(0, delay * 0.1))

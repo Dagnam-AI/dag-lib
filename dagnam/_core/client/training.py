@@ -73,6 +73,37 @@ class TrainingClientMixin(BaseDagnamClient):
             self._training_request("POST", "/api/v1/training/jobs", json_body=payload)
         )
 
+    def register_local_run(
+        self,
+        *,
+        project_id: str,
+        framework: str,
+        config: JsonObject,
+        max_duration_seconds: int | None = None,
+    ) -> JsonObject:
+        """Create a local-execution run that is never enqueued remotely."""
+        payload: JsonObject = {
+            "project_id": str(project_id),
+            "framework": framework,
+            "execution_mode": "local",
+            "config": config,
+        }
+        if max_duration_seconds is not None:
+            payload["max_duration_seconds"] = max_duration_seconds
+        return self._expect_object(
+            self._training_request("POST", "/api/v1/training/jobs", json_body=payload)
+        )
+
+    def mint_run_token(self, job_id: str) -> JsonObject:
+        """Mint or refresh a short-lived upload token for one run."""
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/stream-token",
+                job_id=job_id,
+            )
+        )
+
     def get_training_job(self, job_id: str) -> JsonObject:
         """Fetch one training job. ``GET /api/v1/training/jobs/{id}``."""
         return self._expect_object(

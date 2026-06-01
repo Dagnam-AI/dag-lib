@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import time
 from typing import Any
 
 from dagnam._core.auth import get_api_key, get_api_url
@@ -103,7 +102,8 @@ def resolve_attach_metrics_path(
     return path
 
 
-def _event_with_id(job_id: str, item: dict[str, Any]) -> dict[str, Any]:
+def event_with_id(job_id: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Return an uploaded event with a stable file-offset identifier."""
     event = dict(item["event"])
     event.setdefault("event_id", f"{job_id}:{item['offset']}")
     return event
@@ -151,66 +151,19 @@ def run_training_attach(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    from dagnam._core.metrics_uploader import (
+        HTTPSink,
+        UploadRetriesExhaustedError,
+        run_upload_loop,
+    )
+
     resolved_client = client or DagnamClient(get_api_url(), get_api_key())
-    tailer = MetricsJsonlTailer(path, replay=replay)
+    sink = HTTPSink(resolved_client, job_id)
     process = None
     if command:
         env = dict(os.environ)
         env["DAGNAM_METRICS_PATH"] = str(path)
         process = subprocess.Popen(command, env=env)  # noqa: S603
-
-    pending: list[dict[str, Any]] = []
-    upload_backoff = retry_initial_interval
-    overflow_warning_emitted = False
-
-    def cap_pending() -> None:
-        # Bound memory during a sustained upload outage: the tailer keeps
-        # appending newly-written events while uploads retry, so drop the
-        # oldest backlog once it exceeds max_pending and keep the newest.
-        nonlocal overflow_warning_emitted
-        overflow = len(pending) - max_pending
-        if overflow <= 0:
-            return
-        del pending[:overflow]
-        if not overflow_warning_emitted:
-            overflow_warning_emitted = True
-            sys.stderr.write(
-                f"Dagnam metrics upload backlog exceeded {max_pending} events; "
-                "dropping oldest events to bound memory while retries continue.\n"
-            )
-
-    def drain_once() -> None:
-        for item in tailer.read_available():
-            pending.append(_event_with_id(job_id, item))
-            cap_pending()
-            if len(pending) >= batch_size:
-                upload_pending()
-
-    def upload_pending() -> bool:
-        nonlocal upload_backoff
-        if not pending:
-            return True
-        try:
-            _upload_batch(resolved_client, job_id, pending.copy())
-        except Exception as exc:
-            if _is_terminal_upload_error(exc):
-                # Auth/not-found/4xx won't recover on retry: stop tailing and
-                # let the error propagate so the user sees why it failed.
-                raise
-            sys.stderr.write(f"Failed to upload Dagnam training metrics; retrying: {exc}\n")
-            if upload_backoff > 0:
-                time.sleep(upload_backoff)
-            upload_backoff = min(max(upload_backoff * 2, retry_initial_interval), retry_max_interval)
-            return False
-        pending.clear()
-        upload_backoff = retry_initial_interval
-        return True
-
-    def flush_pending() -> bool:
-        for _ in range(final_upload_attempts):
-            if upload_pending():
-                return True
-        return not pending
 
     def terminate_child() -> None:
         if process is None:
@@ -241,32 +194,40 @@ def run_training_attach(
     try:
         if process is None:
             sys.stdout.write(f"Watching {path} for Dagnam training metrics. Press Ctrl+C to stop.\n")
-            if replay:
-                drain_once()
-                return 0 if flush_pending() else 1
-            while True:
-                drain_once()
-                upload_pending()
-                time.sleep(poll_interval)
+            run_upload_loop(
+                path=path,
+                job_id=job_id,
+                sink=sink,
+                should_continue=lambda: True,
+                replay=replay,
+                poll_interval=poll_interval,
+                batch_size=batch_size,
+                retry_initial_interval=retry_initial_interval,
+                retry_max_interval=retry_max_interval,
+                max_pending=max_pending,
+                final_upload_attempts=final_upload_attempts,
+            )
+            return 0
 
-        while process.poll() is None:
-            drain_once()
-            upload_pending()
-            time.sleep(poll_interval)
-
-        drain_once()
-        if not flush_pending():
-            return 1
+        run_upload_loop(
+            path=path,
+            job_id=job_id,
+            sink=sink,
+            should_continue=lambda: process.poll() is None,
+            poll_interval=poll_interval,
+            batch_size=batch_size,
+            retry_initial_interval=retry_initial_interval,
+            retry_max_interval=retry_max_interval,
+            max_pending=max_pending,
+            final_upload_attempts=final_upload_attempts,
+        )
         exit_code = int(process.wait())
         process_reaped = True
         return exit_code
+    except UploadRetriesExhaustedError:
+        return 1
     except KeyboardInterrupt:
-        drain_once()
-        upload_pending()
         return 130
     finally:
-        # Never orphan the child: terminate it on Ctrl+C or when a terminal
-        # upload error propagates out. Skip only when it already exited and
-        # was reaped on the normal path.
         if process is not None and not process_reaped:
             terminate_child()

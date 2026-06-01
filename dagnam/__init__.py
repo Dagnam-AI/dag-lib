@@ -35,6 +35,7 @@ from dagnam.resources.training import (
     training_metrics_summary,
 )
 from dagnam.training import (
+    init,
     report_error,
     report_log,
     report_metric,
@@ -77,6 +78,7 @@ __all__ = [
     "hub",
     "inference",
     "inference_batch",
+    "init",
     "is_cached",
     "list_training_jobs",
     "load_dataset",

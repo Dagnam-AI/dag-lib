@@ -20,12 +20,22 @@ import datetime
 import json
 import os
 import sys
+import threading
+from typing import Any
 
 _DEFAULT_METRICS_PATH = "./dagnam_metrics.jsonl"
 _metrics_path: str | None = None
 _file = None
 _using_fallback_path = False
 _fallback_warning_emitted = False
+SCHEMA_VERSION = "1"
+_project_id: str | None = None
+_schema_version: str | None = None
+_uploader_thread: threading.Thread | None = None
+_uploader_stop: threading.Event | None = None
+_stream_finalized = False
+_run_failed = False
+_finalize_registered = False
 
 
 def _configured_metrics_path() -> str | None:
@@ -93,9 +103,11 @@ def _close_file() -> None:
     _file = None
 
 
-def _write_event(event: dict) -> None:
+def _write_event(event: dict[str, Any]) -> None:
     """Serialize *event* as a JSON line, write it, and flush."""
     try:
+        if _schema_version is not None and "schema_version" not in event:
+            event = {**event, "schema_version": _schema_version}
         line = json.dumps(event, default=str)
         f = _get_file()
         f.write(line + "\n")
@@ -109,7 +121,7 @@ def _utcnow_iso() -> str:
     return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat()
 
 
-def report_metric(epoch: int, step: int, metrics: dict) -> None:
+def report_metric(epoch: int, step: int, metrics: dict[str, float]) -> None:
     """Write a metric event with training or validation metrics."""
     _write_event(
         {
@@ -143,7 +155,7 @@ def report_system(
     cpu_percent: float | None = None,
 ) -> None:
     """Write a system metrics event with GPU and CPU statistics."""
-    event: dict = {"type": "system", "timestamp": _utcnow_iso()}
+    event: dict[str, Any] = {"type": "system", "timestamp": _utcnow_iso()}
     if gpu_utilization is not None:
         event["gpu_utilization"] = gpu_utilization
     if gpu_memory_used is not None:
@@ -168,7 +180,9 @@ def report_error(
     traceback: str | None = None,
 ) -> None:
     """Write a structured training failure event before re-raising."""
-    event = {
+    global _run_failed
+    _run_failed = True
+    event: dict[str, Any] = {
         "type": "error",
         "timestamp": _utcnow_iso(),
         "category": category,
@@ -212,9 +226,178 @@ def write_training_state(
         pass
 
 
-def _reset() -> None:
+def _online_context() -> bool:
+    """Return whether this local process can register an online run."""
+    if os.environ.get("DAGNAM_INTERNAL") or not _project_id:
+        return False
+    try:
+        auth_mod = __import__("dagnam._core.auth", fromlist=["get_api_key"])
+        auth_mod.get_api_key()
+    except Exception:
+        return False
+    return True
+
+
+def _sdk_version() -> str:
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return version("dagnam")
+        except PackageNotFoundError:
+            return "0+unknown"
+    except Exception:
+        return "0+unknown"
+
+
+def _start_uploader(project_id: str, framework: str, name: str) -> None:
+    """Register a local run and start its daemon uploader."""
+    global _stream_finalized, _uploader_stop, _uploader_thread, _finalize_registered
+
+    auth_mod = __import__("dagnam._core.auth", fromlist=["get_api_key", "get_api_url"])
+    client_mod = __import__("dagnam._core.client", fromlist=["DagnamClient"])
+    uploader_mod = __import__(
+        "dagnam._core.metrics_uploader",
+        fromlist=["HTTPSink", "run_upload_loop"],
+    )
+    client_class = client_mod.DagnamClient
+
+    if _uploader_thread is not None and _uploader_thread.is_alive():
+        return
+
+    api_url = auth_mod.get_api_url()
+    machine_client = client_class(api_url, auth_mod.get_api_key())
+    # The producer doesn't know the real hyperparameters — generated train.py
+    # only emits metrics. These are schema-satisfying placeholders for the
+    # backend's TrainingConfig (learning_rate must be >0, batch_size >=1); the
+    # platform never trains a local run, so they have no compute effect.
+    config = {
+        "epochs": int(os.environ.get("DAGNAM_TOTAL_EPOCHS", "1") or 1),
+        "batch_size": 1,
+        "learning_rate": 0.001,
+        "optimizer": "adam",
+        "loss_function": "unknown",
+        "dataset_config": {
+            "training_dataset_id": os.environ.get(
+                "DAGNAM_DATASET_ID",
+                "00000000-0000-0000-0000-000000000000",
+            ),
+            "train_split": 0.8,
+            "val_split": 0.1,
+            "test_split": 0.1,
+        },
+        "run_name": name,
+    }
+    try:
+        run = machine_client.register_local_run(
+            project_id=project_id,
+            framework=framework,
+            config=config,
+        )
+        run_id = str(run["id"])
+        token = str(machine_client.mint_run_token(run_id)["token"])
+    except Exception as exc:
+        sys.stderr.write(
+            f"Dagnam: could not register local run ({exc}); "
+            "streaming disabled, metrics still saved locally.\n"
+        )
+        return
+
+    stop = threading.Event()
+    _uploader_stop = stop
+    _stream_finalized = False
+
+    def _loop() -> None:
+        def _refresh_upload_client():
+            refreshed_token = str(machine_client.mint_run_token(run_id)["token"])
+            return client_class(api_url, refreshed_token)
+
+        upload_client = client_class(api_url, token)
+        sink = uploader_mod.HTTPSink(
+            upload_client,
+            run_id,
+            source={
+                "kind": "local_stream",
+                "sdk_version": _sdk_version(),
+                "schema_version": SCHEMA_VERSION,
+            },
+            refresh_client=_refresh_upload_client,
+        )
+        try:
+            uploader_mod.run_upload_loop(
+                path=_metrics_path,
+                job_id=run_id,
+                sink=sink,
+                should_continue=lambda: not stop.is_set(),
+                replay_existing=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — daemon thread must never crash the trainer
+            # A terminal ingest response (e.g. 409 after the run is cancelled or
+            # already finished) is the platform's "stop streaming" signal — exit
+            # quietly. Anything else is unexpected; surface it on stderr so a real
+            # failure is never silently swallowed (metrics are still on disk).
+            if not uploader_mod.is_terminal_upload_error(exc):
+                sys.stderr.write(
+                    f"Dagnam: live metrics streaming stopped unexpectedly ({exc!r}); "
+                    "metrics are still saved locally.\n"
+                )
+
+    _uploader_thread = threading.Thread(target=_loop, name="dagnam-uploader", daemon=True)
+    _uploader_thread.start()
+    sys.stdout.write(f"Dagnam: streaming local run '{name}' live to the platform.\n")
+    # Register the at-exit terminal flush only once per process; re-running init()
+    # (e.g. after a previous uploader finished) must not stack duplicate handlers.
+    if not _finalize_registered:
+        atexit.register(_finalize_stream)
+        _finalize_registered = True
+
+
+def _finalize_stream() -> None:
+    """Emit one local terminal event, then stop after the uploader drains."""
+    global _stream_finalized
+    if os.environ.get("DAGNAM_INTERNAL") or _uploader_thread is None or _stream_finalized:
+        return
+    _stream_finalized = True
+    _write_event({"type": "failed" if _run_failed else "complete", "timestamp": _utcnow_iso()})
+    if _uploader_stop is not None:
+        _uploader_stop.set()
+    _uploader_thread.join(timeout=30.0)
+
+
+def _generated_name() -> str:
+    naming_mod = __import__("dagnam._core.naming", fromlist=["generate_run_name"])
+    return naming_mod.generate_run_name()
+
+
+def init(
+    project_id: str,
+    *,
+    framework: str = "pytorch",
+    name: str | None = None,
+    mode: str = "auto",
+) -> None:
+    """Bind generated training code to a project and stream when logged in."""
+    global _project_id, _schema_version
+    if mode not in {"auto", "off"}:
+        raise ValueError("mode must be 'auto' or 'off'")
+    _project_id = os.environ.get("DAGNAM_PROJECT_ID") or project_id
+    _schema_version = SCHEMA_VERSION
+    _get_file()
+    if mode == "auto" and _online_context():
+        _start_uploader(_project_id, framework, name or _generated_name())
+
+
+def _reset() -> None:  # pyright: ignore[reportUnusedFunction]
     """Reset module state and re-read the metrics path for tests."""
     global _metrics_path, _file, _using_fallback_path, _fallback_warning_emitted
+    global _project_id, _schema_version, _uploader_thread, _uploader_stop
+    global _stream_finalized, _run_failed
     _close_file()
     _metrics_path, _using_fallback_path = _resolve_metrics_path()
     _fallback_warning_emitted = False
+    _project_id = None
+    _schema_version = None
+    _uploader_thread = None
+    _uploader_stop = None
+    _stream_finalized = False
+    _run_failed = False

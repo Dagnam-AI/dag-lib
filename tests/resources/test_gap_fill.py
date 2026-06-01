@@ -6,7 +6,7 @@ from collections.abc import Iterator, Sequence
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -14,6 +14,7 @@ import pytest
 import requests
 
 from dagnam import deployments, hub, projects
+from dagnam._core import sse as sse_mod
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
     CheckpointNotFoundError,
@@ -21,11 +22,13 @@ from dagnam._core.exceptions import (
     StreamError,
 )
 from dagnam._core.lro import LongRunningOperation, freeze
+from dagnam._core.sse import RawSSEEvent, parse_raw_event
 from dagnam.resources import checkpoints as ck_module, training as tr_module
-from dagnam.resources.training import RawSSEEvent, parse_event
-from tests.typing_helpers import LogCapture, PytestMonkeyPatch
 
 ScriptEvent = RawSSEEvent | requests.exceptions.RequestException
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import LogCapture, PytestMonkeyPatch
 
 
 def _sleep_noop(_seconds: float) -> None:
@@ -54,7 +57,7 @@ def _raw_event(
     event_id: str | None = None,
     retry: object | None = None,
 ) -> RawSSEEvent:
-    return cast(RawSSEEvent, SimpleNamespace(event=event, data=data, id=event_id, retry=retry))
+    return cast("RawSSEEvent", SimpleNamespace(event=event, data=data, id=event_id, retry=retry))
 
 # ---------------------------------------------------------------- deployments
 
@@ -234,7 +237,7 @@ def test_hub_create_with_metadata() -> None:
 
 def testparse_event_invalid_retry() -> None:
     raw = _raw_event("x", "{}", retry="not-int")
-    ev = parse_event(raw)
+    ev = parse_raw_event(raw)
     assert ev.retry is None
 
 
@@ -300,8 +303,8 @@ def test_stream_training_reconnects_on_transporterror(monkeypatch: PytestMonkeyP
             [_raw_event("complete", "{}")],
         ],
     )
-    monkeypatch.setattr(tr_module.time, "sleep", _sleep_noop)
-    monkeypatch.setattr(tr_module.random, "uniform", _zero_jitter)
+    monkeypatch.setattr(sse_mod.time, "sleep", _sleep_noop)
+    monkeypatch.setattr(sse_mod.random, "uniform", _zero_jitter)
 
     events = list(tr_module.stream_training("job1", client=client))
     assert [e.event for e in events] == ["metric", "complete"]
@@ -338,8 +341,8 @@ def test_stream_training_gives_up_after_max_attempts(monkeypatch: PytestMonkeyPa
             [requests.exceptions.ConnectionError("c")],
         ],
     )
-    monkeypatch.setattr(tr_module.time, "sleep", _sleep_noop)
-    monkeypatch.setattr(tr_module.random, "uniform", _zero_jitter)
+    monkeypatch.setattr(sse_mod.time, "sleep", _sleep_noop)
+    monkeypatch.setattr(sse_mod.random, "uniform", _zero_jitter)
 
     with pytest.raises(StreamError, match="dropped after 2"):
         list(tr_module.stream_training("job1", client=client, max_reconnects=2))

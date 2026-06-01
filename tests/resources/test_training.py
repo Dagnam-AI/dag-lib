@@ -10,13 +10,13 @@ import pytest
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import StreamError
+from dagnam._core.sse import parse_raw_event
 from dagnam.resources.training import (
     cancel_training_job,
     create_training_job,
     delete_training_jobs,
     get_training_job,
     list_training_jobs,
-    parse_event,
     stream_training,
     training_logs,
     training_metrics,
@@ -33,17 +33,17 @@ def _sse(event: str, data: str, id: str | None = None, retry: str | None = None)
 
 class TestParseEvent:
     def test_decodes_json_payload(self) -> None:
-        ev = parse_event(_sse("metric", '{"loss": 0.5}', id="1"))
+        ev = parse_raw_event(_sse("metric", '{"loss": 0.5}', id="1"))
         assert ev.event == "metric"
         assert ev.data == {"loss": 0.5}
         assert ev.id == "1"
 
     def test_non_json_falls_back_to_string(self) -> None:
-        ev = parse_event(_sse("log", "plain text"))
+        ev = parse_raw_event(_sse("log", "plain text"))
         assert ev.data == "plain text"
 
     def test_empty_data_becomes_empty_dict(self) -> None:
-        ev = parse_event(_sse("heartbeat", ""))
+        ev = parse_raw_event(_sse("heartbeat", ""))
         assert ev.data == {}
 
 
@@ -113,7 +113,7 @@ class TestStreamTraining:
 
         with (
             patch("sseclient.SSEClient", side_effect=fake_sse_client),
-            patch("dagnam.resources.training.time.sleep"),
+            patch("dagnam._core.sse.time.sleep"),
         ):
             out = list(stream_training("job_1", client=client))
 
@@ -130,7 +130,7 @@ class TestStreamTraining:
         client.open_training_stream.return_value = MagicMock()
         with (
             patch("sseclient.SSEClient", return_value=_FakeSSE([])),
-            patch("dagnam.resources.training.time.sleep"),
+            patch("dagnam._core.sse.time.sleep"),
             pytest.raises(StreamError),
         ):
             list(stream_training("job_1", client=client, max_reconnects=2))
