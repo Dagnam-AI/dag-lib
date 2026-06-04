@@ -370,11 +370,11 @@ Environment variables:
 
 | SDK version | Backend version | Notes |
 | --- | --- | --- |
-| `0.1.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
+| `0.5.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
 
 The SDK follows semantic versioning. Public APIs may still expand quickly while
 the package is alpha, but patch releases should avoid breaking documented
-`0.1.x` behavior.
+`0.5.x` behavior.
 
 ## Development
 

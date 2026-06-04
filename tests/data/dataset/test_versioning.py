@@ -87,8 +87,8 @@ class TestVersionedCacheKey:
         (versioned_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="https://api.test"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
             patch.object(
                 DagnamClient, "download_dataset", return_value=versioned_dir / "data.csv"
@@ -121,8 +121,8 @@ class TestVersionedCacheKey:
         downloaded.write_bytes(body)
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="https://api.test"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
             patch.object(
                 DagnamClient, "download_dataset", return_value=downloaded
@@ -161,8 +161,8 @@ class TestVersionedCacheKey:
         (cache_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="https://api.test"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
         ):
             ds = load_dataset(dataset_id, cache_dir=str(tmp_path))

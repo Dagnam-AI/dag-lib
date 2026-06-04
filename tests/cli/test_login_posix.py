@@ -57,13 +57,17 @@ def force_linux(monkeypatch: PytestMonkeyPatch) -> SimpleNamespace:
     return fake_sys
 
 
-def test_lock_down_config_path_returns_early_on_windows(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_returns_early_on_windows(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(login_mod, "sys", SimpleNamespace(platform="win32"))
     # Should be a no-op even with a missing dir.
     _lock_down_config_path(tmp_path / "missing", tmp_path / "missing.json")
 
 
-def test_lock_down_config_path_chmods_loose_dir(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_chmods_loose_dir(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     config_dir = tmp_path / ".dagnam"
     config_dir.mkdir()
     chmod_calls: list[tuple[Path | str, int]] = []
@@ -80,7 +84,9 @@ def test_lock_down_config_path_chmods_loose_dir(force_linux: SimpleNamespace, mo
     assert (config_dir, 0o700) in chmod_calls
 
 
-def test_lock_down_config_path_rejects_foreign_uid(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_rejects_foreign_uid(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     fake = _fake_os(
         stat_fn=lambda _path: SimpleNamespace(st_uid=42, st_mode=0o700),
     )
@@ -89,7 +95,9 @@ def test_lock_down_config_path_rejects_foreign_uid(force_linux: SimpleNamespace,
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_handles_stat_failure(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_handles_stat_failure(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     def _raise(_path: Path | str) -> None:
         raise OSError("perm denied")
 
@@ -99,7 +107,9 @@ def test_lock_down_config_path_handles_stat_failure(force_linux: SimpleNamespace
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_chmod_failure_exits(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_chmod_failure_exits(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     def _bad_chmod(_p: Path | str, _m: int) -> None:
         raise OSError("locked")
 
@@ -112,7 +122,9 @@ def test_lock_down_config_path_chmod_failure_exits(force_linux: SimpleNamespace,
         _lock_down_config_path(tmp_path, tmp_path / "config.json")
 
 
-def test_lock_down_config_path_file_uid_mismatch(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_file_uid_mismatch(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
 
@@ -128,7 +140,9 @@ def test_lock_down_config_path_file_uid_mismatch(force_linux: SimpleNamespace, m
         _lock_down_config_path(tmp_path, cfg_file)
 
 
-def test_lock_down_config_path_file_stat_failure(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_lock_down_config_path_file_stat_failure(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
 
@@ -143,7 +157,9 @@ def test_lock_down_config_path_file_stat_failure(force_linux: SimpleNamespace, m
         _lock_down_config_path(tmp_path, cfg_file)
 
 
-def test_login_chmod_failure_swallowed(force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_login_chmod_failure_swallowed(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     """The post-write chmod() inside cmd_login is best-effort; OSError mustn't abort."""
     config_dir = tmp_path / ".dagnam"
     config_file = config_dir / "config.json"

@@ -23,7 +23,10 @@ def test_stream_training_delegates_to_iter_with_reconnect(monkeypatch):
         def open_training_stream(self, job_id, last_event_id=None):
             return object()
 
-    events = list(training_mod.stream_training("job_x", client=_Client()))
+    # _Client is a minimal duck-typed stand-in for DagnamClient.
+    events = list(
+        training_mod.stream_training("job_x", client=_Client())  # pyright: ignore[reportArgumentType]
+    )
 
     assert captured["open_stream_callable"] is True
     assert "complete" in captured["terminal_events"]

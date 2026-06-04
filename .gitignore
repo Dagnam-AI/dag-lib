@@ -45,6 +45,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage.json
 *.cover
 *.py.cover
 .hypothesis/
@@ -218,3 +219,10 @@ graphify-out/
 
 # IDE
 .vscode/
+
+# Local tooling logs and editor/CI temp files (never commit)
+*.log.txt
+.lint-log*
+.test*-log*
+*.yml.tmp.*
+*.yaml.tmp.*

@@ -80,11 +80,11 @@ class TorchModule(Protocol):
 
 
 def _load_torch() -> TorchModule:
-    return cast(TorchModule, import_module("torch"))
+    return cast("TorchModule", import_module("torch"))
 
 
 def _load_torchaudio() -> TorchaudioModule:
-    return cast(TorchaudioModule, import_module("torchaudio"))
+    return cast("TorchaudioModule", import_module("torchaudio"))
 
 
 class AudioFolderDataset:
@@ -151,13 +151,13 @@ class AudioFolderDataset:
             waveform = torch.nn.functional.pad(waveform, (0, padding))
 
         if self.waveform_transform is not None:
-            waveform = cast(TorchTensor, self.waveform_transform(waveform))
+            waveform = cast("TorchTensor", self.waveform_transform(waveform))
 
         # Apply mel spectrogram
         mel_spec = self.mel_transform(waveform)
 
         if self.spectrogram_transform is not None:
-            mel_spec = cast(TorchTensor, self.spectrogram_transform(mel_spec))
+            mel_spec = cast("TorchTensor", self.spectrogram_transform(mel_spec))
 
         if self.target_transform is not None:
             label = self.target_transform(label)

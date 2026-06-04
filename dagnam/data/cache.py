@@ -114,7 +114,9 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
         from dagnam._core.config import get_config_value
 
         configured_size = get_config_value("max_cache_size", DEFAULT_MAX_CACHE_BYTES)
-        max_size_bytes = configured_size if isinstance(configured_size, int) else DEFAULT_MAX_CACHE_BYTES
+        max_size_bytes = (
+            configured_size if isinstance(configured_size, int) else DEFAULT_MAX_CACHE_BYTES
+        )
 
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
     if not base.exists():

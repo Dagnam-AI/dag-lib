@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from pathlib import Path
 import sys
-from typing import Protocol, SupportsInt, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 import numpy as np
 import numpy.typing as npt
+from tests.typing_helpers import PytestMonkeyPatch
 from typing_extensions import override
 
 from dagnam._types import JsonObject
 from dagnam.data.dataset import DagnamDataset
-from tests.typing_helpers import PytestMonkeyPatch
 
 if TYPE_CHECKING:
     import jax
@@ -37,11 +37,11 @@ def _identity(value: object) -> object:
 
 
 def _add_ten(value: object) -> int:
-    return int(cast(SupportsInt, value)) + 10
+    return int(cast("SupportsInt", value)) + 10
 
 
 def _add_hundred(value: object) -> int:
-    return int(cast(SupportsInt, value)) + 100
+    return int(cast("SupportsInt", value)) + 100
 
 
 def _tf_map(value: object) -> object:
@@ -74,7 +74,9 @@ def _meta(
     }
 
 
-def test_image_folder_loader_accepts_custom_transform(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_image_folder_loader_accepts_custom_transform(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     calls: dict[str, object] = {}
 
     def fake_create_loader(**kwargs: object) -> str:
@@ -107,7 +109,9 @@ def test_image_folder_loader_accepts_custom_transform(monkeypatch: PytestMonkeyP
     assert calls["batch_size"] == 4
 
 
-def test_pytorch_batch_transform_wraps_custom_collate(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_pytorch_batch_transform_wraps_custom_collate(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     calls: dict[str, object] = {}
 
     def fake_create_loader(**kwargs: object) -> str:
@@ -128,7 +132,7 @@ def test_pytorch_batch_transform_wraps_custom_collate(monkeypatch: PytestMonkeyP
         return {"items": batch}
 
     def batch_transform(batch: object) -> dict[str, object]:
-        batch = cast(dict[str, object], batch)
+        batch = cast("dict[str, object]", batch)
         batch["transformed"] = True
         return batch
 
@@ -138,7 +142,7 @@ def test_pytorch_batch_transform_wraps_custom_collate(monkeypatch: PytestMonkeyP
         batch_transform=batch_transform,
     )
 
-    collate = cast(Callable[[object], object], calls["collate_fn"])
+    collate = cast("Callable[[object], object]", calls["collate_fn"])
     collated = collate([("x", 0)])
 
     assert collated == {"items": [("x", 0)], "transformed": True}
@@ -290,7 +294,7 @@ def test_to_arrays_and_to_pytorch_loader_produce_same_split(tmp_path: Path) -> N
         test_ratio=0,
         seed=42,
     )
-    features_loader, labels_loader = cast(tuple[TensorLike, TensorLike], next(iter(loader)))
+    features_loader, labels_loader = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
 
     np.testing.assert_allclose(features_loader.numpy(), features_arr)
     np.testing.assert_array_equal(labels_loader.numpy(), labels_arr)
@@ -310,7 +314,10 @@ def test_iter_samples_reads_file_backed_jsonl_dataset(tmp_path: Path) -> None:
     )
 
     # Splits shuffle deterministically — verify set equality rather than order
-    samples = cast(list[tuple[list[float], int]], list(dataset.iter_samples(split="train", val_ratio=0, test_ratio=0)))
+    samples = cast(
+        "list[tuple[list[float], int]]",
+        list(dataset.iter_samples(split="train", val_ratio=0, test_ratio=0)),
+    )
     assert sorted(samples) == [([1.5], 0), ([2.5], 1)]
 
 
@@ -328,7 +335,7 @@ def test_tabular_pytorch_loader_applies_batch_transform(tmp_path: Path) -> None:
     )
 
     def batch_transform(batch: object) -> tuple[TensorLike, TensorLike]:
-        features, labels = cast(tuple[TensorLike, TensorLike], batch)
+        features, labels = cast("tuple[TensorLike, TensorLike]", batch)
         return features + 10, labels + 100
 
     loader = dataset.to_pytorch_loader(
@@ -340,7 +347,7 @@ def test_tabular_pytorch_loader_applies_batch_transform(tmp_path: Path) -> None:
         test_ratio=0,
         batch_transform=batch_transform,
     )
-    features, labels = cast(tuple[TensorLike, TensorLike], next(iter(loader)))
+    features, labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
 
     assert sorted(features.squeeze(1).tolist()) == [11.0, 12.0]
     assert sorted(labels.tolist()) == [100, 101]
@@ -360,7 +367,7 @@ def test_tabular_pytorch_loader_uses_custom_collate_fn(tmp_path: Path) -> None:
     )
 
     def collate_fn(batch: object) -> dict[str, object]:
-        rows = cast(Sequence[tuple[object, SupportsInt]], batch)
+        rows = cast("Sequence[tuple[object, SupportsInt]]", batch)
         return {"count": len(rows), "labels": [int(label) for _, label in rows]}
 
     loader = dataset.to_pytorch_loader(
@@ -373,9 +380,9 @@ def test_tabular_pytorch_loader_uses_custom_collate_fn(tmp_path: Path) -> None:
         collate_fn=collate_fn,
     )
 
-    batch = cast(dict[str, object], next(iter(loader)))
+    batch = cast("dict[str, object]", next(iter(loader)))
     assert batch["count"] == 2
-    assert sorted(cast(list[int], batch["labels"])) == [0, 1]
+    assert sorted(cast("list[int]", batch["labels"])) == [0, 1]
 
 
 def test_tensorflow_dataset_accepts_sample_and_batch_map_fns(

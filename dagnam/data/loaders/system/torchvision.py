@@ -105,17 +105,17 @@ class TorchTextDatasetsModule(Protocol):
 
 def _load_torchvision() -> tuple[TorchVisionDatasetsModule, TorchVisionTransformsModule]:
     return (
-        cast(TorchVisionDatasetsModule, import_module("torchvision.datasets")),
-        cast(TorchVisionTransformsModule, import_module("torchvision.transforms")),
+        cast("TorchVisionDatasetsModule", import_module("torchvision.datasets")),
+        cast("TorchVisionTransformsModule", import_module("torchvision.transforms")),
     )
 
 
 def _load_torchaudio() -> TorchaudioModule:
-    return cast(TorchaudioModule, import_module("torchaudio"))
+    return cast("TorchaudioModule", import_module("torchaudio"))
 
 
 def _load_torchtext_datasets() -> TorchTextDatasetsModule:
-    return cast(TorchTextDatasetsModule, import_module("torchtext.datasets"))
+    return cast("TorchTextDatasetsModule", import_module("torchtext.datasets"))
 
 
 def sha256(path: Path) -> str:
@@ -276,6 +276,7 @@ def load_fashion_mnist(meta: JsonObject, transform: TransformFn | None = None) -
 def load_imdb(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
     """Load IMDB via direct npz download (no TensorFlow dependency)."""
     import numpy as np
+
     from dagnam.data.dataset import DagnamDataset
 
     cache = SYSTEM_CACHE_ROOT / "imdb"
@@ -375,8 +376,8 @@ def load_wikitext2(meta: JsonObject, transform: TransformFn | None = None) -> Da
         # Store as native for custom handling
         train_iter = torchtext_datasets.WikiText2(root=str(cache), split="train")
         test_iter = torchtext_datasets.WikiText2(root=str(cache), split="test")
-        train_items: NativeSplit = cast(NativeSplit, list(train_iter))
-        test_items: NativeSplit = cast(NativeSplit, list(test_iter))
+        train_items: NativeSplit = cast("NativeSplit", list(train_iter))
+        test_items: NativeSplit = cast("NativeSplit", list(test_iter))
         return DagnamDataset(
             meta,
             cache,

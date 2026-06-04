@@ -21,6 +21,7 @@ DAGNAM_ASCII_ART = r"""
 ░░░░░░░░░░ ░░░░░   ░░░░░ ░░░░░░░░░ ░░░░░    ░░░░░░░░░   ░░░░░░░░░     ░░░░░ ░░ ░░░░░   ░░░░░░░░░
 """
 
+
 def _terminal_width(fallback: int = 80) -> int:
     """Return the current terminal width, tracking live window resizes.
 
@@ -33,6 +34,8 @@ def _terminal_width(fallback: int = 80) -> int:
     output is piped or redirected.
     """
     for stream in (sys.__stdout__, sys.__stderr__):
+        if stream is None:
+            continue
         try:
             return os.get_terminal_size(stream.fileno()).columns
         except (OSError, ValueError, AttributeError):

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, QueryValue
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment, requests_query_params
+from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, QueryValue
 
 
 class HubClientMixin(BaseDagnamClient):

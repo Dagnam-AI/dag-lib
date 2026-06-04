@@ -10,8 +10,8 @@ import pytest
 
 from dagnam import load_dataset
 from dagnam._core.client import DagnamClient
-from dagnam._core.load import _is_uuid
 from dagnam.data.dataset import DagnamDataset
+from dagnam.data.load import _is_uuid
 
 # ------------------------------------------------------------------
 # _is_uuid tests
@@ -101,8 +101,8 @@ class TestSystemDatasetRouting:
         mock_native_ds = MagicMock(spec=DagnamDataset)
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="http://localhost"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(
                 DagnamClient, "get_system_dataset_meta", return_value=meta
             ) as mock_sys_meta,
@@ -132,8 +132,8 @@ class TestSystemDatasetRouting:
         mock_native_ds = MagicMock(spec=DagnamDataset)
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="http://localhost"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
             patch(
                 "dagnam.data.loaders.system.resolve_system_dataset", return_value=mock_native_ds
@@ -159,8 +159,8 @@ class TestUserDatasetRouting:
         dataset_id = "550e8400-e29b-41d4-a716-446655440000"
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="http://localhost"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta) as mock_user_meta,
             patch.object(DagnamClient, "get_system_dataset_meta") as mock_sys_meta,
             patch.object(DagnamClient, "download_dataset") as mock_user_dl,

@@ -72,10 +72,13 @@ def cmd_checkpoint_download(args: argparse.Namespace) -> None:
     prefer_best = args.checkpoint_id == "best"
     try:
         if args.output_dir:
-            kwargs = {"cache_dir": Path(args.output_dir)}
+            cache_dir = Path(args.output_dir)
             if prefer_best:
-                kwargs["prefer_best"] = True
-            path = dagnam.download_checkpoint(args.job_id, checkpoint_id, **kwargs)
+                path = dagnam.download_checkpoint(
+                    args.job_id, checkpoint_id, cache_dir=cache_dir, prefer_best=True
+                )
+            else:
+                path = dagnam.download_checkpoint(args.job_id, checkpoint_id, cache_dir=cache_dir)
         elif prefer_best:
             path = dagnam.download_checkpoint(args.job_id, checkpoint_id, prefer_best=True)
         else:
@@ -244,7 +247,7 @@ def cmd_training_cancel(args: argparse.Namespace) -> None:
         result = dagnam.cancel_training_job(args.job_id)
     except DagnamError as exc:
         error(str(exc))
-    message = result.get("message") if isinstance(result, dict) else None
+    message = result.get("message")
     print(message or f"Training job {args.job_id} cancelled.")
 
 

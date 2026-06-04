@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 import random
-from collections.abc import Iterator, Sequence
-from typing import TYPE_CHECKING
-from typing import cast
-from typing_extensions import override
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import numpy.typing as npt
 import polars as pl
+from typing_extensions import override
 
 from dagnam._types import (
     JsonObject,
@@ -52,8 +51,8 @@ class DagnamDataset(
         _native_test: NativeSplit | None = None,
         _native_train_tf: TensorflowDataset | None = None,
         _native_test_tf: TensorflowDataset | None = None,
-        _native_train_flax: list["FlaxBatch"] | None = None,
-        _native_test_flax: list["FlaxBatch"] | None = None,
+        _native_train_flax: list[FlaxBatch] | None = None,
+        _native_test_flax: list[FlaxBatch] | None = None,
     ) -> None:
         self.id = self._required_str(meta, "id")
         self.name = self._required_str(meta, "name")
@@ -123,6 +122,7 @@ class DagnamDataset(
 
     @property
     def native_train(self) -> NativeSplit | None:
+        """Native framework training split, if one has been attached."""
         return self._native_train
 
     @native_train.setter
@@ -131,6 +131,7 @@ class DagnamDataset(
 
     @property
     def native_test(self) -> NativeSplit | None:
+        """Native framework test split, if one has been attached."""
         return self._native_test
 
     @native_test.setter
@@ -139,6 +140,7 @@ class DagnamDataset(
 
     @property
     def raw_data(self) -> pl.DataFrame | dict[str, list[object]] | list[object] | None:
+        """Underlying loaded data (a polars frame or in-memory rows), if any."""
         return self._data
 
     @raw_data.setter
@@ -147,20 +149,20 @@ class DagnamDataset(
 
     @property
     @override
-    def native_train_flax(self) -> list["FlaxBatch"] | None:
+    def native_train_flax(self) -> list[FlaxBatch] | None:
         return self._native_train_flax
 
     @native_train_flax.setter
-    def native_train_flax(self, value: list["FlaxBatch"] | None) -> None:
+    def native_train_flax(self, value: list[FlaxBatch] | None) -> None:
         self._native_train_flax = value
 
     @property
     @override
-    def native_test_flax(self) -> list["FlaxBatch"] | None:
+    def native_test_flax(self) -> list[FlaxBatch] | None:
         return self._native_test_flax
 
     @native_test_flax.setter
-    def native_test_flax(self, value: list["FlaxBatch"] | None) -> None:
+    def native_test_flax(self, value: list[FlaxBatch] | None) -> None:
         self._native_test_flax = value
 
     @property
@@ -258,7 +260,7 @@ class DagnamDataset(
             seed=seed,
         ):
             if isinstance(item, tuple):
-                item_tuple = cast(tuple[object, ...], item)
+                item_tuple = cast("tuple[object, ...]", item)
                 if len(item_tuple) == 2:
                     feature, label = item_tuple
                 else:
@@ -298,6 +300,7 @@ class DagnamDataset(
             yield features[index].tolist(), labels[index]
 
     def detect_label_column(self, df: pl.DataFrame) -> str:
+        """Return the label column: a categorical schema column, else the last."""
         if self.feature_schema and "columns" in self.feature_schema:
             columns = self.feature_schema["columns"]
             if isinstance(columns, list):
@@ -318,6 +321,7 @@ class DagnamDataset(
         return [int(value) for value in factorize(series).tolist()]
 
     def encode_label_values(self, series: LabelSeries) -> list[int]:
+        """Encode a label series to integer codes (public wrapper)."""
         return self._encode_label_values(series)
 
     @staticmethod
@@ -362,6 +366,7 @@ class DagnamDataset(
         test_ratio: float,
         seed: int,
     ) -> list[int]:
+        """Compute deterministic train/val/test split indices (public wrapper)."""
         return DagnamDataset._split_indices(n, split, val_ratio, test_ratio, seed)
 
     @override
@@ -393,4 +398,5 @@ class DagnamDataset(
         raise FileNotFoundError(f"No data file matching {patterns} in {self._data_dir}")
 
     def find_data_file(self) -> Path:
+        """Locate the dataset's data file in its directory (public wrapper)."""
         return self._find_data_file()

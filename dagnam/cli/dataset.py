@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 
+from dagnam._types import JsonObject
 from dagnam.cli.common import error
 from dagnam.cli.presentation import Column, emit_result, render_table
 
@@ -28,7 +29,7 @@ def _render_datasets(result: object) -> str:
     )
 
 
-def _redact_dataset_meta(meta: dict[str, object], *, show_download_url: bool) -> dict[str, object]:
+def _redact_dataset_meta(meta: JsonObject, *, show_download_url: bool) -> JsonObject:
     result = deepcopy(meta)
     if "download_url" in result and not show_download_url:
         result["download_url"] = "<redacted>"

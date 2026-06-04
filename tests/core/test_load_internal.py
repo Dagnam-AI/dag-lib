@@ -1,8 +1,6 @@
-"""Coverage for internal-mode and error paths in dagnam._core.load."""
+"""Coverage for internal-mode and error paths in dagnam.data.load."""
 
 from __future__ import annotations
-from tests.typing_helpers import PytestMonkeyPatch
-
 
 import hashlib
 import json
@@ -10,11 +8,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam import load_dataset
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import ChecksumError
-from dagnam._core.load import _load_internal, _validate_internal_dataset_id
+from dagnam.data.load import _load_internal, _validate_internal_dataset_id
 
 SYS_META = {
     "id": "mnist-digits",
@@ -51,7 +50,9 @@ class TestInternalMode:
         ds = load_dataset("abc")
         assert ds.name == "demo"
 
-    def test_internal_legacy_meta_json(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    def test_internal_legacy_meta_json(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
         storage = tmp_path / "uploads"
         ds_dir = storage / "abc"
         ds_dir.mkdir(parents=True)
@@ -72,13 +73,17 @@ class TestInternalMode:
         ds = _load_internal("abc")
         assert ds.name == "legacy"
 
-    def test_internal_missing_everything_raises(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    def test_internal_missing_everything_raises(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
         monkeypatch.setenv("DAGNAM_META_DIR", str(tmp_path / "nope"))
         monkeypatch.setenv("DAGNAM_STORAGE_PATH", str(tmp_path / "also_nope"))
         with pytest.raises(FileNotFoundError, match="Sidecar metadata not found"):
             _load_internal("abc")
 
-    def test_internal_missing_file_path_raises(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    def test_internal_missing_file_path_raises(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
         meta = {
             "id": "abc",
             "name": "demo",
@@ -95,7 +100,9 @@ class TestInternalMode:
         with pytest.raises(FileNotFoundError, match="Dataset file not found"):
             _load_internal("abc")
 
-    def test_internal_system_source_resolves_native(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    def test_internal_system_source_resolves_native(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
         meta = {
             "id": "mnist-digits",
             "name": "MNIST",
@@ -114,7 +121,9 @@ class TestInternalMode:
         with patch("dagnam.data.loaders.system.resolve_system_dataset", return_value=native):
             assert _load_internal("mnist-digits") is native
 
-    def test_internal_system_resolve_falls_through_onerror(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    def test_internal_system_resolve_falls_through_onerror(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
         # When resolve_system_dataset raises, _load_internal should fall back
         # to file_path resolution (which here is also missing → FileNotFoundError).
         meta = {
@@ -165,11 +174,11 @@ class TestChecksumMismatch:
             "class_names": None,
             "checksum": f"sha256:{wrong_checksum}",
         }
-        dataset_id = meta["id"]
+        dataset_id = str(meta["id"])
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="http://localhost"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
             patch.object(DagnamClient, "download_dataset") as mock_dl,
         ):
@@ -199,12 +208,10 @@ class TestSystemDownloadPath:
         dest.write_bytes(csv_content)
 
         with (
-            patch("dagnam._core.load.get_api_key", return_value="key"),
-            patch("dagnam._core.load.get_api_url", return_value="http://localhost"),
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
-            patch.object(
-                DagnamClient, "download_system_dataset", return_value=dest
-            ) as mock_dl,
+            patch.object(DagnamClient, "download_system_dataset", return_value=dest) as mock_dl,
             patch(
                 "dagnam.data.loaders.system.resolve_system_dataset",
                 side_effect=RuntimeError("no tfds"),

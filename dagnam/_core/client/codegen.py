@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment
+from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
 
 
 def _requests_params(params: QueryParams | None) -> dict[str, str] | None:
@@ -77,12 +77,14 @@ class CodegenClientMixin(BaseDagnamClient):
             if options is not None:
                 payload["options"] = options
         params: QueryParams | None = {"async_mode": "true"} if async_mode else None
-        return ensure_json_object(self._codegen_request(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
-            json_body=payload,
-            params=params,
-        ))
+        return ensure_json_object(
+            self._codegen_request(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
+                json_body=payload,
+                params=params,
+            )
+        )
 
     def preview_code(
         self, project_id: str, framework: str, version_id: str | None = None
@@ -101,9 +103,11 @@ class CodegenClientMixin(BaseDagnamClient):
 
     def validate_code(self, project_id: str, version_id: str | None = None) -> JsonObject:
         params: QueryParams | None = {"version_id": version_id} if version_id else None
-        return ensure_json_object(self._codegen_request(
-            "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
-        ))
+        return ensure_json_object(
+            self._codegen_request(
+                "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
+            )
+        )
 
     def validate_architecture(self, project_id: str, version_id: str | None = None) -> JsonObject:
         return self.validate_code(project_id, version_id=version_id)
@@ -139,9 +143,7 @@ class CodegenClientMixin(BaseDagnamClient):
         raise_for_codegen(resp)
 
         if dest_path:
-            return self._stream_response_to_file(
-                resp, Path(dest_path), show_progress=show_progress
-            )
+            return self._stream_response_to_file(resp, Path(dest_path), show_progress=show_progress)
         return resp.content
 
     def download_code_zip(
@@ -161,10 +163,12 @@ class CodegenClientMixin(BaseDagnamClient):
         )
 
     def get_code_status(self, project_id: str, task_id: str) -> JsonObject:
-        return ensure_json_object(self._codegen_request(
-            "GET",
-            (
-                f"/api/v1/projects/{quote_path_segment(project_id)}"
-                f"/code-status/{quote_path_segment(task_id)}"
-            ),
-        ))
+        return ensure_json_object(
+            self._codegen_request(
+                "GET",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/code-status/{quote_path_segment(task_id)}"
+                ),
+            )
+        )

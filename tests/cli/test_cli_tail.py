@@ -25,7 +25,9 @@ def testhuman_size_petabytes() -> None:
 # ---------------------------------------------------------------- cli/cache edge cases
 
 
-def test_cache_list_skips_files_and_bad_meta(tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+def test_cache_list_skips_files_and_bad_meta(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
     cache_dir = tmp_path / "datasets"
     cache_dir.mkdir()
     # A file at the top level — should be skipped (not a dir).
@@ -43,7 +45,9 @@ def test_cache_list_skips_files_and_bad_meta(tmp_path: Path, monkeypatch: Pytest
     assert "stray.txt" not in out
 
 
-def test_cache_clear_when_already_empty(tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+def test_cache_clear_when_already_empty(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
     missing = tmp_path / "nope"
     monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", missing)
     monkeypatch.setattr("sys.argv", ["dagnam", "cache", "clear"])
@@ -79,7 +83,9 @@ def testsplit_by_roles_raises_when_no_target_column() -> None:
         split_by_roles(df, {"a": "feature", "b": "ignore"})
 
 
-def test_create_pytorch_loader_with_explicit_column_roles(tmp_path: Path, sample_metadata: JsonObject) -> None:
+def test_create_pytorch_loader_with_explicit_column_roles(
+    tmp_path: Path, sample_metadata: JsonObject
+) -> None:
     """Exercises the create_pytorch_loader branch that calls split_by_roles."""
     from dagnam.data.dataset import DagnamDataset
     from dagnam.data.loaders.csv import create_pytorch_loader

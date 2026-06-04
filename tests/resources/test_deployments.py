@@ -1,13 +1,13 @@
 """Unit + wire tests for dagnam.deployments."""
 
 from __future__ import annotations
-from typing import cast
-from tests.typing_helpers import JsonObject, JsonValue
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from tests.typing_helpers import JsonObject, JsonValue
 
 from dagnam import deployments
 from dagnam._core.client import DagnamClient
@@ -220,12 +220,12 @@ class TestClientErrorMapping:
             self._client().get_deployment("dep-1")
 
     def test_list_success_returns_dict(self) -> None:
-        body = cast(JsonObject, {"items": [{"id": "dep-1"}], "total": 1, "page": 1})
+        body = cast("JsonObject", {"items": [{"id": "dep-1"}], "total": 1, "page": 1})
         with patch(
             "dagnam._core.client.base.requests.request", return_value=_mock_response(200, body)
         ):
-            out = cast(JsonObject, self._client().list_deployments(page=1, limit=20))
-            items = cast(list[JsonObject], out["items"])
+            out = cast("JsonObject", self._client().list_deployments(page=1, limit=20))
+            items = cast("list[JsonObject]", out["items"])
             assert items[0]["id"] == "dep-1"
 
 

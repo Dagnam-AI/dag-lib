@@ -331,7 +331,7 @@ def _start_uploader(project_id: str, framework: str, name: str) -> None:
                 should_continue=lambda: not stop.is_set(),
                 replay_existing=True,
             )
-        except Exception as exc:  # noqa: BLE001 — daemon thread must never crash the trainer
+        except Exception as exc:
             # A terminal ingest response (e.g. 409 after the run is cancelled or
             # already finished) is the platform's "stop streaming" signal — exit
             # quietly. Anything else is unexpected; surface it on stderr so a real

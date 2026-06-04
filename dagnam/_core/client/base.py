@@ -16,7 +16,7 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     TrainingJobNotFoundError,
 )
-from dagnam._types import JsonObject, JsonValue, ResponseLike
+from dagnam._types import JsonObject, JsonValue, ResponseLike, StatusResponseLike
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
@@ -38,7 +38,7 @@ _WINDOWS_RESERVED_FILENAMES = {
 }
 
 
-def is_success_response(response: ResponseLike) -> bool:
+def is_success_response(response: StatusResponseLike) -> bool:
     code = getattr(response, "status_code", None)
     if isinstance(code, int):
         return 200 <= code < 300

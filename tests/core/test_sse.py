@@ -1,14 +1,13 @@
 """Coverage for ``dagnam._core.sse`` — event parsing + reconnect loop."""
 
 from __future__ import annotations
+
 from collections.abc import Iterator, Sequence
-from tests.typing_helpers import PytestMonkeyPatch
-
-
 from types import SimpleNamespace
 
 import pytest
 import requests
+from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam._core import sse as sse_mod
 from dagnam._core.exceptions import StreamError
@@ -111,7 +110,9 @@ def _install_fake_sseclient(
     monkeypatch.setitem(__import__("sys").modules, "sseclient", fake_module)
 
 
-def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch: PytestMonkeyPatch) -> None:
+def test_iter_with_reconnect_yields_events_and_stops_on_terminal(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -142,7 +143,9 @@ def test_iter_with_reconnect_yields_events_and_stops_on_terminal(monkeypatch: Py
     assert responses[0].closed is True
 
 
-def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch: PytestMonkeyPatch) -> None:
+def test_iter_with_reconnect_emits_heartbeats_when_requested(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -166,7 +169,9 @@ def test_iter_with_reconnect_emits_heartbeats_when_requested(monkeypatch: Pytest
     assert [e.event for e in events] == ["heartbeat", "stream_end"]
 
 
-def test_iter_with_reconnect_reconnects_after_transporterror(monkeypatch: PytestMonkeyPatch) -> None:
+def test_iter_with_reconnect_reconnects_after_transporterror(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
     _install_fake_sseclient(
         monkeypatch,
         [
@@ -179,6 +184,7 @@ def test_iter_with_reconnect_reconnects_after_transporterror(monkeypatch: Pytest
             ],
         ],
     )
+
     def sleep(_seconds: float) -> None:
         return None
 
@@ -230,6 +236,7 @@ def test_iter_with_reconnect_gives_up_after_max_attempts(monkeypatch: PytestMonk
             [requests.exceptions.ConnectionError("boom")],
         ],
     )
+
     def sleep(_seconds: float) -> None:
         return None
 

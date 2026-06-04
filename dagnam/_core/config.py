@@ -6,6 +6,7 @@ Reads persistent configuration from ~/.dagnam/config.json.
 import json
 import logging
 from pathlib import Path
+
 from dagnam._types import JsonObject, JsonValue, ensure_json_object
 
 CONFIG_DIR: Path = Path.home() / ".dagnam"

@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dagnam._types import JsonObject, ensure_json_array
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     is_success_response,
-    safe_error_body_from_response,
     requests,
+    safe_error_body_from_response,
 )
 from dagnam._core.client.common import quote_path_segment
 from dagnam._core.exceptions import AuthError, CheckpointNotFoundError
+from dagnam._types import JsonObject, ensure_json_array
 
 
 class CheckpointsClientMixin(BaseDagnamClient):
@@ -37,11 +37,7 @@ class CheckpointsClientMixin(BaseDagnamClient):
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
         self.raise_for_job_response(resp, job_id)
-        return [
-            item
-            for item in ensure_json_array(resp.json())
-            if isinstance(item, dict)
-        ]
+        return [item for item in ensure_json_array(resp.json()) if isinstance(item, dict)]
 
     def download_checkpoint_stream(
         self, job_id: str, checkpoint_id: str, dest_path: Path

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import numpy.typing as npt
-import polars as pl
+
+if TYPE_CHECKING:
+    import polars as pl
 
 
 def factorize(series: pl.Series) -> npt.NDArray[np.int64]:

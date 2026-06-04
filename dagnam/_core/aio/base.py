@@ -11,9 +11,9 @@ except ImportError as _exc:
 
 import re
 
-from dagnam._types import FormData, JsonValue, QueryParams, UploadFiles
 from dagnam._core.client.common import bearer_headers, safe_response_text
 from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
+from dagnam._types import FormData, JsonValue, QueryParams, UploadFiles
 
 DEFAULT_TIMEOUT = 30
 _WINDOWS_RESERVED_FILENAMES = {

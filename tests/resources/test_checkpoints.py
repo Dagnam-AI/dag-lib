@@ -60,7 +60,9 @@ class TestPickLatest:
 
 
 class TestDownloadCheckpoint:
-    def _fake_download(self, body: bytes) -> tuple[Callable[[str, str, Path], tuple[Path, str]], str]:
+    def _fake_download(
+        self, body: bytes
+    ) -> tuple[Callable[[str, str, Path], tuple[Path, str]], str]:
         """Return a DagnamClient.download_checkpoint_stream side_effect."""
         expected_sha = _sha256(body)
 
@@ -120,7 +122,9 @@ class TestDownloadCheckpoint:
         assert path == ck_cache / "job_1" / "new.pt"
         client.list_checkpoints.assert_called_once_with("job_1")
 
-    def test_checkpoint_cache_paths_cannot_escape_cache_dir(self, ck_cache: Path, tmp_path: Path) -> None:
+    def test_checkpoint_cache_paths_cannot_escape_cache_dir(
+        self, ck_cache: Path, tmp_path: Path
+    ) -> None:
         body = b"weights"
         side, _ = self._fake_download(body)
         client = MagicMock(spec=DagnamClient)

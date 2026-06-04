@@ -339,18 +339,14 @@ def build_parser() -> argparse.ArgumentParser:
         "metrics": cmd_deployments_metrics,
     }.items():
         short_help, long_help = deployment_help[command_name]
-        command = deployment_sub.add_parser(
-            command_name, help=short_help, description=long_help
-        )
+        command = deployment_sub.add_parser(command_name, help=short_help, description=long_help)
         command.add_argument("deployment_id", help="ID of the deployment.")
         if command_name == "logs":
             command.add_argument(
                 "--level", help="Filter by log level: debug, info, warning, or error."
             )
             command.add_argument("--search", help="Filter by message substring.")
-            command.add_argument(
-                "--limit", type=int, default=100, help="Max lines (default: 100)."
-            )
+            command.add_argument("--limit", type=int, default=100, help="Max lines (default: 100).")
         if command_name == "metrics":
             command.add_argument(
                 "--time-range", default="24h", help="Window, e.g. 24h (default: 24h)."
@@ -410,13 +406,9 @@ def build_parser() -> argparse.ArgumentParser:
         "download": cmd_codegen_download,
     }.items():
         short_help, long_help = codegen_help[command_name]
-        command = codegen_sub.add_parser(
-            command_name, help=short_help, description=long_help
-        )
+        command = codegen_sub.add_parser(command_name, help=short_help, description=long_help)
         command.add_argument("project_id", help="ID of the project.")
-        command.add_argument(
-            "--framework", default="pytorch", help="Framework (default: pytorch)."
-        )
+        command.add_argument("--framework", default="pytorch", help="Framework (default: pytorch).")
         command.add_argument("--version-id", help="Specific project version ID.")
         command.add_argument(
             "--async", action="store_true", help="Run asynchronously and return a job."
@@ -450,13 +442,9 @@ def build_parser() -> argparse.ArgumentParser:
     hub_search.add_argument("--search", help="Query string.")
     hub_search.add_argument("--task-type", help="Filter by task type.")
     hub_search.add_argument("--framework", help="Filter by framework.")
-    hub_search.add_argument(
-        "--sort-by", default="popular", help="Sort order (default: popular)."
-    )
+    hub_search.add_argument("--sort-by", default="popular", help="Sort order (default: popular).")
     hub_search.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
-    hub_search.add_argument(
-        "--limit", type=int, default=20, help="Results per page (default: 20)."
-    )
+    hub_search.add_argument("--limit", type=int, default=20, help="Results per page (default: 20).")
     _add_collection_output_args(hub_search)
     hub_search.set_defaults(func=cmd_hub_search)
     hub_help = {
@@ -522,9 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Stream training events for a job over SSE.",
     )
     stream.add_argument("job_id", help="ID of the training job.")
-    stream.add_argument(
-        "--heartbeats", action="store_true", help="Include heartbeat events."
-    )
+    stream.add_argument("--heartbeats", action="store_true", help="Include heartbeat events.")
     stream.add_argument("--json", action="store_true", help="Emit raw JSON events.")
     stream.set_defaults(func=cmd_stream)
 

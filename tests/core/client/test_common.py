@@ -60,7 +60,9 @@ class _StatuslessResp:
         return None
 
 
-def _resp(status: int, *, text: object = "", content_type: str | None = None, content: bytes = b"") -> _Resp:
+def _resp(
+    status: int, *, text: object = "", content_type: str | None = None, content: bytes = b""
+) -> _Resp:
     return _Resp(status, text=text, content_type=content_type, content=content)
 
 
@@ -135,7 +137,12 @@ def test_safe_response_text_handles_decode_failure() -> None:
         def text(self) -> str:
             raise UnicodeDecodeError("utf-8", b"", 0, 1, "boom")
 
-    assert common.safe_response_text(_BadText()) == "<4 bytes; failed to decode body>"
+    # Hand-rolled response fake (class-level attrs) does not statically satisfy
+    # the ResponseLike protocol, but exercises the decode-failure path at runtime.
+    assert (
+        common.safe_response_text(_BadText())  # pyright: ignore[reportArgumentType]
+        == "<4 bytes; failed to decode body>"
+    )
 
 
 def test_safe_response_text_tolerates_missing_headers_attribute() -> None:

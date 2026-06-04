@@ -1,5 +1,6 @@
 """Tests for presigned URL downloads and resumable downloads."""
 
+from collections.abc import Iterable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.client.base import parse_content_disposition_filename
 
 
-def _mock_response(status_code: int, headers: dict[str, str], chunks: list[bytes]) -> None:
+def _mock_response(status_code: int, headers: dict[str, str], chunks: Iterable[bytes]) -> MagicMock:
     """Create a mock requests.Response for streaming."""
     resp = MagicMock()
     resp.ok = 200 <= status_code < 300

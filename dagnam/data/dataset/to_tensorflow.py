@@ -43,7 +43,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         the TF-specific system loader (see ``_load_native_tf``).
         """
         import tensorflow as tf
-        tf = cast(TensorflowModule, tf)
+
+        tf = cast("TensorflowModule", tf)
         native_train = self._native_train
         native_test = self._native_test
         if native_train is None:
@@ -57,10 +58,10 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             else:
                 x_test, y_test = (), ()
             if np.asarray(x_train, dtype=object).dtype == object:
-                x_train = self._pad_sequences(cast(Sequence[Sequence[int]], x_train))
-                x_test = self._pad_sequences(cast(Sequence[Sequence[int]], x_test))
+                x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
+                x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             if split == "test":
-                x = cast(npt.NDArray[np.object_], np.asarray(x_test))
+                x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
                 y = np.asarray(y_test).astype(np.int64)
             else:
                 n = len(x_train)
@@ -79,24 +80,24 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             # torchvision-style: iterate to materialize
 
             source = native_test if (split == "test" and native_test is not None) else native_train
-            source_dataset = cast(IndexedDataset, source)
+            source_dataset = cast("IndexedDataset", source)
             images: list[npt.ArrayLike] = []
             labels: list[int] = []
             for i in range(len(source_dataset)):
                 sample = source_dataset[i]
                 if not isinstance(sample, tuple):
                     raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                sample = cast(tuple[object, ...], sample)
+                sample = cast("tuple[object, ...]", sample)
                 if len(sample) < 2:
                     raise TypeError("Expected native dataset samples to be (feature, label) pairs")
                 img, lbl = sample[0], sample[1]
                 if isinstance(img, SupportsNumpy):
                     img = img.numpy()
-                images.append(cast(npt.ArrayLike, img))
+                images.append(cast("npt.ArrayLike", img))
                 if not isinstance(lbl, SupportsInt):
                     raise TypeError("Expected native dataset labels to be integer-compatible")
                 labels.append(int(lbl))
-            x = cast(npt.NDArray[np.object_], np.stack(images))
+            x = cast("npt.NDArray[np.object_]", np.stack(images))
             y = np.array(labels, dtype=np.int64)
             # For split='val' or 'train' on the training set, apply val cut.
             if split in ("train", "val") and native_test is not None:
@@ -138,7 +139,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         full training set.
         """
         import tensorflow as tf
-        tf = cast(TensorflowModule, tf)
+
+        tf = cast("TensorflowModule", tf)
         native_train_tf = self.native_train_tf
         native_test_tf = self.native_test_tf
 
@@ -190,6 +192,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
     ) -> TensorflowDataset:
+        """Build the split as a native ``tf.data.Dataset`` (public wrapper)."""
         return self._native_tensorflow_dataset(
             split=split,
             batch_size=batch_size,
@@ -216,8 +219,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             return False
         try:
             from dagnam.data.loaders.system import (
-                resolve_tfds_name,
                 resolve_system_dataset_tf,
+                resolve_tfds_name,
             )
         except ImportError:
             return False
@@ -284,6 +287,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
 
         try:
             import tensorflow
+
             del tensorflow
         except ImportError:
             raise ImportError(

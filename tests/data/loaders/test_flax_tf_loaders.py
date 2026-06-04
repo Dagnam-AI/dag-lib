@@ -51,23 +51,26 @@ def _csv_ds(tmp_path: Path, with_class_names: bool = True) -> DagnamDataset:
         + "\n".join(f"{i}.0,{i + 0.5},{'a' if i % 2 == 0 else 'b'}" for i in range(20))
         + "\n"
     )
-    meta = cast(JsonObject, {
-        "id": "tab1",
-        "name": "tab",
-        "format": "csv",
-        "dataset_type": "tabular",
-        "num_samples": 20,
-        "num_classes": 2,
-        "class_names": ["a", "b"] if with_class_names else [],
-        "feature_schema": {
-            "columns": [
-                {"name": "x", "type": "numeric"},
-                {"name": "y", "type": "numeric"},
-                {"name": "species", "type": "categorical"},
-            ]
+    meta = cast(
+        "JsonObject",
+        {
+            "id": "tab1",
+            "name": "tab",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 20,
+            "num_classes": 2,
+            "class_names": ["a", "b"] if with_class_names else [],
+            "feature_schema": {
+                "columns": [
+                    {"name": "x", "type": "numeric"},
+                    {"name": "y", "type": "numeric"},
+                    {"name": "species", "type": "categorical"},
+                ]
+            },
+            "filename": "data.csv",
         },
-        "filename": "data.csv",
-    })
+    )
     return DagnamDataset(meta, tmp_path)
 
 
@@ -140,7 +143,7 @@ def test_tf_loader_basic(tmp_path: Path) -> None:
     tf_ds = create_tensorflow_dataset(
         ds, split="train", batch_size=4, shuffle=False, val_ratio=0.2, test_ratio=0.2, seed=0
     )
-    batch = cast(TensorBatch, next(iter(tf_ds)))
+    batch = cast("TensorBatch", next(iter(tf_ds)))
     assert batch[0].shape[0] >= 1
 
 

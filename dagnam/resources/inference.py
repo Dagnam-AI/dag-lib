@@ -7,11 +7,11 @@ config file, ``dagnam.configure()``, or explicit override).
 
 from __future__ import annotations
 
-from dagnam._types import JsonArray, JsonObject
 from typing import Optional
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.resolver import resolve_client
+from dagnam._types import JsonArray, JsonObject
 
 
 def inference(

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from dagnam._types import JsonObject, ensure_json_array, ensure_json_object
 from dagnam._core.aio.base import BaseAsyncDagnamClient, raise_for_job_response
 from dagnam._core.client.common import quote_path_segment, safe_response_text
 from dagnam._core.exceptions import APIError, AuthError, CheckpointNotFoundError
+from dagnam._types import JsonObject, ensure_json_array, ensure_json_object
 
 
 class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
@@ -40,5 +41,5 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
         expected_checksum = resp.headers.get("x-checksum-sha256")
         dest = Path(dest_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(resp.content)
+        await asyncio.to_thread(dest.write_bytes, resp.content)
         return dest, expected_checksum

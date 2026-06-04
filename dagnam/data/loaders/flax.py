@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
-from typing import NamedTuple, TYPE_CHECKING, cast
+import random
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -49,7 +49,8 @@ def create_flax_dataset(
     ``column_roles`` overrides automatic label detection.
     """
     import jax.numpy as jnp
-    as_jax_array = cast(JaxArrayFactory, getattr(jnp, "array"))
+
+    as_jax_array = cast("JaxArrayFactory", jnp.array)
     df = dagnam_ds.to_polars()
 
     label_col = detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
@@ -57,12 +58,8 @@ def create_flax_dataset(
     # Label encoding
     label_series = df[label_col]
     if dagnam_ds.class_names:
-        mapping: dict[object, int] = {
-            name: idx for idx, name in enumerate(dagnam_ds.class_names)
-        }
-        labels = np.array(
-            [mapping[v] for v in label_series.to_list()], dtype=np.int64
-        )
+        mapping: dict[object, int] = {name: idx for idx, name in enumerate(dagnam_ds.class_names)}
+        labels = np.array([mapping[v] for v in label_series.to_list()], dtype=np.int64)
     else:
         labels = factorize(label_series)
 
@@ -111,7 +108,7 @@ def create_flax_dataset(
     batches: list[FlaxBatch] = []
     for i in range(0, len(split_indices), batch_size):
         batch_f = as_jax_array(split_features[i : i + batch_size])
-        batch_l = as_jax_array(cast(npt.ArrayLike, split_labels[i : i + batch_size]))
+        batch_l = as_jax_array(cast("npt.ArrayLike", split_labels[i : i + batch_size]))
         batch = FlaxBatch(features=batch_f, labels=batch_l)
         if batch_transform_fn is not None:
             batch = batch_transform_fn(batch)

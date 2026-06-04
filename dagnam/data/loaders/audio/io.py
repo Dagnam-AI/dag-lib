@@ -37,11 +37,11 @@ class SoundFileModule(Protocol):
 
 
 def _load_soundfile() -> SoundFileModule:
-    return cast(SoundFileModule, import_module("soundfile"))
+    return cast("SoundFileModule", import_module("soundfile"))
 
 
 def _load_torchaudio_module() -> TorchaudioModule:
-    return cast(TorchaudioModule, import_module("torchaudio"))
+    return cast("TorchaudioModule", import_module("torchaudio"))
 
 
 def collect_audio_samples(

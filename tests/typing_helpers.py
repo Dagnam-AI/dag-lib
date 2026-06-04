@@ -3,26 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Protocol, TypeAlias
+from typing import Protocol
 
 import httpx
 import pytest
 
 from dagnam.data.dataset import DagnamDataset
 
-JsonScalar: TypeAlias = str | int | float | bool | None
-JsonObject: TypeAlias = dict[str, "JsonValue"]
-JsonArray: TypeAlias = list["JsonValue"]
-JsonValue: TypeAlias = JsonScalar | JsonObject | JsonArray
+type JsonScalar = str | int | float | bool | None
+type JsonObject = dict[str, JsonValue]
+type JsonArray = list[JsonValue]
+type JsonValue = JsonScalar | JsonObject | JsonArray
 
-CliRunner: TypeAlias = Callable[[list[str]], None]
-PytestMonkeyPatch: TypeAlias = pytest.MonkeyPatch
-StrCapture: TypeAlias = pytest.CaptureFixture[str]
-LogCapture: TypeAlias = pytest.LogCaptureFixture
-JsonIterable: TypeAlias = Iterable[JsonValue]
-ObjectIterator: TypeAlias = Iterator[object]
-ObjectTransform: TypeAlias = Callable[[object], object]
-StreamOpener: TypeAlias = Callable[[str | None], object]
+type CliRunner = Callable[[list[str]], None]
+type PytestMonkeyPatch = pytest.MonkeyPatch
+type StrCapture = pytest.CaptureFixture[str]
+type LogCapture = pytest.LogCaptureFixture
+type JsonIterable = Iterable[JsonValue]
+type ObjectIterator = Iterator[object]
+type ObjectTransform = Callable[[object], object]
+type StreamOpener = Callable[[str | None], object]
 
 
 class RequestsRecord(Protocol):

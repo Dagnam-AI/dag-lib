@@ -71,7 +71,9 @@ class TestLogin:
 
 
 class TestCacheList:
-    def test_empty_cache(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    def test_empty_cache(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
         empty_dir = tmp_path / "datasets"
         empty_dir.mkdir()
         monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", empty_dir)
@@ -79,13 +81,17 @@ class TestCacheList:
         main()
         assert "empty" in capsys.readouterr().out.lower()
 
-    def test_nonexistent_cache_dir(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    def test_nonexistent_cache_dir(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
         monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "list"])
         main()
         assert "empty" in capsys.readouterr().out.lower()
 
-    def test_lists_cached_dataset(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    def test_lists_cached_dataset(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
         cache = tmp_path / "datasets"
         ds_dir = cache / "ds-abc"
         ds_dir.mkdir(parents=True)
@@ -101,13 +107,17 @@ class TestCacheList:
 
 
 class TestCacheClear:
-    def test_empty_cache(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    def test_empty_cache(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
         monkeypatch.setattr("dagnam.data.cache.DEFAULT_CACHE_DIR", tmp_path / "nope")
         monkeypatch.setattr("sys.argv", ["dagnam", "cache", "clear"])
         main()
         assert "already empty" in capsys.readouterr().out.lower()
 
-    def test_clears_cache(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    def test_clears_cache(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
         cache = tmp_path / "datasets"
         ds_dir = cache / "ds-abc"
         ds_dir.mkdir(parents=True)

@@ -28,23 +28,23 @@ class ArithmeticValue(Protocol):
 
 
 def _torch() -> TorchModule:
-    return cast(TorchModule, import_module("torch"))
+    return cast("TorchModule", import_module("torch"))
 
 
 def _native_split(features: object, labels: object) -> NativeSplit:
-    return cast(NativeSplit, (features, labels))
+    return cast("NativeSplit", (features, labels))
 
 
 def _double(value: object) -> object:
-    return cast(ArithmeticValue, value) * 2
+    return cast("ArithmeticValue", value) * 2
 
 
 def _plus_one(value: object) -> object:
-    return cast(ArithmeticValue, value) + 1
+    return cast("ArithmeticValue", value) + 1
 
 
 def _times_ten(value: object) -> object:
-    return cast(ArithmeticValue, value) * 10
+    return cast("ArithmeticValue", value) * 10
 
 
 @pytest.fixture
@@ -154,7 +154,7 @@ def test_transform_dataset_passthrough_non_tuple_item() -> None:
         def __getitem__(self, index: int) -> object:
             return index * 10
 
-    wrapped = _TransformDataset(cast(Sequence[object], _Plain()), transform=_plus_one)
+    wrapped = _TransformDataset(cast("Sequence[object]", _Plain()), transform=_plus_one)
     assert wrapped[0] == 1
     assert wrapped[1] == 11
     assert len(wrapped) == 2
@@ -170,7 +170,7 @@ def test_transform_dataset_preserves_extra_tuple_elements() -> None:
         def __getitem__(self, _idx: int) -> object:
             return 1, "label", "meta"
 
-    wrapped = _TransformDataset(cast(Sequence[object], _Triple()), transform=_times_ten)
+    wrapped = _TransformDataset(cast("Sequence[object]", _Triple()), transform=_times_ten)
     assert wrapped[0] == (10, "label", "meta")
 
 
@@ -182,5 +182,5 @@ def test_transform_dataset_no_transforms_returns_item() -> None:
         def __getitem__(self, _idx: int) -> object:
             return "raw"
 
-    wrapped = _TransformDataset(cast(Sequence[object], _Single()))
+    wrapped = _TransformDataset(cast("Sequence[object]", _Single()))
     assert wrapped[0] == "raw"

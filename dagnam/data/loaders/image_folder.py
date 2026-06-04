@@ -99,13 +99,13 @@ class TensorflowImageModule(Protocol):
 
 def _load_torchvision() -> tuple[TorchVisionDatasetsModule, TorchVisionTransformsModule]:
     return (
-        cast(TorchVisionDatasetsModule, import_module("torchvision.datasets")),
-        cast(TorchVisionTransformsModule, import_module("torchvision.transforms")),
+        cast("TorchVisionDatasetsModule", import_module("torchvision.datasets")),
+        cast("TorchVisionTransformsModule", import_module("torchvision.transforms")),
     )
 
 
 def _load_tensorflow() -> TensorflowImageModule:
-    return cast(TensorflowImageModule, import_module("tensorflow"))
+    return cast("TensorflowImageModule", import_module("tensorflow"))
 
 
 def _cardinality_to_int(value: object) -> int:
@@ -129,7 +129,7 @@ def create_pytorch_loader(
     transform: TransformFn | None = None,
     target_transform: TransformFn | None = None,
     collate_fn: CollateFn | None = None,
-) -> "DataLoader[object]":
+) -> DataLoader[object]:
     """Create a PyTorch DataLoader from an image-folder dataset.
 
     Requires ``torchvision`` to be installed.
@@ -190,19 +190,25 @@ def create_pytorch_loader(
         # Use explicit split directories
         # Normalize split name: 'val' -> check for 'val' or 'validation'
         split_dir = _resolve_split_dir(data_root, split, layout.splits)
-        dataset: object = cast("Dataset[object]", datasets.ImageFolder(
-            str(split_dir),
-            transform=transform,
-            target_transform=target_transform,
-        ))
+        dataset: object = cast(
+            "Dataset[object]",
+            datasets.ImageFolder(
+                str(split_dir),
+                transform=transform,
+                target_transform=target_transform,
+            ),
+        )
     else:
         # Unsplit: load all images and use deterministic subset
-        base_dataset = cast("Dataset[object]", datasets.ImageFolder(
-            str(data_root),
-            transform=transform,
-            target_transform=target_transform,
-        ))
-        n = len(cast(Sized, base_dataset))
+        base_dataset = cast(
+            "Dataset[object]",
+            datasets.ImageFolder(
+                str(data_root),
+                transform=transform,
+                target_transform=target_transform,
+            ),
+        )
+        n = len(cast("Sized", base_dataset))
         train_idx, val_idx, test_idx = split_indices(
             n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
         )
@@ -282,7 +288,7 @@ def create_tensorflow_dataset(
     from dagnam._types import TensorflowModule
 
     tf = _load_tensorflow()
-    tf_data = cast(TensorflowModule, tf).data
+    tf_data = cast("TensorflowModule", tf).data
     if shuffle is None:
         shuffle = split == "train"
 
@@ -334,11 +340,7 @@ def create_tensorflow_dataset(
         def _drop_index(_index: object, payload: object) -> object:
             return payload
 
-        ds = (
-            full.enumerate()
-            .filter(_keep_index)
-            .map(_drop_index)
-        )
+        ds = full.enumerate().filter(_keep_index).map(_drop_index)
 
     if shuffle:
         ds = ds.shuffle(buffer_size=max(batch_size * 16, 1024), seed=seed)
@@ -365,7 +367,7 @@ def create_flax_dataset(
     image_size: tuple[int, int] = (224, 224),
     transform_fn: ImageTransform | None = None,
     batch_transform_fn: BatchTransform | None = None,
-) -> list["FlaxBatch"]:
+) -> list[FlaxBatch]:
     """Create a list of FlaxBatch from an image-folder dataset.
 
     Reads all images for the split into memory as JAX arrays. For very large
@@ -373,7 +375,8 @@ def create_flax_dataset(
     to JAX per batch in the training loop instead.
     """
     import jax.numpy as jnp
-    as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
+
+    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
     try:
         from PIL import Image
     except ImportError:
@@ -414,7 +417,7 @@ def create_flax_dataset(
         labels: list[int] = []
         for path, label in chunk:
             img = Image.open(path).convert("RGB").resize(image_size)
-            arr = cast(ImageArray, np.asarray(img, dtype=np.float32) / 255.0)
+            arr = cast("ImageArray", np.asarray(img, dtype=np.float32) / 255.0)
             if transform_fn is not None:
                 arr = transform_fn(arr)
             images.append(arr)

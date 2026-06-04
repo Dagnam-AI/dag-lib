@@ -1,10 +1,9 @@
 """Coverage for dagnam.data.loaders.media — archive + folder discovery."""
 
 from __future__ import annotations
-from pathlib import Path
-
 
 import io
+from pathlib import Path
 import tarfile
 import zipfile
 

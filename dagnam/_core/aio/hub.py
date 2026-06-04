@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dagnam._core.aio.base import BaseAsyncDagnamClient
+from dagnam._core.client.common import quote_path_segment, raise_for_hub, response_json_value
 from dagnam._types import (
     JsonArray,
     JsonObject,
@@ -11,9 +13,6 @@ from dagnam._types import (
     ensure_json_array,
     ensure_json_object,
 )
-
-from dagnam._core.aio.base import BaseAsyncDagnamClient
-from dagnam._core.client.common import quote_path_segment, raise_for_hub, response_json_value
 
 
 class AsyncHubMixin(BaseAsyncDagnamClient):
@@ -43,9 +42,11 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         )
 
     async def get_hub_model(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}", model_id=model_id
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}", model_id=model_id
+            )
+        )
 
     async def create_hub_model(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
@@ -53,12 +54,14 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         )
 
     async def update_hub_model(self, model_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "PUT",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}",
-            model_id=model_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "PUT",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}",
+                model_id=model_id,
+                json_body=payload,
+            )
+        )
 
     async def delete_hub_model(self, model_id: str) -> None:
         await self._hub_req(
@@ -66,69 +69,95 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         )
 
     async def list_hub_model_files(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
+            )
+        )
 
     async def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
         params: QueryParams | None = {"file_id": file_id} if file_id else None
-        return ensure_json_object(await self._hub_req(
-            "GET",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}/download",
-            model_id=model_id,
-            params=params,
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/download",
+                model_id=model_id,
+                params=params,
+            )
+        )
 
     async def list_hub_model_versions(self, model_id: str) -> JsonArray:
-        return ensure_json_array(await self._hub_req(
-            "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions", model_id=model_id
-        ))
+        return ensure_json_array(
+            await self._hub_req(
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions",
+                model_id=model_id,
+            )
+        )
 
     async def create_hub_model_version(self, model_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "POST",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions",
-            model_id=model_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions",
+                model_id=model_id,
+                json_body=payload,
+            )
+        )
 
     async def star_hub_model(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "POST", f"/api/v1/hub/models/{quote_path_segment(model_id)}/star", model_id=model_id
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "POST", f"/api/v1/hub/models/{quote_path_segment(model_id)}/star", model_id=model_id
+            )
+        )
 
     async def unstar_hub_model(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "DELETE", f"/api/v1/hub/models/{quote_path_segment(model_id)}/star", model_id=model_id
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "DELETE",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/star",
+                model_id=model_id,
+            )
+        )
 
     async def fork_hub_model(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "POST", f"/api/v1/hub/models/{quote_path_segment(model_id)}/fork", model_id=model_id
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "POST", f"/api/v1/hub/models/{quote_path_segment(model_id)}/fork", model_id=model_id
+            )
+        )
 
-    async def list_hub_model_reviews(self, model_id: str, page: int = 1, limit: int = 20) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "GET",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}/reviews",
-            model_id=model_id,
-            params={"page": page, "limit": limit},
-        ))
+    async def list_hub_model_reviews(
+        self, model_id: str, page: int = 1, limit: int = 20
+    ) -> JsonObject:
+        return ensure_json_object(
+            await self._hub_req(
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/reviews",
+                model_id=model_id,
+                params={"page": page, "limit": limit},
+            )
+        )
 
     async def add_hub_model_review(self, model_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "POST",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}/reviews",
-            model_id=model_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/reviews",
+                model_id=model_id,
+                json_body=payload,
+            )
+        )
 
     async def use_hub_model_in_studio(self, model_id: str) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "POST",
-            f"/api/v1/hub/models/{quote_path_segment(model_id)}/use-in-studio",
-            model_id=model_id,
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/use-in-studio",
+                model_id=model_id,
+            )
+        )
 
     async def list_hub_categories(self) -> JsonArray | str | None:
         value = await self._hub_req("GET", "/api/v1/hub/categories")
@@ -149,6 +178,10 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
     async def list_hub_starred(
         self, sort_by: str = "date_starred", page: int = 1, limit: int = 20
     ) -> JsonObject:
-        return ensure_json_object(await self._hub_req(
-            "GET", "/api/v1/hub/starred", params={"sort_by": sort_by, "page": page, "limit": limit}
-        ))
+        return ensure_json_object(
+            await self._hub_req(
+                "GET",
+                "/api/v1/hub/starred",
+                params={"sort_by": sort_by, "page": page, "limit": limit},
+            )
+        )

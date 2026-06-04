@@ -1,13 +1,12 @@
-from tests.typing_helpers import JsonObject
-from pathlib import Path
-
 """Unit tests for DagnamDataset class."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import polars as pl
 import pytest
+from tests.typing_helpers import JsonObject
 
 from dagnam.data.dataset import DagnamDataset
 
@@ -60,7 +59,7 @@ class TestInit:
         assert ds._data is None  # lazy
 
     def test_optional_fields_default_to_none(self, data_dir: Path) -> None:
-        minimal = {
+        minimal: JsonObject = {
             "id": "ds-002",
             "name": "Minimal",
             "format": "json",

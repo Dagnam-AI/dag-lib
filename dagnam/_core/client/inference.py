@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from dagnam._types import JsonArray, JsonObject
-
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    DEFAULT_TIMEOUT,
     requests,
 )
 from dagnam._core.client.common import quote_path_segment
+from dagnam._types import JsonArray, JsonObject
 
 
 class InferenceClientMixin(BaseDagnamClient):
     """Inference resource methods for DagnamClient."""
 
-    def predict(self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_TIMEOUT) -> JsonObject:
+    def predict(
+        self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_TIMEOUT
+    ) -> JsonObject:
         """POST /api/v1/inference/{deployment_id}/predict"""
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict"
@@ -37,7 +38,9 @@ class InferenceClientMixin(BaseDagnamClient):
         self._raise_for_deployment(resp, deployment_id)
         return resp.json()
 
-    def predict_batch(self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_TIMEOUT) -> JsonArray:
+    def predict_batch(
+        self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_TIMEOUT
+    ) -> JsonArray:
         """POST /api/v1/inference/{deployment_id}/predict/batch"""
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict/batch"

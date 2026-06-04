@@ -11,7 +11,6 @@ match the Phase 3 style (``dagnam.inference``, ``dagnam.stream_training``).
 
 from __future__ import annotations
 
-from dagnam._types import JsonMapping, JsonObject
 from collections.abc import Iterator
 from typing import Optional
 from uuid import UUID
@@ -20,6 +19,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
 from dagnam._core.sse import TERMINAL_DEPLOYMENT_EVENTS, SSEEvent, iter_with_reconnect
+from dagnam._types import JsonMapping, JsonObject
 
 # Terminal status values returned by the deployment status enum.
 _ACTIVE_STATES = frozenset({"running"})

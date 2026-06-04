@@ -91,8 +91,11 @@ def create_training_job(
 
     >>> job = dagnam.create_training_job(
     ...     "proj_abc",
-    ...     epochs=2, batch_size=32, learning_rate=1e-3,
-    ...     optimizer="adam", loss_function="cross_entropy",
+    ...     epochs=2,
+    ...     batch_size=32,
+    ...     learning_rate=1e-3,
+    ...     optimizer="adam",
+    ...     loss_function="cross_entropy",
     ...     training_dataset_id="ds_123",
     ... )
     """

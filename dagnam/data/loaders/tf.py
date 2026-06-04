@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
 from importlib import import_module
+import random
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
+
 from dagnam._types import TensorflowDataset, TensorflowModule
 from dagnam.data._polars_utils import factorize, numeric_columns
 from dagnam.data.loaders.csv import detect_label_column
@@ -33,7 +34,7 @@ def create_tensorflow_dataset(
     Uses the same label detection, encoding, and splitting logic as the
     PyTorch loader. ``column_roles`` overrides automatic label detection.
     """
-    tf_data = cast(TensorflowModule, import_module("tensorflow")).data
+    tf_data = cast("TensorflowModule", import_module("tensorflow")).data
     df = dagnam_ds.to_polars()
 
     label_col = detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
@@ -41,12 +42,8 @@ def create_tensorflow_dataset(
     # Label encoding — get numpy arrays directly
     label_series = df[label_col]
     if dagnam_ds.class_names:
-        mapping: dict[object, int] = {
-            name: idx for idx, name in enumerate(dagnam_ds.class_names)
-        }
-        labels = np.array(
-            [mapping[v] for v in label_series.to_list()], dtype=np.int64
-        )
+        mapping: dict[object, int] = {name: idx for idx, name in enumerate(dagnam_ds.class_names)}
+        labels = np.array([mapping[v] for v in label_series.to_list()], dtype=np.int64)
     else:
         labels = factorize(label_series)
 

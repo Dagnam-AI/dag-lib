@@ -39,5 +39,8 @@ def test_emit_result_writes_json_file_and_human_stdout(
         render_human=lambda _result: "one row",
     )
 
-    assert output.read_text(encoding="utf-8") == '{\n  "items": [\n    {\n      "id": "one"\n    }\n  ]\n}\n'
+    assert (
+        output.read_text(encoding="utf-8")
+        == '{\n  "items": [\n    {\n      "id": "one"\n    }\n  ]\n}\n'
+    )
     assert capsys.readouterr().out == "one row\n"

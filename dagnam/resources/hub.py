@@ -10,6 +10,11 @@ the Phase 3 style (``dagnam.inference``, ``dagnam.deployments``).
 
 from __future__ import annotations
 
+from typing import Optional
+from uuid import UUID
+
+from dagnam._core.client import DagnamClient
+from dagnam._core.resolver import resolve_client
 from dagnam._types import (
     JsonArray,
     JsonObject,
@@ -18,11 +23,6 @@ from dagnam._types import (
     ensure_json_object,
     is_json_value,
 )
-from typing import Optional
-from uuid import UUID
-
-from dagnam._core.client import DagnamClient
-from dagnam._core.resolver import resolve_client
 
 
 def _stringify_id(value: object) -> str:

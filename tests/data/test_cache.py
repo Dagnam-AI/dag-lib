@@ -1,11 +1,11 @@
-from pathlib import Path
-from tests.typing_helpers import JsonObject
-
 """Unit tests for dagnam.cache module."""
 
 import hashlib
 import json
+from pathlib import Path
 import time
+
+from tests.typing_helpers import JsonObject
 
 from dagnam.data.cache import (
     DEFAULT_MAX_CACHE_BYTES,
@@ -236,7 +236,9 @@ class TestGetCacheInfo:
 
 
 class TestEvictLru:
-    def _make_dataset(self, cache_dir: Path, name: str, size: int, last_access: float | None = None) -> None:
+    def _make_dataset(
+        self, cache_dir: Path, name: str, size: int, last_access: float | None = None
+    ) -> None:
         """Helper to create a fake cached dataset."""
         ds_dir = cache_dir / name
         ds_dir.mkdir(parents=True, exist_ok=True)

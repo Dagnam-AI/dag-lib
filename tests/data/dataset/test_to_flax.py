@@ -1,0 +1,302 @@
+"""Coverage for the to_flax mixin on DagnamDataset."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, cast
+
+import numpy as np
+import numpy.typing as npt
+import pytest
+
+pytest.importorskip("jax")
+
+from tests.data.dataset._native_helpers import (
+    array_identity,
+    array_scale,
+    make_indexable_native_ds,
+    make_native_numpy_ds,
+    make_native_obj_ds,
+)
+
+from dagnam.data.dataset import DagnamDataset
+from dagnam.data.loaders.flax import FlaxBatch
+
+if TYPE_CHECKING:
+    import jax
+
+
+class JaxNumpyModule(Protocol):
+    float32: object
+    int32: object
+
+    def asarray(self, value: npt.ArrayLike) -> jax.Array: ...
+
+    def zeros(self, shape: Sequence[int], dtype: object | None = None) -> jax.Array: ...
+
+
+def _jax_batch_identity(features: jax.Array, labels: jax.Array) -> tuple[jax.Array, jax.Array]:
+    return features, labels
+
+
+# ---------------------------------------------------------------- to_flax_dataset
+
+
+def test_to_flax_native_numpy_test_split(tmp_path: Path) -> None:
+    ds = make_native_numpy_ds(tmp_path)
+    batches = ds.to_flax_dataset(split="test", batch_size=2, shuffle=False)
+    assert batches
+    assert isinstance(batches[0], FlaxBatch)
+
+
+def test_to_flax_native_numpy_val_train_splits(tmp_path: Path) -> None:
+    ds = make_native_numpy_ds(tmp_path)
+    val = ds.to_flax_dataset(split="val", batch_size=2, shuffle=False, val_ratio=0.2)
+    train = ds.to_flax_dataset(split="train", batch_size=2, shuffle=True, val_ratio=0.2)
+    assert val
+    assert train
+
+
+def test_to_flax_native_numpy_object_pad(tmp_path: Path) -> None:
+    ds = make_native_obj_ds()
+    batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False)
+    assert batches
+
+
+def test_to_flax_native_numpy_with_transforms(tmp_path: Path) -> None:
+    ds = make_native_numpy_ds(tmp_path)
+    batches = ds.to_flax_dataset(
+        split="train",
+        batch_size=2,
+        shuffle=False,
+        val_ratio=0.2,
+        transform_fn=array_scale,
+        batch_transform_fn=_jax_batch_identity,
+    )
+    assert batches
+
+
+def test_to_flax_native_indexable_train(tmp_path: Path) -> None:
+    ds = make_indexable_native_ds()
+    batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, val_ratio=0.25)
+    assert batches
+
+
+def test_to_flax_native_indexable_val(tmp_path: Path) -> None:
+    ds = make_indexable_native_ds()
+    batches = ds.to_flax_dataset(split="val", batch_size=2, shuffle=False, val_ratio=0.25)
+    assert batches
+
+
+def test_to_flax_native_indexable_test(tmp_path: Path) -> None:
+    ds = make_indexable_native_ds()
+    batches = ds.to_flax_dataset(split="test", batch_size=2, shuffle=False)
+    assert batches
+
+
+def test_to_flax_native_indexable_no_numpy(tmp_path: Path) -> None:
+    ds = make_indexable_native_ds(with_numpy=False)
+    batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, val_ratio=0.25)
+    assert batches
+
+
+def test_to_flax_invalid_split(tmp_path: Path) -> None:
+    ds = make_native_numpy_ds(tmp_path)
+    with pytest.raises(ValueError, match="Unknown split"):
+        ds.to_flax_dataset(split="bogus")
+
+
+def test_to_flax_unsupported_format(tmp_path: Path) -> None:
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text("a\n1\n")
+    ds = DagnamDataset(
+        {
+            "id": "u1",
+            "name": "unsupported",
+            "format": "parquet",  # unsupported by to_flax
+            "dataset_type": "tabular",
+            "num_samples": 1,
+            "num_classes": 0,
+            "class_names": [],
+            "filename": "data.csv",
+        },
+        tmp_path,
+    )
+    with pytest.raises(ValueError, match="Unsupported format"):
+        ds.to_flax_dataset(split="train")
+
+
+def test_to_flax_tabular_csv(tmp_path: Path) -> None:
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text("x,y,species\n1,2,a\n3,4,b\n5,6,a\n7,8,b\n9,10,a\n")
+    ds = DagnamDataset(
+        {
+            "id": "t1",
+            "name": "tab",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 5,
+            "num_classes": 2,
+            "class_names": ["a", "b"],
+            "filename": "data.csv",
+        },
+        tmp_path,
+    )
+    batches = ds.to_flax_dataset(
+        split="train", batch_size=2, shuffle=False, val_ratio=0.2, test_ratio=0.2
+    )
+    assert batches
+
+
+def test_to_flax_image_folder_dispatches(tmp_path: Path) -> None:
+    """image_folder path routes through create_flax_dataset image variant."""
+    from PIL import Image
+
+    for cls_idx, cls in enumerate(("a", "b")):
+        d = tmp_path / cls
+        d.mkdir()
+        for i in range(3):
+            Image.new("RGB", (8, 8), color=(255 * cls_idx, 0, 0)).save(d / f"{i}.jpg", "JPEG")
+    ds = DagnamDataset(
+        {
+            "id": "img1",
+            "name": "img",
+            "format": "image_folder",
+            "dataset_type": "image",
+            "num_samples": 6,
+            "num_classes": 2,
+            "class_names": ["a", "b"],
+        },
+        tmp_path,
+    )
+    batches = ds.to_flax_dataset(
+        split="train", batch_size=2, shuffle=False, val_ratio=0.2, test_ratio=0.2
+    )
+    assert batches
+
+
+# ---------------------------------------------------------------- native_flax_dataset path
+
+
+def test_to_flax_native_flax_path(tmp_path: Path) -> None:
+    """Set _native_train_flax directly so _native_flax_dataset is hit."""
+    import jax.numpy as jnp
+
+    jnp_mod = cast("JaxNumpyModule", jnp)
+
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "native-flax",
+            "format": "native",
+            "dataset_type": "image",
+            "num_samples": 8,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    batch_a = FlaxBatch(
+        features=jnp_mod.asarray(np.zeros((4, 3, 4, 4), dtype=np.float32)),
+        labels=jnp_mod.asarray(np.zeros(4, dtype=np.int64)),
+    )
+    batch_b = FlaxBatch(
+        features=jnp_mod.asarray(np.ones((4, 3, 4, 4), dtype=np.float32)),
+        labels=jnp_mod.asarray(np.ones(4, dtype=np.int64)),
+    )
+    ds.native_train_flax = [batch_a, batch_b]
+    ds.native_test_flax = [batch_a]
+
+    for split in ("train", "val", "test"):
+        out = ds.to_flax_dataset(
+            split=split, batch_size=2, shuffle=split == "train", val_ratio=0.25
+        )
+        assert out
+
+
+def test_to_flax_native_flax_with_transforms(tmp_path: Path) -> None:
+    import jax.numpy as jnp
+
+    jnp_mod = cast("JaxNumpyModule", jnp)
+
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "native-flax",
+            "format": "native",
+            "dataset_type": "image",
+            "num_samples": 4,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    ds.native_train_flax = [
+        FlaxBatch(
+            features=jnp_mod.asarray(np.zeros((4, 3, 4, 4), dtype=np.float32)),
+            labels=jnp_mod.asarray(np.zeros(4, dtype=np.int64)),
+        )
+    ]
+    out = ds.to_flax_dataset(
+        split="train",
+        batch_size=2,
+        shuffle=False,
+        val_ratio=0.25,
+        transform_fn=array_identity,
+        batch_transform_fn=_jax_batch_identity,
+    )
+    assert out
+
+
+def test_to_flax_native_flax_empty_returns_empty(tmp_path: Path) -> None:
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "empty",
+            "format": "native",
+            "dataset_type": "image",
+            "num_samples": 0,
+            "num_classes": 0,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    ds.native_train_flax = []  # empty list — triggers early return
+    out = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False)
+    assert out == []
+
+
+def test_to_flax_native_flax_val_without_train_raises(tmp_path: Path) -> None:
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "x",
+            "format": "native",
+            "dataset_type": "image",
+            "num_samples": 0,
+            "num_classes": 0,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    # Trip the "no native flax" attribute path via patching _native_flax_dataset directly
+    # Easier: set _native_train_flax but force val path via train_flax=None branch
+    import jax.numpy as jnp
+
+    jnp_mod = cast("JaxNumpyModule", jnp)
+
+    ds.native_train_flax = None
+    # Make sure to_flax doesn't hit the early native_flax path: instead poke _native_flax_dataset
+    ds.native_test_flax = [
+        FlaxBatch(
+            features=jnp_mod.zeros((1, 4), dtype=jnp_mod.float32),
+            labels=jnp_mod.zeros((1,), dtype=jnp_mod.int32),
+        )
+    ]
+    with pytest.raises(ValueError, match="No native FLAX"):
+        ds.native_flax_dataset(split="val", batch_size=2, shuffle=False)

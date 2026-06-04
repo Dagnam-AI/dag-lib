@@ -6,13 +6,12 @@ from importlib import import_module
 import random
 from typing import TYPE_CHECKING, Protocol, cast
 
-import polars as pl
-
 from dagnam._types import JsonObject
 from dagnam.data._polars_utils import factorize, numeric_columns
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
+    import polars as pl
     from torch.utils.data import DataLoader, Dataset
 
     from dagnam.data.dataset._typing import DatasetMixinBase
@@ -36,7 +35,7 @@ class TorchModule(Protocol):
 
 
 def _load_torch() -> TorchModule:
-    return cast(TorchModule, import_module("torch"))
+    return cast("TorchModule", import_module("torch"))
 
 
 class _TabularDataset:

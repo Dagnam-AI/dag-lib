@@ -96,7 +96,9 @@ def test_uses_configured_training_metrics_path(tmp_path: Path, monkeypatch: pyte
     assert configured_path.is_file()
 
 
-def test_env_metrics_path_overrides_configured_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_env_metrics_path_overrides_configured_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     configured_path = tmp_path / "configured" / "metrics.jsonl"
     env_path = tmp_path / "env" / "metrics.jsonl"
     config_dir = tmp_path / ".dagnam"
@@ -162,14 +164,24 @@ def test_module_is_stdlib_only_no_network():
     src = (Path(__file__).resolve().parents[1] / "dagnam" / "training.py").read_text(
         encoding="utf-8"
     )
-    for forbidden in ("import requests", "from dagnam._core", "import urllib", "import socket", "import http"):
+    for forbidden in (
+        "import requests",
+        "from dagnam._core",
+        "import urllib",
+        "import socket",
+        "import http",
+    ):
         assert forbidden not in src, f"dagnam.training must not contain {forbidden!r}"
 
 
 def test_metrics_path_resolution_is_lazy():
     """Importing dagnam.training must not read ~/.dagnam/config.json."""
-    src = (Path(__file__).resolve().parents[1] / "dagnam" / "training.py").read_text(encoding="utf-8")
-    assert not src.rstrip().endswith("_metrics_path, _using_fallback_path = _resolve_metrics_path()")
+    src = (Path(__file__).resolve().parents[1] / "dagnam" / "training.py").read_text(
+        encoding="utf-8"
+    )
+    assert not src.rstrip().endswith(
+        "_metrics_path, _using_fallback_path = _resolve_metrics_path()"
+    )
 
 
 def test_public_api_surface():

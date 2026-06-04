@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader, Dataset as _TorchDataset
     from torch.utils.data.sampler import Sampler
 else:
+
     class _TorchDataset:
         @classmethod
         def __class_getitem__(cls, _item: object) -> type[_TorchDataset]:
@@ -73,7 +74,7 @@ def _wrap_collate(
         if collate_fn is None:
             from torch.utils.data._utils import collate as collate_module
 
-            default_collate_fn = cast(CollateFn, getattr(collate_module, "default_collate"))
+            default_collate_fn = cast("CollateFn", collate_module.default_collate)
             collated = default_collate_fn(batch)
         else:
             collated = collate_fn(batch)
@@ -86,7 +87,7 @@ def _with_collate(
     loader: LoaderLike,
     collate_fn: CollateFn | None = None,
     batch_transform: CollateFn | None = None,
-    ) -> DataLoader[object]:
+) -> DataLoader[object]:
     """Rebuild a DataLoader with hook-aware collation when needed."""
     wrapped_collate = _wrap_collate(collate_fn, batch_transform)
     if wrapped_collate is None:
@@ -95,7 +96,7 @@ def _with_collate(
     from torch.utils.data import DataLoader
 
     return DataLoader(
-        cast(_TorchDataset[object], loader.dataset),
+        cast("_TorchDataset[object]", loader.dataset),
         batch_size=loader.batch_size,
         shuffle=False,
         sampler=cast("Sampler[object] | Iterable[object] | None", loader.sampler),
@@ -104,7 +105,7 @@ def _with_collate(
         pin_memory=loader.pin_memory,
         drop_last=loader.drop_last,
         timeout=loader.timeout,
-        worker_init_fn=cast(Callable[[int], None] | None, loader.worker_init_fn),
+        worker_init_fn=cast("Callable[[int], None] | None", loader.worker_init_fn),
         multiprocessing_context=loader.multiprocessing_context,
         generator=loader.generator,
         prefetch_factor=loader.prefetch_factor,
@@ -127,13 +128,13 @@ class _TransformDataset(_TorchDataset[object]):
         self.target_transform = target_transform
 
     def __len__(self) -> int:
-        return len(cast(Sized, self.dataset))
+        return len(cast("Sized", self.dataset))
 
     @override
     def __getitem__(self, index: int) -> object:
         item = self.dataset[index]
         if isinstance(item, tuple):
-            item_tuple = cast(tuple[object, ...], item)
+            item_tuple = cast("tuple[object, ...]", item)
             if len(item_tuple) < 2:
                 return self.transform(item_tuple) if self.transform is not None else item_tuple
             data = item_tuple[0]

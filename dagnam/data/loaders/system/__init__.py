@@ -10,16 +10,16 @@ from dagnam.data.loaders.system.registry import (
 )
 from dagnam.data.loaders.system.tensorflow_datasets import (
     TFDS_NAME_MAP,
-    resolve_tfds_name,
     resolve_system_dataset_tf,
+    resolve_tfds_name,
 )
 
 __all__ = [
     "NATIVE_LOADERS",
     "SYSTEM_CACHE_ROOT",
     "TFDS_NAME_MAP",
-    "resolve_tfds_name",
     "resolve_system_dataset",
     "resolve_system_dataset_flax",
     "resolve_system_dataset_tf",
+    "resolve_tfds_name",
 ]

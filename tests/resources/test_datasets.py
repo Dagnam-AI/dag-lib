@@ -1,7 +1,6 @@
 """Unit tests for dagnam.datasets upload helpers."""
 
 from __future__ import annotations
-from tests.typing_helpers import JsonObject
 
 from unittest.mock import MagicMock
 
@@ -13,8 +12,10 @@ from dagnam._core.exceptions import UploadError
 from dagnam._core.lro import LongRunningOperation
 
 
-def _client(**overrides: JsonObject) -> MagicMock:
-    return MagicMock(spec=DagnamClient, **overrides)
+def _client(**overrides: object) -> MagicMock:
+    client = MagicMock(spec=DagnamClient)
+    client.configure_mock(**overrides)
+    return client
 
 
 class TestUpload:
@@ -71,7 +72,9 @@ class TestUploadFromUrl:
             client=c,
         )
         assert isinstance(op, LongRunningOperation)
-        assert op.initial()["task_id"] == "t1"
+        initial = op.initial()
+        assert initial is not None
+        assert initial["task_id"] == "t1"
         c.upload_dataset_from_url.assert_called_once_with(
             url="https://example.com/data.parquet",
             name="remote-ds",

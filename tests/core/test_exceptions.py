@@ -32,14 +32,15 @@ class TestExceptionHierarchy:
 
     def test_catch_all_with_dagnamerror(self) -> None:
         """All library exceptions can be caught with a single except DagnamError."""
-        for exc_class in (AuthError, DatasetNotFoundError, APIError, ChecksumError):
+        errors: list[DagnamError] = [
+            AuthError("some error"),
+            DatasetNotFoundError("ds-123"),
+            APIError(500, "server error"),
+            ChecksumError("some error"),
+        ]
+        for err in errors:
             with pytest.raises(DagnamError):
-                if exc_class is DatasetNotFoundError:
-                    raise exc_class("ds-123")
-                elif exc_class is APIError:
-                    raise exc_class(500, "server error")
-                else:
-                    raise exc_class("some error")
+                raise err
 
 
 class TestDatasetNotFoundError:
@@ -107,7 +108,11 @@ class TestAPIError:
             def text(self):
                 raise AssertionError("streaming text should not be read")
 
-        assert safe_response_text(Response()) == "<streaming application/octet-stream body omitted>"
+        # Intentionally partial streaming response fake (no status_code).
+        assert (
+            safe_response_text(Response())  # pyright: ignore[reportArgumentType]
+            == "<streaming application/octet-stream body omitted>"
+        )
 
 
 class TestChecksumError:

@@ -1,6 +1,6 @@
 [project]
 name = "dagnam"
-version = "0.1.0"
+version = "0.5.0"
 description = "Official Python SDK for Dagnam.AI - datasets, training, model hub, deployments, and inference."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
@@ -85,7 +85,9 @@ Security = "https://github.com/dagnam-ai/dagnam/blob/main/dag-lib/SECURITY.md"
 [dependency-groups]
 dev = [
     "hypothesis",
+    "import-linter>=2.11",
     "pip-audit>=2.7",
+    "poethepoet>=0.46.0",
     "pre-commit>=3.5",
     "pyright>=1.1.380",
     "pytest",
@@ -141,6 +143,29 @@ reportMissingTypeStubs = "warning"
 reportImplicitOverride = "error"
 reportUnusedImport = "error"
 
+# Strict mode minus its "completeness" family. The SDK consumes untyped
+# third-party ML libraries (torch, torchvision, torchaudio, tensorflow,
+# tensorflow_datasets, jax/flax, numpy) and dynamic JSON server responses,
+# which makes the reportUnknown*/reportMissing* diagnostics pervasive noise
+# that cannot be resolved without sprinkling casts over every boundary. They
+# are disabled deliberately; every *bug-catching* strict diagnostic
+# (reportArgumentType, reportCallIssue, reportAttributeAccessIssue,
+# reportReturnType, reportOptional*, reportIndexIssue, reportOperatorIssue,
+# reportPrivateImportUsage, reportImplicitOverride, ...) stays enabled.
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportUnknownLambdaType = "none"
+reportMissingParameterType = "none"
+reportMissingTypeArgument = "none"
+
+# Tests additionally reach into private (`_`-prefixed) attributes to assert on
+# internal state; that is expected of unit tests, not a design smell.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -179,6 +204,11 @@ ignore = [
     "ARG001",
     "ARG002",
     "ARG005",
+    # Async SDK methods deliberately expose a `timeout` parameter that is
+    # forwarded to the httpx transport (a network/socket timeout), not an
+    # asyncio cancellation scope. This is the correct way to bound a single
+    # request, so ASYNC109's "use asyncio.timeout() instead" does not apply.
+    "ASYNC109",
     "ASYNC230",
     "B904",
     "D103",
@@ -222,21 +252,52 @@ ignore = [
     "PT011", "PT012",
     "RUF059",
     "SIM117",
+    # Test modules import shared type aliases from ``tests.typing_helpers``
+    # purely for annotations; gating their placement behind TYPE_CHECKING in
+    # tests adds churn with no runtime benefit (TC003 is already exempt here).
+    "TC002",
     "TC003",
     "UP028",
 ]
+# Framework-adapter modules are dominated by structural ``Protocol`` classes
+# that mirror external ML library surfaces (torch, torchvision, torchaudio,
+# tensorflow, tfds, jax/flax, soundfile). Their stub methods intentionally
+# mirror the external API and carry no behaviour, so per-method docstrings
+# would be pure noise; the public API is the module-level loader functions.
+"dagnam/data/loaders/**" = ["D102"]
 "dagnam/cli/**/*" = ["T20"]
 "dagnam/__init__.py" = ["F401"]
 "dagnam/_core/__init__.py" = ["F401"]
 "dagnam/aio.py" = ["F401"]
-"dagnam/services/**/*" = ["F401", "F403", "RUF100"]
-"dagnam/data/loaders/*_loader.py" = ["F401", "F403", "RUF100"]
-"dagnam/_core/_common.py" = ["F403", "RUF100"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["dagnam"]
 combine-as-imports = true
 force-sort-within-sections = true
+
+[tool.ruff.lint.pep8-naming]
+# These names intentionally violate snake_case because they mirror the exact
+# public API surface of external ML libraries inside structural ``Protocol``
+# definitions (and the test fakes that satisfy them). Renaming them would
+# break the structural match against the real torch/torchvision/torchaudio/
+# tensorflow_datasets APIs they stand in for.
+extend-ignore-names = [
+    "Compose",
+    "ToTensor",
+    "Resize",
+    "Normalize",
+    "ImageFolder",
+    "MNIST",
+    "CIFAR10",
+    "CIFAR100",
+    "FashionMNIST",
+    "OxfordIIITPet",
+    "SPEECHCOMMANDS",
+    "WikiText2",
+    "MelSpectrogram",
+    "Resample",
+    "Tout",
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -248,3 +309,31 @@ ban-relative-imports = "all"
 quote-style = "double"
 indent-style = "space"
 docstring-code-format = true
+
+[tool.poe.tasks]
+lint = { cmd = "ruff check", help = "Lint with ruff" }
+format-check = { cmd = "ruff format --check", help = "Verify formatting" }
+typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
+lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
+test = { cmd = "pytest tests -q", help = "Run the test suite" }
+check = { sequence = [
+    "lint",
+    "format-check",
+    "typecheck",
+    "lint-imports",
+    "test",
+], help = "Run every quality gate (lint, format, types, import layering, tests)" }
+
+# Layer-first import contract for the SDK. The package keeps its layer-first
+# layout by design (see
+# info/superpowers/specs/2026-06-02-dag-lib-hygiene-cleanup-design.md):
+# cli -> resources -> data -> _core, where a layer may import only the layers
+# below it. Enforced (blocking) in CI via `uv run lint-imports`.
+[tool.importlinter]
+root_package = "dagnam"
+
+[[tool.importlinter.contracts]]
+name = "layered SDK: _core <- data <- resources/cli"
+type = "layers"
+layers = ["cli", "resources", "data", "_core"]
+containers = ["dagnam"]

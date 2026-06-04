@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dagnam._core.auth import configure, get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
@@ -44,11 +44,17 @@ from dagnam.training import (
     write_training_state,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.5.0"
+
+if TYPE_CHECKING:
+    # Declared for type checkers and ``__all__``; loaded lazily at runtime via
+    # ``__getattr__`` (see ``_LAZY_EXPORTS``) to keep import time low.
+    from dagnam.data.dataset import DagnamDataset
+    from dagnam.data.load import load_dataset
 
 _LAZY_EXPORTS = {
     "DagnamDataset": ("dagnam.data.dataset", "DagnamDataset"),
-    "load_dataset": ("dagnam._core.load", "load_dataset"),
+    "load_dataset": ("dagnam.data.load", "load_dataset"),
 }
 
 __all__ = [

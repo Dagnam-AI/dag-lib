@@ -119,7 +119,8 @@ class TestFolderLayout:
             root=Path("/tmp"),
         )
         with pytest.raises(AttributeError):
-            layout.class_names = ["c"]
+            # Deliberately assigning to a frozen dataclass field to prove it raises.
+            layout.class_names = ["c"]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 class TestSafeArchiveExtraction:

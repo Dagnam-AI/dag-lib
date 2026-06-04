@@ -1,7 +1,6 @@
 """Unit tests for dagnam.hub module."""
 
 from __future__ import annotations
-from tests.typing_helpers import JsonObject
 
 from unittest.mock import MagicMock
 
@@ -12,8 +11,10 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import HubModelNotFoundError
 
 
-def _client(**overrides: JsonObject) -> MagicMock:
-    return MagicMock(spec=DagnamClient, **overrides)
+def _client(**overrides: object) -> MagicMock:
+    client = MagicMock(spec=DagnamClient)
+    client.configure_mock(**overrides)
+    return client
 
 
 class TestDiscovery:

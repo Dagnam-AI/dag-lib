@@ -30,9 +30,7 @@ def test_drain_batches_and_assigns_event_ids(tmp_path: Path):
     flat = [event for batch in sink.batches for event in batch]
     raw = path.read_bytes()
     offsets = [raw.index(line.encode("utf-8")) for line in lines]
-    assert [event["event_id"] for event in flat] == [
-        f"run_x:{offset}" for offset in offsets
-    ]
+    assert [event["event_id"] for event in flat] == [f"run_x:{offset}" for offset in offsets]
 
 
 def test_http_sink_refreshes_expired_run_token_once():

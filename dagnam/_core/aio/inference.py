@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dagnam._types import JsonArray, JsonObject
-
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import quote_path_segment, raise_for_deployment
+from dagnam._types import JsonArray, JsonObject
 
 
 class AsyncInferenceMixin(BaseAsyncDagnamClient):
     """Async Inference resource methods."""
 
-    async def predict(self, deployment_id: str, inputs: JsonObject, timeout: int | None = None) -> JsonObject:
+    async def predict(
+        self, deployment_id: str, inputs: JsonObject, timeout: int | None = None
+    ) -> JsonObject:
         resp = await self._request(
             "POST",
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict",

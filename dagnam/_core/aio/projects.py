@@ -49,9 +49,11 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
     async def get_project(self, project_id: str) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}", project_id=project_id
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "GET", f"/api/v1/projects/{quote_path_segment(project_id)}", project_id=project_id
+            )
+        )
 
     async def create_project(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
@@ -59,12 +61,14 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         )
 
     async def update_project(self, project_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "PUT",
-            f"/api/v1/projects/{quote_path_segment(project_id)}",
-            project_id=project_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "PUT",
+                f"/api/v1/projects/{quote_path_segment(project_id)}",
+                project_id=project_id,
+                json_body=payload,
+            )
+        )
 
     async def delete_project(self, project_id: str) -> None:
         await self._project_req(
@@ -73,20 +77,24 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
 
     async def duplicate_project(self, project_id: str, title: str | None = None) -> JsonObject:
         body: JsonObject | None = {"title": title} if title else None
-        return ensure_json_object(await self._project_req(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/duplicate",
-            project_id=project_id,
-            json_body=body,
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/duplicate",
+                project_id=project_id,
+                json_body=body,
+            )
+        )
 
     async def save_architecture(self, project_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/save",
-            project_id=project_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/save",
+                project_id=project_id,
+                json_body=payload,
+            )
+        )
 
     async def import_dag(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
@@ -94,34 +102,42 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         )
 
     async def import_dag_existing(self, project_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/import",
-            project_id=project_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/import",
+                project_id=project_id,
+                json_body=payload,
+            )
+        )
 
     async def bulk_delete_projects(self, project_ids: list[str]) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "POST",
-            "/api/v1/projects/bulk-delete",
-            json_body={"project_ids": [str(project_id) for project_id in project_ids]},
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                "/api/v1/projects/bulk-delete",
+                json_body={"project_ids": [str(project_id) for project_id in project_ids]},
+            )
+        )
 
     async def link_dataset(self, project_id: str, dataset_id: str, role: str) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
-            project_id=project_id,
-            json_body={"dataset_id": dataset_id, "role": role},
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
+                project_id=project_id,
+                json_body={"dataset_id": dataset_id, "role": role},
+            )
+        )
 
     async def get_project_datasets(self, project_id: str) -> JsonObject:
-        return ensure_json_object(await self._project_req(
-            "GET",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
-            project_id=project_id,
-        ))
+        return ensure_json_object(
+            await self._project_req(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/datasets",
+                project_id=project_id,
+            )
+        )
 
     async def unlink_dataset(self, project_id: str, dataset_id: str) -> None:
         await self._project_req(

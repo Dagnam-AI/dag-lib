@@ -59,7 +59,5 @@ class AccountClientMixin(BaseDagnamClient):
     def get_api_key_usage(self, key_id: str) -> JsonObject:
         """Return per-key usage. ``GET /api/v1/users/me/api-keys/{key_id}/usage``."""
         return self._expect_object(
-            self._account_get(
-                f"/api/v1/users/me/api-keys/{quote_path_segment(key_id)}/usage"
-            )
+            self._account_get(f"/api/v1/users/me/api-keys/{quote_path_segment(key_id)}/usage")
         )

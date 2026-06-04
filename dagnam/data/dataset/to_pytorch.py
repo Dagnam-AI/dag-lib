@@ -13,7 +13,6 @@ from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from torch._C import Generator
     from torch.utils.data import DataLoader, Dataset
 
 TransformFn = Callable[[object], object]
@@ -40,7 +39,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         batch_transform: CollateFn | None = None,
         waveform_transform: TransformFn | None = None,
         spectrogram_transform: TransformFn | None = None,
-    ) -> "DataLoader[object]":
+    ) -> DataLoader[object]:
         """Create a PyTorch DataLoader for the specified split.
 
         When ``_native_train`` / ``_native_test`` are set (system datasets),
@@ -65,6 +64,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
 
         try:
             import torch
+
             del torch
         except ImportError:
             raise ImportError(
@@ -168,7 +168,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         transform: TransformFn | None = None,
         target_transform: TransformFn | None = None,
         collate_fn: CollateFn | None = None,
-    ) -> "DataLoader[object]":
+    ) -> DataLoader[object]:
         """Build a DataLoader from native train/test datasets."""
         import torch
         from torch.utils.data import DataLoader, random_split
@@ -197,22 +197,24 @@ class PytorchDatasetMixin(DatasetMixinBase):
         if split == "test":
             ds = cast("Dataset[object]", native_test if native_test is not None else native_train)
         elif split == "val":
-            train_dataset = cast(Sized, native_train)
+            train_dataset = cast("Sized", native_train)
             n_val = int(len(train_dataset) * val_ratio)
             n_train = len(train_dataset) - n_val
             torch_dataset = cast("Dataset[object]", native_train)
-            generator = cast("Generator", getattr(torch, "Generator")().manual_seed(seed))
+            # torch.Generator is public but absent from torch's stub __all__.
+            generator = torch.Generator().manual_seed(seed)  # pyright: ignore[reportPrivateImportUsage]
             _, ds = random_split(
                 torch_dataset,
                 [n_train, n_val],
                 generator=generator,
             )
         else:  # train
-            train_dataset = cast(Sized, native_train)
+            train_dataset = cast("Sized", native_train)
             n_val = int(len(train_dataset) * val_ratio)
             n_train = len(train_dataset) - n_val
             torch_dataset = cast("Dataset[object]", native_train)
-            generator = cast("Generator", getattr(torch, "Generator")().manual_seed(seed))
+            # torch.Generator is public but absent from torch's stub __all__.
+            generator = torch.Generator().manual_seed(seed)  # pyright: ignore[reportPrivateImportUsage]
             ds, _ = random_split(
                 torch_dataset,
                 [n_train, n_val],
@@ -243,13 +245,16 @@ class PytorchDatasetMixin(DatasetMixinBase):
         transform: TransformFn | None = None,
         target_transform: TransformFn | None = None,
         collate_fn: CollateFn | None = None,
-    ) -> "DataLoader[object]":
+    ) -> DataLoader[object]:
         """Build a DataLoader from numpy array tuples (e.g. IMDB)."""
         import torch
         from torch.utils.data import DataLoader, TensorDataset
-        tensor = cast(TensorFactory, getattr(torch, "tensor"))
-        torch_long = getattr(torch, "long")
-        torch_float32 = getattr(torch, "float32")
+
+        # torch.{tensor,long,float32} are public APIs but torch's type stub
+        # omits them from __all__, so pyright flags reportPrivateImportUsage.
+        tensor = cast("TensorFactory", torch.tensor)  # pyright: ignore[reportPrivateImportUsage]
+        torch_long = torch.long  # pyright: ignore[reportPrivateImportUsage]
+        torch_float32 = torch.float32  # pyright: ignore[reportPrivateImportUsage]
 
         if not isinstance(self._native_train, tuple):
             raise ValueError("Native numpy loader requires train arrays")
@@ -262,13 +267,13 @@ class PytorchDatasetMixin(DatasetMixinBase):
         if split == "test":
             # IMDB sequences are variable-length object arrays — pad them
             if np.asarray(x_test, dtype=object).dtype == object:
-                x_test = self._pad_sequences(cast(Sequence[Sequence[int]], x_test))
+                x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = tensor(np.asarray(y_test), dtype=torch_float32).unsqueeze(1)
             ds = TensorDataset(x_t, y_t)
         else:
             if np.asarray(x_train, dtype=object).dtype == object:
-                x_train = self._pad_sequences(cast(Sequence[Sequence[int]], x_train))
+                x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
                 x = tensor(np.asarray(x_train[-n_val:]), dtype=torch_long)

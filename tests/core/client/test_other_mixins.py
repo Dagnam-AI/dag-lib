@@ -1,13 +1,13 @@
 """Coverage for inference, training, codegen, checkpoints sync mixins."""
 
 from __future__ import annotations
-from pathlib import Path
-from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
+from pathlib import Path
 
 import pytest
 import requests
 import requests_mock as rm_module
+from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
@@ -61,7 +61,9 @@ def test_predict_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -
         client.predict("dep1", {"x": 1})
 
 
-def test_predict_batch_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+def test_predict_batch_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
@@ -79,7 +81,9 @@ def test_predict_batch_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPa
         client.predict_batch("dep1", [{"x": 1}])
 
 
-def test_deployment_health_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+def test_deployment_health_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
@@ -132,7 +136,9 @@ def test_open_training_stream_500(client: DagnamClient, rmock: RequestsMocker) -
         client.open_training_stream("job1")
 
 
-def test_open_training_stream_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+def test_open_training_stream_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
@@ -189,7 +195,9 @@ def test_preview_code_no_version(client: DagnamClient, rmock: RequestsMocker) ->
     assert rmock.last_request.qs == {"framework": ["pytorch"]}
 
 
-def test_validate_code_with_and_without_version(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_validate_code_with_and_without_version(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     rmock.post(f"{API}/api/v1/projects/p1/validate", json={"valid": True})
     client.validate_code("p1", version_id="v1")
     assert rmock.last_request.qs == {"version_id": ["v1"]}
@@ -208,7 +216,9 @@ def test_download_code_returns_bytes(client: DagnamClient, rmock: RequestsMocker
     assert result == b"<code>"
 
 
-def test_download_code_writes_to_file(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_download_code_writes_to_file(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     rmock.get(f"{API}/api/v1/projects/p1/download-code", content=b"<code>")
     dest = tmp_path / "out.zip"
     out = client.download_code("p1", framework="pytorch", dest_path=dest)
@@ -221,7 +231,9 @@ def test_download_code_zip_alias(client: DagnamClient, rmock: RequestsMocker) ->
     assert client.download_code_zip("p1", "pytorch") == b"x"
 
 
-def test_download_code_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+def test_download_code_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
@@ -314,7 +326,9 @@ def test_list_checkpoints_500(client: DagnamClient, rmock: RequestsMocker) -> No
         client.list_checkpoints("job1")
 
 
-def test_list_checkpoints_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+def test_list_checkpoints_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
@@ -332,7 +346,9 @@ def test_list_checkpoints_timeout(client: DagnamClient, monkeypatch: PytestMonke
         client.list_checkpoints("job1")
 
 
-def test_download_checkpoint_stream(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_download_checkpoint_stream(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
     rmock.get(url, content=b"weights", headers={"X-Checksum-SHA256": "abc"})
     dest = tmp_path / "ckpt.bin"
@@ -342,21 +358,27 @@ def test_download_checkpoint_stream(client: DagnamClient, rmock: RequestsMocker,
     assert dest.read_bytes() == b"weights"
 
 
-def test_download_checkpoint_stream_401(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_download_checkpoint_stream_401(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
     rmock.get(url, status_code=401)
     with pytest.raises(AuthError):
         client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
 
 
-def test_download_checkpoint_stream_404(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_download_checkpoint_stream_404(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
     rmock.get(url, status_code=404)
     with pytest.raises(CheckpointNotFoundError):
         client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
 
 
-def test_download_checkpoint_stream_500(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_download_checkpoint_stream_500(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
     rmock.get(url, status_code=500, text="boom")
     with pytest.raises(APIError):

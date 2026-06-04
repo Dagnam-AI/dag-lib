@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from builtins import list as builtin_list
 from collections.abc import Sequence
-from typing import Optional, cast
+from typing import Optional
 from unittest.mock import Mock
 from uuid import UUID
 
-from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
 from dagnam._core.client import DagnamClient
 from dagnam._core.resolver import resolve_client
+from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
 
 
 def _stringify_id(value: object) -> str:
@@ -72,7 +72,7 @@ def list(
     if search is not None:
         params["search"] = search
     if _is_mock_client(resolved):
-        legacy_list = getattr(cast(object, resolved), "list_projects")
+        legacy_list = getattr(resolved, "list_projects", None)
         if callable(legacy_list):
             return ensure_json_object(legacy_list(params=params))
     return resolved.list_projects(**params)
@@ -171,7 +171,7 @@ def duplicate(
     resolved = resolve_client(client, api_key, api_url)
     if _is_mock_client(resolved):
         payload: JsonObject | None = {"title": title} if title is not None else None
-        legacy_duplicate = getattr(cast(object, resolved), "duplicate_project")
+        legacy_duplicate = getattr(resolved, "duplicate_project", None)
         if callable(legacy_duplicate):
             return ensure_json_object(legacy_duplicate(_stringify_id(project_id), payload))
     return resolved.duplicate_project(_stringify_id(project_id), title=title)
@@ -279,7 +279,7 @@ def bulk_delete(
     resolved = resolve_client(client, api_key, api_url)
     ids = [_stringify_id(pid) for pid in project_ids]
     if _is_mock_client(resolved):
-        legacy_bulk_delete = getattr(cast(object, resolved), "bulk_delete_projects")
+        legacy_bulk_delete = getattr(resolved, "bulk_delete_projects", None)
         if callable(legacy_bulk_delete):
             return ensure_json_object(legacy_bulk_delete({"project_ids": ids}))
     return resolved.bulk_delete_projects(ids)

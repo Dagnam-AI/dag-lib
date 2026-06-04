@@ -13,7 +13,6 @@ from typing import Any
 from dagnam._core.auth import get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
-from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
 
 DEFAULT_ATTACH_METRICS_PATH = "dagnam_metrics.jsonl"
 
@@ -64,12 +63,16 @@ class MetricsJsonlTailer:
             try:
                 event = json.loads(raw)
             except json.JSONDecodeError:
-                sys.stderr.write(f"Skipping malformed metrics JSONL line at offset {event_offset}\n")
+                sys.stderr.write(
+                    f"Skipping malformed metrics JSONL line at offset {event_offset}\n"
+                )
                 continue
             if isinstance(event, dict):
                 yield {"offset": event_offset, "event": event}
             else:
-                sys.stderr.write(f"Skipping non-object metrics JSONL line at offset {event_offset}\n")
+                sys.stderr.write(
+                    f"Skipping non-object metrics JSONL line at offset {event_offset}\n"
+                )
 
         self._offset = cursor + len(self._partial)
 
@@ -109,26 +112,6 @@ def event_with_id(job_id: str, item: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
-def _upload_batch(client: Any, job_id: str, batch: list[dict[str, Any]]) -> None:
-    if batch:
-        client.upload_training_events(job_id, batch)
-
-
-def _is_terminal_upload_error(exc: Exception) -> bool:
-    """Return True for upload failures that retrying cannot fix.
-
-    Auth (401), job-not-found (404), and other client errors (4xx except 429
-    Too Many Requests) will keep failing identically, so the attach session
-    should surface them and exit rather than loop forever. Connection errors
-    and timeouts surface as ``APIError(0, ...)`` and 5xx/429 stay transient.
-    """
-    if isinstance(exc, (AuthError, TrainingJobNotFoundError)):
-        return True
-    if isinstance(exc, APIError):
-        return 400 <= exc.status_code < 500 and exc.status_code != 429
-    return False
-
-
 def run_training_attach(
     *,
     job_id: str,
@@ -146,8 +129,10 @@ def run_training_attach(
 ) -> int:
     """Run an attach session, optionally launching a child training command."""
     command = list(command or [])
-    path = Path(metrics_path) if metrics_path is not None else resolve_attach_metrics_path(
-        None, require_existing_source=not command
+    path = (
+        Path(metrics_path)
+        if metrics_path is not None
+        else resolve_attach_metrics_path(None, require_existing_source=not command)
     )
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -193,7 +178,9 @@ def run_training_attach(
     process_reaped = False
     try:
         if process is None:
-            sys.stdout.write(f"Watching {path} for Dagnam training metrics. Press Ctrl+C to stop.\n")
+            sys.stdout.write(
+                f"Watching {path} for Dagnam training metrics. Press Ctrl+C to stop.\n"
+            )
             run_upload_loop(
                 path=path,
                 job_id=job_id,

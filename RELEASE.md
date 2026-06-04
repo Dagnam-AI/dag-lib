@@ -71,7 +71,7 @@ python -m twine upload dist/*
 
 ## Post-release
 
-- Create and push a git tag matching the package version, for example `v0.1.0`.
+- Create and push a git tag matching the package version, for example `v0.5.0`.
 - Verify the PyPI project page renders the README correctly.
 - Verify `pip install dagnam` works in a fresh environment.
 - Start the next `CHANGELOG.md` section under `Unreleased`.

@@ -6,13 +6,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-import numpy as np
-import numpy.typing as npt
-import polars as pl
-
 from dagnam._types import JsonObject, NativeSplit, TensorflowDataset
 
 if TYPE_CHECKING:
+    import numpy as np
+    import numpy.typing as npt
+    import polars as pl
+
     from dagnam.data.loaders.flax import FlaxBatch
 
 

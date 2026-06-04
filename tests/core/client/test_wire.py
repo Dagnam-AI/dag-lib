@@ -23,7 +23,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import RequestsMocker
+    from tests.typing_helpers import JsonObject, RequestsMocker
 
 API = "https://api.test"
 
@@ -82,7 +82,9 @@ def test_path_identifiers_are_percent_encoded(client: DagnamClient, rmock: Reque
     )
 
 
-def test_checkpoint_download_streams_and_returns_checksum(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_checkpoint_download_streams_and_returns_checksum(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     body = b"weights-bytes"
     sha = hashlib.sha256(body).hexdigest()
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
@@ -105,7 +107,9 @@ def test_checkpoint_download_streams_and_returns_checksum(client: DagnamClient, 
     assert rmock.last_request.headers["Authorization"] == "Bearer k"
 
 
-def test_sse_uses_api_key_query_param_not_header(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_sse_uses_api_key_query_param_not_header(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     """Contract: SSE auth goes in ?api_key=..., NOT in a custom header."""
     url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
     rmock.get(url, text="")
@@ -128,7 +132,9 @@ def test_inference_404_maps_to_deploymenterror(client: DagnamClient, rmock: Requ
         client.predict("dep_404", {"x": 1})
 
 
-def test_checkpoint_401_maps_to_autherror(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_checkpoint_401_maps_to_autherror(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
     rmock.get(url, status_code=401, text="unauthorized")
 
@@ -136,7 +142,9 @@ def test_checkpoint_401_maps_to_autherror(client: DagnamClient, rmock: RequestsM
         client.download_checkpoint_stream("job_1", "ck_1", tmp_path / "x.pt")
 
 
-def test_checkpoint_404_maps_to_checkpoint_not_found(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_checkpoint_404_maps_to_checkpoint_not_found(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_bad/download"
     rmock.get(url, status_code=404, text="not found")
 
@@ -144,7 +152,9 @@ def test_checkpoint_404_maps_to_checkpoint_not_found(client: DagnamClient, rmock
         client.download_checkpoint_stream("job_1", "ck_bad", tmp_path / "x.pt")
 
 
-def test_checkpoint_redirect_is_rejected_not_written(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_checkpoint_redirect_is_rejected_not_written(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
     rmock.get(url, status_code=302, headers={"Location": "https://evil.test/ck.pt"})
     dest = tmp_path / "x.pt"
@@ -163,7 +173,9 @@ def test_sse_redirect_is_rejected(client: DagnamClient, rmock: RequestsMocker) -
         client.open_training_stream("job_1")
 
 
-def test_codegen_generate_posts_framework_and_version(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_codegen_generate_posts_framework_and_version(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/projects/p1/generate-code"
     rmock.post(url, json={"files": []})
 
@@ -175,7 +187,9 @@ def test_codegen_generate_posts_framework_and_version(client: DagnamClient, rmoc
     assert req.qs == {}
 
 
-def test_codegen_generate_async_sets_query_param(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_codegen_generate_async_sets_query_param(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/projects/p1/generate-code"
     rmock.post(url, json={"task_id": "t1", "status": "pending"})
 
@@ -186,7 +200,9 @@ def test_codegen_generate_async_sets_query_param(client: DagnamClient, rmock: Re
     assert rmock.last_request.json() == {"framework": "pytorch"}
 
 
-def test_codegen_preview_uses_project_preview_route(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_codegen_preview_uses_project_preview_route(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/projects/p1/code-preview"
     rmock.get(url, json={"files": []})
 
@@ -197,7 +213,9 @@ def test_codegen_preview_uses_project_preview_route(client: DagnamClient, rmock:
     assert rmock.last_request.qs["version_id"] == ["v4"]
 
 
-def test_codegen_validate_posts_to_project_route(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_codegen_validate_posts_to_project_route(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/projects/p1/validate"
     rmock.post(url, json={"is_valid": True})
 
@@ -205,14 +223,18 @@ def test_codegen_validate_posts_to_project_route(client: DagnamClient, rmock: Re
     assert rmock.last_request.qs["version_id"] == ["v1"]
 
 
-def test_codegen_status_uses_project_status_route(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_codegen_status_uses_project_status_route(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/projects/p1/code-status/t1"
     rmock.get(url, json={"status": "completed"})
 
     assert client.get_code_status("p1", "t1") == {"status": "completed"}
 
 
-def test_codegen_download_uses_project_download_route(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+def test_codegen_download_uses_project_download_route(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
     body = b"zip-bytes"
     url = f"{API}/api/v1/projects/p1/download-code"
     rmock.get(url, content=body)
@@ -234,7 +256,7 @@ def test_create_training_job_posts_payload(client: DagnamClient, rmock: Requests
     url = f"{API}/api/v1/training/jobs"
     rmock.post(url, status_code=201, json={"id": "j1", "status": "pending"})
 
-    payload = {"project_id": "p1", "framework": "pytorch", "config": {"epochs": 1}}
+    payload: JsonObject = {"project_id": "p1", "framework": "pytorch", "config": {"epochs": 1}}
     result = client.create_training_job(payload)
 
     assert result == {"id": "j1", "status": "pending"}
@@ -275,9 +297,7 @@ def test_list_training_jobs_passes_query(client: DagnamClient, rmock: RequestsMo
     url = f"{API}/api/v1/training/jobs"
     rmock.get(url, json={"items": [], "total": 0})
 
-    client.list_training_jobs(
-        page=2, limit=5, status_filter="running,completed", project_id="p1"
-    )
+    client.list_training_jobs(page=2, limit=5, status_filter="running,completed", project_id="p1")
     qs = rmock.last_request.qs
     assert qs["page"] == ["2"]
     assert qs["status_filter"] == ["running,completed"]
@@ -288,14 +308,10 @@ def test_cancel_training_job_posts(client: DagnamClient, rmock: RequestsMocker) 
     url = f"{API}/api/v1/training/jobs/j1/cancel"
     rmock.post(url, json={"message": "Training job cancelled successfully"})
 
-    assert client.cancel_training_job("j1") == {
-        "message": "Training job cancelled successfully"
-    }
+    assert client.cancel_training_job("j1") == {"message": "Training job cancelled successfully"}
 
 
-def test_cancel_terminal_job_maps_to_apierror(
-    client: DagnamClient, rmock: RequestsMocker
-) -> None:
+def test_cancel_terminal_job_maps_to_apierror(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/training/jobs/j1/cancel"
     rmock.post(url, status_code=400, json={"detail": "Cannot cancel job with status completed"})
 
@@ -312,9 +328,7 @@ def test_bulk_delete_training_jobs_posts_ids(client: DagnamClient, rmock: Reques
     assert rmock.last_request.json() == {"job_ids": ["j1", "j2"]}
 
 
-def test_training_job_path_is_percent_encoded(
-    client: DagnamClient, rmock: RequestsMocker
-) -> None:
+def test_training_job_path_is_percent_encoded(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/training/jobs/a%2Fb/cancel"
     rmock.post(url, json={"message": "ok"})
 
@@ -326,9 +340,7 @@ def test_training_logs_pass_query(client: DagnamClient, rmock: RequestsMocker) -
     url = f"{API}/api/v1/training/jobs/job-1/logs"
     rmock.get(url, json={"items": []})
 
-    assert client.get_training_logs("job-1", log_level="error", page=2, limit=5) == {
-        "items": []
-    }
+    assert client.get_training_logs("job-1", log_level="error", page=2, limit=5) == {"items": []}
     assert rmock.last_request.qs == {
         "log_level": ["error"],
         "page": ["2"],
@@ -381,9 +393,7 @@ def test_get_api_key_usage(client: DagnamClient, rmock: RequestsMocker) -> None:
     assert client.get_api_key_usage("key_1") == {"usage_count": 7}
 
 
-def test_entitlements_401_maps_to_autherror(
-    client: DagnamClient, rmock: RequestsMocker
-) -> None:
+def test_entitlements_401_maps_to_autherror(client: DagnamClient, rmock: RequestsMocker) -> None:
     url = f"{API}/api/v1/users/me/entitlements"
     rmock.get(url, status_code=401, text="unauthorized")
 

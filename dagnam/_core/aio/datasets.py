@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dagnam._types import JsonObject, QueryParams
 from dagnam._core.aio.base import BaseAsyncDagnamClient, parse_content_disposition_filename
 from dagnam._core.client.common import (
     quote_path_segment,
@@ -14,6 +13,7 @@ from dagnam._core.client.common import (
     response_json_array,
     response_json_object,
 )
+from dagnam._types import JsonObject, QueryParams
 
 
 class AsyncDatasetsMixin(BaseAsyncDagnamClient):

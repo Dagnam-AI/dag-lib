@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import BinaryIO, Protocol, TypeAlias, TypeGuard, cast, runtime_checkable
+from typing import BinaryIO, Protocol, TypeGuard, cast, runtime_checkable
 
-JsonScalar: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
-JsonObject: TypeAlias = dict[str, JsonValue]
-JsonArray: TypeAlias = list[JsonValue]
-JsonMapping: TypeAlias = Mapping[str, JsonValue]
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonObject = dict[str, JsonValue]
+type JsonArray = list[JsonValue]
+type JsonMapping = Mapping[str, JsonValue]
 
-QueryScalar: TypeAlias = str | int | float | bool | None
-QueryValue: TypeAlias = QueryScalar | Sequence[QueryScalar]
-QueryParams: TypeAlias = Mapping[str, QueryValue]
-FormData: TypeAlias = Mapping[str, str]
-UploadFile: TypeAlias = tuple[str, BinaryIO] | tuple[str, BinaryIO, str]
-UploadFiles: TypeAlias = Mapping[str, UploadFile]
+type QueryScalar = str | int | float | bool | None
+type QueryValue = QueryScalar | Sequence[QueryScalar]
+type QueryParams = Mapping[str, QueryValue]
+type FormData = Mapping[str, str]
+type UploadFile = tuple[str, BinaryIO] | tuple[str, BinaryIO, str]
+type UploadFiles = Mapping[str, UploadFile]
 
 
 class ResponseLike(Protocol):
@@ -39,6 +39,17 @@ class JsonResponseLike(ResponseLike, Protocol):
     """Response object that can decode a JSON body."""
 
     def json(self) -> object: ...
+
+
+class StatusResponseLike(Protocol):
+    """Minimal response surface exposing only an HTTP status code.
+
+    Used by success/failure checks that need nothing beyond the status code
+    (and an optional ``ok`` flag accessed defensively via ``getattr``).
+    """
+
+    @property
+    def status_code(self) -> object: ...
 
 
 class IndexedDataset(Protocol):
@@ -110,7 +121,7 @@ class TensorflowModule(Protocol):
     data: TensorflowDataNamespace
 
 
-NativeSplit: TypeAlias = IndexedDataset | tuple[Sequence[object], Sequence[object]]
+type NativeSplit = IndexedDataset | tuple[Sequence[object], Sequence[object]]
 
 
 def _type_name(value: object) -> str:
@@ -122,10 +133,10 @@ def is_json_value(value: object) -> TypeGuard[JsonValue]:
     if value is None or isinstance(value, (str, int, float, bool)):
         return True
     if isinstance(value, list):
-        items = cast(list[object], value)
+        items = cast("list[object]", value)
         return all(is_json_value(item) for item in items)
     if isinstance(value, dict):
-        items = cast(dict[object, object], value)
+        items = cast("dict[object, object]", value)
         return all(isinstance(key, str) and is_json_value(item) for key, item in items.items())
     return False
 
@@ -140,16 +151,16 @@ def ensure_json_value(value: object) -> JsonValue:
 def ensure_json_object(value: object) -> JsonObject:
     """Return a JSON object or raise when a response body is not an object."""
     if isinstance(value, dict):
-        items = cast(dict[object, object], value)
+        items = cast("dict[object, object]", value)
         if all(isinstance(key, str) and is_json_value(item) for key, item in items.items()):
-            return cast(JsonObject, value)
-    raise TypeError(f"Expected JSON object, got {_type_name(cast(object, value))}")
+            return cast("JsonObject", value)
+    raise TypeError(f"Expected JSON object, got {_type_name(cast('object', value))}")
 
 
 def ensure_json_array(value: object) -> JsonArray:
     """Return a JSON array or raise when a response body is not an array."""
     if isinstance(value, list):
-        items = cast(list[object], value)
+        items = cast("list[object]", value)
         if all(is_json_value(item) for item in items):
-            return cast(JsonArray, value)
-    raise TypeError(f"Expected JSON array, got {_type_name(cast(object, value))}")
+            return cast("JsonArray", value)
+    raise TypeError(f"Expected JSON array, got {_type_name(cast('object', value))}")

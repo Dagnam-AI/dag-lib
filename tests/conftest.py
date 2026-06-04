@@ -1,8 +1,7 @@
-from pathlib import Path
-
 """Shared test fixtures for the dagnam client library."""
 
 import json
+from pathlib import Path
 
 import pytest
 

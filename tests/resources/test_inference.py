@@ -1,12 +1,12 @@
 """Unit tests for dagnam.inference."""
 
 from __future__ import annotations
-from tests.typing_helpers import JsonValue
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from tests.typing_helpers import JsonValue
 
 from dagnam import deployment_health, inference, inference_batch
 from dagnam._core.client import DagnamClient

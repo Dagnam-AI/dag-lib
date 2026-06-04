@@ -41,19 +41,21 @@ class TensorflowDatasetsModule(Protocol):
 
 
 def _load_tfds() -> TensorflowDatasetsModule:
-    return cast(TensorflowDatasetsModule, import_module("tensorflow_datasets"))
+    return cast("TensorflowDatasetsModule", import_module("tensorflow_datasets"))
 
 
 def _load_supervised_split(tfds: Any, name: str, split: str, cache: Path) -> TensorflowDataset:
     try:
         return cast(
-            TensorflowDataset,
+            "TensorflowDataset",
             tfds.load(name, split=split, as_supervised=True, data_dir=str(cache)),
         )
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
             raise
-        return cast(TensorflowDataset, tfds.load(name, split, True, cache))
+        # Positional fallback for older tensorflow_datasets whose `load`
+        # signature predates keyword-only args; `True` is `as_supervised`.
+        return cast("TensorflowDataset", tfds.load(name, split, True, cache))  # noqa: FBT003
 
 
 def resolve_tfds_name(meta: JsonObject) -> str | None:

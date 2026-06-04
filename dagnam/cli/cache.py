@@ -29,7 +29,12 @@ def cmd_cache_list(args: argparse.Namespace) -> None:
     from dagnam.data import cache as _cache
 
     if not _cache.DEFAULT_CACHE_DIR.exists():
-        emit_result([], output=args.output, json_stdout=args.json or args.verbose, render_human=_render_cache)
+        emit_result(
+            [],
+            output=args.output,
+            json_stdout=args.json or args.verbose,
+            render_human=_render_cache,
+        )
         return
 
     entries: list[dict[str, object]] = []
@@ -46,7 +51,9 @@ def cmd_cache_list(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
         size = dir_size(child)
-        entries.append({"id": dataset_id, "name": name, "size": size, "display_size": human_size(size)})
+        entries.append(
+            {"id": dataset_id, "name": name, "size": size, "display_size": human_size(size)}
+        )
 
     emit_result(
         entries,

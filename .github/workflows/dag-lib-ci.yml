@@ -27,6 +27,8 @@ jobs:
         run: uv run ruff format --check
       - name: Type check
         run: uv run --with "pyright>=1.1.380" pyright
+      - name: Import layering contract (cli -> resources -> data -> _core)
+        run: uv run lint-imports
       - name: Build
         run: uv build
       - name: Check distribution metadata

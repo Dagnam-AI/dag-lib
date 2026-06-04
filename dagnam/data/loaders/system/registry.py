@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from dagnam._types import JsonObject
 from dagnam._core.exceptions import DatasetNotFoundError
+from dagnam._types import JsonObject
 from dagnam.data.loaders.system.torchvision import (
     load_cifar10,
     load_cifar100,

@@ -27,6 +27,8 @@ JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
 
 
 class TfdsModule(Protocol):
+    """tensorflow_datasets surface used by the flax system loader."""
+
     def load(self, name: str, *, split: str, as_supervised: bool, data_dir: str) -> object: ...
 
     def as_numpy(self, dataset: object) -> Iterable[TfdsSample]: ...
@@ -38,7 +40,9 @@ def _load_supervised_split(tfds: TfdsModule, name: str, split: str, cache: Path)
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
             raise
-        return tfds.load(name, split, True, cache)  # type: ignore[call-arg]
+        # Positional fallback for older tensorflow_datasets whose `load`
+        # signature predates keyword-only args; `True` is `as_supervised`.
+        return tfds.load(name, split, True, cache)  # type: ignore[call-arg]  # noqa: FBT003
 
 
 def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
@@ -59,7 +63,8 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
 
     try:
         import jax.numpy as jnp
-        tfds = cast(TfdsModule, import_module("tensorflow_datasets"))
+
+        tfds = cast("TfdsModule", import_module("tensorflow_datasets"))
     except ImportError:
         return resolve_system_dataset(meta)
 
@@ -68,9 +73,9 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
     cache = SYSTEM_CACHE_ROOT / tfds_name
     cache.mkdir(parents=True, exist_ok=True)
 
-    as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
+    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
 
-    def _encode_feature_batch(xs: list[FeatureSample]) -> "jax.Array":
+    def _encode_feature_batch(xs: list[FeatureSample]) -> jax.Array:
         """Convert a list of raw tfds samples into a JAX array.
 
         Images (uint8 arrays with 2+ spatial dims) are cast to float32 and
@@ -80,7 +85,7 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
         """
         first = xs[0]
         if isinstance(first, np.ndarray) and first.dtype == np.uint8 and first.ndim >= 2:
-            image_batch = np.stack([cast(npt.ArrayLike, item) for item in xs]).astype(np.float32)
+            image_batch = np.stack([cast("npt.ArrayLike", item) for item in xs]).astype(np.float32)
             return as_jax_array(image_batch / 255.0)
         if isinstance(first, (bytes, bytearray, str)):
             # Emit raw byte sequences padded to the longest sample.
@@ -99,18 +104,20 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
                 padded[i, : len(a)] = a
             return as_jax_array(padded)
         if isinstance(first, np.ndarray):
-            numeric_batch = np.stack([cast(npt.ArrayLike, item) for item in xs]).astype(np.float32)
+            numeric_batch = np.stack([cast("npt.ArrayLike", item) for item in xs]).astype(
+                np.float32
+            )
             return as_jax_array(numeric_batch)
         # Fallback: let numpy/jax coerce.
         return as_jax_array(np.asarray(xs))
 
-    def _load_split(split: str, batch_size: int = 128) -> list["FlaxBatch"]:
+    def _load_split(split: str, batch_size: int = 128) -> list[FlaxBatch]:
         ds = _load_supervised_split(tfds, tfds_name, split, cache)
         batches: list[FlaxBatch] = []
         xs: list[FeatureSample] = []
         ys: list[int] = []
         for x, lbl in tfds.as_numpy(ds):
-            xs.append(cast(FeatureSample, x))
+            xs.append(cast("FeatureSample", x))
             if not isinstance(lbl, SupportsInt):
                 raise TypeError("Expected integer-compatible tfds labels")
             ys.append(int(lbl))

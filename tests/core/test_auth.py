@@ -1,13 +1,12 @@
 """Coverage for ``dagnam._core.auth`` and ``dagnam._core.config``."""
 
 from __future__ import annotations
-from pathlib import Path
-from tests.typing_helpers import PytestMonkeyPatch
-
 
 import json
+from pathlib import Path
 
 import pytest
+from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam._core import auth as auth_mod, config as config_mod
 from dagnam._core.exceptions import AuthError
@@ -87,7 +86,9 @@ def test_load_config_returns_empty_on_malformed_json(isolated_config: Path) -> N
     assert config_mod.load_config() == {}
 
 
-def test_load_config_returns_empty_on_oserror(isolated_config: Path, monkeypatch: PytestMonkeyPatch) -> None:
+def test_load_config_returns_empty_on_oserror(
+    isolated_config: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
     def _raise(*_args: object, **_kwargs: object) -> None:
         raise OSError("permission denied")
 

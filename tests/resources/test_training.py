@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,11 +22,8 @@ from dagnam.resources.training import (
     training_metrics_summary,
 )
 
-if TYPE_CHECKING:
-    from tests.typing_helpers import JsonObject
 
-
-def _sse(event: str, data: str, id: str | None = None, retry: str | None = None) -> None:
+def _sse(event: str, data: str, id: str | None = None, retry: str | None = None) -> SimpleNamespace:
     return SimpleNamespace(event=event, data=data, id=id, retry=retry)
 
 
@@ -48,7 +44,7 @@ class TestParseEvent:
 
 
 class _FakeSSE:
-    def __init__(self, events: list[JsonObject]) -> None:
+    def __init__(self, events: list[SimpleNamespace]) -> None:
         self._events = events
 
     def events(self):

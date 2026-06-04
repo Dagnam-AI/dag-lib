@@ -60,13 +60,14 @@ def render_table(columns: Sequence[Column], rows: Sequence[Mapping[str, object]]
     return "\n".join(lines)
 
 
-def pagination_footer(result: Mapping[str, object]) -> str:
+def pagination_footer(result: object) -> str:
     """Render page context without exposing backend empty-page quirks."""
-    items = result.get("items")
+    data: Mapping[str, object] = result if isinstance(result, dict) else {}
+    items = data.get("items")
     shown = len(items) if isinstance(items, list) else 0
-    page = result.get("page")
-    pages = result.get("pages")
-    total = result.get("total")
+    page = data.get("page")
+    pages = data.get("pages")
+    total = data.get("total")
     page = page if isinstance(page, int) and page > 0 else 1
     pages = pages if isinstance(pages, int) and pages > 0 else 1
     total = total if isinstance(total, int) and total >= 0 else shown

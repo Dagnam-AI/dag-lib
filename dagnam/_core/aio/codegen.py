@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import quote_path_segment, raise_for_codegen, response_json_value
+from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
 
 
 class AsyncCodegenMixin(BaseAsyncDagnamClient):
@@ -46,12 +47,14 @@ class AsyncCodegenMixin(BaseAsyncDagnamClient):
             if options is not None:
                 payload["options"] = options
         params: QueryParams | None = {"async_mode": "true"} if async_mode else None
-        return ensure_json_object(await self._codegen_req(
-            "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
-            json_body=payload,
-            params=params,
-        ))
+        return ensure_json_object(
+            await self._codegen_req(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/generate-code",
+                json_body=payload,
+                params=params,
+            )
+        )
 
     async def preview_code(
         self, project_id: str, framework: str, version_id: str | None = None
@@ -70,11 +73,15 @@ class AsyncCodegenMixin(BaseAsyncDagnamClient):
 
     async def validate_code(self, project_id: str, version_id: str | None = None) -> JsonObject:
         params: QueryParams | None = {"version_id": version_id} if version_id else None
-        return ensure_json_object(await self._codegen_req(
-            "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
-        ))
+        return ensure_json_object(
+            await self._codegen_req(
+                "POST", f"/api/v1/projects/{quote_path_segment(project_id)}/validate", params=params
+            )
+        )
 
-    async def validate_architecture(self, project_id: str, version_id: str | None = None) -> JsonObject:
+    async def validate_architecture(
+        self, project_id: str, version_id: str | None = None
+    ) -> JsonObject:
         return await self.validate_code(project_id, version_id=version_id)
 
     async def download_code(
@@ -94,7 +101,7 @@ class AsyncCodegenMixin(BaseAsyncDagnamClient):
         if dest_path:
             dest = Path(dest_path)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(resp.content)
+            await asyncio.to_thread(dest.write_bytes, resp.content)
             return dest
         return resp.content
 
@@ -113,10 +120,12 @@ class AsyncCodegenMixin(BaseAsyncDagnamClient):
         )
 
     async def get_code_status(self, project_id: str, task_id: str) -> JsonObject:
-        return ensure_json_object(await self._codegen_req(
-            "GET",
-            (
-                f"/api/v1/projects/{quote_path_segment(project_id)}"
-                f"/code-status/{quote_path_segment(task_id)}"
-            ),
-        ))
+        return ensure_json_object(
+            await self._codegen_req(
+                "GET",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/code-status/{quote_path_segment(task_id)}"
+                ),
+            )
+        )

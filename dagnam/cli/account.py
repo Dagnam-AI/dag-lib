@@ -164,7 +164,7 @@ def _usage_value(entry: dict[str, Any], key: str) -> Any:
 
 def _render_usage(snapshot: object) -> str:
     snapshot = snapshot if isinstance(snapshot, dict) else {}
-    plan = snapshot.get("plan") if isinstance(snapshot, dict) else None
+    plan = snapshot.get("plan")
     plan = plan if isinstance(plan, dict) else {}
     plan_name = plan.get("display_name") or plan.get("code") or "-"
     lines = [f"Plan: {plan_name}"]
@@ -173,7 +173,7 @@ def _render_usage(snapshot: object) -> str:
     if snapshot.get("pending_plan"):
         lines.append(f"Pending plan: {snapshot['pending_plan']}")
 
-    limits = snapshot.get("limits") if isinstance(snapshot, dict) else None
+    limits = snapshot.get("limits")
     limits = limits if isinstance(limits, list) else []
     if not limits:
         return "\n".join([*lines, "No limit information returned."])

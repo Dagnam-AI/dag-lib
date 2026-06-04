@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import polars as pl
-from typing_extensions import override
+from tests.typing_helpers import PytestMonkeyPatch
 from torch.utils.data import DataLoader
+from typing_extensions import override
 
 from dagnam._types import JsonObject, JsonValue
 from dagnam.data.dataset import DagnamDataset
@@ -20,7 +21,6 @@ from dagnam.data.loaders.csv import (
     detect_label_column,
     encode_labels,
 )
-from tests.typing_helpers import PytestMonkeyPatch
 
 
 class TensorLike(CsvTorchTensor, Protocol):
@@ -53,7 +53,8 @@ class TorchTestModule(Protocol):
 
 
 def _torch() -> TorchTestModule:
-    return cast(TorchTestModule, import_module("torch"))
+    return cast("TorchTestModule", import_module("torch"))
+
 
 # ------------------------------------------------------------------
 # Helpers
@@ -165,14 +166,14 @@ class TestEncodeLabels:
     def test_with_class_names(self) -> None:
         torch = _torch()
         series = pl.Series(["dog", "cat", "dog"])
-        result = cast(TensorLike, encode_labels(series, ["cat", "dog"]))
+        result = cast("TensorLike", encode_labels(series, ["cat", "dog"]))
         assert result.dtype == torch.long
         assert result.tolist() == [1, 0, 1]
 
     def test_without_class_names(self) -> None:
         torch = _torch()
         series = pl.Series(["a", "b", "a", "c"])
-        result = cast(TensorLike, encode_labels(series, None))
+        result = cast("TensorLike", encode_labels(series, None))
         assert result.dtype == torch.long
         # factorize assigns codes in order of appearance
         assert result[0] == result[2]  # both "a"
@@ -230,7 +231,9 @@ class TestCreatePytorchLoader:
         )
         assert loader.drop_last is False
 
-    def test_pin_memory_disabled_without_accelerator(self, monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    def test_pin_memory_disabled_without_accelerator(
+        self, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+    ) -> None:
         torch = _torch()
 
         def no_accelerator() -> bool:
@@ -276,8 +279,8 @@ class TestCreatePytorchLoader:
         )
         torch = _torch()
         for batch1, batch2 in zip(loader1, loader2, strict=False):
-            f1, l1 = cast(tuple[TensorLike, TensorLike], batch1)
-            f2, l2 = cast(tuple[TensorLike, TensorLike], batch2)
+            f1, l1 = cast("tuple[TensorLike, TensorLike]", batch1)
+            f2, l2 = cast("tuple[TensorLike, TensorLike]", batch2)
             assert torch.equal(f1, f2)
             assert torch.equal(l1, l2)
 
@@ -320,9 +323,9 @@ class TestCreatePytorchLoader:
             seed=42,
         )
         # drop_last=True for train, so use dataset length directly
-        assert len(cast(Sized, train_loader.dataset)) == n_train
-        assert len(cast(Sized, val_loader.dataset)) == n_val
-        assert len(cast(Sized, test_loader.dataset)) == n_test
+        assert len(cast("Sized", train_loader.dataset)) == n_train
+        assert len(cast("Sized", val_loader.dataset)) == n_val
+        assert len(cast("Sized", test_loader.dataset)) == n_test
 
     def test_factorize_fallback(self, tmp_path: Path) -> None:
         """Labels encoded via first-seen-order factorize when class_names is None."""
@@ -338,7 +341,7 @@ class TestCreatePytorchLoader:
             seed=42,
         )
         torch = _torch()
-        _batch_feats, batch_labels = cast(tuple[TensorLike, TensorLike], next(iter(loader)))
+        _batch_feats, batch_labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
         assert batch_labels.dtype == torch.long
 
     def test_schema_label_detection(self, tmp_path: Path) -> None:
@@ -361,7 +364,7 @@ class TestCreatePytorchLoader:
             seed=42,
         )
         # Should have 2 feature columns (feat1, feat2)
-        batch_feats, _labels = cast(tuple[TensorLike, TensorLike], next(iter(loader)))
+        batch_feats, _labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
         assert batch_feats.shape[1] == 2
 
     def test_feature_tensor_dtype(self, tmp_path: Path) -> None:
@@ -377,5 +380,5 @@ class TestCreatePytorchLoader:
             seed=42,
         )
         torch = _torch()
-        batch_feats, _labels = cast(tuple[TensorLike, TensorLike], next(iter(loader)))
+        batch_feats, _labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
         assert batch_feats.dtype == torch.float32

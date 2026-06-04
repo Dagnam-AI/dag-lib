@@ -8,12 +8,12 @@ server-side ingestion completes.
 
 from __future__ import annotations
 
-from dagnam._types import JsonObject
 from typing import Callable, Optional
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
+from dagnam._types import JsonObject
 
 _SUCCESS_STATES = frozenset({"completed", "ready"})
 _FAILURE_STATES = frozenset({"failed"})

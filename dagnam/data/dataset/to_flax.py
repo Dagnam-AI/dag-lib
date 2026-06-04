@@ -34,11 +34,13 @@ class FlaxDatasetMixin(DatasetMixinBase):
         seed: int,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
-    ) -> list["FlaxBatch"]:
+    ) -> list[FlaxBatch]:
         """Convert a torchvision-style native dataset into a list of FlaxBatch."""
         import jax.numpy as jnp
+
         from dagnam.data.loaders.flax import FlaxBatch
-        as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
+
+        as_jax_array = cast("JaxArrayFactory", jnp.asarray)
 
         native_train = self._native_train
         native_test = self._native_test
@@ -53,17 +55,17 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 x_test, y_test = (), ()
             x_train_array = np.asarray(x_train, dtype=object)
             if x_train_array.dtype == object:
-                x_train = self._pad_sequences(cast(Sequence[Sequence[int]], x_train))
-                x_test = self._pad_sequences(cast(Sequence[Sequence[int]], x_test))
+                x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
+                x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             if split == "test":
-                x = cast(npt.NDArray[np.object_], np.asarray(x_test))
+                x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
                 y = np.asarray(y_test).astype(np.int64)
             else:
                 n = len(x_train)
                 n_val = int(n * val_ratio)
                 if split == "val":
                     x = cast(
-                        npt.NDArray[np.object_],
+                        "npt.NDArray[np.object_]",
                         np.asarray(x_train[-n_val:]) if n_val > 0 else np.asarray([]),
                     )
                     y = (
@@ -73,30 +75,30 @@ class FlaxDatasetMixin(DatasetMixinBase):
                     )
                 else:
                     x = cast(
-                        npt.NDArray[np.object_],
+                        "npt.NDArray[np.object_]",
                         np.asarray(x_train[:-n_val] if n_val > 0 else x_train),
                     )
                     y = np.asarray(y_train[:-n_val] if n_val > 0 else y_train).astype(np.int64)
         else:
             source = native_test if (split == "test" and native_test is not None) else native_train
-            source_dataset = cast(IndexedDataset, source)
+            source_dataset = cast("IndexedDataset", source)
             images: list[npt.ArrayLike] = []
             labels: list[int] = []
             for i in range(len(source_dataset)):
                 sample = source_dataset[i]
                 if not isinstance(sample, tuple):
                     raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                sample = cast(tuple[object, ...], sample)
+                sample = cast("tuple[object, ...]", sample)
                 if len(sample) < 2:
                     raise TypeError("Expected native dataset samples to be (feature, label) pairs")
                 img, lbl = sample[0], sample[1]
                 if isinstance(img, SupportsNumpy):
                     img = img.numpy()
-                images.append(cast(npt.ArrayLike, img))
+                images.append(cast("npt.ArrayLike", img))
                 if not isinstance(lbl, SupportsInt):
                     raise TypeError("Expected native dataset labels to be integer-compatible")
                 labels.append(int(lbl))
-            x = cast(npt.NDArray[np.object_], np.stack(images))
+            x = cast("npt.NDArray[np.object_]", np.stack(images))
             y = np.array(labels, dtype=np.int64)
             if split in ("train", "val") and native_test is not None:
                 n = len(x)
@@ -119,8 +121,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
             batch_y = y[start : start + batch_size]
             if transform_fn is not None:
                 batch_x = cast(
-                    npt.NDArray[np.object_],
-                    np.stack([transform_fn(cast(npt.ArrayLike, s)) for s in batch_x]),
+                    "npt.NDArray[np.object_]",
+                    np.stack([transform_fn(cast("npt.ArrayLike", s)) for s in batch_x]),
                 )
             feat = as_jax_array(batch_x)
             lbl = as_jax_array(batch_y)
@@ -140,7 +142,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         seed: int = 42,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
-    ) -> list["FlaxBatch"]:
+    ) -> list[FlaxBatch]:
         """Route to a FLAX-native dataset when ``_native_train_flax`` is set.
 
         The native FLAX path stores ``list[FlaxBatch]`` at a native batch size
@@ -149,8 +151,10 @@ class FlaxDatasetMixin(DatasetMixinBase):
         optional transforms so val/test stay deterministic.
         """
         import jax.numpy as jnp
+
         from dagnam.data.loaders.flax import FlaxBatch
-        as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
+
+        as_jax_array = cast("JaxArrayFactory", jnp.asarray)
 
         native_train_flax = self.native_train_flax
         native_test_flax = self.native_test_flax
@@ -199,8 +203,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
             chunk_y = all_labels[start : start + batch_size]
             if transform_fn is not None:
                 chunk_x = cast(
-                    npt.NDArray[np.object_],
-                    np.stack([transform_fn(cast(npt.ArrayLike, s)) for s in chunk_x]),
+                    "npt.NDArray[np.object_]",
+                    np.stack([transform_fn(cast("npt.ArrayLike", s)) for s in chunk_x]),
                 )
             feat = as_jax_array(chunk_x)
             lbl = as_jax_array(chunk_y)
@@ -220,7 +224,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
         seed: int = 42,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
-    ) -> list["FlaxBatch"]:
+    ) -> list[FlaxBatch]:
+        """Build the split as a list of native Flax/JAX batches (public wrapper)."""
         return self._native_flax_dataset(
             split=split,
             batch_size=batch_size,
@@ -241,8 +246,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
             return False
         try:
             from dagnam.data.loaders.system import (
-                resolve_tfds_name,
                 resolve_system_dataset_flax,
+                resolve_tfds_name,
             )
         except ImportError:
             return False
@@ -268,7 +273,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         column_roles: dict[str, str] | None = None,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
-    ) -> list["FlaxBatch"]:
+    ) -> list[FlaxBatch]:
         """Create a list of Flax batches for the specified split.
 
         Supports tabular (CSV/TSV/JSON/JSONL), image-folder, and audio-folder
@@ -306,6 +311,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
 
         try:
             import jax
+
             del jax
         except ImportError:
             raise ImportError(
@@ -365,7 +371,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
-                transform_fn=cast(ImageTransform | None, transform_fn),
+                transform_fn=cast("ImageTransform | None", transform_fn),
                 batch_transform_fn=batch_transform_fn,
             )
 
@@ -408,6 +414,6 @@ class FlaxDatasetMixin(DatasetMixinBase):
             test_ratio=test_ratio,
             seed=seed,
             column_roles=column_roles,
-            transform_fn=cast(FeatureTransform | None, transform_fn),
-            batch_transform_fn=cast(TabularBatchTransform | None, batch_transform_fn),
+            transform_fn=cast("FeatureTransform | None", transform_fn),
+            batch_transform_fn=cast("TabularBatchTransform | None", batch_transform_fn),
         )

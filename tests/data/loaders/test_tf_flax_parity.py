@@ -14,16 +14,15 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Protocol, SupportsInt, TYPE_CHECKING, cast
-
+from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytest
+from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam._types import JsonObject, TensorflowDataset
 from dagnam.data.dataset import DagnamDataset
-from tests.typing_helpers import PytestMonkeyPatch
 
 if TYPE_CHECKING:
     import jax
@@ -62,7 +61,7 @@ def _dataset_with_flax(tmp_path: Path, native_train_flax: list[FlaxBatch]) -> Da
 
 
 def _tf_label_values(dataset: Iterable[object]) -> list[int]:
-    batches = cast(Iterable[TensorBatch], dataset)
+    batches = cast("Iterable[TensorBatch]", dataset)
     return [int(value.numpy()) for batch in batches for value in batch[1]]
 
 
@@ -80,7 +79,7 @@ def test_native_tf_dataset_val_split_is_distinct(tmp_path: Path) -> None:
     ys = np.arange(n, dtype=np.int64)
     native_train = tf.data.Dataset.from_tensor_slices((xs, ys))
 
-    ds = _dataset_with_tf(tmp_path, cast(TensorflowDataset, native_train))
+    ds = _dataset_with_tf(tmp_path, cast("TensorflowDataset", native_train))
     train = ds.native_tensorflow_dataset(
         split="train",
         batch_size=5,
@@ -96,8 +95,8 @@ def test_native_tf_dataset_val_split_is_distinct(tmp_path: Path) -> None:
         seed=0,
     )
 
-    train_samples = _tf_label_values(cast(Iterable[object], train))
-    val_samples = _tf_label_values(cast(Iterable[object], val))
+    train_samples = _tf_label_values(cast("Iterable[object]", train))
+    val_samples = _tf_label_values(cast("Iterable[object]", val))
 
     # Distinct partitions, no overlap, correct sizes.
     assert len(val_samples) == 10
@@ -112,16 +111,22 @@ def test_native_tf_dataset_train_honors_shuffle_seed(tmp_path: Path) -> None:
     ys = np.arange(40, dtype=np.int64)
     native_train = tf.data.Dataset.from_tensor_slices((xs, ys))
 
-    ds = _dataset_with_tf(tmp_path, cast(TensorflowDataset, native_train))
+    ds = _dataset_with_tf(tmp_path, cast("TensorflowDataset", native_train))
     a = _tf_label_values(
-        cast(Iterable[object], ds.native_tensorflow_dataset(
-            split="train", batch_size=10, shuffle=True, val_ratio=0.0, seed=123
-        ))
+        cast(
+            "Iterable[object]",
+            ds.native_tensorflow_dataset(
+                split="train", batch_size=10, shuffle=True, val_ratio=0.0, seed=123
+            ),
+        )
     )
     b = _tf_label_values(
-        cast(Iterable[object], ds.native_tensorflow_dataset(
-            split="train", batch_size=10, shuffle=True, val_ratio=0.0, seed=123
-        ))
+        cast(
+            "Iterable[object]",
+            ds.native_tensorflow_dataset(
+                split="train", batch_size=10, shuffle=True, val_ratio=0.0, seed=123
+            ),
+        )
     )
     assert a == b  # deterministic under same seed
 
@@ -140,7 +145,7 @@ def test_native_flax_dataset_reshapes_batches_and_splits_val(tmp_path: Path) -> 
     # Prebatched as 2 batches of 50 samples; caller wants batch_size=10 + val.
     xs = np.arange(100, dtype=np.float32).reshape(100, 1)
     ys = np.arange(100, dtype=np.int64)
-    jnp_mod = cast(JaxNumpyModule, jnp)
+    jnp_mod = cast("JaxNumpyModule", jnp)
     native = [
         FlaxBatch(features=jnp_mod.asarray(xs[:50]), labels=jnp_mod.asarray(ys[:50])),
         FlaxBatch(features=jnp_mod.asarray(xs[50:]), labels=jnp_mod.asarray(ys[50:])),
@@ -177,7 +182,9 @@ def test_native_flax_dataset_reshapes_batches_and_splits_val(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_system_dataset_flax_encodes_text_without_image_scaling(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+def test_resolve_system_dataset_flax_encodes_text_without_image_scaling(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
     """tfds IMDB yields bytes/text samples; the loader must not divide by 255."""
     pytest.importorskip("jax")
 
@@ -221,6 +228,6 @@ def test_resolve_system_dataset_flax_encodes_text_without_image_scaling(monkeypa
 
     # Features must be an integer array (byte codepoints padded), NOT
     # float-divided-by-255. Max value should exceed 1.0 for ASCII.
-    feats = cast(npt.NDArray[np.int64], np.asarray(batch.features))
+    feats = cast("npt.NDArray[np.int64]", np.asarray(batch.features))
     assert feats.dtype.kind in ("i", "u"), f"expected integer dtype, got {feats.dtype}"
     assert feats.max() > 1, "text loader must not apply image normalization"

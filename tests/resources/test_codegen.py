@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,12 +12,11 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import CodegenError, CodegenValidationError
 from dagnam._core.lro import LongRunningOperation
 
-if TYPE_CHECKING:
-    from tests.typing_helpers import JsonObject
 
-
-def _client(**overrides: JsonObject) -> MagicMock:
-    return MagicMock(spec=DagnamClient, **overrides)
+def _client(**overrides: object) -> MagicMock:
+    client = MagicMock(spec=DagnamClient)
+    client.configure_mock(**overrides)
+    return client
 
 
 class TestGenerate:
@@ -28,6 +26,7 @@ class TestGenerate:
         c.generate_code.assert_called_once_with(
             "p1", framework="pytorch", version_id=None, async_mode=False
         )
+        assert isinstance(out, dict)
         assert out["task_id"] == "t1"
 
     def test_async_returns_lro(self) -> None:
@@ -37,7 +36,9 @@ class TestGenerate:
             "p1", framework="pytorch", version_id=None, async_mode=True
         )
         assert isinstance(op, LongRunningOperation)
-        assert op.initial()["task_id"] == "t1"
+        initial = op.initial()
+        assert initial is not None
+        assert initial["task_id"] == "t1"
 
     def test_passes_framework_and_version(self) -> None:
         c = _client(generate_code=MagicMock(return_value={"task_id": "t1"}))
@@ -52,6 +53,7 @@ class TestPreview:
         c = _client(preview_code=MagicMock(return_value={"code": "import torch"}))
         out = codegen.preview("p1", framework="pytorch", client=c)
         c.preview_code.assert_called_once_with("p1", framework="pytorch", version_id=None)
+        assert isinstance(out, dict)
         assert out["code"] == "import torch"
 
 

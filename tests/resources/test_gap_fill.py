@@ -59,6 +59,7 @@ def _raw_event(
 ) -> RawSSEEvent:
     return cast("RawSSEEvent", SimpleNamespace(event=event, data=data, id=event_id, retry=retry))
 
+
 # ---------------------------------------------------------------- deployments
 
 
@@ -252,7 +253,9 @@ class _FakeSSE:
             yield e
 
 
-def _setup_fake_sseclient(monkeypatch: PytestMonkeyPatch, scripts: Sequence[Sequence[ScriptEvent]]) -> None:
+def _setup_fake_sseclient(
+    monkeypatch: PytestMonkeyPatch, scripts: Sequence[Sequence[ScriptEvent]]
+) -> None:
     import sys
 
     iterator = iter(scripts)
@@ -356,7 +359,9 @@ def testpick_latest_raises_on_empty() -> None:
         ck_module.pick_latest([])
 
 
-def test_download_checkpoint_checksum_mismatch_unlinks(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+def test_download_checkpoint_checksum_mismatch_unlinks(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 
@@ -372,7 +377,9 @@ def test_download_checkpoint_checksum_mismatch_unlinks(tmp_path: Path, monkeypat
         ck_module.download_checkpoint("job1", "ck1", client=client, cache_dir=cache)
 
 
-def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 
@@ -398,7 +405,9 @@ def test_download_checkpoint_checksum_mismatch_swallows_unlink_failure(tmp_path:
         monkeypatch.setattr(Path, "unlink", original_unlink)
 
 
-def test_download_checkpoint_eviction_failure_is_logged(tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: LogCapture) -> None:
+def test_download_checkpoint_eviction_failure_is_logged(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: LogCapture
+) -> None:
     cache = tmp_path / "ck"
     client = MagicMock(spec=DagnamClient)
 

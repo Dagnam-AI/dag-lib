@@ -13,15 +13,57 @@ cd dag-lib
 uv sync
 ```
 
-Useful commands:
+Run every quality gate the way CI does, with a single command:
 
 ```bash
-uv run pytest tests/ -v
-uv run ruff check
-uv run ruff format --check
-uv run --with "pyright>=1.1.380" pyright
+uv run poe check        # ruff + format-check + pyright + lint-imports + pytest
+```
+
+Or run the individual gates:
+
+```bash
+uv run poe lint          # ruff check
+uv run poe format-check  # ruff format --check
+uv run poe typecheck     # pyright (strict)
+uv run poe lint-imports  # layer-first import contract
+uv run poe test          # pytest
 uv run --with pip-audit pip-audit
 ```
+
+Run `uv run poe check` before pushing.
+
+## Architecture
+
+`dagnam` is **layer-first** by design (this is the conventional shape for a
+client SDK; cf. `openai`, `stripe`):
+
+```
+dagnam/
+  _core/      # transport, auth, config, client, LRO, exceptions  (base layer)
+  data/       # datasets, cache, loaders, adapters, load_dataset   (depends on _core)
+  resources/  # high-level resource modules (datasets, hub, ...)   (depends on data/_core)
+  cli/        # argparse CLI                                        (top layer)
+```
+
+The import direction `cli -> resources -> data -> _core` is enforced by
+`import-linter` (`uv run poe lint-imports`, blocking in CI): a layer may import
+only the layers below it.
+
+### Public-API contract
+
+`tests/test_public_api.py` is a golden test that pins `dagnam.__all__`, the
+documented submodule paths, and the lazy exports. **Keep it green.** Any change
+to the public surface must be a deliberate, `CHANGELOG.md`-recorded decision, not
+an accident of a refactor.
+
+### Imports
+
+Module-level imports go at the top of the file (ruff `E402`). The SDK
+intentionally uses **lazy imports inside functions** in two situations, both
+sanctioned: (1) optional framework backends (`torch`, `tensorflow`, `jax`/`flax`,
+`torchaudio`, `PIL`, `sseclient`) so a base install stays light — the CI
+"base-install isolation" job verifies these never leak into `import dagnam`; and
+(2) the CLI, which lazy-imports per-command to keep startup fast.
 
 ## Pull Request Expectations
 

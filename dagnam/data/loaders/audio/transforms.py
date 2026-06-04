@@ -71,7 +71,7 @@ class TensorflowAudioModule(Protocol):
 
 
 def _load_tensorflow() -> TensorflowAudioModule:
-    return cast(TensorflowAudioModule, import_module("tensorflow"))
+    return cast("TensorflowAudioModule", import_module("tensorflow"))
 
 
 def _decode_path_tensor(value: object) -> str:
@@ -207,7 +207,9 @@ def create_pytorch_loader(
             n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
         )
         split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        dataset = cast("Dataset[object]", Subset(cast("Dataset[object]", dataset), split_map[split]))
+        dataset = cast(
+            "Dataset[object]", Subset(cast("Dataset[object]", dataset), split_map[split])
+        )
 
     loader = DataLoader(
         cast("Dataset[object]", dataset),
@@ -287,7 +289,7 @@ def create_flax_dataset(
     max_duration_sec: float = 5.0,
     transform_fn: WaveformTransform | None = None,
     batch_transform_fn: BatchTransform | None = None,
-) -> list["FlaxBatch"]:
+) -> list[FlaxBatch]:
     """Create a list of FlaxBatch from an audio-folder dataset.
 
     Loads waveforms eagerly into a list of JAX arrays. Suitable for small
@@ -295,8 +297,10 @@ def create_flax_dataset(
     per-batch ``jnp.asarray`` in the training loop.
     """
     import jax.numpy as jnp
+
     from dagnam.data.loaders.flax import FlaxBatch
-    as_jax_array = cast(JaxArrayFactory, getattr(jnp, "asarray"))
+
+    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
 
     if shuffle is None:
         shuffle = split == "train"
@@ -317,7 +321,7 @@ def create_flax_dataset(
         for path, label in chunk:
             w: WaveformArray = load_waveform_py(str(path), sample_rate, target_len)
             if transform_fn is not None:
-                w = cast(WaveformArray, transform_fn(w))
+                w = cast("WaveformArray", transform_fn(w))
             waves.append(w)
             labels.append(label)
         x = as_jax_array(np.stack(waves).astype(np.float32))

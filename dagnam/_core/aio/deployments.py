@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
-
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
     response_json_value,
 )
+from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
 
 
 class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
@@ -58,11 +57,13 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         )
 
     async def get_deployment(self, deployment_id: str) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "GET",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
-            deployment_id=deployment_id,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "GET",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
+                deployment_id=deployment_id,
+            )
+        )
 
     async def create_deployment(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
@@ -70,12 +71,14 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         )
 
     async def update_deployment(self, deployment_id: str, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "PUT",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
-            deployment_id=deployment_id,
-            json_body=payload,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "PUT",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}",
+                deployment_id=deployment_id,
+                json_body=payload,
+            )
+        )
 
     async def delete_deployment(self, deployment_id: str) -> JsonObject | None:
         value = await self._deployment_req(
@@ -88,42 +91,54 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         return ensure_json_object(value)
 
     async def pause_deployment(self, deployment_id: str) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/pause",
-            deployment_id=deployment_id,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/pause",
+                deployment_id=deployment_id,
+            )
+        )
 
     async def resume_deployment(self, deployment_id: str) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/resume",
-            deployment_id=deployment_id,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/resume",
+                deployment_id=deployment_id,
+            )
+        )
 
     async def scale_deployment(self, deployment_id: str, num_instances: int) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "PUT",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
-            deployment_id=deployment_id,
-            params={"num_instances": num_instances},
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "PUT",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
+                deployment_id=deployment_id,
+                params={"num_instances": num_instances},
+            )
+        )
 
     async def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
-            deployment_id=deployment_id,
-            params={"checkpoint_path": checkpoint_path},
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
+                deployment_id=deployment_id,
+                params={"checkpoint_path": checkpoint_path},
+            )
+        )
 
-    async def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "GET",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
-            deployment_id=deployment_id,
-            params={"time_range": time_range},
-        ))
+    async def get_deployment_metrics(
+        self, deployment_id: str, time_range: str = "24h"
+    ) -> JsonObject:
+        return ensure_json_object(
+            await self._deployment_req(
+                "GET",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
+                deployment_id=deployment_id,
+                params={"time_range": time_range},
+            )
+        )
 
     async def get_deployment_logs(
         self,
@@ -145,16 +160,20 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             params["start_time"] = start_time
         if end_time is not None:
             params["end_time"] = end_time
-        return ensure_json_object(await self._deployment_req(
-            "GET",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/logs",
-            deployment_id=deployment_id,
-            params=params,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "GET",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/logs",
+                deployment_id=deployment_id,
+                params=params,
+            )
+        )
 
     async def get_deployment_health_full(self, deployment_id: str) -> JsonObject:
-        return ensure_json_object(await self._deployment_req(
-            "GET",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
-            deployment_id=deployment_id,
-        ))
+        return ensure_json_object(
+            await self._deployment_req(
+                "GET",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
+                deployment_id=deployment_id,
+            )
+        )

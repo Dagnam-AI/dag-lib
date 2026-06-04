@@ -104,7 +104,9 @@ def test_jsonl_tailer_starts_at_end_without_replay(tmp_path: Path) -> None:
     ]
 
 
-def test_attach_sets_child_metrics_path_and_uploads_final_drain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_sets_child_metrics_path_and_uploads_final_drain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dagnam.training_attach import run_training_attach
 
     metrics_path = tmp_path / "events.jsonl"
@@ -120,7 +122,8 @@ def test_attach_sets_child_metrics_path_and_uploads_final_drain(tmp_path: Path, 
             self.poll_count += 1
             if self.poll_count == 1:
                 metrics_path.write_text(
-                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}}) + "\n",
+                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}})
+                    + "\n",
                     encoding="utf-8",
                 )
                 return None
@@ -138,7 +141,11 @@ def test_attach_sets_child_metrics_path_and_uploads_final_drain(tmp_path: Path, 
 
     monkeypatch.setattr("subprocess.Popen", fake_popen)
 
-    client = SimpleNamespace(upload_training_events=lambda _job_id, events: uploaded.append(events) or {"accepted": len(events)})
+    client = SimpleNamespace(
+        upload_training_events=lambda _job_id, events: (
+            uploaded.append(events) or {"accepted": len(events)}
+        )
+    )
     code = run_training_attach(
         job_id="job-1",
         metrics_path=metrics_path,
@@ -162,7 +169,11 @@ def test_attach_replay_without_child_exits_after_existing_events(tmp_path: Path)
         encoding="utf-8",
     )
     uploaded: list[list[dict[str, object]]] = []
-    client = SimpleNamespace(upload_training_events=lambda _job_id, events: uploaded.append(events) or {"accepted": len(events)})
+    client = SimpleNamespace(
+        upload_training_events=lambda _job_id, events: (
+            uploaded.append(events) or {"accepted": len(events)}
+        )
+    )
 
     code = run_training_attach(
         job_id="job-1",
@@ -204,7 +215,9 @@ def test_attach_replay_without_child_fails_when_upload_never_recovers(tmp_path: 
     assert attempts == 3
 
 
-def test_attach_retries_upload_errors_while_child_continues(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_retries_upload_errors_while_child_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dagnam.training_attach import run_training_attach
 
     metrics_path = tmp_path / "events.jsonl"
@@ -217,7 +230,8 @@ def test_attach_retries_upload_errors_while_child_continues(tmp_path: Path, monk
             self.poll_count += 1
             if self.poll_count == 1:
                 metrics_path.write_text(
-                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}}) + "\n",
+                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}})
+                    + "\n",
                     encoding="utf-8",
                 )
                 return None
@@ -257,7 +271,9 @@ def test_attach_retries_upload_errors_while_child_continues(tmp_path: Path, monk
     assert uploaded[0][0]["event_id"] == "job-1:0"
 
 
-def test_attach_drains_metrics_on_keyboard_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_drains_metrics_on_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dagnam.training_attach import run_training_attach
 
     metrics_path = tmp_path / "events.jsonl"
@@ -267,7 +283,8 @@ def test_attach_drains_metrics_on_keyboard_interrupt(tmp_path: Path, monkeypatch
 
         def poll(self) -> int | None:
             metrics_path.write_text(
-                json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}}) + "\n",
+                json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}})
+                + "\n",
                 encoding="utf-8",
             )
             raise KeyboardInterrupt
@@ -278,7 +295,11 @@ def test_attach_drains_metrics_on_keyboard_interrupt(tmp_path: Path, monkeypatch
     fake_process = FakeProcess()
     monkeypatch.setattr("subprocess.Popen", lambda _command, env: fake_process)
     uploaded: list[list[dict[str, object]]] = []
-    client = SimpleNamespace(upload_training_events=lambda _job_id, events: uploaded.append(events) or {"accepted": len(events)})
+    client = SimpleNamespace(
+        upload_training_events=lambda _job_id, events: (
+            uploaded.append(events) or {"accepted": len(events)}
+        )
+    )
 
     code = run_training_attach(
         job_id="job-1",
@@ -294,7 +315,9 @@ def test_attach_drains_metrics_on_keyboard_interrupt(tmp_path: Path, monkeypatch
     assert uploaded[0][0]["event_id"] == "job-1:0"
 
 
-def test_attach_stops_fast_on_terminal_upload_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_stops_fast_on_terminal_upload_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from dagnam._core.exceptions import AuthError
     from dagnam.training_attach import run_training_attach
 
@@ -310,7 +333,8 @@ def test_attach_stops_fast_on_terminal_upload_error(tmp_path: Path, monkeypatch:
             self.poll_count += 1
             if self.poll_count == 1:
                 metrics_path.write_text(
-                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}}) + "\n",
+                    json.dumps({"type": "metric", "epoch": 1, "step": 1, "metrics": {"loss": 0.1}})
+                    + "\n",
                     encoding="utf-8",
                 )
             # Always "running": without a terminal-error exit this would loop forever.
@@ -454,7 +478,8 @@ def test_attach_bounds_backlog_and_drops_oldest_during_outage(
             self.poll_count += 1
             if self.poll_count == 1:
                 lines = "".join(
-                    json.dumps({"type": "metric", "epoch": 1, "step": i, "metrics": {"loss": 0.1}}) + "\n"
+                    json.dumps({"type": "metric", "epoch": 1, "step": i, "metrics": {"loss": 0.1}})
+                    + "\n"
                     for i in range(5)
                 )
                 metrics_path.write_text(lines, encoding="utf-8")
@@ -499,10 +524,23 @@ def test_attach_bounds_backlog_and_drops_oldest_during_outage(
     assert [e["step"] for e in uploaded[0]] == [3, 4]
 
 
-def test_attach_cli_parses_command_after_separator(run_cli, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attach_cli_parses_command_after_separator(
+    run_cli, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "sk_test")
     with mock.patch("dagnam.cli.training.cmd_training_attach") as attach:
-        run_cli(["training", "attach", "job-1", "--metrics-path", "events.jsonl", "--", "python", "train.py"])
+        run_cli(
+            [
+                "training",
+                "attach",
+                "job-1",
+                "--metrics-path",
+                "events.jsonl",
+                "--",
+                "python",
+                "train.py",
+            ]
+        )
 
     args = attach.call_args.args[0]
     assert args.job_id == "job-1"

@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Internal: the quality gates are now clean at zero — `ruff` reports no errors
+  and `pyright` (strict, minus the unavoidable untyped-ML-library completeness
+  diagnostics) reports no errors. Remaining suppressions are centralized and
+  documented in `pyproject.toml`. Async checkpoint/codegen downloads now write
+  to disk via `asyncio.to_thread` so they no longer block the event loop, and
+  `dagnam.data.loaders` submodules are imported lazily via `__getattr__`
+  (PEP 562). No public API or runtime behavior changed.
+
+## [0.5.0] - 2026-06-03
+
 ### Added
 
 - Release-process documentation for maintainers.
@@ -35,6 +47,28 @@ and this project follows [Semantic Versioning](https://semver.org/).
   best-then-latest). Pass `prefer_best=True` to restore the previous behavior.
   The `dagnam checkpoint download <job> best` CLI keyword maps to
   `prefer_best=True`.
+
+### Changed
+
+- Internal: the `load_dataset` implementation module moved from
+  `dagnam._core.load` to `dagnam.data.load` so it sits in the `data` layer it
+  composes (cache, dataset adapters, system loaders), enforcing the
+  `cli -> resources -> data -> _core` import contract. The public entry point
+  `dagnam.load_dataset` is unchanged; only the internal module path moved.
+
+### Removed
+
+- Internal compatibility-shim modules that only forwarded old import paths:
+  the `dagnam.services` package, `dagnam._core._common` / `_resolver` / `_sse`,
+  the `dagnam.data.loaders.*_loader` forwarders (`audio_loader`, `csv_loader`,
+  `flax_loader`, `image_folder_loader`, `json_loader`, `system_loader`,
+  `tf_loader`) and `data.loaders.media_utils`, and the redundant
+  `dagnam/resources/datasets_upload.py` module. These were internal forwarders
+  with no external consumers; the canonical modules (`dagnam.resources.*`,
+  `dagnam._core.{client.common,resolver,sse}`, `dagnam.data.loaders.{audio,csv,
+  flax,image_folder,json_array,system,tf,media}`) are unchanged, and the
+  documented public API (`dagnam.*` exports, the `dagnam.resources.datasets_upload`
+  alias) keeps resolving.
 
 ## [0.1.0] - 2026-05-10
 

@@ -6,8 +6,8 @@ split helpers used by image_folder_loader and audio_loader.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 import random
 import shutil
