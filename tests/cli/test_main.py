@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,8 +14,6 @@ from dagnam.cli.common import format_ascii_art
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, StrCapture
-
-cli_main_module = importlib.import_module("dagnam.cli.main")
 
 
 class TestMainNoArgs:
@@ -48,7 +45,7 @@ class TestLogin:
         config_dir = tmp_path / ".dagnam"
         config_file = config_dir / "config.json"
 
-        monkeypatch.setattr(cli_main_module.getpass, "getpass", lambda _: "test-key-123")
+        monkeypatch.setattr("getpass.getpass", lambda _: "test-key-123")
         monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
         monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
         monkeypatch.setattr("sys.argv", ["dagnam", "login"])
@@ -62,7 +59,7 @@ class TestLogin:
         assert data["api_key"] == "test-key-123"
 
     def test_empty_key_exits(self, monkeypatch: PytestMonkeyPatch) -> None:
-        monkeypatch.setattr(cli_main_module.getpass, "getpass", lambda _: "  ")
+        monkeypatch.setattr("getpass.getpass", lambda _: "  ")
         monkeypatch.setattr("sys.argv", ["dagnam", "login"])
 
         with pytest.raises(SystemExit) as exc_info:

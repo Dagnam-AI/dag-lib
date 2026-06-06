@@ -152,7 +152,7 @@ def run_training_attach(
 
     def terminate_child() -> None:
         if process is None:
-            return
+            return  # pragma: no cover -- unreachable: sole caller (L220) guards `process is not None`; `process` is assigned only at L147/151
         if os.name == "nt" and getattr(process, "pid", None) is not None:
             subprocess.run(  # noqa: S603
                 ["taskkill", "/F", "/T", "/PID", str(process.pid)],  # noqa: S607

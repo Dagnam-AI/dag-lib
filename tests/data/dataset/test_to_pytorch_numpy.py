@@ -8,6 +8,7 @@ from typing import Protocol, cast
 
 import numpy as np
 import pytest
+from tests.data.dataset._native_helpers import make_indexable_native_ds
 
 from dagnam._types import NativeSplit
 from dagnam.data.dataset import DagnamDataset
@@ -114,6 +115,14 @@ def test_numpy_loader_train_with_transform(numpy_native_ds: DagnamDataset) -> No
     assert torch.is_tensor(y)
 
 
+def test_numpy_loader_does_not_pad_rectangular(numpy_native_ds: DagnamDataset) -> None:
+    """Rectangular numeric arrays must NOT be padded — width is preserved, not forced to 200."""
+    loader = numpy_native_ds.to_pytorch_loader(split="test", batch_size=2, num_workers=0)
+    x, _ = next(iter(loader))
+    # x_test was (2, 4); a correct guard skips _pad_sequences (which would force width 200).
+    assert x.shape[1] == 4
+
+
 def test_numpy_loader_pads_object_dtype_sequences() -> None:
     """When numpy arrays are object-dtype, _pad_sequences is called."""
     ds = DagnamDataset(
@@ -139,6 +148,121 @@ def test_numpy_loader_pads_object_dtype_sequences() -> None:
     x, _ = next(iter(loader))
     torch = _torch()
     assert x.dtype == torch.long
+    # Ragged sequences are padded/truncated to the fixed maxlen (200).
+    assert x.shape[1] == 200
+
+
+def test_numpy_loader_train_pads_object_dtype_sequences() -> None:
+    """The train-split guard also pads ragged object-dtype sequences to maxlen (200)."""
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 4,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    x_train = np.array([np.array([1, 2, 3]), np.array([4, 5]), np.array([6])], dtype=object)
+    y_train = np.array([0.0, 1.0, 0.0])
+    ds.native_train = _native_split(x_train, y_train)
+    loader = ds.to_pytorch_loader(
+        split="train", batch_size=1, num_workers=0, val_ratio=0.0, shuffle=False
+    )
+    x, _ = next(iter(loader))
+    torch = _torch()
+    assert x.dtype == torch.long
+    assert x.shape[1] == 200
+
+
+# ---------------------------------------------------------------- map-style native loader
+
+
+def test_native_pytorch_loader_test_split() -> None:
+    """Torchvision-style indexable native dataset → test split uses native_test."""
+    ds = make_indexable_native_ds(with_numpy=False)  # plain ndarray samples (collatable)
+    loader = ds.to_pytorch_loader(split="test", batch_size=2, num_workers=0)
+    x, y = next(iter(loader))
+    torch = _torch()
+    assert torch.is_tensor(x)
+    assert torch.is_tensor(y)
+
+
+def test_native_pytorch_loader_val_split() -> None:
+    """Map-style val split goes through random_split."""
+    ds = make_indexable_native_ds(with_numpy=False)
+    loader = ds.to_pytorch_loader(split="val", batch_size=2, num_workers=0, val_ratio=0.25)
+    batches = list(loader)
+    assert len(batches) >= 1
+
+
+def test_native_pytorch_loader_train_split_with_transforms() -> None:
+    """Map-style train split via random_split plus _TransformDataset wrap."""
+    ds = make_indexable_native_ds(with_numpy=False)
+    loader = ds.to_pytorch_loader(
+        split="train",
+        batch_size=2,
+        num_workers=0,
+        val_ratio=0.25,
+        shuffle=False,
+        transform=_double,
+    )
+    batches = list(loader)
+    assert len(batches) >= 1
+
+
+def test_native_pytorch_loader_missing_native_raises() -> None:
+    """Direct call with native_train None raises (defensive guard, line 195)."""
+    ds = make_indexable_native_ds()
+    ds.native_train = None
+    with pytest.raises(ValueError, match="No native PyTorch dataset"):
+        ds._native_pytorch_loader(
+            split="train",
+            batch_size=2,
+            num_workers=0,
+            shuffle=False,
+            val_ratio=0.1,
+            seed=0,
+        )
+
+
+def test_native_numpy_loader_non_tuple_train_raises() -> None:
+    """Direct call into the numpy loader without tuple arrays raises (line 260)."""
+    ds = make_indexable_native_ds()  # native_train is indexable, not a tuple
+    with pytest.raises(ValueError, match="Native numpy loader requires train arrays"):
+        ds._native_numpy_loader(
+            split="train",
+            batch_size=2,
+            num_workers=0,
+            shuffle=False,
+            val_ratio=0.1,
+            seed=0,
+        )
+
+
+def test_numpy_loader_test_without_tuple_test_uses_empty() -> None:
+    """native_train tuple but native_test not a tuple → x_test/y_test = (), () (line 265)."""
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 6,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    x_train = np.arange(40).reshape(10, 4).astype(np.float32)
+    y_train = np.arange(10).astype(np.float32)
+    ds.native_train = _native_split(x_train, y_train)
+    ds.native_test = make_indexable_native_ds().native_train  # non-tuple indexable
+    loader = ds.to_pytorch_loader(split="test", batch_size=1, num_workers=0)
+    assert list(loader) == []
 
 
 # ---------------------------------------------------------------- hooks tail

@@ -62,6 +62,15 @@ def test_to_flax_native_numpy_object_pad(tmp_path: Path) -> None:
     ds = make_native_obj_ds()
     batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False)
     assert batches
+    # Ragged object-array sequences are padded/truncated to the fixed maxlen (200).
+    assert batches[0].features.shape[1] == 200
+
+
+def test_to_flax_native_numpy_not_padded(tmp_path: Path) -> None:
+    """Rectangular numeric arrays keep their width — the padding guard must not fire."""
+    ds = make_native_numpy_ds(tmp_path)  # x_train is (10, 4)
+    batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, val_ratio=0.2)
+    assert batches[0].features.shape[1] == 4
 
 
 def test_to_flax_native_numpy_with_transforms(tmp_path: Path) -> None:

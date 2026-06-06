@@ -85,3 +85,38 @@ class TestResolveVersion:
             assert common_mod.resolve_version() == __version__
         finally:
             md.version = original  # type: ignore[assignment]
+
+
+def test_ascii_art_skips_stream_that_raises_then_uses_next(monkeypatch: MonkeyPatch) -> None:
+    """The first stream raising must `continue` to the next attached stream."""
+
+    def _only_stderr_has_size(fileno: int) -> os.terminal_size:
+        # stdout's fileno raises; stderr's fileno succeeds.
+        if fileno == 1:
+            raise OSError("stdout not a tty")
+        return os.terminal_size((100, 24))
+
+    class _Stream:
+        def __init__(self, fd: int) -> None:
+            self._fd = fd
+
+        def fileno(self) -> int:
+            return self._fd
+
+    monkeypatch.setattr("sys.__stdout__", _Stream(1))
+    monkeypatch.setattr("sys.__stderr__", _Stream(2))
+    monkeypatch.setattr(os, "get_terminal_size", _only_stderr_has_size)
+
+    art = format_ascii_art()
+
+    assert max(len(line) for line in art.splitlines()) > 20
+
+
+def test_ascii_art_skips_none_stream(monkeypatch: MonkeyPatch) -> None:
+    """A ``None`` stream (detached stdout) must be skipped without error."""
+    monkeypatch.setattr("sys.__stdout__", None)
+    monkeypatch.setattr(os, "get_terminal_size", lambda *_: os.terminal_size((90, 24)))
+
+    art = format_ascii_art()
+
+    assert art

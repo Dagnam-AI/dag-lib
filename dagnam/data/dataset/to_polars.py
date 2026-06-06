@@ -56,7 +56,9 @@ class PolarsDatasetMixin(DatasetMixinBase):
             self._data = pl.read_csv(data_file, separator="\t")
         elif fmt == "json":
             self._data = pl.read_json(data_file)
-        elif fmt == "jsonl":
+        elif (
+            fmt == "jsonl"
+        ):  # pragma: no branch -- the L48 guard limits fmt to csv/tsv/json/jsonl; csv/tsv/json are handled above, so reaching this elif means fmt=="jsonl" and the false-leg is unreachable
             self._data = pl.read_ndjson(data_file)
 
         return cast("pl.DataFrame", self._data)

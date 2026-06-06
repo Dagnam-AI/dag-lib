@@ -8,13 +8,26 @@ import pytest
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.client.base import (
+    BaseDagnamClient,
     _sanitize_filename,
     is_success_response,
     parse_content_disposition_filename,
     safe_error_body_from_response,
 )
+from dagnam._core.exceptions import APIError, AuthError
 
 API = "https://api.test"
+
+
+class _ErrorResponse:
+    """Minimal requests.Response stand-in for `_raise_for_status` error paths."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        self.ok = False
+        self.headers: dict[str, str] = {"Content-Type": "text/plain"}
+        self.content = b"boom"
+        self.text = "boom"
 
 
 # ---------------------------------------------------------------- base helpers
@@ -82,3 +95,15 @@ def test_safe_error_body_from_response_delegates_to_common(client: DagnamClient)
     # Intentionally partial response fake (no status_code); the helper only
     # touches headers/text/content.
     assert safe_error_body_from_response(_R()) == "err"  # pyright: ignore[reportArgumentType]
+
+
+def test_raise_for_status_maps_401_to_autherror() -> None:
+    with pytest.raises(AuthError, match="invalid or expired API key"):
+        # Partial response fake exercising only the status-code mapping.
+        BaseDagnamClient._raise_for_status(_ErrorResponse(401), "ds-1")  # pyright: ignore[reportArgumentType]
+
+
+def test_raise_for_status_maps_other_codes_to_apierror() -> None:
+    with pytest.raises(APIError) as exc_info:
+        BaseDagnamClient._raise_for_status(_ErrorResponse(500), "ds-1")  # pyright: ignore[reportArgumentType]
+    assert exc_info.value.status_code == 500

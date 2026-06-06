@@ -53,8 +53,9 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 x_test, y_test = native_test
             else:
                 x_test, y_test = (), ()
-            x_train_array = np.asarray(x_train, dtype=object)
-            if x_train_array.dtype == object:
+            if np.asarray(x_train).dtype == object:
+                # Ragged (variable-length) sequences arrive as object arrays; pad them.
+                # Rectangular numeric arrays keep their natural dtype and are left as-is.
                 x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
                 x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             if split == "test":
@@ -397,7 +398,9 @@ class FlaxDatasetMixin(DatasetMixinBase):
 
         # Tabular
         if fmt not in ("csv", "tsv", "json", "jsonl"):
-            raise ValueError(f"Unsupported format for Flax dataset: {self.format}")
+            raise ValueError(
+                f"Unsupported format for Flax dataset: {self.format}"
+            )  # pragma: no cover -- defensive: unsupported formats already rejected by this method's earlier guard (L309-310)
 
         from dagnam.data.loaders.flax import (
             BatchTransform as TabularBatchTransform,

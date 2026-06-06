@@ -28,10 +28,12 @@ def as_numpy(value: object) -> object:
 
 
 class FakeTfdsLoader:
-    def __init__(self, samples: Sequence[tuple[object, int]]) -> None:
+    # Label is ``object`` (not ``int``) so tests can feed non-integer labels
+    # to exercise the loader's integer-label rejection path.
+    def __init__(self, samples: Sequence[tuple[object, object]]) -> None:
         self._samples = list(samples)
 
-    def __call__(self, *_args: object, **_kwargs: object) -> list[tuple[object, int]]:
+    def __call__(self, *_args: object, **_kwargs: object) -> list[tuple[object, object]]:
         return self._samples
 
 

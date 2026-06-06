@@ -49,3 +49,27 @@ def test_usage_apierror_exits(run_cli: CliRunner) -> None:
     with mock.patch("dagnam.account", fake):
         with pytest.raises(SystemExit):
             run_cli(["usage"])
+
+
+def test_usage_read_only_grace_and_pending_plan(run_cli: CliRunner, capsys: StrCapture) -> None:
+    snapshot = {
+        "plan": {"display_name": "Pro"},
+        "read_only_grace": True,
+        "pending_plan": "enterprise",
+        "limits": [{"key": "jobs", "current": 2, "limit": 5}],
+    }
+    fake = SimpleNamespace(entitlements=mock.Mock(return_value=snapshot))
+    with mock.patch("dagnam.account", fake):
+        run_cli(["usage"])
+    out = capsys.readouterr().out
+    assert "READ-ONLY GRACE" in out
+    assert "Pending plan: enterprise" in out
+    assert "Remaining" in out
+
+
+def test_usage_no_limits_returns_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    snapshot = {"plan": {"code": "free"}, "limits": []}
+    fake = SimpleNamespace(entitlements=mock.Mock(return_value=snapshot))
+    with mock.patch("dagnam.account", fake):
+        run_cli(["usage"])
+    assert "No limit information returned." in capsys.readouterr().out

@@ -174,3 +174,68 @@ def test_projects_architecture_accepts_json_literals(
         )
     save.assert_called_once_with("p1", {"nodes": [1]}, {"layers": [2]}, commit_message=None)
     capsys.readouterr()
+
+
+def test_projects_list_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(list=mock.Mock(return_value={"items": [], "total": 0}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "list"])
+    assert "No projects found." in capsys.readouterr().out
+
+
+def test_projects_get_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "p.json"
+    fake = SimpleNamespace(get=mock.Mock(return_value={"id": "p1", "title": "X"}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "get", "p1", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8"))["id"] == "p1"
+
+
+def test_projects_create_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "p.json"
+    fake = SimpleNamespace(create=mock.Mock(return_value={"id": "p1"}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "create", "--title", "x", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8"))["id"] == "p1"
+
+
+def test_projects_duplicate_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "p.json"
+    fake = SimpleNamespace(duplicate=mock.Mock(return_value={"id": "p2"}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "duplicate", "p1", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8"))["id"] == "p2"
+
+
+def test_projects_architecture_bad_json_exits_1(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(save_architecture=mock.Mock())
+    with mock.patch("dagnam.projects", fake):
+        with pytest.raises(SystemExit) as exc:
+            run_cli(["projects", "architecture", "p1", "--diagram", "{bad", "--config", "{}"])
+    assert exc.value.code == 1
+    assert "Could not read JSON input" in capsys.readouterr().err
+
+
+def test_projects_architecture_apierror_exits(run_cli: CliRunner) -> None:
+    from dagnam._core.exceptions import APIError
+
+    fake = SimpleNamespace(save_architecture=mock.Mock(side_effect=APIError(500, "boom")))
+    with mock.patch("dagnam.projects", fake):
+        with pytest.raises(SystemExit):
+            run_cli(["projects", "architecture", "p1", "--diagram", "{}", "--config", "{}"])
+
+
+def test_projects_list_dict_with_non_list_items(run_cli: CliRunner, capsys: StrCapture) -> None:
+    """A dict whose ``items`` is not a list renders as empty, not a crash."""
+    fake = SimpleNamespace(list=mock.Mock(return_value={"items": None, "total": 0}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "list"])
+    assert "No projects found." in capsys.readouterr().out
+
+
+def test_projects_list_bare_list_result(run_cli: CliRunner, capsys: StrCapture) -> None:
+    """A bare list result (not a paginated dict) renders via the list branch."""
+    fake = SimpleNamespace(list=mock.Mock(return_value=[{"id": "p1", "title": "Solo"}]))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "list"])
+    assert "Solo" in capsys.readouterr().out

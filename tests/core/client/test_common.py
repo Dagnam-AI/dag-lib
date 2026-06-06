@@ -66,6 +66,62 @@ def _resp(
     return _Resp(status, text=text, content_type=content_type, content=content)
 
 
+class _JsonResp:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+        self.status_code = 200
+        self.headers: dict[str, str] = {}
+        self.text = ""
+        self.content = b""
+
+    def json(self) -> object:
+        return self._payload
+
+
+# response_json_* helpers ------------------------------------------------
+
+
+def test_response_json_value_returns_scalar() -> None:
+    assert common.response_json_value(_JsonResp(42)) == 42
+
+
+def test_response_json_object_returns_object() -> None:
+    assert common.response_json_object(_JsonResp({"a": 1})) == {"a": 1}
+
+
+def test_response_json_array_returns_array() -> None:
+    assert common.response_json_array(_JsonResp([1, 2, 3])) == [1, 2, 3]
+
+
+# requests_query_params --------------------------------------------------
+
+
+def test_requests_query_params_none_returns_none() -> None:
+    assert common.requests_query_params(None) is None
+
+
+def test_requests_query_params_skips_none_value() -> None:
+    assert common.requests_query_params({"a": None, "b": "1"}) == [("b", "1")]
+
+
+def test_requests_query_params_scalar_types() -> None:
+    result = common.requests_query_params({"i": 1, "f": 1.5, "b": True, "s": "x"})
+    assert result == [("i", "1"), ("f", "1.5"), ("b", "True"), ("s", "x")]
+
+
+def test_requests_query_params_iterable_drops_none_items() -> None:
+    result = common.requests_query_params({"tags": ["a", None, "b"]})
+    assert result == [("tags", "a"), ("tags", "b")]
+
+
+def test_query_scalar_to_string_none_returns_empty() -> None:
+    assert common._query_scalar_to_string(None) == ""
+
+
+def test_query_scalar_to_string_value() -> None:
+    assert common._query_scalar_to_string(7) == "7"
+
+
 # build_url --------------------------------------------------------------
 
 
@@ -182,6 +238,110 @@ def test_safe_response_text_formats_fastapi_validation_detail() -> None:
         content_type="application/json",
     )
     assert common.safe_response_text(r) == "body.project_id: Field required"
+
+
+# _format_fastapi_detail edge cases --------------------------------------
+
+
+def test_fastapi_detail_list_skips_non_dict_items() -> None:
+    # A list detail with a non-dict item exercises the ``continue`` arm; with
+    # no usable messages it falls through to json.dumps of the detail.
+    r = _resp(422, text='{"detail":["just a string"]}', content_type="application/json")
+    assert common.safe_response_text(r) == '["just a string"]'
+
+
+def test_fastapi_detail_list_item_without_string_msg_is_skipped() -> None:
+    # item is a dict but ``msg`` is not a str -> the loop continues without
+    # appending, and with no usable messages falls through to json.dumps.
+    r = _resp(
+        422,
+        text='{"detail":[{"loc":["body"],"msg":123}]}',
+        content_type="application/json",
+    )
+    assert common.safe_response_text(r) == '[{"loc": ["body"], "msg": 123}]'
+
+
+def test_fastapi_detail_non_str_non_list_falls_through_to_dumps() -> None:
+    # detail is a dict -> not str, not list -> json.dumps(detail)
+    r = _resp(422, text='{"detail":{"code":1}}', content_type="application/json")
+    assert common.safe_response_text(r) == '{"code": 1}'
+
+
+def test_safe_response_text_streaming_text_decode_failure_returns_empty() -> None:
+    class _StreamingBadText:
+        _content = False
+        content = b""
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "text/plain"}
+
+        @property
+        def status_code(self) -> int:
+            return 500
+
+        @property
+        def text(self) -> str:
+            raise UnicodeDecodeError("utf-8", b"", 0, 1, "boom")
+
+    # text raises -> text_value = "" -> empty -> falls to "<streaming ...>"
+    assert (
+        common.safe_response_text(_StreamingBadText())  # pyright: ignore[reportArgumentType]
+        == "<streaming text/plain body omitted>"
+    )
+
+
+def test_safe_response_text_binary_body_len_typeerror_reports_zero() -> None:
+    class _NoLenContent:
+        def __bool__(self) -> bool:
+            return True
+
+        def __len__(self) -> int:
+            raise TypeError("no len")
+
+    class _BinaryNoLen:
+        _content = b""
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "application/octet-stream"}
+            self.content = _NoLenContent()
+
+        @property
+        def status_code(self) -> int:
+            return 400
+
+    assert (
+        common.safe_response_text(_BinaryNoLen())  # pyright: ignore[reportArgumentType]
+        == "<0 bytes of application/octet-stream>"
+    )
+
+
+def test_safe_response_text_decode_failure_len_typeerror_reports_zero() -> None:
+    class _NoLenContent:
+        def __bool__(self) -> bool:
+            return True
+
+        def __len__(self) -> int:
+            raise TypeError("no len")
+
+    class _TextDecodeNoLen:
+        _content = b""
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "text/plain"}
+            self.content = _NoLenContent()
+
+        @property
+        def status_code(self) -> int:
+            return 400
+
+        @property
+        def text(self) -> str:
+            raise UnicodeDecodeError("utf-8", b"", 0, 1, "boom")
+
+    assert (
+        common.safe_response_text(_TextDecodeNoLen())  # pyright: ignore[reportArgumentType]
+        == "<0 bytes; failed to decode body>"
+    )
 
 
 # raise_for_generic ------------------------------------------------------

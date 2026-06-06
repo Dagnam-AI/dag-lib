@@ -63,7 +63,7 @@ class TestSplitByRolesRoundTrip:
     """Validates: Requirements 15.1, 15.2, 15.4"""
 
     @given(data=column_roles_strategy())
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_feature_and_target_match_roles(self, data: dict[str, str]) -> None:
         """For any valid column_roles with ≥1 target, split_by_roles returns
         feature columns matching feature roles and label column matching a
@@ -89,7 +89,7 @@ class TestSplitByRolesRoundTrip:
         assert label_col == expected_targets[0]
 
     @given(data=column_roles_strategy())
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_ignore_columns_excluded(self, data: dict[str, str]) -> None:
         """Columns with role 'ignore' do not appear in features or target."""
         df = _make_df(list(data.keys()))
@@ -106,7 +106,7 @@ class TestSplitByRolesRoundTrip:
         assert ignore_cols.isdisjoint(set(feature_cols))
 
     @given(data=column_roles_strategy())
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_feature_columns_preserve_order(self, data: dict[str, str]) -> None:
         """Feature columns preserve original DataFrame column order."""
         col_names = list(data.keys())

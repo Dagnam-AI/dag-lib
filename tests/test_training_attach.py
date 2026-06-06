@@ -546,3 +546,144 @@ def test_attach_cli_parses_command_after_separator(
     assert args.job_id == "job-1"
     assert args.metrics_path == "events.jsonl"
     assert args.command == ["python", "train.py"]
+
+
+# ---------------------------------------------------------------- tailer edge cases
+
+
+def test_tailer_missing_file_yields_nothing(tmp_path: Path) -> None:
+    from dagnam.training_attach import MetricsJsonlTailer
+
+    tailer = MetricsJsonlTailer(tmp_path / "absent.jsonl")
+    assert list(tailer.read_available()) == []
+
+
+def test_tailer_skips_blank_and_malformed_and_non_object_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from dagnam.training_attach import MetricsJsonlTailer
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(
+        "\n"  # blank line -> skipped silently
+        "{not json}\n"  # malformed -> warning, skipped
+        "[1, 2, 3]\n"  # valid JSON but not an object -> warning, skipped
+        '{"type": "metric", "step": 1}\n',  # the only real event
+        encoding="utf-8",
+    )
+    tailer = MetricsJsonlTailer(path, replay=True)
+    events = list(tailer.read_available())
+    assert [e["event"] for e in events] == [{"type": "metric", "step": 1}]
+    err = capsys.readouterr().err
+    assert "malformed metrics JSONL line" in err
+    assert "non-object metrics JSONL line" in err
+
+
+# ---------------------------------------------------------------- path resolution
+
+
+def test_resolve_explicit_path(tmp_path: Path) -> None:
+    from dagnam.training_attach import resolve_attach_metrics_path
+
+    assert resolve_attach_metrics_path("custom.jsonl") == Path("custom.jsonl")
+
+
+def test_resolve_uses_env_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dagnam.training_attach import resolve_attach_metrics_path
+
+    monkeypatch.setenv("DAGNAM_METRICS_PATH", "/tmp/from-env.jsonl")
+    assert resolve_attach_metrics_path() == Path("/tmp/from-env.jsonl")
+
+
+def test_resolve_uses_configured_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dagnam import training_attach
+
+    monkeypatch.delenv("DAGNAM_METRICS_PATH", raising=False)
+    monkeypatch.setattr(training_attach, "get_config_value", lambda _key: "/tmp/configured.jsonl")
+    assert training_attach.resolve_attach_metrics_path() == Path("/tmp/configured.jsonl")
+
+
+def test_resolve_requires_existing_source_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dagnam import training_attach
+
+    monkeypatch.delenv("DAGNAM_METRICS_PATH", raising=False)
+    monkeypatch.setattr(training_attach, "get_config_value", lambda _key: None)
+    with pytest.raises(FileNotFoundError, match="not configured"):
+        training_attach.resolve_attach_metrics_path(require_existing_source=True)
+
+
+def test_resolve_falls_back_to_cwd_default(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from dagnam import training_attach
+
+    monkeypatch.delenv("DAGNAM_METRICS_PATH", raising=False)
+    monkeypatch.setattr(training_attach, "get_config_value", lambda _key: None)
+    monkeypatch.chdir(tmp_path)
+    resolved = training_attach.resolve_attach_metrics_path()
+    assert resolved == tmp_path / training_attach.DEFAULT_ATTACH_METRICS_PATH
+    assert "Using local metrics path" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- terminate_child guards
+
+
+def test_terminate_child_noop_without_process(tmp_path: Path) -> None:
+    # No command -> no child process. The finally-block terminate_child() must
+    # return immediately (process is None) after run_upload_loop completes.
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+    metrics_path.write_text(json.dumps({"type": "metric", "step": 1}) + "\n", encoding="utf-8")
+    client = SimpleNamespace(
+        upload_training_events=lambda _job_id, events: {"accepted": len(events)}
+    )
+    code = run_training_attach(
+        job_id="job-1",
+        metrics_path=metrics_path,
+        replay=True,
+        client=client,
+        poll_interval=0,
+    )
+    assert code == 0
+
+
+def test_terminate_child_windows_without_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows branch where the process object exposes no wait attribute -> the
+    # `if wait is not None` guard (163->165) takes its false leg.
+    from dagnam._core.exceptions import AuthError
+    from dagnam.training_attach import run_training_attach
+
+    metrics_path = tmp_path / "events.jsonl"
+
+    class FakeProcess:
+        pid = 4321
+
+        def poll(self) -> None:
+            metrics_path.write_text(json.dumps({"type": "metric", "step": 1}) + "\n")
+            return None
+
+        def __getattribute__(self, name: str) -> object:  # pyright: ignore[reportImplicitOverride]
+            if name == "wait":
+                raise AttributeError(name)
+            return object.__getattribute__(self, name)
+
+    taskkill = mock.Mock()
+    monkeypatch.setattr("dagnam.training_attach.os.name", "nt")
+    monkeypatch.setattr("dagnam.training_attach.subprocess.run", taskkill)
+    monkeypatch.setattr("subprocess.Popen", lambda _command, env: FakeProcess())
+    client = SimpleNamespace(
+        upload_training_events=lambda *_args: (_ for _ in ()).throw(AuthError("bad key"))
+    )
+
+    with pytest.raises(AuthError):
+        run_training_attach(
+            job_id="job-1",
+            metrics_path=metrics_path,
+            command=["python", "train.py"],
+            client=client,
+            poll_interval=0,
+        )
+    taskkill.assert_called_once()

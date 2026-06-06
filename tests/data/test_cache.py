@@ -5,10 +5,14 @@ import json
 from pathlib import Path
 import time
 
-from tests.typing_helpers import JsonObject
+import pytest
+from tests.typing_helpers import JsonObject, PytestMonkeyPatch
 
+from dagnam.data import cache as cache_module
 from dagnam.data.cache import (
     DEFAULT_MAX_CACHE_BYTES,
+    CacheInfo,
+    cache_dir_name,
     compute_file_checksum,
     evict_lru,
     get_cache_dir,
@@ -308,7 +312,89 @@ class TestEvictLru:
         assert (cache_dir / "b").exists()
         assert (cache_dir / "c").exists()
 
+    def test_default_max_size_uses_configured_value(
+        self, cache_dir: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """When max_size_bytes is None, the configured value drives eviction."""
+        self._make_dataset(cache_dir, "old", 100, last_access=1000.0)
+        self._make_dataset(cache_dir, "new", 100, last_access=2000.0)
+
+        # Configure a small limit so one dataset must be evicted.
+        monkeypatch.setattr(
+            "dagnam._core.config.get_config_value",
+            lambda _key, _default: 150,
+        )
+        evicted = evict_lru(base_dir=cache_dir)
+        assert evicted == ["old"]
+
+    def test_default_max_size_falls_back_to_constant_when_config_non_int(
+        self, cache_dir: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """A non-int configured value falls back to DEFAULT_MAX_CACHE_BYTES."""
+        self._make_dataset(cache_dir, "ds", 100, last_access=1000.0)
+
+        monkeypatch.setattr(
+            "dagnam._core.config.get_config_value",
+            lambda _key, _default: "not-an-int",
+        )
+        # 100 bytes is far below the 10 GB default, so nothing is evicted.
+        evicted = evict_lru(base_dir=cache_dir)
+        assert evicted == []
+        assert (cache_dir / "ds").exists()
+
+    def test_skips_entry_whose_directory_vanished(
+        self, cache_dir: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """A reported cache entry whose directory no longer exists is skipped.
+
+        Simulates a race where ``get_cache_info`` lists an entry but the
+        directory is removed before eviction reaches it. The phantom entry
+        must not be added to the evicted list, and the real one is evicted.
+        """
+        self._make_dataset(cache_dir, "real", 100, last_access=2000.0)
+
+        phantom: CacheInfo = {
+            "dataset_id": "ghost",
+            "size_bytes": 1_000_000,
+            "last_access": 1000.0,
+        }
+        real_get_cache_info = cache_module.get_cache_info
+
+        def fake_info(base_dir: Path | None = None) -> list[CacheInfo]:
+            real_entries = [e for e in real_get_cache_info(base_dir) if e["dataset_id"] == "real"]
+            return [phantom, *real_entries]
+
+        monkeypatch.setattr(cache_module, "get_cache_info", fake_info)
+
+        evicted = evict_lru(max_size_bytes=50, base_dir=cache_dir)
+        assert "ghost" not in evicted
+        assert "real" in evicted
+        assert not (cache_dir / "real").exists()
+
 
 class TestDefaultMaxCacheBytes:
     def test_constant_is_10gb(self) -> None:
         assert DEFAULT_MAX_CACHE_BYTES == 10 * 1024 * 1024 * 1024
+
+
+class TestCacheDirName:
+    def test_plain_id_passthrough(self) -> None:
+        assert cache_dir_name("ds-123") == "ds-123"
+
+    def test_empty_id_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            cache_dir_name("")
+
+    def test_dot_is_percent_encoded(self) -> None:
+        # quote() leaves "." untouched (it is in the safe set), so the
+        # explicit "." / ".." guard must replace it to avoid a path component
+        # that resolves to the current directory.
+        assert cache_dir_name(".") == "%2E"
+
+    def test_dotdot_is_percent_encoded(self) -> None:
+        # "../" would escape the cache root; both dots must be encoded.
+        assert cache_dir_name("..") == "%2E%2E"
+
+    def test_slash_is_percent_encoded(self) -> None:
+        # A path separator must not survive into the directory name.
+        assert cache_dir_name("a/b") == "a%2Fb"

@@ -192,6 +192,9 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Import Linter
+.import_linter_cache/
+
 # PyPI configuration file
 .pypirc
 
@@ -226,3 +229,4 @@ graphify-out/
 .test*-log*
 *.yml.tmp.*
 *.yaml.tmp.*
+.tmp-*

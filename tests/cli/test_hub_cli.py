@@ -100,3 +100,17 @@ def test_hub_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) 
     with mock.patch("dagnam.hub", fake):
         with pytest.raises(SystemExit):
             run_cli(cmd_args)
+
+
+def test_hub_search_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(search=mock.Mock(return_value={"items": [], "total": 0}))
+    with mock.patch("dagnam.hub", fake):
+        run_cli(["hub", "search"])
+    assert "No hub models found." in capsys.readouterr().out
+
+
+def test_hub_featured_list_with_non_dict_item(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(featured=mock.Mock(return_value=["model-name-string"]))
+    with mock.patch("dagnam.hub", fake):
+        run_cli(["hub", "featured"])
+    assert "model-name-string" in capsys.readouterr().out

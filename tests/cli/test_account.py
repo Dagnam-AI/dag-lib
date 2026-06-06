@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -256,3 +257,97 @@ class TestConfig:
 
         assert exc_info.value.code == 1
         assert "Unsupported config key" in capsys.readouterr().err
+
+    def test_unset_rejects_unsupported_config_key(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "unset", "api_key"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        assert "Unsupported config key for unset" in capsys.readouterr().err
+
+    def test_list_invalid_json_exits_1(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "list"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        assert "Could not read" in capsys.readouterr().err
+
+    def test_list_non_object_json_exits_1(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text("[1, 2, 3]", encoding="utf-8")
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr("sys.argv", ["dagnam", "config", "list"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        assert "expected a JSON object" in capsys.readouterr().err
+
+    def test_set_chmods_config_on_posix(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """`config set` locks the file to 0o600 on POSIX platforms."""
+        import dagnam.cli.account as account_mod
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr(account_mod.sys, "platform", "linux")
+
+        chmod_calls: list[tuple[object, int]] = []
+        real_chmod = account_mod.os.chmod
+
+        def _record_chmod(path: str | os.PathLike[str], mode: int) -> None:
+            chmod_calls.append((path, mode))
+            try:
+                real_chmod(path, mode)
+            except (OSError, NotImplementedError):
+                pass
+
+        monkeypatch.setattr(account_mod.os, "chmod", _record_chmod)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dagnam", "config", "set", "training_metrics_path", "./m.jsonl"],
+        )
+        main()
+
+        assert any(mode == 0o600 for _path, mode in chmod_calls)
+
+    def test_set_ignores_chmod_oserror_on_posix(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """A failing chmod during `config set` must not crash on POSIX."""
+        import dagnam.cli.account as account_mod
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr(account_mod.sys, "platform", "linux")
+
+        def _boom(_path: object, _mode: int) -> None:
+            raise OSError("chmod denied")
+
+        monkeypatch.setattr(account_mod.os, "chmod", _boom)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dagnam", "config", "set", "training_metrics_path", "./m.jsonl"],
+        )
+        main()
+
+        assert (
+            json.loads(config_file.read_text(encoding="utf-8"))["training_metrics_path"]
+            == "./m.jsonl"
+        )

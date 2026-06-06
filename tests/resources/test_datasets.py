@@ -84,6 +84,18 @@ class TestUploadFromUrl:
             visibility="private",
         )
 
+    def test_missing_string_task_id_raises(self) -> None:
+        # Response without a string task_id must be rejected before building the LRO.
+        c = _client(upload_dataset_from_url=MagicMock(return_value={"status": "pending"}))
+        with pytest.raises(ValueError, match="did not include a string task_id"):
+            datasets_upload.upload_from_url(
+                "https://x.com/d.csv",
+                name="ds",
+                dataset_type="tabular",
+                format="csv",
+                client=c,
+            )
+
     def test_lro_polls_task_status(self) -> None:
         c = _client(
             upload_dataset_from_url=MagicMock(

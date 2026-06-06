@@ -7,6 +7,7 @@ plus ``sys.platform = 'linux'`` for the duration of the test.
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Callable
 import json
 from pathlib import Path
@@ -199,3 +200,52 @@ def test_login_chmod_failure_swallowed(
 
     assert config_file.exists()
     assert json.loads(config_file.read_text())["api_key"] == "k"
+
+
+def test_lock_down_config_path_existing_file_matching_uid_passes(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """Existing file owned by the current user passes the ownership check."""
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text("{}")
+
+    fake = _fake_os(
+        stat_fn=lambda _path: SimpleNamespace(st_uid=1000, st_mode=0o700),
+    )
+    monkeypatch.setattr(login_mod, "os", fake)
+    # Should return without raising (the 56->exit fall-through branch).
+    _lock_down_config_path(tmp_path, cfg_file)
+
+
+def test_login_reraises_when_fdopen_fails(
+    force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """The ``except BaseException: raise`` guard around os.fdopen propagates errors."""
+    config_dir = tmp_path / ".dagnam"
+    config_file = config_dir / "config.json"
+    monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+    monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
+    monkeypatch.setattr(login_mod, "_lock_down_config_path", lambda *_a: None)
+
+    import os as real_os
+
+    def _boom_fdopen(*_a: object, **_kw: object) -> object:
+        raise OSError("disk full")
+
+    fake = SimpleNamespace(
+        getuid=lambda: 1000,
+        stat=lambda _path: SimpleNamespace(st_uid=1000, st_mode=0o700),
+        chmod=_noop_chmod,
+        O_WRONLY=real_os.O_WRONLY,
+        O_CREAT=real_os.O_CREAT,
+        O_TRUNC=real_os.O_TRUNC,
+        O_NOFOLLOW=getattr(real_os, "O_NOFOLLOW", 0),
+        open=real_os.open,
+        fdopen=_boom_fdopen,
+    )
+    monkeypatch.setattr(login_mod, "os", fake)
+
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
+        with pytest.raises(OSError, match="disk full"):
+            login_mod.cmd_login(argparse.Namespace(api_url="https://custom"))

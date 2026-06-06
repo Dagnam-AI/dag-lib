@@ -57,7 +57,9 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 x_test, y_test = native_test
             else:
                 x_test, y_test = (), ()
-            if np.asarray(x_train, dtype=object).dtype == object:
+            if np.asarray(x_train).dtype == object:
+                # Ragged (variable-length) sequences arrive as object arrays; pad them.
+                # Rectangular numeric arrays keep their natural dtype and are left as-is.
                 x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
                 x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             if split == "test":
@@ -375,7 +377,9 @@ class TensorflowDatasetMixin(DatasetMixinBase):
 
         # Tabular datasets
         if fmt not in ("csv", "tsv", "json", "jsonl"):
-            raise ValueError(f"Unsupported format for TensorFlow dataset: {self.format}")
+            raise ValueError(
+                f"Unsupported format for TensorFlow dataset: {self.format}"
+            )  # pragma: no cover -- defensive: unsupported formats already rejected by this method's earlier guard (L285-286)
 
         from dagnam.data.loaders.tf import create_tensorflow_dataset
 

@@ -202,3 +202,36 @@ def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> 
     with mock.patch("dagnam.deployments", fake):
         with pytest.raises(SystemExit):
             run_cli(cmd_args)
+
+
+def test_deployments_list_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(list=mock.Mock(return_value={"items": [], "total": 0}))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "list"])
+    assert "No deployments found." in capsys.readouterr().out
+
+
+def test_deployments_list_non_dict_result_passthrough(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    # A bare list (not a paginated dict) exercises the list-branch of the helpers.
+    fake = SimpleNamespace(list=mock.Mock(return_value=[{"id": "dep-1", "name": "api"}]))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "list"])
+    assert "dep-1" in capsys.readouterr().out
+
+
+def test_deployments_get_non_dict_passthrough(run_cli: CliRunner, capsys: StrCapture) -> None:
+    """A non-dict deployment payload is returned unchanged by the redactor."""
+    fake = SimpleNamespace(get=mock.Mock(return_value=["not", "a", "dict"]))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "get", "dep-1"])
+    assert "not" in capsys.readouterr().out
+
+
+def test_deployments_list_dict_without_list_items(run_cli: CliRunner, capsys: StrCapture) -> None:
+    """A dict result whose ``items`` is not a list skips per-item redaction."""
+    fake = SimpleNamespace(list=mock.Mock(return_value={"items": None, "total": 0}))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "list"])
+    assert "No deployments found." in capsys.readouterr().out

@@ -98,6 +98,45 @@ class TestTimeout:
         with pytest.raises(LROTimeoutError):
             op.result()
 
+    def test_result_after_timeout_reports_non_terminal_state(self) -> None:
+        # After wait() times out, _latest holds a non-terminal payload; calling
+        # result() then raises the "still in non-terminal state" timeout (lro.py:181).
+        op = LongRunningOperation(
+            poll=lambda: {"status": "deploying"},
+            success_states={"running"},
+            poll_min=0.1,
+            poll_max=0.1,
+        )
+        clk = FakeClock()
+        with pytest.raises(LROTimeoutError):
+            op.wait(timeout=0.5, sleep=clk.sleep, now=clk.now)
+        with pytest.raises(LROTimeoutError, match="non-terminal state"):
+            op.result()
+
+    def test_zero_timeout_skips_poll_loop(self) -> None:
+        # timeout=0 → deadline already reached after the first non-terminal poll,
+        # so the `while now() < deadline` loop is never entered (branch 141->155).
+        op = LongRunningOperation(
+            poll=lambda: {"status": "deploying"},
+            success_states={"running"},
+        )
+        clk = FakeClock()
+        with pytest.raises(LROTimeoutError):
+            op.wait(timeout=0, sleep=clk.sleep, now=clk.now)
+
+    def test_failure_without_detail_omits_suffix(self) -> None:
+        # Failure payload with no error_message → LROFailedError detail is None and
+        # the message carries no ": <detail>" suffix (exceptions.py branch 141->143).
+        op = LongRunningOperation(
+            poll=lambda: {"status": "failed"},
+            success_states={"running"},
+        )
+        clk = FakeClock()
+        with pytest.raises(LROFailedError) as excinfo:
+            op.wait(timeout=1, sleep=clk.sleep, now=clk.now).result()
+        assert excinfo.value.detail is None
+        assert str(excinfo.value) == "Operation entered failure state 'failed'"
+
 
 class TestCustomStateKey:
     def test_alternate_state_key(self) -> None:

@@ -73,6 +73,17 @@ def test_delete_deployment_empty_body(client: DagnamClient, rmock: RequestsMocke
     assert client.delete_deployment("dep1") is None
 
 
+def test_delete_deployment_returns_object(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{API}/api/v1/deployments/dep1", json={"deleted": True})
+    assert client.delete_deployment("dep1") == {"deleted": True}
+
+
+def test_get_deployment_logs_minimal(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/deployments/dep1/logs", json={"items": []})
+    client.get_deployment_logs("dep1")
+    assert set(rmock.last_request.qs.keys()) == {"page", "limit"}
+
+
 def test_pause_resume(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/deployments/dep1/pause", json={"paused": True})
     rmock.post(f"{API}/api/v1/deployments/dep1/resume", json={"paused": False})

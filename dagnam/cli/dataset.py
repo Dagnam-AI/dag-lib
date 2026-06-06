@@ -6,10 +6,14 @@ import argparse
 from copy import deepcopy
 from pathlib import Path
 import sys
+from typing import TYPE_CHECKING
 
 from dagnam._types import JsonObject
-from dagnam.cli.common import error
+from dagnam.cli.common import add_collection_output_args, error
 from dagnam.cli.presentation import Column, emit_result, render_table
+
+if TYPE_CHECKING:
+    from dagnam.cli.common import SubParsersAction
 
 
 def _render_datasets(result: object) -> str:
@@ -114,3 +118,55 @@ def cmd_dataset_info(args: argparse.Namespace) -> None:
             print(f"{key}: {', '.join(str(v) for v in value)}")
         else:
             print(f"{key}: {value}")
+
+
+def register_dataset(subparsers: SubParsersAction) -> None:
+    """Register the ``dataset`` command group on the top-level subparsers."""
+    dataset = subparsers.add_parser(
+        "dataset",
+        help="Browse and download datasets.",
+        description="List, inspect, and download datasets from Dagnam.AI.",
+    )
+    dataset_sub = dataset.add_subparsers(dest="dataset_command", required=True)
+    dataset_list = dataset_sub.add_parser(
+        "list", help="List datasets.", description="List available datasets."
+    )
+    dataset_list.add_argument("--api-url", help="Override the API base URL.")
+    dataset_list.add_argument("--api-key", help="Override the API key.")
+    dataset_list.add_argument(
+        "--type",
+        default="all",
+        help="Filter by dataset type: image, text, audio, video, tabular, custom, or all.",
+    )
+    dataset_list.add_argument("--search", help="Filter by name/description substring.")
+    add_collection_output_args(dataset_list)
+    dataset_list.set_defaults(func=cmd_dataset_list)
+    dataset_info = dataset_sub.add_parser(
+        "info", help="Show dataset metadata.", description="Show metadata for one dataset."
+    )
+    dataset_info.add_argument("dataset_id", help="ID of the dataset to inspect.")
+    dataset_info.add_argument("--api-url", help="Override the API base URL.")
+    dataset_info.add_argument("--api-key", help="Override the API key.")
+    dataset_info.add_argument(
+        "--show-download-url",
+        action="store_true",
+        help="Include signed download_url values in output. By default these are redacted.",
+    )
+    dataset_info.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    dataset_info.add_argument("--output", help="Write the redacted JSON response to this path.")
+    dataset_info.set_defaults(func=cmd_dataset_info)
+    dataset_download = dataset_sub.add_parser(
+        "download",
+        help="Download a dataset.",
+        description="Download a dataset to a local directory.",
+    )
+    dataset_download.add_argument("dataset_id", help="ID of the dataset to download.")
+    dataset_download.add_argument(
+        "--output-dir", default=".", help="Destination directory (default: current dir)."
+    )
+    dataset_download.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable download progress output. Progress is also hidden when stderr is redirected.",
+    )
+    dataset_download.set_defaults(func=cmd_dataset_download)

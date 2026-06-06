@@ -265,7 +265,7 @@ def testload_speech_commands_fallback(monkeypatch: PytestMonkeyPatch, tmp_path: 
     """When torchaudio raises on import, the loader should fall back."""
     monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
 
-    real_import_module = tv_mod.import_module
+    real_import_module = tv_mod.import_module  # pyright: ignore[reportPrivateImportUsage]
 
     def fake_import(name: str, package: str | None = None):
         if name == "torchaudio":
@@ -377,7 +377,7 @@ def testload_imdb_downloads_when_missing(monkeypatch: PytestMonkeyPatch, tmp_pat
     def fake_get(_url: str, **_kwargs: object) -> _FakeResp:
         return _FakeResp(sample_bytes)
 
-    monkeypatch.setattr(tv_mod.requests, "get", fake_get)
+    monkeypatch.setattr(tv_mod.requests, "get", fake_get)  # pyright: ignore[reportPrivateImportUsage]
     # Override checksum to match our expected hash so checksum passes.
     monkeypatch.setattr(tv_mod, "sha256", _expected_imdb_sha)
 
@@ -419,7 +419,7 @@ def test_download_verified_file_rejects_bad_checksum(
     def fake_get(_url: str, **_kwargs: object) -> _FakeResp:
         return _FakeResp()
 
-    monkeypatch.setattr(tv_mod.requests, "get", fake_get)
+    monkeypatch.setattr(tv_mod.requests, "get", fake_get)  # pyright: ignore[reportPrivateImportUsage]
     monkeypatch.setattr(tv_mod, "sha256", _wrong_sha)
     dest = tmp_path / "f"
     with pytest.raises(ValueError, match="checksum mismatch"):
@@ -431,3 +431,115 @@ def test_sha256_computes(tmp_path: Path) -> None:
     p.write_bytes(b"hello world")
     expected = hashlib.sha256(b"hello world").hexdigest()
     assert tv_mod.sha256(p) == expected
+
+
+# ---------------------------------------------------------------- SPEECHCOMMANDS / WikiText2 success
+
+
+def testload_speech_commands_success(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    """A working torchaudio yields native train/test SPEECHCOMMANDS datasets."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+
+    class _FakeSpeechCommands:
+        def __init__(self, *, root: str, download: bool, subset: str) -> None:
+            self.root = root
+            self.download = download
+            self.subset = subset
+
+        def __len__(self) -> int:
+            return 1
+
+    fake_torchaudio = SimpleNamespace(datasets=SimpleNamespace(SPEECHCOMMANDS=_FakeSpeechCommands))
+
+    real_import_module = tv_mod.import_module  # pyright: ignore[reportPrivateImportUsage]
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "torchaudio":
+            return fake_torchaudio
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(tv_mod, "import_module", fake_import)
+    ds = tv_mod.load_speech_commands(
+        {
+            "name": "speech commands",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "audio",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
+    assert ds.native_train is not None
+    assert ds.native_test is not None
+    train = cast("_FakeSpeechCommands", ds.native_train)
+    assert train.subset == "training"
+
+
+def testload_wikitext2_success(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    """A working torchtext yields native train/test WikiText2 iterables (materialized)."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+
+    def fake_wikitext2(*, root: str, split: str) -> Iterator[str]:
+        return iter([f"{split}-line-1", f"{split}-line-2"])
+
+    fake_torchtext_datasets = SimpleNamespace(WikiText2=fake_wikitext2)
+
+    real_import_module = tv_mod.import_module  # pyright: ignore[reportPrivateImportUsage]
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "torchtext.datasets":
+            return fake_torchtext_datasets
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(tv_mod, "import_module", fake_import)
+    ds = tv_mod.load_wikitext2(
+        {
+            "name": "wikitext-2",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "text",
+            "num_classes": 0,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
+    assert ds.native_train is not None
+    assert ds.native_test is not None
+    train = cast("list[str]", ds.native_train)
+    assert train == ["train-line-1", "train-line-2"]
+
+
+def test_download_verified_file_skips_empty_chunks(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """Empty keep-alive chunks from iter_content are skipped, not written."""
+    payload = b"real-bytes"
+
+    class _FakeResp:
+        def raise_for_status(self) -> None:
+            pass
+
+        def iter_content(self, chunk_size: int = 1) -> Iterator[bytes]:
+            # An empty chunk (keep-alive) must be skipped before real content.
+            yield b""
+            yield payload
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+    def fake_get(_url: str, **_kwargs: object) -> _FakeResp:
+        return _FakeResp()
+
+    monkeypatch.setattr(tv_mod.requests, "get", fake_get)  # pyright: ignore[reportPrivateImportUsage]
+    expected = hashlib.sha256(payload).hexdigest()
+    dest = tmp_path / "out.bin"
+    tv_mod.download_verified_file("https://x/y", dest, expected)
+    assert dest.read_bytes() == payload

@@ -266,13 +266,17 @@ class PytorchDatasetMixin(DatasetMixinBase):
 
         if split == "test":
             # IMDB sequences are variable-length object arrays — pad them
-            if np.asarray(x_test, dtype=object).dtype == object:
+            if np.asarray(x_test).dtype == object:
+                # Ragged (variable-length) sequences arrive as object arrays; pad them.
+                # Rectangular numeric arrays keep their natural dtype and are left as-is.
                 x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = tensor(np.asarray(y_test), dtype=torch_float32).unsqueeze(1)
             ds = TensorDataset(x_t, y_t)
         else:
-            if np.asarray(x_train, dtype=object).dtype == object:
+            if np.asarray(x_train).dtype == object:
+                # Ragged (variable-length) sequences arrive as object arrays; pad them.
+                # Rectangular numeric arrays keep their natural dtype and are left as-is.
                 x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
             n_val = int(len(x_train) * val_ratio)
             if split == "val":

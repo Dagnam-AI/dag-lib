@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.data.loaders._system_fakes import (
     fallback_resolve,
 )
@@ -108,3 +110,65 @@ def test_resolve_system_dataset_tf_loads(monkeypatch: PytestMonkeyPatch, tmp_pat
     )
     assert out.native_train_tf == "TFDS:train"
     assert out.native_test_tf == "TFDS:test"
+
+
+def testresolve_tfds_name_non_string_returns_none() -> None:
+    # A non-string ``name`` field can't be resolved to a tfds name.
+    assert resolve_tfds_name({"name": 123}) is None
+
+
+def test_load_supervised_split_uses_positional_fallback(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """Older tfds whose load() rejects keyword args triggers the positional retry."""
+    from dagnam.data.loaders.system import tensorflow_datasets as tfds_mod
+
+    monkeypatch.setattr(tfds_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+
+    def fake_load(name: str, *args: object, **kwargs: object) -> str:
+        if kwargs:
+            raise TypeError("load() got an unexpected keyword argument 'as_supervised'")
+        # Positional call: (name, split, True, cache)
+        split = args[0]
+        return f"POS:{split}"
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", SimpleNamespace(load=fake_load))
+    out = resolve_system_dataset_tf(
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
+    assert out.native_train_tf == "POS:train"
+    assert out.native_test_tf == "POS:test"
+
+
+def test_load_supervised_split_reraises_unrelated_type_error(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """A TypeError unrelated to keyword args is propagated, not swallowed."""
+    from dagnam.data.loaders.system import tensorflow_datasets as tfds_mod
+
+    monkeypatch.setattr(tfds_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+
+    def fake_load(_name: str, *_args: object, **_kwargs: object) -> str:
+        raise TypeError("some other failure")
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", SimpleNamespace(load=fake_load))
+    with pytest.raises(TypeError, match="some other failure"):
+        resolve_system_dataset_tf(
+            {
+                "name": "mnist",
+                "id": "1",
+                "format": "native",
+                "dataset_type": "image",
+                "num_classes": 2,
+                "class_names": [],
+                "num_samples": 2,
+            }
+        )

@@ -8,10 +8,13 @@ import os
 from pathlib import Path
 import platform
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dagnam.cli.common import error, mask_key, resolve_version
 from dagnam.cli.presentation import Column, emit_result, render_table
+
+if TYPE_CHECKING:
+    from dagnam.cli.common import SubParsersAction
 
 _MUTABLE_CONFIG_KEYS = {"training_metrics_path"}
 
@@ -223,3 +226,68 @@ def cmd_usage(args: argparse.Namespace) -> None:
         json_stdout=args.json,
         render_human=_render_usage,
     )
+
+
+def register_account(subparsers: SubParsersAction) -> None:
+    """Register the ``version``, ``whoami``, ``usage``, ``logout``, and ``config`` commands."""
+    version_cmd = subparsers.add_parser(
+        "version",
+        help="Show version and environment info.",
+        description="Print the dagnam version, Python version, and platform.",
+    )
+    version_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    version_cmd.set_defaults(func=cmd_version)
+
+    whoami = subparsers.add_parser(
+        "whoami",
+        help="Show the current authenticated identity.",
+        description="Show the resolved API URL, masked API key, and its source.",
+    )
+    whoami.set_defaults(func=cmd_whoami)
+
+    usage = subparsers.add_parser(
+        "usage",
+        help="Show plan, usage, and remaining limits.",
+        description="Show your plan and real-time usage against plan limits.",
+    )
+    usage.add_argument("--json", action="store_true", help="Print the full entitlement snapshot.")
+    usage.add_argument("--output", help="Write the full entitlement snapshot to this path.")
+    usage.set_defaults(func=cmd_usage)
+
+    logout = subparsers.add_parser(
+        "logout",
+        help="Remove stored credentials.",
+        description="Remove the stored API key from ~/.dagnam/config.json.",
+    )
+    logout.set_defaults(func=cmd_logout)
+
+    config_cmd = subparsers.add_parser(
+        "config",
+        help="Inspect and update saved configuration.",
+        description="Read and update supported values in ~/.dagnam/config.json.",
+    )
+    config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
+    config_list = config_sub.add_parser(
+        "list", help="Print all config values.", description="Print config (api_key masked)."
+    )
+    config_list.set_defaults(func=cmd_config_list)
+    config_get = config_sub.add_parser(
+        "get", help="Print one config value.", description="Print a single config value."
+    )
+    config_get.add_argument("key", help="Config key to read, e.g. api_url.")
+    config_get.set_defaults(func=cmd_config_get)
+    config_set = config_sub.add_parser(
+        "set",
+        help="Set a config value.",
+        description="Set a supported config value such as training_metrics_path.",
+    )
+    config_set.add_argument("key", help="Config key to set, e.g. training_metrics_path.")
+    config_set.add_argument("value", help="Value to save.")
+    config_set.set_defaults(func=cmd_config_set)
+    config_unset = config_sub.add_parser(
+        "unset",
+        help="Unset a config value.",
+        description="Unset a supported config value such as training_metrics_path.",
+    )
+    config_unset.add_argument("key", help="Config key to unset, e.g. training_metrics_path.")
+    config_unset.set_defaults(func=cmd_config_unset)

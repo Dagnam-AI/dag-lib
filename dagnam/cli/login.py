@@ -9,9 +9,13 @@ import json
 import os
 from pathlib import Path
 import sys
+from typing import TYPE_CHECKING
 
 from dagnam._types import JsonObject, ensure_json_object
 from dagnam.cli.common import error, format_ascii_art
+
+if TYPE_CHECKING:
+    from dagnam.cli.common import SubParsersAction
 
 DEFAULT_TRAINING_METRICS_PATH = (
     Path.home() / ".dagnam" / "training-metrics" / "dagnam_metrics.jsonl"
@@ -149,3 +153,22 @@ def cmd_login(
         except OSError:
             pass
     print(f"Credentials saved to {_cfg.CONFIG_FILE}")
+
+
+def _login(args: argparse.Namespace) -> None:
+    cmd_login(args, getpass.getpass)
+
+
+def register_login(subparsers: SubParsersAction) -> None:
+    """Register the ``login`` command on the top-level subparsers."""
+    login = subparsers.add_parser(
+        "login",
+        help="Authenticate and store an API key.",
+        description="Log in to Dagnam.AI and save credentials to ~/.dagnam/config.json.",
+    )
+    login.add_argument("--api-url", help="API base URL (default: https://api.dagnam.ai).")
+    login.add_argument(
+        "--training-metrics-path",
+        help="Persist the local generated-training metrics JSONL path.",
+    )
+    login.set_defaults(func=_login)

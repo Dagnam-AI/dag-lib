@@ -121,6 +121,36 @@ async def test_async_upload_dataset_from_url(
     assert result == {"task_id": "t1"}
 
 
+async def test_async_upload_dataset_minimal(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    fp = tmp_path / "x.csv"
+    fp.write_text("a,b\n1,2")
+    mock.post("/api/v1/datasets/upload").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
+    result = await client.upload_dataset(
+        fp,
+        name="x",
+        dataset_type="tabular",
+        format="csv",
+    )
+    assert result == {"id": "ds1"}
+
+
+async def test_async_upload_dataset_from_url_minimal(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/datasets/upload-url").mock(
+        return_value=httpx.Response(200, json={"task_id": "t1"})
+    )
+    result = await client.upload_dataset_from_url(
+        "https://x/data.csv",
+        name="n",
+        dataset_type="t",
+        format="csv",
+    )
+    assert result == {"task_id": "t1"}
+
+
 async def test_async_get_dataset_task_status(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:

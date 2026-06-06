@@ -187,3 +187,28 @@ def test_dataset_download_apierror_exits(
     with mock.patch("dagnam.load_dataset", side_effect=APIError(500, "boom")):
         with pytest.raises(SystemExit):
             run_cli(["dataset", "download", "ds-1"])
+
+
+def test_dataset_info_writes_output_file(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    output = tmp_path / "ds.json"
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.get_dataset_meta",
+        return_value={"id": "ds-1", "name": "Iris"},
+    ):
+        run_cli(["dataset", "info", "ds-1", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8"))["id"] == "ds-1"
+
+
+def test_dataset_info_json_mode(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.get_dataset_meta",
+        return_value={"id": "ds-1", "name": "Iris"},
+    ):
+        run_cli(["dataset", "info", "ds-1", "--json"])
+    assert json.loads(capsys.readouterr().out) == {"id": "ds-1", "name": "Iris"}

@@ -275,6 +275,32 @@ def test_download_dataset_full(client: DagnamClient, rmock: RequestsMocker, tmp_
     assert out.read_bytes() == b"abc"
 
 
+def test_download_dataset_full_removes_stale_derived_part(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    # No filename arg → derived from Content-Disposition. A stale .part with the
+    # derived name must be unlinked before the fresh full download (line 228).
+    stale = tmp_path / "ds.bin.part"
+    stale.write_bytes(b"stale")
+    rmock.get(
+        f"{API}/api/v1/datasets/ds1/download",
+        content=b"fresh",
+        headers={"Content-Disposition": 'attachment; filename="ds.bin"'},
+    )
+    out = client.download_dataset("ds1", tmp_path)
+    assert out.read_bytes() == b"fresh"
+
+
+def test_download_dataset_resume_disabled_without_partial(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    # resume=False with a filename but no pre-existing .part exercises the
+    # false leg of the cleanup guard (branch 185->187).
+    rmock.get(f"{API}/api/v1/datasets/ds1/download", content=b"fresh")
+    out = client.download_dataset("ds1", tmp_path, filename="ds.bin", resume=False)
+    assert out.read_bytes() == b"fresh"
+
+
 def test_download_dataset_resume_206(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:

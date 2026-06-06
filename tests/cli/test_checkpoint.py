@@ -94,3 +94,46 @@ def test_checkpoint_download_apierror_exits(run_cli: CliRunner) -> None:
     with mock.patch("dagnam.download_checkpoint", side_effect=APIError(500, "boom")):
         with pytest.raises(SystemExit):
             run_cli(["checkpoint", "download", "job-1"])
+
+
+def test_checkpoint_download_best_with_output_dir(run_cli: CliRunner, tmp_path: Path) -> None:
+    with mock.patch("dagnam.download_checkpoint", return_value=tmp_path / "best.pt") as download:
+        run_cli(["checkpoint", "download", "job-1", "best", "--output-dir", str(tmp_path)])
+    download.assert_called_once_with("job-1", None, cache_dir=tmp_path, prefer_best=True)
+
+
+def test_checkpoint_download_specific_id(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.download_checkpoint", return_value="/p") as download:
+        run_cli(["checkpoint", "download", "job-1", "ck-9"])
+    download.assert_called_once_with("job-1", "ck-9")
+
+
+def test_checkpoint_list_ignores_non_dict_items(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.list_checkpoints",
+        return_value=["not-a-dict", {"id": "ck-1", "epoch": 1, "step": 2, "file_size": 1024}],
+    ):
+        run_cli(["checkpoint", "list", "job-1"])
+    assert "ck-1" in capsys.readouterr().out
+
+
+def test_checkpoint_list_handles_bool_and_missing_file_size(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A bool or non-numeric ``file_size`` falls back to the 0-byte default."""
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.list_checkpoints",
+        return_value=[
+            {"id": "ck-bool", "epoch": 1, "step": 1, "file_size": True},
+            {"id": "ck-str", "epoch": 1, "step": 2, "file_size": "not-a-number"},
+            {"id": "ck-missing", "epoch": 1, "step": 3},
+        ],
+    ):
+        run_cli(["checkpoint", "list", "job-1"])
+    out = capsys.readouterr().out
+    assert "ck-bool" in out
+    assert "0.0 B" in out

@@ -139,3 +139,17 @@ def test_inference_health_apierror_exits(run_cli: CliRunner) -> None:
     with mock.patch("dagnam.deployments", deployments):
         with pytest.raises(SystemExit):
             run_cli(["inference", "health", "dep-1"])
+
+
+def test_inference_run_writes_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "out.json"
+    with mock.patch("dagnam.inference", return_value={"label": "ok"}):
+        run_cli(["inference", "run", "dep-1", "--input", '{"x":1}', "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8")) == {"label": "ok"}
+
+
+def test_inference_batch_writes_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "out.json"
+    with mock.patch("dagnam.inference_batch", return_value=[{"y": 1}]):
+        run_cli(["inference", "batch", "dep-1", "--inputs", "[1]", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8")) == [{"y": 1}]

@@ -173,3 +173,73 @@ def test_safe_extract_tar_rejects_special_member(tmp_path: Path) -> None:
         out.mkdir()
         with pytest.raises(ValueError, match="Unsafe archive member type"):
             _safe_extract_tar(tf, out)
+
+
+# ---------------------------------------------------------------- safe extract directory members
+
+
+def test_safe_extract_zip_creates_directory_members(tmp_path: Path) -> None:
+    """Explicit directory entries are created and skipped (no file copy)."""
+    archive_path = tmp_path / "dirs.zip"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("sub/", "")  # explicit directory entry
+        zf.writestr("sub/file.txt", "hi")
+    out = tmp_path / "out"
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        _safe_extract_zip(zf, out)
+    assert (out / "sub").is_dir()
+    assert (out / "sub" / "file.txt").read_text() == "hi"
+
+
+def test_safe_extract_tar_creates_directory_members(tmp_path: Path) -> None:
+    """Tar directory members are created and skipped before file members."""
+    archive_path = tmp_path / "dirs.tar"
+    with tarfile.open(archive_path, "w") as tf:
+        dir_info = tarfile.TarInfo(name="sub")
+        dir_info.type = tarfile.DIRTYPE
+        tf.addfile(dir_info)
+        data = b"hello"
+        file_info = tarfile.TarInfo(name="sub/file.txt")
+        file_info.size = len(data)
+        tf.addfile(file_info, io.BytesIO(data))
+    out = tmp_path / "out"
+    out.mkdir()
+    with tarfile.open(archive_path, "r") as tf:
+        _safe_extract_tar(tf, out)
+    assert (out / "sub").is_dir()
+    assert (out / "sub" / "file.txt").read_text() == "hello"
+
+
+def test_safe_extract_tar_raises_when_extractfile_returns_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A file member that yields no stream from extractfile is rejected."""
+    archive_path = tmp_path / "data.tar"
+    with tarfile.open(archive_path, "w") as tf:
+        data = b"content"
+        info = tarfile.TarInfo(name="file.txt")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+
+    out = tmp_path / "out"
+    out.mkdir()
+    with tarfile.open(archive_path, "r") as tf:
+        monkeypatch.setattr(tf, "extractfile", lambda _member: None)
+        with pytest.raises(ValueError, match="Unable to extract archive member"):
+            _safe_extract_tar(tf, out)
+
+
+def test_safe_extract_zip_rejects_symlink_member(tmp_path: Path) -> None:
+    """A zip entry whose external_attr marks it a symlink is rejected."""
+    import stat
+
+    archive_path = tmp_path / "link.zip"
+    info = zipfile.ZipInfo("link")
+    # Encode the symlink file-type bits in the high 16 bits of external_attr.
+    info.external_attr = stat.S_IFLNK << 16
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr(info, "/etc/passwd")
+    out = tmp_path / "out"
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        with pytest.raises(ValueError, match="Unsafe archive member link"):
+            _safe_extract_zip(zf, out)

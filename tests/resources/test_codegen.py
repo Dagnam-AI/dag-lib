@@ -47,6 +47,12 @@ class TestGenerate:
             "p1", framework="tensorflow", version_id="v2", async_mode=False
         )
 
+    def test_async_missing_string_task_id_raises(self) -> None:
+        # async_mode response without a string task_id is rejected before the LRO.
+        c = _client(generate_code=MagicMock(return_value={"status": "pending"}))
+        with pytest.raises(ValueError, match="did not include a string task_id"):
+            codegen.generate("p1", async_mode=True, client=c)
+
 
 class TestPreview:
     def test_preview_delegates(self) -> None:
@@ -82,6 +88,19 @@ class TestDownload:
             "p1", framework="pytorch", version_id=None, dest_path=dest, show_progress=True
         )
         assert result == dest
+
+    def test_download_with_dest_rejects_non_path(self, tmp_path: Path) -> None:
+        # dest given but the client returned bytes instead of a path → TypeError.
+        dest = tmp_path / "out.zip"
+        c = _client(download_code=MagicMock(return_value=b"code"))
+        with pytest.raises(TypeError, match="Expected generated code download path"):
+            codegen.download("p1", dest=dest, client=c)
+
+    def test_download_without_dest_rejects_non_bytes(self, tmp_path: Path) -> None:
+        # no dest but the client returned a path instead of bytes → TypeError.
+        c = _client(download_code=MagicMock(return_value=tmp_path / "x.zip"))
+        with pytest.raises(TypeError, match="Expected generated code bytes"):
+            codegen.download("p1", client=c)
 
 
 class TestStatus:

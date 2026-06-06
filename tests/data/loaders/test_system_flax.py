@@ -206,3 +206,127 @@ def test_resolve_system_dataset_flax_fallback_for_misc_type(
         }
     )
     assert ds.native_train_flax is not None
+
+
+def test_resolve_system_dataset_flax_full_batch_flush(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """Exactly batch_size (128) samples flush a full batch and leave no remainder.
+
+    Covers the mid-loop ``len(xs) == batch_size`` flush plus the post-loop
+    ``if xs:`` False arm (no trailing partial batch).
+    """
+    from dagnam.data.loaders.system import flax as flax_mod
+
+    monkeypatch.setattr(flax_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    pytest.importorskip("jax")
+
+    samples: list[tuple[object, int]] = [
+        (np.zeros((4, 4, 1), dtype=np.uint8), i % 2) for i in range(128)
+    ]
+    fake_tfds = SimpleNamespace(load=FakeTfdsLoader(samples), as_numpy=as_numpy)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
+    ds = resolve_system_dataset_flax(
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 128,
+        }
+    )
+    assert ds.native_train_flax is not None
+    # 128 samples at batch_size 128 → exactly one batch, no remainder.
+    assert len(ds.native_train_flax) == 1
+
+
+def test_resolve_system_dataset_flax_rejects_non_int_label(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """A label without integer semantics raises during accumulation."""
+    from dagnam.data.loaders.system import flax as flax_mod
+
+    monkeypatch.setattr(flax_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    pytest.importorskip("jax")
+
+    samples = [(np.zeros((4, 4, 1), dtype=np.uint8), None)]
+    fake_tfds = SimpleNamespace(load=FakeTfdsLoader(samples), as_numpy=as_numpy)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
+    with pytest.raises(TypeError, match="integer-compatible tfds labels"):
+        resolve_system_dataset_flax(
+            {
+                "name": "mnist",
+                "id": "1",
+                "format": "native",
+                "dataset_type": "image",
+                "num_classes": 2,
+                "class_names": [],
+                "num_samples": 1,
+            }
+        )
+
+
+def test_resolve_system_dataset_flax_text_batch_rejects_non_text_item(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """A text batch (first item bytes) with a later non-text item is rejected."""
+    from dagnam.data.loaders.system import flax as flax_mod
+
+    monkeypatch.setattr(flax_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    pytest.importorskip("jax")
+
+    # First sample is bytes → text branch; second is an int → triggers the
+    # "Expected bytes or strings" guard inside the text encoder.
+    samples: list[tuple[object, int]] = [(b"hello", 0), (12345, 1)]
+    fake_tfds = SimpleNamespace(load=FakeTfdsLoader(samples), as_numpy=as_numpy)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
+    with pytest.raises(TypeError, match="Expected bytes or strings"):
+        resolve_system_dataset_flax(
+            {
+                "name": "imdb",
+                "id": "1",
+                "format": "native",
+                "dataset_type": "text",
+                "num_classes": 2,
+                "class_names": [],
+                "num_samples": 2,
+            }
+        )
+
+
+def test_resolve_system_dataset_flax_reraises_unrelated_type_error(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """A TypeError from tfds.load unrelated to keyword args propagates."""
+    from dagnam.data.loaders.system import flax as flax_mod
+
+    monkeypatch.setattr(flax_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    pytest.importorskip("jax")
+
+    def boom_load(*_args: object, **_kwargs: object) -> object:
+        raise TypeError("unrelated load failure")
+
+    fake_tfds = SimpleNamespace(load=boom_load, as_numpy=as_numpy)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
+    with pytest.raises(TypeError, match="unrelated load failure"):
+        resolve_system_dataset_flax(
+            {
+                "name": "mnist",
+                "id": "1",
+                "format": "native",
+                "dataset_type": "image",
+                "num_classes": 2,
+                "class_names": [],
+                "num_samples": 1,
+            }
+        )

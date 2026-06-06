@@ -69,3 +69,36 @@ async def test_async_get_deployment_404(client: AsyncDagnamClient, mock: RespxMo
     mock.get("/api/v1/deployments/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         await client.get_deployment("missing")
+
+
+async def test_async_deployments_text_response(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/deployments").mock(
+        return_value=httpx.Response(200, text="plain", headers={"Content-Type": "text/plain"})
+    )
+    with pytest.raises(TypeError):
+        await client.list_deployments()
+
+
+async def test_async_get_deployment_logs_minimal(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/deployments/dep1/logs").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    await client.get_deployment_logs("dep1")
+    url = str(route.calls[0].request.url)
+    assert "level" not in url
+    assert "search" not in url
+    assert "start_time" not in url
+    assert "end_time" not in url
+
+
+async def test_async_delete_deployment_returns_object(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.delete("/api/v1/deployments/dep1").mock(
+        return_value=httpx.Response(200, json={"deleted": True})
+    )
+    assert await client.delete_deployment("dep1") == {"deleted": True}

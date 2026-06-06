@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
 import shutil
 import sys
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    # argparse exposes no public type for the object returned by
+    # ``ArgumentParser.add_subparsers()``; ``_SubParsersAction`` is the canonical
+    # (underscore-prefixed) type. Alias it once here so every command module
+    # shares a single clean annotation instead of repeating the private reference.
+    type SubParsersAction = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
 
 # dos rebel font: <https://patorjk.com/software/taag/#p=display&f=DOS+Rebel&t=DAGNAM.AI&x=none&v=4&h=3&w=80&we=false>
 DAGNAM_ASCII_ART = r"""
@@ -51,6 +59,21 @@ def format_ascii_art(columns: int | None = None) -> str:
     """
     width = columns if columns is not None else _terminal_width()
     return "\n".join(line[:width].rstrip() for line in DAGNAM_ASCII_ART.strip("\n").splitlines())
+
+
+def add_collection_output_args(command: argparse.ArgumentParser) -> None:
+    """Add the shared ``--json``/``--verbose``/``--output`` options to a command."""
+    command.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full JSON response instead of the concise table.",
+    )
+    command.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Compatibility alias for --json.",
+    )
+    command.add_argument("--output", help="Save the full JSON response to this path.")
 
 
 def human_size(nbytes: int | float) -> str:

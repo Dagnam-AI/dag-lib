@@ -36,6 +36,18 @@ async def test_async_generate_code_default(
     assert "async_mode=true" in str(route.calls[0].request.url)
 
 
+async def test_async_generate_code_default_minimal(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/projects/p1/generate-code").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    await client.generate_code("p1")
+    body = route.calls[0].request.read()
+    assert b"version_id" not in body
+    assert b"options" not in body
+
+
 async def test_async_generate_code_explicit_payload(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
@@ -101,3 +113,10 @@ async def test_async_codegen_empty_response(
 ) -> None:
     mock.get("/api/v1/projects/p1/code-preview").mock(return_value=httpx.Response(204))
     assert await client.preview_code("p1", "pytorch") is None
+
+
+async def test_async_get_code_status(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.get("/api/v1/projects/p1/code-status/t1").mock(
+        return_value=httpx.Response(200, json={"status": "done"})
+    )
+    assert await client.get_code_status("p1", "t1") == {"status": "done"}

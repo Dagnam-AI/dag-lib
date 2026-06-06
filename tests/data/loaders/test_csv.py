@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import polars as pl
+import pytest
 from tests.typing_helpers import PytestMonkeyPatch
 from torch.utils.data import DataLoader
 from typing_extensions import override
@@ -20,6 +21,7 @@ from dagnam.data.loaders.csv import (
     create_pytorch_loader,
     detect_label_column,
     encode_labels,
+    split_by_roles,
 )
 
 
@@ -156,6 +158,87 @@ class TestDetectLabelColumn:
         }
         assert detect_label_column(df, schema) == "b"
 
+    def test_skips_non_dict_column_entries(self) -> None:
+        # A non-dict entry in the columns list is ignored; detection continues
+        # to the first valid categorical column.
+        df = pl.DataFrame({"a": [1], "b": ["x"]})
+        schema: JsonObject = {
+            "columns": [
+                "not-a-dict",
+                {"name": "b", "type": "categorical"},
+            ]
+        }
+        assert detect_label_column(df, schema) == "b"
+
+    def test_column_roles_target_takes_priority(self) -> None:
+        df = pl.DataFrame({"a": [1], "b": ["x"], "c": [2]})
+        assert detect_label_column(df, None, column_roles={"a": "target"}) == "a"
+
+    def test_column_roles_label_role_recognized(self) -> None:
+        df = pl.DataFrame({"a": [1], "b": ["x"]})
+        assert detect_label_column(df, None, column_roles={"b": "label"}) == "b"
+
+    def test_column_roles_target_not_in_dataframe_is_skipped(self) -> None:
+        # Role matches target/label but the column is absent from the DataFrame
+        # (branch 194->193): the loop continues and the priority-1 path does not
+        # return, falling through to the schema/fallback logic (branch 193->197).
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        schema: JsonObject = {
+            "columns": [
+                {"name": "a", "type": "categorical"},
+            ]
+        }
+        assert detect_label_column(df, schema, column_roles={"missing": "target"}) == "a"
+
+    def test_column_roles_non_target_role_skipped(self) -> None:
+        # Role present in df but not target/label (branch 194->193 false leg via
+        # role mismatch), then exhausts the loop (193->197) to the fallback.
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        assert detect_label_column(df, None, column_roles={"a": "feature"}) == "b"
+
+    def test_schema_columns_not_a_list_falls_back(self) -> None:
+        # feature_schema has "columns" but it is not a list (branch 199->210):
+        # detection skips straight to the last-column fallback.
+        df = pl.DataFrame({"a": [1], "b": [2], "c": [3]})
+        schema: JsonObject = {"columns": "not-a-list"}
+        assert detect_label_column(df, schema) == "c"
+
+    def test_categorical_column_with_non_str_name_skipped(self) -> None:
+        # A categorical column whose "name" is not a str (branch 206->200):
+        # the loop continues to the next valid categorical column.
+        df = pl.DataFrame({"a": [1], "b": ["x"]})
+        schema: JsonObject = {
+            "columns": [
+                {"name": 123, "type": "categorical"},
+                {"name": "b", "type": "categorical"},
+            ]
+        }
+        assert detect_label_column(df, schema) == "b"
+
+
+# ------------------------------------------------------------------
+# split_by_roles
+# ------------------------------------------------------------------
+
+
+class TestSplitByRoles:
+    def test_target_then_feature_continues_loop(self) -> None:
+        # A target column followed by a feature column exercises the
+        # elif-then-continue leg (branch 165->160) and the feature append.
+        df = pl.DataFrame({"y": ["a"], "x1": [1], "x2": [2]})
+        label_col, feature_cols = split_by_roles(
+            df, {"y": "target", "x1": "feature", "x2": "ignore"}
+        )
+        assert label_col == "y"
+        assert feature_cols == ["x1"]
+
+    def test_raises_when_no_target_role(self) -> None:
+        # No column carries a target role, so split_by_roles raises (line 170,
+        # branch 169->170).
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        with pytest.raises(ValueError, match="does not specify object target column"):
+            split_by_roles(df, {"a": "feature", "b": "feature"})
+
 
 # ------------------------------------------------------------------
 # _encode_labels
@@ -202,6 +285,25 @@ class TestCreatePytorchLoader:
         assert loader.batch_size == 16
         # drop_last=True for train
         assert loader.drop_last is True
+
+    def test_column_roles_path(self, tmp_path: Path) -> None:
+        # Passing column_roles routes through split_by_roles instead of the
+        # heuristic detector (line 85).
+        ds = _make_csv_dataset(tmp_path, class_names=["cat", "dog"])
+        loader = create_pytorch_loader(
+            ds,
+            split="train",
+            batch_size=8,
+            num_workers=0,
+            shuffle=False,
+            val_ratio=0.1,
+            test_ratio=0.1,
+            seed=42,
+            column_roles={"feat1": "feature", "feat2": "feature", "label": "target"},
+        )
+        # feat1 + feat2 are the feature columns.
+        batch_feats, _labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
+        assert batch_feats.shape[1] == 2
 
     def test_val_loader_no_drop_last(self, tmp_path: Path) -> None:
         ds = _make_csv_dataset(tmp_path, class_names=["cat", "dog"])

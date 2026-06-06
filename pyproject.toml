@@ -130,6 +130,37 @@ source = ["dagnam"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+# Hard gate: the suite must keep dagnam at 100% statement AND branch coverage
+# (branch = true in [tool.coverage.run] folds branch coverage into the total %
+# that fail_under checks). Any regression fails `uv run poe check`. Genuinely
+# non-coverable lines are documented in info/superpowers/ledgers/dag-lib-exclusions.md
+# and excluded via exclude_also / `# pragma: no cover` / `# pragma: no branch`.
+fail_under = 100
+# Exclude only genuinely non-coverable lines (not whole files). These are
+# boilerplate that can never execute in a normal test run, so counting them
+# understates real coverage:
+#   - TYPE_CHECKING-only import blocks (never run at runtime)
+#   - abstract / Protocol method bodies (`raise NotImplementedError`, `...`)
+#   - optional-dependency import guards (torch/tf/jax are installed, so the
+#     `except ImportError: raise ImportError(...)` arms can't fire)
+#   - script entry points
+# Real but currently-untested logic (hub/projects facade delegations, the
+# local-run streaming uploader, native dataset-conversion branches) is left
+# visible on purpose — that is a test gap, not non-coverable code.
+exclude_also = [
+    "if\\s+TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.\\s*$",
+    "if\\s+__name__\\s*==\\s*[\"']__main__[\"']:",
+    "except\\s+ImportError(\\s+as\\s+\\w+)?:",
+    # Defensive response-shape re-narrowing repeated across every client method.
+    # The canonical narrowing logic lives in (and is tested via) the
+    # `ensure_json_*` validators in `dagnam/_types.py`; these per-call-site
+    # `raise TypeError("Expected JSON ...")` guards only fire when the backend
+    # violates its own contract and would each need a contrived wrong-type wire
+    # mock to hit. Excluded as boilerplate, not as a real test gap.
+    "raise TypeError\\(f?\"Expected JSON",
+]
 
 [tool.pyright]
 include = ["dagnam", "tests"]
@@ -165,6 +196,12 @@ reportMissingTypeArgument = "none"
 [[tool.pyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = "none"
+# Test modules import shared first-party helpers (`tests.typing_helpers`,
+# `tests.data.loaders._*`) for annotations. `tests` is a namespace package with
+# no `py.typed`, so pyright flags each such import as a missing stub. These are
+# our own source files, not third-party libraries; scoping the rule off for the
+# tests root removes the noise without weakening production type checking.
+reportMissingTypeStubs = "none"
 
 [tool.ruff]
 line-length = 100
@@ -315,7 +352,7 @@ lint = { cmd = "ruff check", help = "Lint with ruff" }
 format-check = { cmd = "ruff format --check", help = "Verify formatting" }
 typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
 lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
-test = { cmd = "pytest tests -q", help = "Run the test suite" }
+test = { cmd = "pytest tests -q --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite with branch coverage (fails under 100%)" }
 check = { sequence = [
     "lint",
     "format-check",

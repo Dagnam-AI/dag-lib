@@ -6,9 +6,13 @@ import argparse
 import json
 from pathlib import Path
 import shutil
+from typing import TYPE_CHECKING
 
-from dagnam.cli.common import dir_size, human_size
+from dagnam.cli.common import add_collection_output_args, dir_size, human_size
 from dagnam.cli.presentation import Column, emit_result, render_table
+
+if TYPE_CHECKING:
+    from dagnam.cli.common import SubParsersAction
 
 
 def _render_cache(entries: object) -> str:
@@ -88,3 +92,28 @@ def cmd_cache_clear(args: argparse.Namespace) -> None:
 
     shutil.rmtree(target)
     print(f"Cleared {label}. Freed {human_size(total)}.")
+
+
+def register_cache(subparsers: SubParsersAction) -> None:
+    """Register the ``cache`` command group on the top-level subparsers."""
+    cache = subparsers.add_parser(
+        "cache",
+        help="Inspect and clear the local dataset cache.",
+        description="Manage the on-disk dataset cache.",
+    )
+    cache_sub = cache.add_subparsers(dest="cache_command", required=True)
+    cache_list = cache_sub.add_parser(
+        "list", help="List cached datasets.", description="List datasets in the local cache."
+    )
+    add_collection_output_args(cache_list)
+    cache_list.set_defaults(func=cmd_cache_list)
+    cache_clear = cache_sub.add_parser(
+        "clear",
+        help="Delete the local cache immediately.",
+        description="Permanently remove cached datasets immediately unless --dry-run is used.",
+    )
+    cache_clear.add_argument("--dataset-id", help="Clear only one cached dataset ID.")
+    cache_clear.add_argument(
+        "--dry-run", action="store_true", help="Show what would be deleted without deleting it."
+    )
+    cache_clear.set_defaults(func=cmd_cache_clear)
