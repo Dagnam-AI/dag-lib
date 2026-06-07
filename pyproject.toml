@@ -103,7 +103,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dagnam"]
-include = ["dagnam/py.typed"]
+include = [
+    "dagnam/py.typed",
+    # Ship the Agent Skill payload + harness adapters as package data so
+    # `dagnam agent install` can locate them via importlib.resources.
+    "dagnam/_agent/skill/**",
+    "dagnam/_agent/claude/**",
+    "dagnam/_agent/codex/**",
+]
 force-include = { "NOTICE" = "dagnam/NOTICE" }
 
 [tool.hatch.build.targets.sdist]
@@ -303,6 +310,12 @@ ignore = [
 # would be pure noise; the public API is the module-level loader functions.
 "dagnam/data/loaders/**" = ["D102"]
 "dagnam/cli/**/*" = ["T20"]
+# The agent-integration runner and guard hook print to stdout by design: they
+# back the skill's ``scripts/*.py`` shims and the PreToolUse hook protocol, both
+# of which communicate via stdout. The script shims are equally print-by-design.
+"dagnam/_agent/runner.py" = ["T20"]
+"dagnam/_agent/guardhook.py" = ["T20"]
+"dagnam/_agent/skill/scripts/**" = ["T20"]
 "dagnam/__init__.py" = ["F401"]
 "dagnam/_core/__init__.py" = ["F401"]
 "dagnam/aio.py" = ["F401"]

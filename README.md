@@ -338,9 +338,61 @@ dagnam deployments list
 dagnam hub search --search resnet
 dagnam projects list
 dagnam codegen preview <project-id>
+
+dagnam agent install          # install the Agent Skill into Claude Code / Codex
+dagnam agent uninstall --all
 ```
 
 Run `dagnam --help` or `dagnam <command> --help` for command-specific options.
+
+## Agent Integration (Claude Code & Codex)
+
+The `dagnam` package ships an **Agent Skill** that teaches AI coding agents — both
+**Claude Code** and **Codex** — to drive the full platform (datasets → projects →
+codegen → training → deployments → inference → hub) through this CLI and SDK. It is
+distributed *with* the pip package and activated per harness with one command:
+
+```bash
+dagnam agent install
+```
+
+By default this **auto-detects** the agent harnesses you have installed (Claude Code
+via `~/.claude`, Codex via `~/.codex` / `~/.agents`), shows exactly what it will write,
+and asks before proceeding. Flags for explicit / non-interactive (CI) installs:
+
+| Flag | Effect |
+| --- | --- |
+| `--claude` / `--codex` | Target a specific harness (skip auto-detect). |
+| `--all` | Install to every detected harness. |
+| `--yes` | Skip the confirmation prompt. |
+| `--symlink` | Symlink the skill instead of copying (falls back to copy if symlinks are unavailable). |
+
+It is idempotent and reversible — re-running updates in place, and
+`dagnam agent uninstall` removes what it wrote.
+
+**What gets installed**
+
+- The **skill** (`SKILL.md` + on-demand `reference/*.md` + helper `scripts/`) into the
+  harness's auto-discovered skills directory (`~/.claude/skills/dagnam`,
+  `~/.agents/skills/dagnam`). Versions are stamped to match the installed SDK, so the
+  skill never drifts from the CLI/SDK it documents.
+- **Claude Code:** a plugin under `~/.claude/plugins/dagnam` providing the
+  `dagnam-runner` subagent (drives long train→watch→deploy loops in an isolated
+  context) and a `PreToolUse` guard hook.
+- **Codex:** skill metadata (`openai.yaml`) plus an idempotent merge of the guard hook
+  into `~/.codex/hooks.json` (existing hooks are preserved).
+
+**Dry-run / preview-by-default guardrail.** Read, build, generate, and preview actions
+run freely. Anything that **spends money, is irreversible, or is public** — creating a
+training job or deployment, deleting a project/job/deployment, or publishing to the hub
+— is gated: the agent must show an execution plan and get your explicit confirmation
+first. This is enforced behaviorally by the skill and hardened by a cross-platform
+`PreToolUse` deny hook (`python -m dagnam._agent.guardhook`), which is **fail-open** so
+it can never wedge the agent.
+
+**Second door (Claude plugin marketplace).** The repository also exposes a
+`.claude-plugin/marketplace.json`, so Claude Code users can `/plugin install` the
+`dagnam-runner` subagent and guard hook directly from the repo.
 
 ## Configuration
 

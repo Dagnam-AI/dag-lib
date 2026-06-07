@@ -1,0 +1,11 @@
+{
+  "name": "dagnam",
+  "owner": "Dagnam.AI",
+  "plugins": [
+    {
+      "name": "dagnam",
+      "source": "./dagnam/_agent/claude",
+      "description": "Drive the Dagnam platform from Claude Code: the dagnam-runner subagent + a costly-action guard hook. Pairs with the `dagnam` skill (installed via `dagnam agent install` or shipped with the dagnam pip package)."
+    }
+  ]
+}

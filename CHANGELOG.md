@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Cross-platform **Agent Skill** for AI coding agents (Claude Code and Codex),
+  shipped as package data and activated with `dagnam agent install`
+  (auto-detect & prompt; `--claude` / `--codex` / `--all` / `--yes` / `--symlink`
+  for explicit and CI installs; `dagnam agent uninstall` to remove). It installs a
+  single write-once skill (`SKILL.md` + on-demand domain `reference/*.md` + helper
+  `scripts/`) into each harness's auto-discovered skills directory, plus per-harness
+  adapters: a Claude plugin with the `dagnam-runner` subagent and a `PreToolUse`
+  guard hook, and a Codex `openai.yaml` + idempotent guard-hook merge into
+  `~/.codex/hooks.json`. Skill/adapter versions are stamped to the installed SDK.
+- **Dry-run / preview-by-default guardrail** for costly, irreversible, or public
+  actions (training-job and deployment creation, deletes, hub publish): a behavioral
+  gate in the skill plus a fail-open cross-platform `PreToolUse` deny hook
+  (`python -m dagnam._agent.guardhook`).
+- Claude plugin marketplace listing (`.claude-plugin/marketplace.json`) as an
+  alternate `/plugin install` door.
+
 ### Changed
 
 - Internal: the quality gates are now clean at zero — `ruff` reports no errors

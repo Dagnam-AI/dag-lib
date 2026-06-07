@@ -1,0 +1,8 @@
+{
+  "name": "dagnam",
+  "version": "0.0.0",
+  "description": "Drive the Dagnam platform (datasets, projects, codegen, training, deployments, inference, hub) from Claude Code. Pairs with the `dagnam` skill installed at ~/.claude/skills/dagnam.",
+  "author": "Dagnam.AI",
+  "agents": ["./agents/dagnam-runner.md"],
+  "hooks": "./hooks/guard.json"
+}

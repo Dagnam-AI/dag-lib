@@ -1,0 +1,4 @@
+name: dagnam
+version: 0.0.0
+description: Drive the Dagnam platform from Codex (datasets, projects, codegen, training, deployments, inference, hub).
+allow_implicit_invocation: true

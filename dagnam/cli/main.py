@@ -14,6 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     function wires them onto a single shared subparsers action in display order.
     """
     from dagnam.cli.account import register_account
+    from dagnam.cli.agent import register_agent
     from dagnam.cli.cache import register_cache
     from dagnam.cli.checkpoint import register_checkpoint
     from dagnam.cli.codegen import register_codegen
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_checkpoint(subparsers)
     register_training(subparsers)
     register_account(subparsers)
+    register_agent(subparsers)
 
     return parser
 
