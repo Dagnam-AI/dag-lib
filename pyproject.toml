@@ -7,7 +7,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.13"
 authors = [
-    { name = "Angad Sandhu", email = "angad@dagnam.ai" },
+    { name = "Dagnam.AI", email = "dagnam@dagnam.ai" },
 ]
 maintainers = [
     { name = "Dagnam.AI", email = "sdk@dagnam.ai" },
@@ -92,6 +92,7 @@ dev = [
     "pyright>=1.1.380",
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "requests-mock>=1.12",
     "respx>=0.20",
     "ruff",
@@ -365,7 +366,10 @@ lint = { cmd = "ruff check", help = "Lint with ruff" }
 format-check = { cmd = "ruff format --check", help = "Verify formatting" }
 typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
 lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
-test = { cmd = "pytest tests -q --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite with branch coverage (fails under 100%)" }
+test = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
+test-cov = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
+audit = { cmd = "pip-audit", help = "Audit Python dependencies for known vulnerabilities" }
+build = { cmd = "uv build", help = "Build the source distribution and wheel" }
 check = { sequence = [
     "lint",
     "format-check",
@@ -373,6 +377,7 @@ check = { sequence = [
     "lint-imports",
     "test",
 ], help = "Run every quality gate (lint, format, types, import layering, tests)" }
+release-check = { sequence = ["check", "audit", "build"], help = "Run quality gates, dependency audit, and package build" }
 
 # Layer-first import contract for the SDK. The package keeps its layer-first
 # layout by design (see

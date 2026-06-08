@@ -60,13 +60,11 @@ The printed path should be inside `D:/Code/dagnam-ai/dag-lib/dagnam/...`.
 
 ### Start the backend
 
-The backend dev server runs at `http://localhost:8000`
-(`mvp-backend/Makefile:60-61` → `uvicorn src.api.main:app --reload --port 8000`).
+The backend dev server runs at `http://localhost:8000`.
 
 ```powershell
 cd D:/Code/dagnam-ai/mvp-backend
-make dev
-# or directly: uv run uvicorn src.api.main:app --reload --port 8000
+uv run poe dev
 ```
 
 ### Tell `dagnam` where the backend lives

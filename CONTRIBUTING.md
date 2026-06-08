@@ -26,11 +26,34 @@ uv run poe lint          # ruff check
 uv run poe format-check  # ruff format --check
 uv run poe typecheck     # pyright (strict)
 uv run poe lint-imports  # layer-first import contract
-uv run poe test          # pytest
-uv run --with pip-audit pip-audit
+uv run poe test          # parallel pytest + terminal coverage
+uv run poe test-cov      # parallel pytest + terminal, HTML, JSON, and XML coverage reports
+uv run poe audit         # dependency vulnerability audit
+uv run poe build         # source distribution and wheel
 ```
 
 Run `uv run poe check` before pushing.
+
+The `test` and `test-cov` tasks use four pytest-xdist workers with
+`--dist=loadfile`. Tests from one file stay together and run sequentially while
+independent files run in parallel.
+
+## Coverage Reports
+
+Generate the complete statement and branch coverage report with:
+
+```bash
+uv run poe test-cov
+```
+
+The command enforces the configured 100% coverage gate and writes:
+
+- Terminal report with missing lines
+- `htmlcov/index.html` for the browsable report
+- `coverage.json` for machine-readable detail
+- `coverage.xml` for CI and coverage services
+
+These generated files are ignored by Git.
 
 ## Architecture
 

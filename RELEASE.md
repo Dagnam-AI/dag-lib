@@ -11,18 +11,14 @@ This document is for maintainers publishing `dagnam` to PyPI.
 
    ```bash
    uv sync
-   uv run pytest tests/ -v
-   uv run ruff check
-   uv run ruff format --check
-   uv run --with "pyright>=1.1.380" pyright
-   uv run --with pip-audit pip-audit
+   uv run poe release-check
    ```
 
 4. Build and inspect the distribution:
 
    ```bash
    Remove-Item -Recurse -Force dist
-   uv build
+   uv run poe build
    python -m twine check dist/*
    ```
 

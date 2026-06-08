@@ -434,17 +434,14 @@ the package is alpha, but patch releases should avoid breaking documented
 cd dag-lib
 uv sync
 
-uv run pytest tests/ -v
-uv run ruff check
-uv run ruff format --check
-uv run --with "pyright>=1.1.380" pyright
-uv run --with pip-audit pip-audit
+uv run poe check
+uv run poe audit
 ```
 
 Build the package locally:
 
 ```bash
-uv build
+uv run poe build
 python -m twine check dist/*
 ```
 
