@@ -16,6 +16,8 @@ from dagnam.data.loaders.media import (
     _validate_archive_size,
     discover_class_folders,
     ensure_extracted,
+    resolve_split_dir,
+    select_split_indices,
     split_indices,
 )
 
@@ -243,3 +245,45 @@ def test_safe_extract_zip_rejects_symlink_member(tmp_path: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as zf:
         with pytest.raises(ValueError, match="Unsafe archive member link"):
             _safe_extract_zip(zf, out)
+
+
+# ---------------------------------------------------------------- resolve_split_dir
+
+
+def test_resolve_split_dir_direct_match(tmp_path: Path) -> None:
+    assert resolve_split_dir(tmp_path, "train", ["train", "val"]) == tmp_path / "train"
+
+
+def test_resolve_split_dir_aliases(tmp_path: Path) -> None:
+    assert resolve_split_dir(tmp_path, "val", ["train", "validation"]) == tmp_path / "validation"
+    assert resolve_split_dir(tmp_path, "validation", ["train", "val"]) == tmp_path / "val"
+    assert resolve_split_dir(tmp_path, "test", ["train", "dev"]) == tmp_path / "dev"
+
+
+def test_resolve_split_dir_fallback_to_train(tmp_path: Path) -> None:
+    assert resolve_split_dir(tmp_path, "val", ["train"]) == tmp_path / "train"
+
+
+def test_resolve_split_dir_raises_when_no_match(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="No directory found"):
+        resolve_split_dir(tmp_path, "val", ["other"])
+
+
+# ---------------------------------------------------------------- select_split_indices
+
+
+def test_select_split_indices_partitions_disjointly() -> None:
+    train = select_split_indices(100, "train", val_ratio=0.1, test_ratio=0.1, seed=42)
+    val = select_split_indices(100, "val", val_ratio=0.1, test_ratio=0.1, seed=42)
+    test = select_split_indices(100, "test", val_ratio=0.1, test_ratio=0.1, seed=42)
+    assert len(train) == 80
+    assert len(val) == 10
+    assert len(test) == 10
+    assert set(train) | set(val) | set(test) == set(range(100))
+    assert not (set(train) & set(val))
+    assert not (set(val) & set(test))
+
+
+def test_select_split_indices_deterministic_by_seed() -> None:
+    assert select_split_indices(50, "train", seed=7) == select_split_indices(50, "train", seed=7)
+    assert select_split_indices(50, "train", seed=7) != select_split_indices(50, "train", seed=8)

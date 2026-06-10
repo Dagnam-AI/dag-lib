@@ -7,7 +7,6 @@ import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, SupportsInt, cast
 
-import pytest
 from tests.data.loaders._audio_helpers import (
     LabelTensor,
     build_audio_folder,
@@ -164,15 +163,3 @@ def testcollect_audio_files(tmp_path: Path) -> None:
     files, _labels, classes = collect_audio_files(tmp_path)
     assert ".hidden" not in classes
     assert len(files) == 4  # 2 per class
-
-
-def testresolve_audio_split_dir_in_dataset(tmp_path: Path) -> None:
-    from dagnam.data.loaders.audio.dataset import resolve_audio_split_dir
-
-    assert resolve_audio_split_dir(tmp_path, "train", ["train"]) == tmp_path / "train"
-    assert resolve_audio_split_dir(tmp_path, "val", ["validation"]) == tmp_path / "validation"
-    assert resolve_audio_split_dir(tmp_path, "test", ["dev"]) == tmp_path / "dev"
-    assert resolve_audio_split_dir(tmp_path, "val", ["train"]) == tmp_path / "train"
-
-    with pytest.raises(FileNotFoundError):
-        resolve_audio_split_dir(tmp_path, "val", ["other"])

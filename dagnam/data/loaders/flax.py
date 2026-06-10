@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import random
 from typing import TYPE_CHECKING, NamedTuple, cast
 
@@ -11,6 +11,7 @@ import numpy.typing as npt
 
 from dagnam.data._polars_utils import factorize, numeric_columns
 from dagnam.data.loaders.csv import detect_label_column
+from dagnam.data.loaders.media import select_split_indices
 
 if TYPE_CHECKING:
     import jax
@@ -28,6 +29,52 @@ class FlaxBatch(NamedTuple):
 FeatureTransform = Callable[[npt.ArrayLike, object], npt.ArrayLike | tuple[npt.ArrayLike, object]]
 BatchTransform = Callable[[FlaxBatch], FlaxBatch]
 JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
+
+PairBatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
+
+
+def build_flax_batches[SampleT](
+    samples: Sequence[SampleT],
+    batch_size: int,
+    load_sample: Callable[[SampleT], tuple[npt.NDArray[np.float32], int]],
+    *,
+    shuffle: bool = False,
+    seed: int = 42,
+    batch_transform_fn: PairBatchTransform | None = None,
+) -> list[FlaxBatch]:
+    """Batch ``(feature_array, label)`` samples into a list of ``FlaxBatch``.
+
+    Shared by the image-folder and audio-folder Flax loaders. ``load_sample``
+    materializes one sample to ``(feature_ndarray, label_int)``; any per-sample
+    transform belongs inside that closure. Optional seeded shuffle and a
+    ``(features, labels) -> (features, labels)`` batch transform mirror the
+    behavior the per-loader loops previously implemented inline.
+    """
+    import jax.numpy as jnp
+
+    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
+    ordered = list(samples)
+    if shuffle:
+        random.Random(seed).shuffle(ordered)
+
+    batches: list[FlaxBatch] = []
+    for start in range(0, len(ordered), batch_size):
+        chunk = ordered[start : start + batch_size]
+        features: list[npt.NDArray[np.float32]] = []
+        labels: list[int] = []
+        for sample in chunk:
+            feature, label = load_sample(sample)
+            features.append(feature)
+            labels.append(label)
+        x = as_jax_array(np.stack(features))
+        y = as_jax_array(np.array(labels, dtype=np.int64))
+        batch = FlaxBatch(features=x, labels=y)
+        if batch_transform_fn is not None:
+            feat, lbl = batch_transform_fn(batch.features, batch.labels)
+            batch = FlaxBatch(features=feat, labels=lbl)
+        batches.append(batch)
+
+    return batches
 
 
 def create_flax_dataset(
@@ -69,20 +116,13 @@ def create_flax_dataset(
     features = df.select(numeric_cols).to_numpy().astype(np.float32)
 
     # Deterministic split
-    n = df.height
-    n_test = int(n * test_ratio)
-    n_val = int(n * val_ratio)
-    n_train = n - n_val - n_test
-
-    indices = list(range(n))
-    random.Random(seed).shuffle(indices)
-
-    split_map = {
-        "train": indices[:n_train],
-        "val": indices[n_train : n_train + n_val],
-        "test": indices[n_train + n_val :],
-    }
-    split_indices = split_map[split]
+    split_indices = select_split_indices(
+        df.height,
+        split,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+    )
 
     if shuffle:
         random.Random(seed + 1).shuffle(split_indices)

@@ -501,6 +501,17 @@ def test_core_init_handles_missing_aio(monkeypatch: PytestMonkeyPatch) -> None:
             sys.modules.pop(k, None)
     sys.modules.update(snapshot)
 
+    # `importlib.import_module("dagnam._core")` also rebinds the `_core`
+    # attribute on the top-level `dagnam` package to the throwaway module.
+    # Restoring the sys.modules entry is not enough: pytest's string-path
+    # resolver reads `getattr(dagnam, "_core")`, so a later
+    # `monkeypatch.setattr("dagnam._core.<sub>.X", ...)` would resolve against
+    # the throwaway (which lacks the lazily-imported submodules like config /
+    # metrics_uploader) and raise
+    # `AttributeError: module 'dagnam._core' has no attribute '<sub>'`. Point
+    # the parent attribute back at the canonical, fully-populated module.
+    sys.modules["dagnam"].__dict__["_core"] = snapshot["dagnam._core"]
+
 
 # ---------------------------------------------------------------- _freeze
 

@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import numpy.typing as npt
 
 from dagnam._types import SupportsNumpy, TensorflowDataset
-from dagnam.data.loaders.audio.dataset import (
-    AudioFolderDataset,
-    collect_audio_files,
-    resolve_audio_split_dir,
-)
+from dagnam.data.loaders.audio.dataset import AudioFolderDataset, collect_audio_files
 from dagnam.data.loaders.audio.io import collect_audio_samples, load_waveform_py
-from dagnam.data.loaders.media import discover_class_folders, ensure_extracted, split_indices
+from dagnam.data.loaders.media import (
+    discover_class_folders,
+    ensure_extracted,
+    resolve_split_dir,
+    select_split_indices,
+)
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
@@ -30,7 +32,6 @@ WaveformArray = npt.NDArray[np.float32]
 SampleTransform = Callable[[object], object]
 TensorflowMapTransform = Callable[[object, object], object]
 WaveformTransform = Callable[[npt.ArrayLike], npt.ArrayLike]
-JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
 BatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
 
 
@@ -184,7 +185,7 @@ def create_pytorch_loader(
 
     # Build the dataset
     if layout.has_explicit_splits:
-        split_dir = resolve_audio_split_dir(data_root, split, layout.splits)
+        split_dir = resolve_split_dir(data_root, split, layout.splits)
         files, labels, _class_names = collect_audio_files(split_dir)
     else:
         files, labels, _class_names = collect_audio_files(data_root)
@@ -203,13 +204,14 @@ def create_pytorch_loader(
     # Apply deterministic split if unsplit
     if not layout.has_explicit_splits:
         n = len(dataset)
-        train_idx, val_idx, test_idx = split_indices(
-            n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+        indices = select_split_indices(
+            n,
+            split,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
         )
-        split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        dataset = cast(
-            "Dataset[object]", Subset(cast("Dataset[object]", dataset), split_map[split])
-        )
+        dataset = cast("Dataset[object]", Subset(cast("Dataset[object]", dataset), indices))
 
     loader = DataLoader(
         cast("Dataset[object]", dataset),
@@ -296,11 +298,7 @@ def create_flax_dataset(
     audio benchmarks; for large corpora use ``to_tensorflow_dataset`` + a
     per-batch ``jnp.asarray`` in the training loop.
     """
-    import jax.numpy as jnp
-
-    from dagnam.data.loaders.flax import FlaxBatch
-
-    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
+    from dagnam.data.loaders.flax import build_flax_batches
 
     if shuffle is None:
         shuffle = split == "train"
@@ -308,28 +306,18 @@ def create_flax_dataset(
     samples, _classes = collect_audio_samples(dagnam_ds, split, val_ratio, test_ratio, seed)
     target_len = int(max_duration_sec * sample_rate)
 
-    if shuffle:
-        import random as _random
+    def _load_sample(sample: tuple[Path, int]) -> tuple[WaveformArray, int]:
+        path, label = sample
+        waveform = load_waveform_py(str(path), sample_rate, target_len)
+        if transform_fn is not None:
+            waveform = cast("WaveformArray", transform_fn(waveform))
+        return waveform.astype(np.float32), label
 
-        _random.Random(seed).shuffle(samples)
-
-    batches: list[FlaxBatch] = []
-    for start in range(0, len(samples), batch_size):
-        chunk = samples[start : start + batch_size]
-        waves: list[WaveformArray] = []
-        labels: list[int] = []
-        for path, label in chunk:
-            w: WaveformArray = load_waveform_py(str(path), sample_rate, target_len)
-            if transform_fn is not None:
-                w = cast("WaveformArray", transform_fn(w))
-            waves.append(w)
-            labels.append(label)
-        x = as_jax_array(np.stack(waves).astype(np.float32))
-        y = as_jax_array(np.array(labels, dtype=np.int64))
-        batch = FlaxBatch(features=x, labels=y)
-        if batch_transform_fn is not None:
-            feat, lbl = batch_transform_fn(batch.features, batch.labels)
-            batch = FlaxBatch(features=feat, labels=lbl)
-        batches.append(batch)
-
-    return batches
+    return build_flax_batches(
+        samples,
+        batch_size,
+        _load_sample,
+        shuffle=shuffle,
+        seed=seed,
+        batch_transform_fn=batch_transform_fn,
+    )

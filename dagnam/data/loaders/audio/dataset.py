@@ -190,26 +190,3 @@ def collect_audio_files(
                 labels.append(idx)
 
     return file_paths, labels, class_names
-
-
-def resolve_audio_split_dir(root: Path, split: str, available_splits: list[str]) -> Path:
-    """Resolve the actual directory for a requested split name."""
-    if split in available_splits:
-        return root / split
-
-    aliases = {
-        "val": ["validation", "dev"],
-        "validation": ["val"],
-        "test": ["dev"],
-    }
-
-    for alias in aliases.get(split, []):
-        if alias in available_splits:
-            return root / alias
-
-    if "train" in available_splits:
-        return root / "train"
-
-    raise FileNotFoundError(
-        f"No directory found for split '{split}' in {root}. Available splits: {available_splits}"
-    )

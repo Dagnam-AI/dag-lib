@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from importlib import import_module
-import random
 from typing import TYPE_CHECKING, Protocol, cast
 
 from dagnam._types import JsonObject
 from dagnam.data._polars_utils import factorize, numeric_columns
+from dagnam.data.loaders.media import select_split_indices
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
@@ -96,20 +96,13 @@ def create_pytorch_loader(
     features = torch.tensor(df.select(numeric_cols).to_numpy(), dtype=torch.float32)
 
     # ---- deterministic split ----
-    n = df.height
-    n_test = int(n * test_ratio)
-    n_val = int(n * val_ratio)
-    n_train = n - n_val - n_test
-
-    indices = list(range(n))
-    random.Random(seed).shuffle(indices)
-
-    split_map = {
-        "train": indices[:n_train],
-        "val": indices[n_train : n_train + n_val],
-        "test": indices[n_train + n_val :],
-    }
-    split_indices = split_map[split]
+    split_indices = select_split_indices(
+        df.height,
+        split,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+    )
 
     # ---- build dataset & loader ----
     ds = _TabularDataset(features[split_indices], labels[split_indices])

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from importlib import import_module
-import random
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -12,6 +11,7 @@ import numpy as np
 from dagnam._types import TensorflowDataset, TensorflowModule
 from dagnam.data._polars_utils import factorize, numeric_columns
 from dagnam.data.loaders.csv import detect_label_column
+from dagnam.data.loaders.media import select_split_indices
 
 if TYPE_CHECKING:
     from dagnam.data.dataset._typing import DatasetMixinBase
@@ -53,20 +53,13 @@ def create_tensorflow_dataset(
     features = df.select(numeric_cols).to_numpy().astype(np.float32)
 
     # Deterministic split (same logic as csv_loader)
-    n = df.height
-    n_test = int(n * test_ratio)
-    n_val = int(n * val_ratio)
-    n_train = n - n_val - n_test
-
-    indices = list(range(n))
-    random.Random(seed).shuffle(indices)
-
-    split_map = {
-        "train": indices[:n_train],
-        "val": indices[n_train : n_train + n_val],
-        "test": indices[n_train + n_val :],
-    }
-    split_indices = split_map[split]
+    split_indices = select_split_indices(
+        df.height,
+        split,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+    )
 
     split_features = features[split_indices]
     split_labels = labels[split_indices]

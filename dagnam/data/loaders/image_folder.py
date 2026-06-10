@@ -19,7 +19,8 @@ from dagnam._types import TensorflowDataset
 from dagnam.data.loaders.media import (
     discover_class_folders,
     ensure_extracted,
-    split_indices,
+    resolve_split_dir,
+    select_split_indices,
 )
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
@@ -34,7 +35,6 @@ ImageArray = npt.NDArray[np.float32]
 TransformFn = Callable[[object], object]
 CollateFn = Callable[[object], object]
 ImageTransform = Callable[[ImageArray], ImageArray]
-JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
 BatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
 
 
@@ -189,7 +189,7 @@ def create_pytorch_loader(
     if layout.has_explicit_splits:
         # Use explicit split directories
         # Normalize split name: 'val' -> check for 'val' or 'validation'
-        split_dir = _resolve_split_dir(data_root, split, layout.splits)
+        split_dir = resolve_split_dir(data_root, split, layout.splits)
         dataset: object = cast(
             "Dataset[object]",
             datasets.ImageFolder(
@@ -208,12 +208,14 @@ def create_pytorch_loader(
                 target_transform=target_transform,
             ),
         )
-        n = len(cast("Sized", base_dataset))
-        train_idx, val_idx, test_idx = split_indices(
-            n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+        keep = select_split_indices(
+            len(cast("Sized", base_dataset)),
+            split,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
         )
-        split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        dataset = cast("Dataset[object]", Subset(base_dataset, split_map[split]))
+        dataset = cast("Dataset[object]", Subset(base_dataset, keep))
 
     loader = DataLoader(
         dataset,
@@ -225,40 +227,6 @@ def create_pytorch_loader(
         collate_fn=collate_fn,
     )
     return loader
-
-
-def _resolve_split_dir(root: Path, split: str, available_splits: list[str]) -> Path:
-    """Resolve the actual directory for a requested split name.
-
-    Handles aliases like 'val' -> 'validation' and vice versa.
-    """
-    # Direct match
-    if split in available_splits:
-        return root / split
-
-    # Alias mapping
-    aliases = {
-        "val": ["validation", "dev"],
-        "validation": ["val"],
-        "test": ["dev"],
-    }
-
-    for alias in aliases.get(split, []):
-        if alias in available_splits:
-            return root / alias
-
-    # Fallback: if requesting val/test but only train exists, return train
-    # (the caller will get a subset of train data)
-    if "train" in available_splits:
-        return root / "train"
-
-    raise FileNotFoundError(
-        f"No directory found for split '{split}' in {root}. Available splits: {available_splits}"
-    )
-
-
-def resolve_split_dir(root: Path, split: str, available_splits: list[str]) -> Path:
-    return _resolve_split_dir(root, split, available_splits)
 
 
 def create_tensorflow_dataset(
@@ -296,7 +264,7 @@ def create_tensorflow_dataset(
     layout = discover_class_folders(data_root)
 
     if layout.has_explicit_splits:
-        split_dir = _resolve_split_dir(data_root, split, layout.splits)
+        split_dir = resolve_split_dir(data_root, split, layout.splits)
         ds: TensorflowDataset = tf.keras.utils.image_dataset_from_directory(
             str(split_dir),
             labels="inferred",
@@ -326,11 +294,15 @@ def create_tensorflow_dataset(
         if n == tf_data.experimental.UNKNOWN_CARDINALITY or n < 0:
             # Fall back to Python iteration for count
             n = sum(1 for _ in full)
-        train_idx, val_idx, test_idx = split_indices(
-            int(n), val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+        keep_indices = set(
+            select_split_indices(
+                int(n),
+                split,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+            )
         )
-        split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        keep_indices = set(split_map[split])
         keep_mask = [i in keep_indices for i in range(int(n))]
         keep_tensor = tf.constant(keep_mask, dtype=tf.bool)
 
@@ -374,9 +346,6 @@ def create_flax_dataset(
     image datasets prefer ``to_tensorflow_dataset`` (streamed) and convert
     to JAX per batch in the training loop instead.
     """
-    import jax.numpy as jnp
-
-    as_jax_array = cast("JaxArrayFactory", jnp.asarray)
     try:
         from PIL import Image
     except ImportError:
@@ -385,7 +354,7 @@ def create_flax_dataset(
             "Install with: pip install dagnam[flax] Pillow"
         )
 
-    from dagnam.data.loaders.flax import FlaxBatch
+    from dagnam.data.loaders.flax import build_flax_batches
 
     if shuffle is None:
         shuffle = split == "train"
@@ -394,43 +363,37 @@ def create_flax_dataset(
     layout = discover_class_folders(data_root)
 
     if layout.has_explicit_splits:
-        split_dir = _resolve_split_dir(data_root, split, layout.splits)
+        split_dir = resolve_split_dir(data_root, split, layout.splits)
         samples, _classes = _gather_image_samples(split_dir)
     else:
         samples, _classes = _gather_image_samples(data_root)
-        train_idx, val_idx, test_idx = split_indices(
-            len(samples), val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
-        )
-        split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        samples = [samples[i] for i in split_map[split]]
+        samples = [
+            samples[i]
+            for i in select_split_indices(
+                len(samples),
+                split,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                seed=seed,
+            )
+        ]
 
-    if shuffle:
-        import random as _random
+    def _load_sample(sample: tuple[Path, int]) -> tuple[ImageArray, int]:
+        path, label = sample
+        img = Image.open(path).convert("RGB").resize(image_size)
+        arr = cast("ImageArray", np.asarray(img, dtype=np.float32) / 255.0)
+        if transform_fn is not None:
+            arr = transform_fn(arr)
+        return arr, label
 
-        rng = _random.Random(seed)
-        rng.shuffle(samples)
-
-    batches: list[FlaxBatch] = []
-    for start in range(0, len(samples), batch_size):
-        chunk = samples[start : start + batch_size]
-        images: list[ImageArray] = []
-        labels: list[int] = []
-        for path, label in chunk:
-            img = Image.open(path).convert("RGB").resize(image_size)
-            arr = cast("ImageArray", np.asarray(img, dtype=np.float32) / 255.0)
-            if transform_fn is not None:
-                arr = transform_fn(arr)
-            images.append(arr)
-            labels.append(label)
-        x = as_jax_array(np.stack(images))
-        y = as_jax_array(np.array(labels, dtype=np.int64))
-        batch = FlaxBatch(features=x, labels=y)
-        if batch_transform_fn is not None:
-            feat, lbl = batch_transform_fn(batch.features, batch.labels)
-            batch = FlaxBatch(features=feat, labels=lbl)
-        batches.append(batch)
-
-    return batches
+    return build_flax_batches(
+        samples,
+        batch_size,
+        _load_sample,
+        shuffle=shuffle,
+        seed=seed,
+        batch_transform_fn=batch_transform_fn,
+    )
 
 
 def _gather_image_samples(root: Path) -> tuple[list[tuple[Path, int]], list[str]]:
@@ -447,7 +410,3 @@ def _gather_image_samples(root: Path) -> tuple[list[tuple[Path, int]], list[str]
             if p.is_file() and p.suffix.lower() in extensions:
                 samples.append((p, class_to_idx[cls]))
     return samples, classes
-
-
-def gather_image_samples(root: Path) -> tuple[list[tuple[Path, int]], list[str]]:
-    return _gather_image_samples(root)

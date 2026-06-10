@@ -14,7 +14,8 @@ from dagnam.data.loaders.media import (
     AUDIO_EXTENSIONS,
     discover_class_folders,
     ensure_extracted,
-    split_indices,
+    resolve_split_dir,
+    select_split_indices,
 )
 
 if TYPE_CHECKING:
@@ -56,15 +57,18 @@ def collect_audio_samples(
     layout = discover_class_folders(data_root)
 
     if layout.has_explicit_splits:
-        split_dir = resolve_audio_split_dir(data_root, split, layout.splits)
+        split_dir = resolve_split_dir(data_root, split, layout.splits)
         samples, classes = _enumerate_audio_samples(split_dir)
     else:
         samples, classes = _enumerate_audio_samples(data_root)
-        train_idx, val_idx, test_idx = split_indices(
-            len(samples), val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+        indices = select_split_indices(
+            len(samples),
+            split,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
         )
-        split_map = {"train": train_idx, "val": val_idx, "test": test_idx}
-        samples = [samples[i] for i in split_map[split]]
+        samples = [samples[i] for i in indices]
     return samples, classes
 
 
@@ -77,18 +81,6 @@ def _enumerate_audio_samples(root: Path) -> tuple[list[tuple[Path, int]], list[s
             if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
                 samples.append((p, class_to_idx[cls]))
     return samples, classes
-
-
-def resolve_audio_split_dir(root: Path, split: str, available: list[str]) -> Path:
-    if split in available:
-        return root / split
-    aliases = {"val": ["validation", "dev"], "validation": ["val"], "test": ["dev"]}
-    for a in aliases.get(split, []):
-        if a in available:
-            return root / a
-    if "train" in available:
-        return root / "train"
-    raise FileNotFoundError(f"No directory for split '{split}' in {root}")
 
 
 def load_waveform_py(path: str, target_sr: int, target_len: int) -> WaveformArray:

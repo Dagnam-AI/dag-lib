@@ -253,33 +253,3 @@ def testcollect_audio_samples_split(tmp_path: Path) -> None:
         ds, "val", val_ratio=0.0, test_ratio=0.0, seed=0
     )
     assert len(samples) >= 1
-
-
-def testresolve_audio_split_dir_aliases(tmp_path: Path) -> None:
-    from dagnam.data.loaders.audio import io as audio_io
-
-    assert (
-        audio_io.resolve_audio_split_dir(tmp_path, "val", ["train", "validation"])
-        == tmp_path / "validation"
-    )
-    assert (
-        audio_io.resolve_audio_split_dir(tmp_path, "validation", ["train", "val"])
-        == tmp_path / "val"
-    )
-    assert audio_io.resolve_audio_split_dir(tmp_path, "test", ["dev"]) == tmp_path / "dev"
-    assert audio_io.resolve_audio_split_dir(tmp_path, "val", ["train"]) == tmp_path / "train"
-
-
-def testresolve_audio_split_dir_direct(tmp_path: Path) -> None:
-    from dagnam.data.loaders.audio import io as audio_io
-
-    assert (
-        audio_io.resolve_audio_split_dir(tmp_path, "train", ["train", "val"]) == tmp_path / "train"
-    )
-
-
-def testresolve_audio_split_dir_raises(tmp_path: Path) -> None:
-    from dagnam.data.loaders.audio import io as audio_io
-
-    with pytest.raises(FileNotFoundError, match="No directory"):
-        audio_io.resolve_audio_split_dir(tmp_path, "val", ["other"])

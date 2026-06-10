@@ -23,11 +23,10 @@ from dagnam.data.loaders.image_folder import (  # noqa: E402
     ImageArray,
     TransformFn,
     _cardinality_to_int,
+    _gather_image_samples,
     create_flax_dataset,
     create_pytorch_loader,
     create_tensorflow_dataset,
-    gather_image_samples,
-    resolve_split_dir,
 )
 
 if TYPE_CHECKING:
@@ -103,37 +102,12 @@ def _make_ds(tmp_path: Path, fmt: str = "image_folder") -> DagnamDataset:
     )
 
 
-# ---------------------------------------------------------------- _resolve_split_dir
-
-
-def test_resolve_split_dir_direct_match(tmp_path: Path) -> None:
-    assert resolve_split_dir(tmp_path, "train", ["train", "val"]) == tmp_path / "train"
-
-
-def test_resolve_split_dir_alias_validation(tmp_path: Path) -> None:
-    # 'val' falls back to 'validation'
-    assert resolve_split_dir(tmp_path, "val", ["train", "validation"]) == tmp_path / "validation"
-    # 'validation' falls back to 'val'
-    assert resolve_split_dir(tmp_path, "validation", ["train", "val"]) == tmp_path / "val"
-    # 'test' falls back to 'dev'
-    assert resolve_split_dir(tmp_path, "test", ["train", "dev"]) == tmp_path / "dev"
-
-
-def test_resolve_split_dir_fallback_to_train(tmp_path: Path) -> None:
-    assert resolve_split_dir(tmp_path, "val", ["train"]) == tmp_path / "train"
-
-
-def test_resolve_split_dir_raises_when_no_match(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="No directory found"):
-        resolve_split_dir(tmp_path, "val", ["other"])
-
-
 # ---------------------------------------------------------------- _gather_image_samples
 
 
 def test_gather_image_samples_sorted(tmp_path: Path) -> None:
     _build_unsplit_dataset(tmp_path, per_class=3)
-    samples, classes = gather_image_samples(tmp_path)
+    samples, classes = _gather_image_samples(tmp_path)
     assert classes == ["cat", "dog"]
     assert len(samples) == 6
     # All samples have valid class indices
@@ -146,7 +120,7 @@ def test_gather_image_samples_skips_hidden_classes_and_non_images(tmp_path: Path
     (tmp_path / "cat").mkdir()
     (tmp_path / "cat" / "x.jpg").write_bytes(b"x")  # not a real jpeg but matches ext
     (tmp_path / "cat" / "README.txt").write_text("noise")  # non-image
-    samples, classes = gather_image_samples(tmp_path)
+    samples, classes = _gather_image_samples(tmp_path)
     assert classes == ["cat"]
     assert len(samples) == 1
 

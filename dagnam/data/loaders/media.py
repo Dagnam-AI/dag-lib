@@ -167,6 +167,49 @@ def split_indices(
     return train, val, test
 
 
+def resolve_split_dir(root: Path, split: str, available: list[str]) -> Path:
+    """Resolve the directory for a requested split, honoring common aliases.
+
+    Direct match wins; otherwise ``val``/``validation``/``test`` fall back to
+    their aliases (``validation``/``dev``); failing that, ``train`` is used if
+    present. Raises :class:`FileNotFoundError` when nothing matches.
+    """
+    if split in available:
+        return root / split
+
+    aliases = {
+        "val": ["validation", "dev"],
+        "validation": ["val"],
+        "test": ["dev"],
+    }
+    for alias in aliases.get(split, []):
+        if alias in available:
+            return root / alias
+
+    if "train" in available:
+        return root / "train"
+
+    raise FileNotFoundError(
+        f"No directory found for split '{split}' in {root}. Available splits: {available}"
+    )
+
+
+def select_split_indices(
+    n: int,
+    split: str,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+    seed: int = 42,
+) -> list[int]:
+    """Return only the requested split's indices from a deterministic partition.
+
+    Thin selector over :func:`split_indices` so loaders never rebuild the
+    ``{"train": ..., "val": ..., "test": ...}[split]`` map by hand.
+    """
+    train, val, test = split_indices(n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed)
+    return {"train": train, "val": val, "test": test}[split]
+
+
 def ensure_extracted(data_dir: Path) -> Path:
     """Extract an archive in data_dir if one exists and return the extraction root.
 

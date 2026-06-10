@@ -216,6 +216,7 @@ __marimo__/
 # Skills
 .understand-anything/
 graphify-out/
+.graphify_uncached.txt
 
 # AI Agents
 .kiro/
