@@ -11,6 +11,7 @@ from dagnam.resources import (
     hub,
     inference,
     projects,
+    studio,
     training,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "hub",
     "inference",
     "projects",
+    "studio",
     "training",
 ]

@@ -19,7 +19,7 @@ from dagnam.data.cache import (
     save_metadata,
     touch_cache,
 )
-from dagnam.resources import account, codegen, datasets, deployments, hub, projects
+from dagnam.resources import account, codegen, datasets, deployments, hub, projects, studio
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.inference import deployment_health, inference, inference_batch
 from dagnam.resources.training import (
@@ -98,6 +98,7 @@ __all__ = [
     "save_checksum",
     "save_metadata",
     "stream_training",
+    "studio",
     "touch_cache",
     "training_logs",
     "training_metrics",
