@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+import os
 import random
 from typing import TYPE_CHECKING, NamedTuple, cast
 
@@ -57,22 +59,24 @@ def build_flax_batches[SampleT](
     if shuffle:
         random.Random(seed).shuffle(ordered)
 
+    # Decode each chunk's samples in parallel. ``executor.map`` yields results
+    # in input order, so the batch contents (and thus determinism) are identical
+    # to the previous sequential loop; only the per-sample I/O/decode overlaps.
+    max_workers = min(32, (os.cpu_count() or 1) * 4)
     batches: list[FlaxBatch] = []
-    for start in range(0, len(ordered), batch_size):
-        chunk = ordered[start : start + batch_size]
-        features: list[npt.NDArray[np.float32]] = []
-        labels: list[int] = []
-        for sample in chunk:
-            feature, label = load_sample(sample)
-            features.append(feature)
-            labels.append(label)
-        x = as_jax_array(np.stack(features))
-        y = as_jax_array(np.array(labels, dtype=np.int64))
-        batch = FlaxBatch(features=x, labels=y)
-        if batch_transform_fn is not None:
-            feat, lbl = batch_transform_fn(batch.features, batch.labels)
-            batch = FlaxBatch(features=feat, labels=lbl)
-        batches.append(batch)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for start in range(0, len(ordered), batch_size):
+            chunk = ordered[start : start + batch_size]
+            decoded = list(executor.map(load_sample, chunk))
+            features = [feature for feature, _ in decoded]
+            labels = [label for _, label in decoded]
+            x = as_jax_array(np.stack(features))
+            y = as_jax_array(np.array(labels, dtype=np.int64))
+            batch = FlaxBatch(features=x, labels=y)
+            if batch_transform_fn is not None:
+                feat, lbl = batch_transform_fn(batch.features, batch.labels)
+                batch = FlaxBatch(features=feat, labels=lbl)
+            batches.append(batch)
 
     return batches
 

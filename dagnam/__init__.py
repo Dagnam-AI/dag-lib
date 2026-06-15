@@ -49,15 +49,18 @@ __version__ = "0.5.0"
 if TYPE_CHECKING:
     # Declared for type checkers and ``__all__``; loaded lazily at runtime via
     # ``__getattr__`` (see ``_LAZY_EXPORTS``) to keep import time low.
+    from dagnam._core.aio import AsyncDagnamClient
     from dagnam.data.dataset import DagnamDataset
     from dagnam.data.load import load_dataset
 
 _LAZY_EXPORTS = {
+    "AsyncDagnamClient": ("dagnam._core.aio", "AsyncDagnamClient"),
     "DagnamDataset": ("dagnam.data.dataset", "DagnamDataset"),
     "load_dataset": ("dagnam.data.load", "load_dataset"),
 }
 
 __all__ = [
+    "AsyncDagnamClient",
     "ChecksumError",
     "DagnamClient",
     "DagnamDataset",

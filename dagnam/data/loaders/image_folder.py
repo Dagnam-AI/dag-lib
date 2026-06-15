@@ -20,6 +20,7 @@ from dagnam.data.loaders.media import (
     discover_class_folders,
     ensure_extracted,
     resolve_split_dir,
+    scan_class_samples,
     select_split_indices,
 )
 from dagnam.data.loaders.torch_utils import should_pin_memory
@@ -397,16 +398,9 @@ def create_flax_dataset(
 
 
 def _gather_image_samples(root: Path) -> tuple[list[tuple[Path, int]], list[str]]:
-    """Enumerate (image_path, class_idx) pairs sorted by class name, then filename."""
-    classes = sorted(
-        entry.name for entry in root.iterdir() if entry.is_dir() and not entry.name.startswith(".")
-    )
-    class_to_idx = {c: i for i, c in enumerate(classes)}
-    extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
-    samples: list[tuple[Path, int]] = []
-    for cls in classes:
-        cls_dir = root / cls
-        for p in sorted(cls_dir.iterdir()):
-            if p.is_file() and p.suffix.lower() in extensions:
-                samples.append((p, class_to_idx[cls]))
-    return samples, classes
+    """Enumerate (image_path, class_idx) pairs sorted by class name, then filename.
+
+    Delegates to the cached :func:`scan_class_samples` so the directory tree is
+    walked at most once per ``(root, mtime)``.
+    """
+    return scan_class_samples(root)

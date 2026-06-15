@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import random
 import shutil
@@ -134,6 +135,82 @@ def discover_class_folders(root: Path) -> FolderLayout:
     )
 
 
+def scan_class_samples(root: Path) -> tuple[list[tuple[Path, int]], list[str]]:
+    """Enumerate ``(image_path, class_idx)`` pairs and the sorted class names.
+
+    The expensive per-class file walk is cached per ``(root, signature)`` so
+    repeated loader calls over an unchanged tree do not re-walk every file. The
+    signature covers the root *and* each class subdirectory's mtime, so adding or
+    removing a file *inside* an existing class folder — which bumps that folder's
+    mtime, not the root's — invalidates the entry. Computing the signature is a
+    cheap top-level ``iterdir`` + per-class ``stat`` that never descends into the
+    files, so the cache still saves the costly inner scan.
+    """
+    samples, classes = _scan_class_samples_cached(str(root), _scan_signature(root))
+    return list(samples), list(classes)
+
+
+def _scan_signature(root: Path) -> tuple[tuple[str, int], ...]:
+    """Freshness key covering the root and every immediate class subdirectory.
+
+    A class folder's mtime — not the root's — changes when a file is added to or
+    removed from it, so each class dir's ``st_mtime_ns`` must be part of the key
+    for the scan cache to invalidate on intra-class content changes; the leading
+    root entry catches added/removed class folders. Nanosecond precision avoids
+    the whole-second blind spot of a bare ``int(st_mtime)``.
+    """
+    signature: list[tuple[str, int]] = [("", root.stat().st_mtime_ns)]
+    for entry in sorted(root.iterdir()):
+        if entry.is_dir() and not entry.name.startswith("."):
+            signature.append((entry.name, entry.stat().st_mtime_ns))
+    return tuple(signature)
+
+
+@lru_cache(maxsize=64)
+def _scan_class_samples_cached(
+    root_str: str, _signature: tuple[tuple[str, int], ...]
+) -> tuple[tuple[tuple[Path, int], ...], tuple[str, ...]]:
+    """Cached single-pass scan of a class-folder directory.
+
+    ``_signature`` participates only in the cache key (see ``_scan_signature``);
+    a change to the root or any class folder yields a new key and forces a fresh
+    scan.
+    """
+    root = Path(root_str)
+    classes = sorted(
+        entry.name for entry in root.iterdir() if entry.is_dir() and not entry.name.startswith(".")
+    )
+    class_to_idx = {name: index for index, name in enumerate(classes)}
+    samples: list[tuple[Path, int]] = []
+    for class_name in classes:
+        class_dir = root / class_name
+        for path in sorted(class_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                samples.append((path, class_to_idx[class_name]))
+    return tuple(samples), tuple(classes)
+
+
+@lru_cache(maxsize=128)
+def _shuffled_indices(n: int, seed: int) -> tuple[int, ...]:
+    """Memoize the deterministic shuffle of ``range(n)`` for a given seed.
+
+    The same ``(n, seed)`` permutation backs all three splits, so caching it
+    avoids re-shuffling once per split when loaders request train/val/test in
+    sequence.
+    """
+    indices = list(range(n))
+    random.Random(seed).shuffle(indices)
+    return tuple(indices)
+
+
+def _split_bounds(n: int, val_ratio: float, test_ratio: float) -> tuple[int, int]:
+    """Return the ``(train_end, val_end)`` boundaries of the deterministic split."""
+    n_test = int(n * test_ratio)
+    n_val = int(n * val_ratio)
+    n_train = n - n_val - n_test
+    return n_train, n_train + n_val
+
+
 def split_indices(
     n: int,
     val_ratio: float = 0.1,
@@ -153,18 +230,13 @@ def split_indices(
     Returns:
         Tuple of (train_indices, val_indices, test_indices).
     """
-    indices = list(range(n))
-    random.Random(seed).shuffle(indices)
-
-    n_test = int(n * test_ratio)
-    n_val = int(n * val_ratio)
-    n_train = n - n_val - n_test
-
-    train = indices[:n_train]
-    val = indices[n_train : n_train + n_val]
-    test = indices[n_train + n_val :]
-
-    return train, val, test
+    indices = _shuffled_indices(n, seed)
+    train_end, val_end = _split_bounds(n, val_ratio, test_ratio)
+    return (
+        list(indices[:train_end]),
+        list(indices[train_end:val_end]),
+        list(indices[val_end:]),
+    )
 
 
 def resolve_split_dir(root: Path, split: str, available: list[str]) -> Path:
@@ -203,11 +275,15 @@ def select_split_indices(
 ) -> list[int]:
     """Return only the requested split's indices from a deterministic partition.
 
-    Thin selector over :func:`split_indices` so loaders never rebuild the
-    ``{"train": ..., "val": ..., "test": ...}[split]`` map by hand.
+    Thin selector over the memoized permutation so loaders never rebuild the
+    ``{"train": ..., "val": ..., "test": ...}[split]`` map by hand and never
+    materialize the two splits they did not ask for.
     """
-    train, val, test = split_indices(n, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed)
-    return {"train": train, "val": val, "test": test}[split]
+    indices = _shuffled_indices(n, seed)
+    train_end, val_end = _split_bounds(n, val_ratio, test_ratio)
+    spans = {"train": (0, train_end), "val": (train_end, val_end), "test": (val_end, n)}
+    start, stop = spans[split]
+    return list(indices[start:stop])
 
 
 def ensure_extracted(data_dir: Path) -> Path:

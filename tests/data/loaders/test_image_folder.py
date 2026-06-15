@@ -16,6 +16,8 @@ from dagnam.data.loaders.media import (
     _safe_extract_zip,
     discover_class_folders,
     ensure_extracted,
+    scan_class_samples,
+    select_split_indices,
     split_indices,
 )
 
@@ -105,6 +107,141 @@ class TestSplitIndices:
         assert len(train) == 20
         assert len(val) == 0
         assert len(test) == 0
+
+
+class TestSelectSplitIndicesLazy:
+    """The lazy selector must match the full partition and memoize the shuffle."""
+
+    def test_matches_full_partition(self) -> None:
+        train, val, test = split_indices(1000, val_ratio=0.1, test_ratio=0.1, seed=42)
+        assert select_split_indices(1000, "train", seed=42) == train
+        assert select_split_indices(1000, "val", seed=42) == val
+        assert select_split_indices(1000, "test", seed=42) == test
+
+    def test_sizes_unchanged(self) -> None:
+        assert len(select_split_indices(1000, "train")) == 800
+        assert len(select_split_indices(1000, "val")) == 100
+        assert len(select_split_indices(1000, "test")) == 100
+
+    def test_partition_is_disjoint_and_total(self) -> None:
+        n = 777
+        parts = [select_split_indices(n, s, seed=7) for s in ("train", "val", "test")]
+        combined = sorted(i for part in parts for i in part)
+        assert combined == list(range(n))
+
+    def test_permutation_memoized(self) -> None:
+        from dagnam.data.loaders import media
+
+        media._shuffled_indices.cache_clear()
+        select_split_indices(1000, "train", seed=42)
+        select_split_indices(1000, "val", seed=42)
+        select_split_indices(1000, "test", seed=42)
+        info = media._shuffled_indices.cache_info()
+        assert info.misses == 1
+        assert info.hits == 2
+
+    def test_unknown_split_raises(self) -> None:
+        with pytest.raises(KeyError):
+            select_split_indices(10, "holdout")
+
+
+class TestScanClassSamples:
+    """The cached directory scan enumerates samples once per ``(root, mtime)``."""
+
+    def _make_tree(self, root: Path) -> None:
+        for cls in ("cat", "dog"):
+            d = root / cls
+            d.mkdir()
+            (d / "a.jpg").write_bytes(b"x")
+            (d / "b.png").write_bytes(b"y")
+            (d / "skip.txt").write_bytes(b"z")
+
+    def test_enumerates_samples_sorted_by_class_then_name(self, tmp_path: Path) -> None:
+        self._make_tree(tmp_path)
+        samples, classes = scan_class_samples(tmp_path)
+        assert classes == ["cat", "dog"]
+        names = [(p.name, idx) for p, idx in samples]
+        assert names == [
+            ("a.jpg", 0),
+            ("b.png", 0),
+            ("a.jpg", 1),
+            ("b.png", 1),
+        ]
+
+    def test_ignores_non_image_files_and_hidden_dirs(self, tmp_path: Path) -> None:
+        self._make_tree(tmp_path)
+        hidden = tmp_path / ".hidden"
+        hidden.mkdir()
+        (hidden / "x.jpg").write_bytes(b"q")
+        samples, classes = scan_class_samples(tmp_path)
+        assert classes == ["cat", "dog"]
+        assert all(p.suffix.lower() != ".txt" for p, _ in samples)
+
+    def test_repeated_scan_uses_cache(self, tmp_path: Path) -> None:
+        from dagnam.data.loaders import media
+
+        media._scan_class_samples_cached.cache_clear()
+        self._make_tree(tmp_path)
+        scan_class_samples(tmp_path)
+        scan_class_samples(tmp_path)
+        info = media._scan_class_samples_cached.cache_info()
+        assert info.misses == 1
+        assert info.hits == 1
+
+    def test_returned_lists_are_independent_copies(self, tmp_path: Path) -> None:
+        self._make_tree(tmp_path)
+        samples1, classes1 = scan_class_samples(tmp_path)
+        samples1.append((Path("nope"), 99))
+        classes1.append("ghost")
+        samples2, classes2 = scan_class_samples(tmp_path)
+        assert (Path("nope"), 99) not in samples2
+        assert "ghost" not in classes2
+
+    def test_cache_invalidates_when_file_added_to_existing_class(self, tmp_path: Path) -> None:
+        """Adding an image to an EXISTING class dir must surface on the next scan.
+
+        Regression: the cache key previously used only the root's whole-second
+        mtime. Adding a file inside an existing class folder bumps that folder's
+        mtime, not the root's, so the stale single-file list was returned. The
+        key now includes each class dir's mtime, so the entry invalidates.
+        """
+        import os
+
+        from dagnam.data.loaders import media
+
+        media._scan_class_samples_cached.cache_clear()
+        cls = tmp_path / "cat"
+        cls.mkdir()
+        (cls / "a.jpg").write_bytes(b"x")
+        samples_before, _ = scan_class_samples(tmp_path)
+        assert [p.name for p, _ in samples_before] == ["a.jpg"]
+
+        # Add a file to the existing class dir, then force its mtime forward so
+        # the assertion is independent of filesystem mtime resolution. Pre-fix
+        # (root-only key) this stayed cached and returned only "a.jpg".
+        (cls / "b.jpg").write_bytes(b"y")
+        bumped = cls.stat().st_mtime_ns + 5_000_000_000
+        os.utime(cls, ns=(bumped, bumped))
+
+        samples_after, _ = scan_class_samples(tmp_path)
+        assert sorted(p.name for p, _ in samples_after) == ["a.jpg", "b.jpg"]
+
+
+class TestGatherImageSamplesDelegates:
+    """``_gather_image_samples`` delegates to the cached ``scan_class_samples``."""
+
+    def test_delegates_to_scan_class_samples(self, tmp_path: Path) -> None:
+        from dagnam.data.loaders import image_folder
+
+        sentinel = ([(tmp_path / "z.jpg", 0)], ["z"])
+        with patch(
+            "dagnam.data.loaders.image_folder.scan_class_samples",
+            return_value=sentinel,
+        ) as mock_scan:
+            result = image_folder._gather_image_samples(tmp_path)
+
+        assert result == sentinel
+        mock_scan.assert_called_once_with(tmp_path)
 
 
 class TestFolderLayout:
