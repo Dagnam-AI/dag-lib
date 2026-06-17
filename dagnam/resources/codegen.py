@@ -10,7 +10,9 @@ task reaches ``completed`` or ``failed``.
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from typing import Optional, Union
+import zipfile
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
@@ -103,13 +105,34 @@ def download(
 ) -> Union[Path, bytes]:
     """Download generated code.
 
-    If *dest* is provided, stream to that file path and return the
-    :class:`~pathlib.Path`.  Otherwise return raw bytes.  *show_progress*
-    only applies when streaming to *dest*.
+    If *dest* is an existing directory, the generated code archive is
+    downloaded to a temporary file and extracted into *dest*, which is then
+    returned.  If *dest* is a file path, the raw archive is streamed there and
+    the :class:`~pathlib.Path` is returned.  Otherwise the raw bytes are
+    returned.  *show_progress* only applies when streaming to *dest*.
     """
     resolved = resolve_client(client, api_key, api_url)
     if dest is not None:
         dest = Path(dest)
+        if dest.is_dir():
+            # Convenience: download the archive to a temp file and extract into dest.
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                archive_path = Path(tmp.name)
+            try:
+                downloaded = resolved.download_code(
+                    project_id,
+                    framework=framework,
+                    version_id=version_id,
+                    dest_path=archive_path,
+                    show_progress=show_progress,
+                )
+                if not isinstance(downloaded, Path):
+                    raise TypeError("Expected a download path for the temporary archive")
+                with zipfile.ZipFile(downloaded) as zf:
+                    zf.extractall(dest)
+            finally:
+                archive_path.unlink(missing_ok=True)
+            return dest
         dest.parent.mkdir(parents=True, exist_ok=True)
     data = resolved.download_code(
         project_id,

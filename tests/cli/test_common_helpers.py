@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from typing import TYPE_CHECKING
 
+import pytest
+
+from dagnam.cli import common
 from dagnam.cli.common import format_ascii_art, mask_key, resolve_version
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
+    from tests.typing_helpers import PytestMonkeyPatch, StrCapture
 
 
 def test_ascii_art_stems_lines_to_available_width() -> None:
@@ -120,3 +125,66 @@ def test_ascii_art_skips_none_stream(monkeypatch: MonkeyPatch) -> None:
     art = format_ascii_art()
 
     assert art
+
+
+class TestPrintNextStep:
+    def test_writes_hint_to_stderr(self, capsys: StrCapture) -> None:
+        common.print_next_step("dagnam projects list")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Next: dagnam projects list" in captured.err
+
+
+class TestRunCommand:
+    def test_returns_zero_on_success(self) -> None:
+        args = argparse.Namespace(func=lambda _a: None, debug=False)
+        assert common.run_command(args) == 0
+
+    def test_dagnam_error_prints_clean_message(self, capsys: StrCapture) -> None:
+        from dagnam._core.exceptions import DagnamError
+
+        def boom(_a: argparse.Namespace) -> None:
+            raise DagnamError("token expired")
+
+        args = argparse.Namespace(func=boom, debug=False)
+        assert common.run_command(args) == 1
+        err = capsys.readouterr().err
+        assert "Error: token expired" in err
+        assert common.DOCS_URL in err
+        assert "Traceback" not in err
+
+    def test_unexpected_error_is_generic(self, capsys: StrCapture) -> None:
+        def boom(_a: argparse.Namespace) -> None:
+            raise ValueError("internal detail")
+
+        args = argparse.Namespace(func=boom, debug=False)
+        assert common.run_command(args) == 1
+        err = capsys.readouterr().err
+        assert "unexpected error" in err
+        assert "--debug" in err
+        assert "internal detail" not in err
+
+    def test_debug_flag_reraises(self) -> None:
+        def boom(_a: argparse.Namespace) -> None:
+            raise ValueError("internal detail")
+
+        args = argparse.Namespace(func=boom, debug=True)
+        with pytest.raises(ValueError, match="internal detail"):
+            common.run_command(args)
+
+    def test_debug_env_reraises(self, monkeypatch: PytestMonkeyPatch) -> None:
+        monkeypatch.setenv("DAGNAM_DEBUG", "1")
+
+        def boom(_a: argparse.Namespace) -> None:
+            raise ValueError("internal detail")
+
+        args = argparse.Namespace(func=boom, debug=False)
+        with pytest.raises(ValueError, match="internal detail"):
+            common.run_command(args)
+
+    def test_keyboard_interrupt_returns_130(self) -> None:
+        def boom(_a: argparse.Namespace) -> None:
+            raise KeyboardInterrupt
+
+        args = argparse.Namespace(func=boom, debug=False)
+        assert common.run_command(args) == 130

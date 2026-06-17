@@ -116,7 +116,9 @@ def test_deployments_create_wait_result(run_cli: CliRunner, capsys: StrCapture) 
                 "small",
             ]
         )
-    assert '"id": "dep-1"' in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert '"id": "dep-1"' in captured.out
+    assert "Next: dagnam inference dep-1 run ..." in captured.err
 
 
 def test_deployments_pause(run_cli: CliRunner, capsys: StrCapture) -> None:

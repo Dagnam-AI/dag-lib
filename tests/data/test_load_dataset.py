@@ -108,7 +108,7 @@ class TestSystemDatasetRouting:
             ) as mock_sys_meta,
             patch.object(DagnamClient, "get_dataset_meta") as mock_user_meta,
             patch(
-                "dagnam.data.loaders.system.resolve_system_dataset", return_value=mock_native_ds
+                "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
             ) as mock_resolve,
         ):
             ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
@@ -136,7 +136,7 @@ class TestSystemDatasetRouting:
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
             patch(
-                "dagnam.data.loaders.system.resolve_system_dataset", return_value=mock_native_ds
+                "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
             ) as mock_resolve,
         ):
             ds = load_dataset("imdb-sentiment", cache_dir=str(tmp_path))

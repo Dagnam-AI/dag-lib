@@ -24,8 +24,8 @@ class TestHelpText:
 
         assert exc_info.value.code == 0
         out = capsys.readouterr().out
-        assert format_ascii_art() in out
         assert "Official CLI for Dagnam.AI" in out
+        assert format_ascii_art() not in out  # compact help omits the full banner
         assert "Examples:" in out
         assert "version" in out
         assert "whoami" in out
@@ -43,6 +43,27 @@ class TestHelpText:
         out = capsys.readouterr().out
         assert "List available datasets" in out
         assert "Filter by dataset type" in out
+
+    def test_command_group_help_uses_compact_sections(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("sys.argv", ["dagnam", "projects", "--help"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "Usage: dagnam projects [-h] <command> ..." in out
+        assert "Create, list, inspect, and delete projects." in out
+        assert "Commands:" in out
+        assert "  list          List projects." in out
+        assert "  create        Create a project." in out
+        assert "  architecture  Save a project's architecture." in out
+        assert "Options:" in out
+        assert "  -h, --help    Show this help and exit." in out
+        assert "Docs: https://dagnam.ai/docs" in out
+        assert "positional arguments:" not in out
 
     def test_config_get_help_describes_key(
         self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture

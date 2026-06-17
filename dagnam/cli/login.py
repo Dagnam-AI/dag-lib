@@ -12,7 +12,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from dagnam._types import JsonObject, ensure_json_object
-from dagnam.cli.common import error, format_ascii_art
+from dagnam.cli.common import error, format_ascii_art, print_next_step
 
 if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
@@ -153,6 +153,7 @@ def cmd_login(
         except OSError:
             pass
     print(f"Credentials saved to {_cfg.CONFIG_FILE}")
+    print_next_step("dagnam projects list")
 
 
 def _login(args: argparse.Namespace) -> None:

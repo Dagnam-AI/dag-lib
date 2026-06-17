@@ -10,20 +10,21 @@ from unittest import mock
 import pytest
 
 from dagnam.cli import build_parser, human_size, main
-from dagnam.cli.common import format_ascii_art
+from dagnam.cli.common import format_ascii_art, resolve_version
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, StrCapture
 
 
 class TestMainNoArgs:
-    """Running with no arguments should print help and exit."""
+    """Running with no arguments prints the banner help and exits 0."""
 
-    def test_exits_with_code_2(self) -> None:
+    def test_prints_banner_and_exits_zero(self, capsys: StrCapture) -> None:
         with mock.patch("sys.argv", ["dagnam"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 2
+            assert main() == 0
+        out = capsys.readouterr().out
+        assert format_ascii_art() in out
+        assert "Commands:" in out
 
 
 class TestHumanSize:
@@ -133,14 +134,18 @@ class TestVersionFlag:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
-        assert capsys.readouterr().out.startswith(f"{format_ascii_art()}\n\ndagnam ")
+        out = capsys.readouterr().out
+        assert format_ascii_art() in out
+        assert f"dagnam {resolve_version()}" in out  # version string present
 
     def test_short_flag(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
         monkeypatch.setattr("sys.argv", ["dagnam", "-v"])
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
-        assert capsys.readouterr().out.startswith(f"{format_ascii_art()}\n\ndagnam ")
+        out = capsys.readouterr().out
+        assert format_ascii_art() in out
+        assert f"dagnam {resolve_version()}" in out  # version string present
 
 
 class TestBuildParser:

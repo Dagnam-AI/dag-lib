@@ -3,22 +3,45 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import error, write_json_file
+from dagnam.cli.common import add_collection_output_args, error
+from dagnam.cli.presentation import emit_result
 
 if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
 
 
-def _emit_json_result(result: object, output: str | None, *, label: str) -> None:
-    if output:
-        write_json_file(output, result)
-        print(f"Wrote {label} to {output}")
-        return
-    print(json.dumps(result, indent=2, default=str))
+def _render_validate(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    valid = bool(data.get("valid"))
+    status = "valid" if valid else "invalid"
+    errors = data.get("errors")
+    if isinstance(errors, list) and errors:
+        joined = "; ".join(str(item) for item in errors)
+        return f"Project is {status}: {joined}"
+    return f"Project is {status}."
+
+
+def _render_preview(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    files = data.get("files")
+    if isinstance(files, list) and files:
+        names = [str(f.get("name", "?")) for f in files if isinstance(f, dict)]
+        return f"Preview: {len(files)} file(s): {', '.join(names)}"
+    return "Preview ready."
+
+
+def _render_generate(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    task_id = data.get("task_id")
+    if task_id is not None:
+        return f"Generation started (task {task_id})."
+    files = data.get("files")
+    if isinstance(files, list):
+        return f"Generated {len(files)} file(s)."
+    return "Code generated."
 
 
 def cmd_codegen_generate(args: argparse.Namespace) -> None:
@@ -34,7 +57,12 @@ def cmd_codegen_generate(args: argparse.Namespace) -> None:
         )
     except DagnamError as exc:
         error(str(exc))
-    _emit_json_result(result, args.output, label="code generation response")
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_generate,
+    )
 
 
 def cmd_codegen_preview(args: argparse.Namespace) -> None:
@@ -49,7 +77,12 @@ def cmd_codegen_preview(args: argparse.Namespace) -> None:
         )
     except DagnamError as exc:
         error(str(exc))
-    _emit_json_result(result, args.output, label="code preview")
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_preview,
+    )
 
 
 def cmd_codegen_validate(args: argparse.Namespace) -> None:
@@ -60,7 +93,12 @@ def cmd_codegen_validate(args: argparse.Namespace) -> None:
         result = dagnam.codegen.validate(args.project_id, version_id=args.version_id)
     except DagnamError as exc:
         error(str(exc))
-    _emit_json_result(result, args.output, label="validation response")
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_validate,
+    )
 
 
 def cmd_codegen_download(args: argparse.Namespace) -> None:
@@ -73,7 +111,7 @@ def cmd_codegen_download(args: argparse.Namespace) -> None:
             args.project_id,
             framework=args.framework,
             version_id=args.version_id,
-            dest=args.output,
+            dest=args.dest,
             show_progress=show_progress,
         )
     except DagnamError as exc:
@@ -106,16 +144,11 @@ def register_codegen(subparsers: SubParsersAction) -> None:
         command.add_argument("project_id", help="ID of the project.")
         command.add_argument("--framework", default="pytorch", help="Framework (default: pytorch).")
         command.add_argument("--version-id", help="Specific project version ID.")
-        command.add_argument(
-            "--async", action="store_true", help="Run asynchronously and return a job."
-        )
-        output_help = (
-            "Write the downloaded ZIP to this path."
-            if command_name == "download"
-            else "Write the JSON response to this path."
-        )
-        command.add_argument("--output", help=output_help)
         if command_name == "download":
+            command.add_argument(
+                "--dest",
+                help="Write the downloaded ZIP to this path.",
+            )
             command.add_argument(
                 "--no-progress",
                 action="store_true",
@@ -124,4 +157,9 @@ def register_codegen(subparsers: SubParsersAction) -> None:
                     "when stderr is redirected."
                 ),
             )
+        else:
+            command.add_argument(
+                "--async", action="store_true", help="Run asynchronously and return a job."
+            )
+            add_collection_output_args(command)
         command.set_defaults(func=handler)

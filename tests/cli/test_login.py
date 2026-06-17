@@ -124,7 +124,9 @@ def test_login_uses_default_training_metrics_path_when_non_interactive(
     metrics_path = Path(data["training_metrics_path"])
     assert metrics_path.name == "dagnam_metrics.jsonl"
     assert metrics_path.parent.name == "training-metrics"
-    assert "Training metrics path:" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "Training metrics path:" in captured.out
+    assert "Next: dagnam projects list" in captured.err
 
 
 def test_login_with_custom_api_url(

@@ -56,14 +56,36 @@ dependencies = [
 streaming = ["sseclient-py>=1.7"]
 pytorch = ["torch>=2.0", "torchvision>=0.15"]
 audio = ["torch>=2.0", "torchaudio>=2.0"]
-tensorflow = ["tensorflow>=2.12"]
-flax = ["jax>=0.4", "flax>=0.7"]
+# tensorflow-datasets lazily imports importlib_resources (via etils) but does
+# not declare it, so a bare install fails with ModuleNotFoundError; pin it here.
+# truststore routes tfds' requests-based downloads through the OS trust store so
+# they work behind TLS-inspection proxies (matching torchvision's urllib path).
+tensorflow = [
+    "tensorflow>=2.12",
+    "tensorflow-datasets>=4.9",
+    "importlib_resources>=6.0",
+    "truststore>=0.9",
+]
+# Flax system-dataset loading goes through tensorflow_datasets, which needs a
+# TensorFlow runtime to materialize tf.data splits (tfds.as_numpy), so the Flax
+# extra carries tfds + tensorflow (and tfds' undeclared deps) alongside JAX/Flax.
+flax = [
+    "jax>=0.4",
+    "flax>=0.7",
+    "tensorflow-datasets>=4.9",
+    "tensorflow>=2.12",
+    "importlib_resources>=6.0",
+    "truststore>=0.9",
+]
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
 all = [
     "torch>=2.0",
     "torchvision>=0.15",
     "torchaudio>=2.0",
     "tensorflow>=2.12",
+    "tensorflow-datasets>=4.9",
+    "importlib_resources>=6.0",
+    "truststore>=0.9",
     "jax>=0.4",
     "flax>=0.7",
     "httpx>=0.27",

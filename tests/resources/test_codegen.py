@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
+import zipfile
 
 import pytest
 
@@ -101,6 +102,34 @@ class TestDownload:
         c = _client(download_code=MagicMock(return_value=tmp_path / "x.zip"))
         with pytest.raises(TypeError, match="Expected generated code bytes"):
             codegen.download("p1", client=c)
+
+    def test_download_to_existing_directory_extracts_generated_code(self, tmp_path: Path) -> None:
+        # dest is an existing directory → download zip to temp file and extract into dest.
+        dest = tmp_path / "pytorch"
+        dest.mkdir()
+
+        def _fake_download(*_args: object, dest_path: Path, **_kwargs: object) -> Path:
+            with zipfile.ZipFile(dest_path, "w") as zf:
+                zf.writestr("model.py", "import torch\n")
+            return dest_path
+
+        c = _client(download_code=MagicMock(side_effect=_fake_download))
+        result = codegen.download("p1", framework="pytorch", dest=dest, client=c)
+
+        assert result == dest
+        assert (dest / "model.py").read_text() == "import torch\n"
+        # The temp archive path passed to download_code is not the dest directory.
+        call = c.download_code.call_args
+        assert call.kwargs["dest_path"] != dest
+        assert call.kwargs["dest_path"].suffix == ".zip"
+
+    def test_download_to_directory_rejects_non_path_archive(self, tmp_path: Path) -> None:
+        # dest is a directory but download_code returns bytes instead of a temp path → TypeError.
+        dest = tmp_path / "pytorch"
+        dest.mkdir()
+        c = _client(download_code=MagicMock(return_value=b"not-a-path"))
+        with pytest.raises(TypeError, match="Expected a download path for the temporary archive"):
+            codegen.download("p1", dest=dest, client=c)
 
 
 class TestStatus:

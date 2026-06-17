@@ -8,13 +8,13 @@ A project holds a model architecture (a DAG) and its version history; you genera
 - `dagnam projects create --title TEXT [--framework pytorch] [--description TEXT] [--visibility private] [--json] [--output]` — create a project. Required: `--title`.
 - `dagnam projects delete <project_id>` — delete permanently. **[guardrail: irreversible]**
 - `dagnam projects duplicate <project_id> [--title TEXT] [--json] [--output]` — clone a project.
-- `dagnam projects architecture <project_id> --diagram @diagram.json --config @config.json [--message TEXT]` — save a new architecture version (diagram state + config). Required: `--diagram --config`.
+- `dagnam projects architecture <project_id> --diagram @diagram.json --config @config.json [--message TEXT] [--json] [--output PATH]` — save a new architecture version (diagram state + config). Required: `--diagram --config`. Now accepts the uniform `--json`/`--output` output flags (was previously JSON-only with no `--json`).
 
 ## SDK (`import dagnam`)
 - `dagnam.projects.list(...)`, `dagnam.projects.get(project_id)`, `dagnam.projects.create(title, framework="pytorch", description=None, visibility="private", tags=None) -> dict`.
 - `dagnam.projects.update(project_id, **fields)`, `dagnam.projects.duplicate(project_id, title=None)`.
 - `dagnam.projects.delete(project_id) -> None` — **[guardrail: irreversible]**.
-- `dagnam.projects.save_architecture(project_id, diagram_state, architecture_config, commit_message=None)`.
+- `dagnam.projects.save_architecture(project_id, diagram_state, architecture_config, *, commit_message=None)` — `commit_message` is **keyword-only** (note the bare `*`); pass it as `commit_message="..."`, never positionally.
 - `dagnam.projects.import_dag(ir, title, framework=..., ...)` / `dagnam.projects.import_dag_existing(project_id, ir, commit_message=None)` — create/update a project from an IR DAG.
 
 ## Dataset linking (SDK only — no CLI subcommand)

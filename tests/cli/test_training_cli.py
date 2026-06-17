@@ -50,7 +50,9 @@ def test_training_create_passes_hyperparameters(run_cli: CliRunner, capsys: StrC
     assert kwargs["training_dataset_id"] == "ds1"
     assert kwargs["max_duration_seconds"] == 600
     assert kwargs["confirm_resource_warning"] is True
-    assert '"id": "j1"' in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert '"id": "j1"' in captured.out
+    assert "Next: dagnam stream j1" in captured.err
 
 
 def test_training_create_parses_config_overrides_file(run_cli: CliRunner, tmp_path: Path) -> None:

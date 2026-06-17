@@ -40,6 +40,68 @@ class TensorflowDatasetsModule(Protocol):
     ) -> TensorflowDataset: ...
 
 
+class _TruststoreModule(Protocol):
+    """``truststore`` surface used to route tfds downloads through the OS store."""
+
+    def inject_into_ssl(self) -> None: ...
+
+
+class _TfTensor(Protocol):
+    """A TensorFlow tensor surface supporting the scaling division."""
+
+    def __truediv__(self, other: float) -> _TfTensor: ...
+
+
+class _TfCastModule(Protocol):
+    """``tensorflow`` surface used to cast/scale image features."""
+
+    uint8: object
+    float32: object
+
+    def cast(self, value: object, dtype: object) -> _TfTensor: ...
+
+
+def _normalize_image_features(dataset: TensorflowDataset) -> TensorflowDataset:
+    """Cast uint8 image features to float32 in ``[0, 1]``.
+
+    ``tfds`` ``as_supervised`` yields raw uint8 images, but the generated models
+    have float32 convolution kernels (and the PyTorch and Flax loaders both
+    normalize to ``[0, 1]``), so a uint8 forward pass raises an "Incompatible
+    type conversion" error. Non-image features (e.g. text datasets such as
+    ``imdb_reviews``) keep their original dtype and are returned unchanged.
+    """
+    spec = getattr(dataset, "element_spec", None)
+    feature_spec = spec[0] if isinstance(spec, tuple) and len(spec) >= 1 else None
+    dtype = getattr(feature_spec, "dtype", None)
+    if getattr(dtype, "name", None) != "uint8":
+        return dataset
+
+    tf = cast("_TfCastModule", import_module("tensorflow"))
+
+    def _to_float(features: object, label: object) -> tuple[_TfTensor, object]:
+        return tf.cast(features, tf.float32) / 255.0, label
+
+    return dataset.map(_to_float)
+
+
+def ensure_system_trust() -> None:
+    """Make ``tensorflow_datasets`` downloads trust the OS certificate store.
+
+    tfds downloads with ``requests`` (the certifi CA bundle), so — unlike
+    torchvision's urllib path, which uses the OS trust store — it rejects
+    certificates injected by corporate TLS-inspection proxies with
+    CERTIFICATE_VERIFY_FAILED, failing exactly where the PyTorch loader
+    succeeds. ``truststore`` routes verification through the OS trust store,
+    making tfds behave like torchvision. Best-effort: when ``truststore`` is not
+    installed (a clean network does not need it) this is a no-op.
+    """
+    try:
+        truststore = cast("_TruststoreModule", import_module("truststore"))
+    except ImportError:
+        return
+    truststore.inject_into_ssl()
+
+
 def _load_tfds() -> TensorflowDatasetsModule:
     return cast("TensorflowDatasetsModule", import_module("tensorflow_datasets"))
 
@@ -92,11 +154,12 @@ def resolve_system_dataset_tf(meta: JsonObject) -> DagnamDataset:
         # Fall back — caller uses _native_to_tensorflow on PT native.
         return resolve_system_dataset(meta)
 
+    ensure_system_trust()
     cache = SYSTEM_CACHE_ROOT / tfds_name
     cache.mkdir(parents=True, exist_ok=True)
 
-    train_ds = _load_supervised_split(tfds, tfds_name, "train", cache)
-    test_ds = _load_supervised_split(tfds, tfds_name, "test", cache)
+    train_ds = _normalize_image_features(_load_supervised_split(tfds, tfds_name, "train", cache))
+    test_ds = _normalize_image_features(_load_supervised_split(tfds, tfds_name, "test", cache))
 
     return DagnamDataset(
         meta,

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import platform
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from dagnam.cli.common import error, mask_key, resolve_version
 from dagnam.cli.presentation import Column, emit_result, render_table
@@ -17,6 +17,20 @@ if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
 
 _MUTABLE_CONFIG_KEYS = {"training_metrics_path"}
+_LIMIT_LABELS = {
+    "storage.bytes": "storage",
+    "storage.max_upload_bytes": "max upload size",
+    "training.minutes_per_period": "training minutes",
+    "training.max_duration_minutes": "max training duration",
+    "training.concurrent_jobs": "concurrent training jobs",
+    "models.max_parameters": "max model parameters",
+    "projects.count": "projects",
+    "projects.private_count": "private projects",
+    "hub.private_model_count": "private hub models",
+    "deployments.count": "deployments",
+    "api_keys.count": "API keys",
+    "projects.version_retention": "project versions retained",
+}
 
 
 def cmd_version(args: argparse.Namespace) -> None:
@@ -160,9 +174,81 @@ def cmd_config_unset(args: argparse.Namespace) -> None:
     print(f"Unset {args.key}")
 
 
-def _usage_value(entry: dict[str, Any], key: str) -> Any:
-    value = entry.get(key)
-    return value if value is not None else "-"
+def _is_number(value: object) -> TypeGuard[int | float]:
+    return isinstance(value, int | float)
+
+
+def _is_byte_limit(key: object) -> bool:
+    if not isinstance(key, str):
+        return False
+    return key.endswith(".bytes") or key.endswith("_bytes")
+
+
+def _trim_decimal(value: float) -> str:
+    text = f"{value:.1f}"
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _format_bytes(value: int | float) -> str:
+    units = ("B", "KB", "MB", "GB", "TB", "PB")
+    amount = float(value)
+    for unit in units:
+        if abs(amount) < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} B"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024
+    raise AssertionError("unreachable byte unit loop")  # pragma: no cover - final unit returns
+
+
+def _format_count(value: int | float) -> str:
+    amount = float(value)
+    for threshold, suffix in (
+        (1_000_000_000_000, "T"),
+        (1_000_000_000, "B"),
+        (1_000_000, "M"),
+        (1_000, "K"),
+    ):
+        if abs(amount) >= threshold:
+            return f"{_trim_decimal(amount / threshold)}{suffix}"
+    return str(int(amount)) if amount.is_integer() else _trim_decimal(amount)
+
+
+def _format_usage_value(limit_key: object, value: object) -> str:
+    if value is None:
+        return "unlimited"
+    if not _is_number(value):
+        return "-"
+    return _format_bytes(value) if _is_byte_limit(limit_key) else _format_count(value)
+
+
+def _limit_label(key: object) -> str:
+    if not isinstance(key, str):
+        return "-"
+    return _LIMIT_LABELS.get(key, key.replace(".", " ").replace("_", " "))
+
+
+def _remaining_ratio(current: object, limit: object) -> float | None:
+    if not _is_number(current) or not _is_number(limit):
+        return None
+    if limit <= 0:
+        return 0.0
+    return max(min((limit - current) / limit, 1.0), 0.0)
+
+
+def _remaining_bar(current: object, limit: object, *, width: int = 10) -> str:
+    ratio = _remaining_ratio(current, limit)
+    if ratio is None:
+        return "unlimited" if limit is None else "-"
+    filled = round(ratio * width)
+    return f"{'#' * filled}{'-' * (width - filled)}"
+
+
+def _remaining_percent(current: object, limit: object) -> str:
+    ratio = _remaining_ratio(current, limit)
+    if ratio is None:
+        return "unlimited" if limit is None else "-"
+    return f"{round(ratio * 100)}%"
 
 
 def _render_usage(snapshot: object) -> str:
@@ -188,22 +274,25 @@ def _render_usage(snapshot: object) -> str:
         if isinstance(current, int | float) and isinstance(limit, int | float):
             remaining: Any = max(limit - current, 0)
         else:
-            remaining = "unlimited" if limit is None else "-"
-        limit_display = "unlimited" if limit is None else limit
+            remaining = None if limit is None else "-"
         rows.append(
             {
-                "key": entry.get("key", "-"),
-                "current": _usage_value(entry, "current"),
-                "limit": limit_display,
-                "remaining": remaining,
+                "key": _limit_label(entry.get("key")),
+                "current": _format_usage_value(entry.get("key"), current),
+                "limit": _format_usage_value(entry.get("key"), limit),
+                "remaining": _format_usage_value(entry.get("key"), remaining),
+                "bar": _remaining_bar(current, limit),
+                "percent": _remaining_percent(current, limit),
             }
         )
     table = render_table(
         (
-            Column("Limit", "key", 32),
+            Column("Limit type", "key", 32),
             Column("Used", "current", 12, "right"),
             Column("Limit", "limit", 12, "right"),
             Column("Remaining", "remaining", 12, "right"),
+            Column("Meter", "bar", 10),
+            Column("Available %", "percent", 11, "right"),
         ),
         rows,
     )

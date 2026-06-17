@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.data.loaders._system_fakes import (
@@ -14,6 +14,7 @@ from tests.data.loaders._system_fakes import (
 )
 
 from dagnam.data.loaders.system.tensorflow_datasets import (
+    ensure_system_trust,
     resolve_system_dataset_tf,
     resolve_tfds_name,
 )
@@ -115,6 +116,133 @@ def test_resolve_system_dataset_tf_loads(monkeypatch: PytestMonkeyPatch, tmp_pat
 def testresolve_tfds_name_non_string_returns_none() -> None:
     # A non-string ``name`` field can't be resolved to a tfds name.
     assert resolve_tfds_name({"name": 123}) is None
+
+
+def test_ensure_system_trust_injects_when_available(monkeypatch: PytestMonkeyPatch) -> None:
+    """When ``truststore`` is importable, its OS-store SSL injection runs."""
+    calls: dict[str, int] = {"inject": 0}
+
+    def fake_inject() -> None:
+        calls["inject"] += 1
+
+    monkeypatch.setitem(sys.modules, "truststore", SimpleNamespace(inject_into_ssl=fake_inject))
+    ensure_system_trust()
+    assert calls["inject"] == 1
+
+
+def test_ensure_system_trust_noop_when_truststore_missing(monkeypatch: PytestMonkeyPatch) -> None:
+    """A missing ``truststore`` degrades to a no-op (clean networks don't need it)."""
+    # ``None`` in sys.modules makes import_module raise ImportError deterministically,
+    # regardless of whether truststore happens to be installed in the test env.
+    monkeypatch.setitem(sys.modules, "truststore", None)
+    ensure_system_trust()  # must not raise
+
+
+class _FakeTensor:
+    """Minimal tensor stub: division records the scaling the loader applies."""
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def __truediv__(self, other: float) -> tuple[str, object, float]:
+        return ("scaled", self.value, other)
+
+
+def _fake_tf() -> SimpleNamespace:
+    return SimpleNamespace(
+        uint8="u8",
+        float32="f32",
+        cast=lambda value, _dtype: _FakeTensor(value),
+    )
+
+
+def test_resolve_system_dataset_tf_normalizes_uint8_images(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """uint8 image splits are mapped to float32/255 so Conv kernels accept them."""
+    from dagnam.data.loaders.system import tensorflow_datasets as tfds_mod
+
+    monkeypatch.setattr(tfds_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    map_calls: list[tuple[str, object]] = []
+
+    class FakeImageDS:
+        def __init__(self, split: str) -> None:
+            self.split = split
+            self.element_spec = (
+                SimpleNamespace(dtype=SimpleNamespace(name="uint8")),
+                SimpleNamespace(dtype=SimpleNamespace(name="int64")),
+            )
+
+        def map(self, fn: object, num_parallel_calls: object = None) -> str:
+            map_calls.append((self.split, fn))
+            return f"NORM:{self.split}"
+
+    def fake_load(
+        _name: str, *, split: str, as_supervised: bool = True, data_dir: str = ""
+    ) -> object:
+        return FakeImageDS(split)
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", SimpleNamespace(load=fake_load))
+    monkeypatch.setitem(sys.modules, "tensorflow", _fake_tf())
+
+    out = resolve_system_dataset_tf(
+        {
+            "name": "mnist",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
+    assert out.native_train_tf == "NORM:train"
+    assert out.native_test_tf == "NORM:test"
+    # The captured map fn scales the image by 255 and passes the label through.
+    _split, fn = map_calls[0]
+    normalize = cast("Callable[[object, object], object]", fn)
+    assert normalize("IMG", "LBL") == (("scaled", "IMG", 255.0), "LBL")
+
+
+def test_resolve_system_dataset_tf_skips_normalize_for_text(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """Non-uint8 (e.g. text) features are passed through without an image map."""
+    from dagnam.data.loaders.system import tensorflow_datasets as tfds_mod
+
+    monkeypatch.setattr(tfds_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+
+    class FakeTextDS:
+        def __init__(self, split: str) -> None:
+            self.split = split
+            self.element_spec = (
+                SimpleNamespace(dtype=SimpleNamespace(name="string")),
+                SimpleNamespace(dtype=SimpleNamespace(name="int64")),
+            )
+
+        def map(self, _fn: object, num_parallel_calls: object = None) -> str:
+            raise AssertionError("text features must not be image-normalized")
+
+    def fake_load(
+        _name: str, *, split: str, as_supervised: bool = True, data_dir: str = ""
+    ) -> object:
+        return FakeTextDS(split)
+
+    monkeypatch.setitem(sys.modules, "tensorflow_datasets", SimpleNamespace(load=fake_load))
+
+    out = resolve_system_dataset_tf(
+        {
+            "name": "imdb",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "text",
+            "num_classes": 2,
+            "class_names": [],
+            "num_samples": 2,
+        }
+    )
+    assert isinstance(out.native_train_tf, FakeTextDS)
+    assert out.native_train_tf.split == "train"
 
 
 def test_load_supervised_split_uses_positional_fallback(

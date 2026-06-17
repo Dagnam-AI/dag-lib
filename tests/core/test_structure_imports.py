@@ -31,6 +31,8 @@ def test_loader_modules_use_target_names() -> None:
     assert image_folder.create_pytorch_loader is not None
     assert media.discover_class_folders is not None
     assert system.resolve_system_dataset is not None
+    assert system.load_system_dataset is not None
+    assert system.detect_installed_framework is not None
     assert tf.create_tensorflow_dataset is not None
     assert flax.create_flax_dataset is not None
 
@@ -39,7 +41,7 @@ def test_loaders_lazy_getattr_rejects_unknown_name() -> None:
     import dagnam.data.loaders as loaders
 
     # Known submodules resolve lazily via __getattr__ (PEP 562)...
-    assert loaders.csv is not None
+    assert loaders.__getattr__("csv") is not None
     # ...but unknown attributes raise AttributeError rather than ImportError.
     with pytest.raises(AttributeError, match="has no attribute"):
         _ = loaders.does_not_exist

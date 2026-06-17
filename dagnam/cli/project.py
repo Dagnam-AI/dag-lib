@@ -10,6 +10,7 @@ from dagnam.cli.common import (
     error,
     load_json_arg,
     print_json,
+    print_next_step,
     write_json_file,
 )
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
@@ -58,16 +59,31 @@ def _render_projects(result: object) -> str:
     return f"{table}\n{pagination_footer(result)}"
 
 
-def _print_project_summary(result: object) -> None:
+def _print_project_summary_text(result: object) -> str:
     project = result if isinstance(result, dict) else {}
     project_id = project.get("id") or "-"
     title = project.get("title") or project.get("name") or "-"
-    print(f"Project {project_id}")
-    print(f"Title: {title}")
-    print(f"Status: {project.get('status') or '-'}")
-    print(f"Framework: {project.get('framework') or '-'}")
-    print(f"Latest version: {project.get('latest_version_number') or '-'}")
-    print(f"Updated: {_date(project.get('updated_at'))}")
+    return "\n".join(
+        (
+            f"Project {project_id}",
+            f"Title: {title}",
+            f"Status: {project.get('status') or '-'}",
+            f"Framework: {project.get('framework') or '-'}",
+            f"Latest version: {project.get('latest_version_number') or '-'}",
+            f"Updated: {_date(project.get('updated_at'))}",
+        )
+    )
+
+
+def _render_architecture(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    version_id = data.get("version_id") or data.get("id")
+    version_number = data.get("version_number") or data.get("latest_version_number")
+    if version_id is not None:
+        return f"Saved architecture version {version_id}."
+    if version_number is not None:
+        return f"Saved architecture version {version_number}."
+    return "Architecture saved."
 
 
 def cmd_projects_list(args: argparse.Namespace) -> None:
@@ -104,7 +120,7 @@ def cmd_projects_get(args: argparse.Namespace) -> None:
     if args.json or args.verbose:
         print_json(result)
     else:
-        _print_project_summary(result)
+        print(_print_project_summary_text(result))
 
 
 def cmd_projects_create(args: argparse.Namespace) -> None:
@@ -120,9 +136,14 @@ def cmd_projects_create(args: argparse.Namespace) -> None:
         )
     except DagnamError as exc:
         error(str(exc))
-    if args.output:
-        write_json_file(args.output, result)
-    print_json(result)
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_print_project_summary_text,
+    )
+    project_id = result.get("id")
+    print_next_step(f"dagnam training create {project_id or '<project-id>'} ...")
 
 
 def cmd_projects_delete(args: argparse.Namespace) -> None:
@@ -144,9 +165,12 @@ def cmd_projects_duplicate(args: argparse.Namespace) -> None:
         result = dagnam.projects.duplicate(args.project_id, title=args.title)
     except DagnamError as exc:
         error(str(exc))
-    if args.output:
-        write_json_file(args.output, result)
-    print_json(result)
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_print_project_summary_text,
+    )
 
 
 def cmd_projects_architecture(args: argparse.Namespace) -> None:
@@ -170,7 +194,12 @@ def cmd_projects_architecture(args: argparse.Namespace) -> None:
         )
     except DagnamError as exc:
         error(str(exc))
-    print_json(result)
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_architecture,
+    )
 
 
 def register_projects(subparsers: SubParsersAction) -> None:
@@ -209,8 +238,7 @@ def register_projects(subparsers: SubParsersAction) -> None:
     project_create.add_argument(
         "--visibility", default="private", help="private or public (default: private)."
     )
-    project_create.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
-    project_create.add_argument("--output", help="Write the JSON response to this path.")
+    add_collection_output_args(project_create)
     project_create.set_defaults(func=cmd_projects_create)
     project_delete = project_sub.add_parser(
         "delete", help="Delete a project.", description="Delete a project permanently."
@@ -222,8 +250,7 @@ def register_projects(subparsers: SubParsersAction) -> None:
     )
     project_dup.add_argument("project_id", help="ID of the project to duplicate.")
     project_dup.add_argument("--title", help="Title for the copy (defaults to a derived name).")
-    project_dup.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
-    project_dup.add_argument("--output", help="Write the JSON response to this path.")
+    add_collection_output_args(project_dup)
     project_dup.set_defaults(func=cmd_projects_duplicate)
     project_arch = project_sub.add_parser(
         "architecture",
@@ -245,4 +272,5 @@ def register_projects(subparsers: SubParsersAction) -> None:
         help="Architecture config as a JSON literal or @path to a JSON file (required).",
     )
     project_arch.add_argument("--message", help="Optional commit message for the version.")
+    add_collection_output_args(project_arch)
     project_arch.set_defaults(func=cmd_projects_architecture)

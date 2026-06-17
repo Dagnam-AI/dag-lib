@@ -24,8 +24,21 @@ and this project follows [Semantic Versioning](https://semver.org/).
   (`python -m dagnam._agent.guardhook`).
 - Claude plugin marketplace listing (`.claude-plugin/marketplace.json`) as an
   alternate `/plugin install` door.
+- `dagnam codegen download` now accepts a **directory** as the destination and
+  auto-extracts the generated files into it (the SDK `download(dest=<dir>)` returns
+  the directory `Path`); previously passing a directory raised a `PermissionError`.
+- Uniform CLI output convention: `codegen validate`/`preview`/`generate` and
+  `projects architecture` now accept `--json` (JSON to stdout) and `--output PATH`
+  (JSON to file), with human-readable summaries by default — matching the other
+  command groups.
 
 ### Changed
+
+- **BREAKING (CLI):** `dagnam codegen download --output PATH` is renamed to
+  `--dest PATH` (no alias). `--output` now uniformly means "write the JSON result
+  to a file"; `--dest` is the downloaded-artifact destination (a file path streams
+  the ZIP; a directory auto-extracts). Migrate `codegen download ... --output X`
+  to `... --dest X`.
 
 - Internal: the quality gates are now clean at zero — `ruff` reports no errors
   and `pyright` (strict, minus the unavoidable untyped-ML-library completeness

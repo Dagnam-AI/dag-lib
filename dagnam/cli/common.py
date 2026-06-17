@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     # shares a single clean annotation instead of repeating the private reference.
     type SubParsersAction = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
 
+DOCS_URL = "https://dagnam.ai/docs"
+
 # dos rebel font: <https://patorjk.com/software/taag/#p=display&f=DOS+Rebel&t=DAGNAM.AI&x=none&v=4&h=3&w=80&we=false>
 DAGNAM_ASCII_ART = r"""
  ██████████   █████████   █████████ ██████   █████ █████████ ██████   ██████      █████████ █████
@@ -28,6 +30,56 @@ DAGNAM_ASCII_ART = r"""
  ██████████ █████   ████░░█████████ █████  ░░█████████   █████████     █████ ██ █████   █████████
 ░░░░░░░░░░ ░░░░░   ░░░░░ ░░░░░░░░░ ░░░░░    ░░░░░░░░░   ░░░░░░░░░     ░░░░░ ░░ ░░░░░   ░░░░░░░░░
 """
+
+# Plain-ASCII fallback banner for consoles whose encoding cannot represent the
+# box-drawing glyphs above. ``dagnam -v`` / ``dagnam -h`` print the banner to
+# stdout via argparse; on a legacy code page (cp1252 — the default Windows
+# console, many CI shells, Git Bash) writing those glyphs raises
+# ``UnicodeEncodeError`` and crashes a command that must never fail. When stdout
+# cannot be upgraded to UTF-8, the banner degrades to this ASCII form (G019).
+DAGNAM_ASCII_FALLBACK_ART = r"""
+==================================================
+                    DAGNAM.AI
+==================================================
+"""
+
+
+def configure_console_encoding() -> None:
+    """Best-effort upgrade of the console streams to UTF-8.
+
+    Modern terminals (including Windows Terminal and a cp1252 console) accept
+    being switched to UTF-8 in place via ``TextIOWrapper.reconfigure`` (Python
+    3.7+), which lets the branded banner render with its box-drawing glyphs
+    instead of degrading to ASCII. Any stream that cannot be reconfigured (a
+    plain pipe, a redirected file, a substituted test stream) is silently
+    skipped; those are covered by the ASCII fallback in ``format_ascii_art`` so
+    the command still never crashes on a legacy code page (G019).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+
+
+def _stream_can_encode(text: str, stream: object) -> bool:
+    """Return whether ``stream``'s text encoding can represent ``text``.
+
+    Reads the stream's declared ``encoding`` (treating a missing or empty value
+    as the safest assumption, ``ascii``) and tests a strict round-trip, so we
+    can decide whether the box-drawing banner is safe to emit or must degrade to
+    the ASCII fallback. An unknown codec name (``LookupError``) is treated as
+    not-encodable rather than propagating.
+    """
+    encoding = getattr(stream, "encoding", None) or "ascii"
+    try:
+        text.encode(encoding, errors="strict")
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
 
 
 def _terminal_width(fallback: int = 80) -> int:
@@ -56,9 +108,17 @@ def format_ascii_art(columns: int | None = None) -> str:
 
     Recomputes the width on every call so the banner stays responsive to live
     terminal resizes rather than freezing at the width seen on first render.
+    Degrades to a plain-ASCII banner when stdout's encoding cannot represent the
+    box-drawing glyphs, so ``dagnam -v``/``-h`` never crash on a cp1252 console
+    (G019).
     """
     width = columns if columns is not None else _terminal_width()
-    return "\n".join(line[:width].rstrip() for line in DAGNAM_ASCII_ART.strip("\n").splitlines())
+    art = (
+        DAGNAM_ASCII_ART
+        if _stream_can_encode(DAGNAM_ASCII_ART, sys.stdout)
+        else DAGNAM_ASCII_FALLBACK_ART
+    )
+    return "\n".join(line[:width].rstrip() for line in art.strip("\n").splitlines())
 
 
 def add_collection_output_args(command: argparse.ArgumentParser) -> None:
@@ -98,6 +158,44 @@ def error(msg: str) -> NoReturn:
     """Print an error message to stderr and exit."""
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def print_next_step(command: str) -> None:
+    """Print a suggested follow-up command to stderr.
+
+    Written to stderr so it never pollutes stdout, which several create handlers
+    use for raw JSON that must stay pipe-parseable.
+    """
+    print(f"\nNext: {command}", file=sys.stderr)
+
+
+def run_command(args: argparse.Namespace) -> int:
+    """Dispatch ``args.func(args)`` with a clean top-level error backstop.
+
+    Handlers that catch ``DagnamError`` themselves (via ``error()``) exit
+    directly; this is the net for anything that escapes, for unexpected
+    exceptions, and for Ctrl-C. ``--debug`` or ``DAGNAM_DEBUG`` re-raises the
+    real traceback.
+    """
+    debug = bool(getattr(args, "debug", False)) or bool(os.environ.get("DAGNAM_DEBUG"))
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:  # BLE001 - intentional top-level CLI backstop
+        if debug:
+            raise
+        from dagnam._core.exceptions import DagnamError
+
+        if isinstance(exc, DagnamError):
+            print(f"Error: {exc}\n\nDocs: {DOCS_URL}", file=sys.stderr)
+        else:
+            print(
+                "Error: an unexpected error occurred. Run with --debug for details.",
+                file=sys.stderr,
+            )
+        return 1
+    return 0
 
 
 def load_json_arg(value: str) -> object:

@@ -13,7 +13,7 @@ import numpy.typing as npt
 from dagnam._types import JsonObject
 from dagnam.data.loaders.system.common import SYSTEM_CACHE_ROOT
 from dagnam.data.loaders.system.registry import resolve_system_dataset
-from dagnam.data.loaders.system.tensorflow_datasets import resolve_tfds_name
+from dagnam.data.loaders.system.tensorflow_datasets import ensure_system_trust, resolve_tfds_name
 
 if TYPE_CHECKING:
     import jax
@@ -68,6 +68,7 @@ def resolve_system_dataset_flax(meta: JsonObject) -> DagnamDataset:
     except ImportError:
         return resolve_system_dataset(meta)
 
+    ensure_system_trust()
     from dagnam.data.loaders.flax import FlaxBatch
 
     cache = SYSTEM_CACHE_ROOT / tfds_name

@@ -122,7 +122,7 @@ print(feats.shape, labels.shape if labels is not None else None)
 
 If the HTTP request fails:
 
-1. Confirm the backend is up — `curl http://localhost:8000/api/v1/health`
+1. Confirm the backend is up — `curl http://localhost:8000/health`
    (or whatever the backend's health endpoint is).
 2. Confirm the API key is valid against your local DB.
 

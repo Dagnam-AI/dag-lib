@@ -161,7 +161,7 @@ class TestSourceTypeDetection:
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch("dagnam.data.load.DagnamClient") as MockClient,
             patch(
-                "dagnam.data.loaders.system.resolve_system_dataset", return_value=mock_native_ds
+                "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
             ) as mock_resolve,
         ):
             MockClient.return_value.get_dataset_meta.return_value = meta
@@ -247,7 +247,7 @@ class TestLoadInternal:
                 },
             ),
             patch(
-                "dagnam.data.loaders.system.resolve_system_dataset", return_value=mock_native_ds
+                "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
             ) as mock_resolve,
         ):
             ds = _load_internal(dataset_id)

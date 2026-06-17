@@ -9,6 +9,8 @@ from unittest import mock
 
 import pytest
 
+from dagnam.cli import account as account_mod
+
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, StrCapture
 
@@ -16,12 +18,31 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------- usage
 
 
+def test_usage_format_helpers_cover_units_and_edge_cases() -> None:
+    assert account_mod._format_usage_value("storage.bytes", 1024**2) == "1.0 MB"
+    assert account_mod._format_usage_value("storage.bytes", 2 * 1024**4) == "2.0 TB"
+    assert account_mod._format_usage_value("jobs", 1_200) == "1.2K"
+    assert account_mod._format_usage_value("records", 2_500_000) == "2.5M"
+    assert account_mod._format_usage_value(123, 5) == "5"
+    assert account_mod._format_usage_value("bad", "unknown") == "-"
+    assert account_mod._limit_label("training.concurrent_jobs") == "concurrent training jobs"
+    assert account_mod._limit_label("custom.quota_name") == "custom quota name"
+    assert account_mod._limit_label(None) == "-"
+    assert account_mod._remaining_bar(5, 0) == "----------"
+    assert account_mod._remaining_percent(5, 0) == "0%"
+    assert account_mod._remaining_bar("n/a", 10) == "-"
+    assert account_mod._remaining_percent("n/a", 10) == "-"
+
+
 def test_usage_table(run_cli: CliRunner, capsys: StrCapture) -> None:
     snapshot = {
         "plan": {"code": "pro", "display_name": "Pro"},
         "read_only_grace": False,
         "limits": [
-            {"key": "concurrent_training_jobs", "current": 1, "limit": 3},
+            {"key": "storage.bytes", "current": 385, "limit": 107374182400},
+            {"key": "storage.max_upload_bytes", "current": 0, "limit": 10737418240},
+            {"key": "models.max_parameters", "current": 0, "limit": 1_000_000_000},
+            {"key": "projects.version_retention", "current": 13, "limit": 50},
             {"key": "training_minutes", "current": 10, "limit": None},
         ],
     }
@@ -30,8 +51,30 @@ def test_usage_table(run_cli: CliRunner, capsys: StrCapture) -> None:
         run_cli(["usage"])
     out = capsys.readouterr().out
     assert "Plan: Pro" in out
-    assert "concurrent_training_jobs" in out
-    assert "training_minutes" in out
+    assert "Limit type" in out
+    assert "Meter" in out
+    assert "Available %" in out
+    assert "Available  Available %" not in out
+    assert "storage" in out
+    assert "385 B" in out
+    assert "100.0 GB" in out
+    assert "max upload size" in out
+    assert "10.0 GB" in out
+    assert "max model parameters" in out
+    assert "1B" in out
+    assert "project versions retained" in out
+    assert "37" in out
+    assert "training minutes" in out
+    assert "Remaining" in out
+    assert "##########" in out
+    assert "#######---" in out
+    assert "74%" in out
+    assert "storage.bytes" not in out
+    assert "storage.max_upload_bytes" not in out
+    assert "models.max_parameters" not in out
+    assert "projects.version_retention" not in out
+    assert "107374182400" not in out
+    assert "1000000000" not in out
 
 
 def test_usage_json(run_cli: CliRunner, capsys: StrCapture) -> None:

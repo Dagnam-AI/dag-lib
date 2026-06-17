@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dagnam.data.loaders.system.common import SYSTEM_CACHE_ROOT
+from dagnam.data.loaders.system.dispatch import (
+    detect_installed_framework,
+    load_system_dataset,
+)
 from dagnam.data.loaders.system.flax import resolve_system_dataset_flax
 from dagnam.data.loaders.system.registry import (
     NATIVE_LOADERS,
@@ -18,6 +22,8 @@ __all__ = [
     "NATIVE_LOADERS",
     "SYSTEM_CACHE_ROOT",
     "TFDS_NAME_MAP",
+    "detect_installed_framework",
+    "load_system_dataset",
     "resolve_system_dataset",
     "resolve_system_dataset_flax",
     "resolve_system_dataset_tf",

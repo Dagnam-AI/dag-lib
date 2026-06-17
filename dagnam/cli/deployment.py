@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, error, print_json
+from dagnam.cli.common import add_collection_output_args, error, print_json, print_next_step
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 if TYPE_CHECKING:
@@ -127,6 +127,8 @@ def cmd_deployments_create(args: argparse.Namespace) -> None:
     except DagnamError as exc:
         error(str(exc))
     print_json(result)
+    deployment_id = result.get("id") if isinstance(result, dict) else None
+    print_next_step(f"dagnam inference {deployment_id or '<deployment-id>'} run ...")
 
 
 def cmd_deployments_pause(args: argparse.Namespace) -> None:

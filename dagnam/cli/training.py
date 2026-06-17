@@ -13,6 +13,7 @@ from dagnam.cli.common import (
     error,
     load_json_arg,
     print_json,
+    print_next_step,
     write_json_file,
 )
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
@@ -99,6 +100,8 @@ def cmd_training_create(args: argparse.Namespace) -> None:
     except DagnamError as exc:
         error(str(exc))
     print_json(result)
+    job_id = result.get("id")
+    print_next_step(f"dagnam stream {job_id or '<job-id>'}")
 
 
 def cmd_training_get(args: argparse.Namespace) -> None:

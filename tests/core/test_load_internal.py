@@ -81,6 +81,26 @@ class TestInternalMode:
         with pytest.raises(FileNotFoundError, match="Sidecar metadata not found"):
             _load_internal("abc")
 
+    def test_internal_absent_file_path_raises(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        # A non-system sidecar with no file_path key at all → the str/non-empty
+        # guard is False and resolution raises a clear FileNotFoundError.
+        meta = {
+            "id": "abc",
+            "name": "demo",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 0,
+            "num_classes": 0,
+        }
+        meta_dir = tmp_path / "meta"
+        meta_dir.mkdir()
+        (meta_dir / "abc.meta.json").write_text(json.dumps(meta))
+        monkeypatch.setenv("DAGNAM_META_DIR", str(meta_dir))
+        with pytest.raises(FileNotFoundError, match="Dataset file not found"):
+            _load_internal("abc")
+
     def test_internal_missing_file_path_raises(
         self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
     ) -> None:
@@ -118,14 +138,16 @@ class TestInternalMode:
         monkeypatch.setenv("DAGNAM_META_DIR", str(meta_dir))
 
         native = MagicMock()
-        with patch("dagnam.data.loaders.system.resolve_system_dataset", return_value=native):
+        with patch("dagnam.data.loaders.system.load_system_dataset", return_value=native):
             assert _load_internal("mnist-digits") is native
 
-    def test_internal_system_resolve_falls_through_onerror(
+    def test_internal_system_resolve_propagates_error(
         self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
     ) -> None:
-        # When resolve_system_dataset raises, _load_internal should fall back
-        # to file_path resolution (which here is also missing → FileNotFoundError).
+        # A system dataset has no real on-disk file (the relative file_path is a
+        # codegen placeholder), so a native-loader failure must propagate its
+        # real cause instead of being masked as a FileNotFoundError. This is the
+        # G033 observability fix.
         meta = {
             "id": "mnist-digits",
             "name": "MNIST",
@@ -141,10 +163,10 @@ class TestInternalMode:
         monkeypatch.setenv("DAGNAM_META_DIR", str(meta_dir))
 
         with patch(
-            "dagnam.data.loaders.system.resolve_system_dataset",
-            side_effect=RuntimeError("nope"),
+            "dagnam.data.loaders.system.load_system_dataset",
+            side_effect=RuntimeError("real loader error"),
         ):
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises(RuntimeError, match="real loader error"):
                 _load_internal("mnist-digits")
 
 
@@ -213,7 +235,7 @@ class TestSystemDownloadPath:
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
             patch.object(DagnamClient, "download_system_dataset", return_value=dest) as mock_dl,
             patch(
-                "dagnam.data.loaders.system.resolve_system_dataset",
+                "dagnam.data.loaders.system.load_system_dataset",
                 side_effect=RuntimeError("no tfds"),
             ),
         ):

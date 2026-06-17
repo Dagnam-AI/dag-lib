@@ -152,7 +152,61 @@ def test_projects_architecture_reads_json_inputs(
             ]
         )
     save.assert_called_once_with("p1", {"nodes": []}, {"layers": []}, commit_message="init")
-    assert '"version_id": "v1"' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Concise human summary by default (not raw JSON) that surfaces the saved
+    # version identifier rather than an all-dashes project summary.
+    assert "Saved architecture version v1." in out
+    assert '"version_id"' not in out
+
+
+def test_projects_architecture_json_flag_emits_full_json(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    """``--json`` closes G007: the full architecture response reaches stdout."""
+    save = mock.Mock(return_value={"version_id": "v1"})
+    fake = SimpleNamespace(save_architecture=save)
+    with mock.patch("dagnam.projects", fake):
+        run_cli(
+            [
+                "projects",
+                "architecture",
+                "p1",
+                "--diagram",
+                '{"nodes": []}',
+                "--config",
+                '{"layers": []}',
+                "--json",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert out.strip().startswith("{")
+    assert '"version_id": "v1"' in out
+
+
+def test_projects_architecture_output_saves_full_json(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    output = tmp_path / "arch.json"
+    payload = {"version_id": "v1"}
+    save = mock.Mock(return_value=payload)
+    fake = SimpleNamespace(save_architecture=save)
+    with mock.patch("dagnam.projects", fake):
+        run_cli(
+            [
+                "projects",
+                "architecture",
+                "p1",
+                "--diagram",
+                '{"nodes": []}',
+                "--config",
+                '{"layers": []}',
+                "--output",
+                str(output),
+            ]
+        )
+    out = capsys.readouterr().out
+    assert '"version_id"' not in out
+    assert json.loads(output.read_text(encoding="utf-8")) == payload
 
 
 def test_projects_architecture_accepts_json_literals(
@@ -176,6 +230,19 @@ def test_projects_architecture_accepts_json_literals(
     capsys.readouterr()
 
 
+def test_render_architecture_falls_back_to_version_number() -> None:
+    from dagnam.cli.project import _render_architecture
+
+    assert _render_architecture({"version_number": 7}) == "Saved architecture version 7."
+
+
+def test_render_architecture_handles_missing_identifiers() -> None:
+    from dagnam.cli.project import _render_architecture
+
+    assert _render_architecture({}) == "Architecture saved."
+    assert _render_architecture("not-a-dict") == "Architecture saved."
+
+
 def test_projects_list_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake = SimpleNamespace(list=mock.Mock(return_value={"items": [], "total": 0}))
     with mock.patch("dagnam.projects", fake):
@@ -189,6 +256,34 @@ def test_projects_get_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
     with mock.patch("dagnam.projects", fake):
         run_cli(["projects", "get", "p1", "--output", str(output)])
     assert json.loads(output.read_text(encoding="utf-8"))["id"] == "p1"
+
+
+def test_projects_create_concise_by_default_and_json(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    fake = SimpleNamespace(create=mock.Mock(return_value={"id": "p1", "title": "X"}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "create", "--title", "X"])
+        run_cli(["projects", "create", "--title", "X", "--json"])
+    captured = capsys.readouterr()
+    out = captured.out
+    first, second = out.split("{", maxsplit=1)
+    assert "Project p1" in first
+    assert '"id": "p1"' in "{" + second
+    assert "Next: dagnam training create p1 ..." in captured.err
+
+
+def test_projects_duplicate_concise_by_default_and_verbose(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    fake = SimpleNamespace(duplicate=mock.Mock(return_value={"id": "p2", "title": "copy"}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "duplicate", "p1"])
+        run_cli(["projects", "duplicate", "p1", "--verbose"])
+    out = capsys.readouterr().out
+    first, second = out.split("{", maxsplit=1)
+    assert "Project p2" in first
+    assert '"id": "p2"' in "{" + second
 
 
 def test_projects_create_output_file(run_cli: CliRunner, tmp_path: Path) -> None:

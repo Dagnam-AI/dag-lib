@@ -12,6 +12,7 @@ Server mode contract:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -32,6 +33,8 @@ from dagnam.data.cache import (
     touch_cache,
 )
 from dagnam.data.dataset import DagnamDataset
+
+logger = logging.getLogger(__name__)
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -104,11 +107,18 @@ def load_dataset(
     source_type = meta.get("source_type", "")
     if source_type == "system" or is_system:
         try:
-            from dagnam.data.loaders.system import resolve_system_dataset
+            from dagnam.data.loaders.system import load_system_dataset
 
-            return resolve_system_dataset(meta)
-        except (ImportError, Exception):
-            pass
+            return load_system_dataset(meta)
+        except Exception as exc:
+            # Native resolution is the preferred path; if it fails (e.g. the
+            # framework library or tfds isn't installed) fall back to the
+            # server-side download below, but surface the real cause first.
+            logger.warning(
+                "Native system-dataset load failed for %r; falling back to download: %s",
+                dataset_id,
+                exc,
+            )
 
     cache_dir_path: Path | None = Path(cache_dir) if cache_dir is not None else None
     cache_key = f"{dataset_id}@{version}" if version else dataset_id
@@ -180,12 +190,13 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
     meta = ensure_json_object(json.loads(meta_path.read_text(encoding="utf-8")))
 
     if meta.get("source_type") == "system":
-        try:
-            from dagnam.data.loaders.system import resolve_system_dataset
+        # A system dataset is always resolved via its framework-native loader;
+        # its sidecar carries no real on-disk file (the relative file_path is a
+        # codegen placeholder), so let any loader error propagate with its real
+        # cause rather than masking it as a FileNotFoundError below.
+        from dagnam.data.loaders.system import load_system_dataset
 
-            return resolve_system_dataset(meta)
-        except (ImportError, Exception):
-            pass
+        return load_system_dataset(meta)
 
     file_path_str = meta.get("file_path")
     if isinstance(file_path_str, str) and file_path_str:

@@ -4,21 +4,28 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+from dagnam.cli._parser import DagnamArgumentParser
+
+if TYPE_CHECKING:
+    from dagnam.cli.common import SubParsersAction
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> DagnamArgumentParser:
     """Build the top-level ``dagnam`` CLI parser.
 
-    Each command group's argument registration lives beside its handlers in the
-    matching ``dagnam.cli.<domain>`` module as a ``register_*`` function; this
-    function wires them onto a single shared subparsers action in display order.
+    Each command group registers its arguments via a ``register_*`` function in
+    the matching ``dagnam.cli.<domain>`` module; this wires them onto one shared
+    subparsers action in display order. The root uses ``DagnamArgumentParser`` so
+    every subcommand inherits typo suggestions and grouped help.
     """
     from dagnam.cli.account import register_account
     from dagnam.cli.agent import register_agent
     from dagnam.cli.cache import register_cache
     from dagnam.cli.checkpoint import register_checkpoint
     from dagnam.cli.codegen import register_codegen
-    from dagnam.cli.common import format_ascii_art, format_version_banner
+    from dagnam.cli.common import format_version_banner
     from dagnam.cli.dataset import register_dataset
     from dagnam.cli.deployment import register_deployments
     from dagnam.cli.hub import register_hub
@@ -27,25 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     from dagnam.cli.project import register_projects
     from dagnam.cli.training import register_training
 
-    parser = argparse.ArgumentParser(
+    parser = DagnamArgumentParser(
         prog="dagnam",
-        description=(
-            f"{format_ascii_art()}\n\n"
-            "Official CLI for Dagnam.AI datasets, projects, deployments, and training."
-        ),
-        epilog=(
-            "Examples:\n"
-            "  dagnam login                         Authenticate with an API key\n"
-            "  dagnam dataset list --search mnist   Search available datasets\n"
-            "  dagnam projects create --title X     Create a new project\n"
-            "  dagnam training create <pid> ...     Start a training job\n"
-            "  dagnam training attach <jid> -- ... Attach local metrics to a child process\n"
-            "  dagnam config set training_metrics_path <path>\n"
-            "                                       Set the default local metrics JSONL path\n"
-            "  dagnam usage                         Show plan usage and limits\n"
-            "  dagnam deployments logs <id>         Tail a deployment's logs\n\n"
-            "Docs: https://dagnam.ai/docs"
-        ),
+        add_help=True,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -55,7 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
         version=format_version_banner(),
         help="Show the dagnam version and exit.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show full tracebacks on error.",
+    )
+    # _SubParsersAction is invariant in typeshed but DagnamArgumentParser IS an
+    # ArgumentParser; cast so register_* functions (typed SubParsersAction) accept it.
+    subparsers: SubParsersAction = parser.add_subparsers(  # pyright: ignore[reportAssignmentType]
+        dest="command", metavar="<command>", required=False
+    )
 
     register_login(subparsers)
     register_dataset(subparsers)
@@ -75,10 +75,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
+    from dagnam.cli._parser import format_root_help
+    from dagnam.cli.common import configure_console_encoding, run_command
+
+    # Upgrade the console to UTF-8 before the banner is built so the branded art
+    # renders on capable terminals; it degrades to ASCII on cp1252 (G019).
+    configure_console_encoding()
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.func(args)
-    return 0
+    if not hasattr(args, "func"):
+        # Bare ``dagnam``: friendly welcome with the full banner.
+        print(format_root_help(banner=True), end="")
+        return 0
+    return run_command(args)
 
 
 if __name__ == "__main__":
