@@ -66,6 +66,13 @@ def test_to_flax_native_numpy_object_pad(tmp_path: Path) -> None:
     assert batches[0].features.shape[1] == 200
 
 
+def test_to_flax_native_numpy_object_clamps_to_vocab_size(tmp_path: Path) -> None:
+    ds = make_native_obj_ds()
+    batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False, vocab_size=8)
+
+    assert batches[0].features[0, :4].tolist() == [6, 7, 0, 0]
+
+
 def test_to_flax_native_numpy_not_padded(tmp_path: Path) -> None:
     """Rectangular numeric arrays keep their width — the padding guard must not fire."""
     ds = make_native_numpy_ds(tmp_path)  # x_train is (10, 4)

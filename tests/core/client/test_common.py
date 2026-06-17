@@ -262,9 +262,23 @@ def test_fastapi_detail_list_item_without_string_msg_is_skipped() -> None:
 
 
 def test_fastapi_detail_non_str_non_list_falls_through_to_dumps() -> None:
-    # detail is a dict -> not str, not list -> json.dumps(detail)
+    # detail is a dict with no ``message`` key -> json.dumps(detail)
     r = _resp(422, text='{"detail":{"code":1}}', content_type="application/json")
     assert common.safe_response_text(r) == '{"code": 1}'
+
+
+def test_fastapi_detail_dict_with_message_returns_clean_message() -> None:
+    # A structured codegen error detail surfaces its human-readable ``message``
+    # (clean field triage), not the JSON-stringified dict.
+    r = _resp(
+        422,
+        text=(
+            '{"detail":{"error":"code_generation_failed",'
+            '"message":"Unknown legacy loss: DiceBCELoss"}}'
+        ),
+        content_type="application/json",
+    )
+    assert common.safe_response_text(r) == "Unknown legacy loss: DiceBCELoss"
 
 
 def test_safe_response_text_streaming_text_decode_failure_returns_empty() -> None:
@@ -520,6 +534,18 @@ def test_raise_for_codegen_401() -> None:
 def test_raise_for_codegen_validation(code: int) -> None:
     with pytest.raises(CodegenValidationError):
         common.raise_for_codegen(_resp(code))
+
+
+def test_raise_for_codegen_structured_422_detail_surfaces_message() -> None:
+    body = (
+        '{"detail": {"error": "code_generation_failed", '
+        '"message": "Unknown legacy loss: DiceBCELoss"}}'
+    )
+
+    with pytest.raises(CodegenValidationError) as exc:
+        common.raise_for_codegen(_resp(422, text=body, content_type="application/json"))
+
+    assert "DiceBCELoss" in str(exc.value)
 
 
 def test_raise_for_codegen_500() -> None:

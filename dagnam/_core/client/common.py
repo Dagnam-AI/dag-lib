@@ -142,6 +142,13 @@ def _format_fastapi_detail(text: str) -> str:
                 messages.append(f"{field}: {message}" if field else message)
         if messages:
             return "; ".join(messages)
+    if isinstance(detail, dict):
+        # Structured error details (e.g. codegen's
+        # ``{"error": ..., "message": ...}``) surface their human-readable
+        # message rather than the JSON-stringified dict.
+        message = detail.get("message")
+        if isinstance(message, str):
+            return message
     return json.dumps(detail, default=str)
 
 

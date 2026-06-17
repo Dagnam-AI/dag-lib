@@ -152,6 +152,32 @@ def test_numpy_loader_pads_object_dtype_sequences() -> None:
     assert x.shape[1] == 200
 
 
+def test_numpy_loader_clamps_object_sequences_to_vocab_size() -> None:
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 6,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    x_train = np.array([np.array([1, 2, 3])], dtype=object)
+    y_train = np.array([0.0])
+    x_test = np.array([np.array([6, 7, 8, 9])], dtype=object)
+    y_test = np.array([1.0])
+    ds.native_train = _native_split(x_train, y_train)
+    ds.native_test = _native_split(x_test, y_test)
+
+    loader = ds.to_pytorch_loader(split="test", batch_size=1, num_workers=0, vocab_size=8)
+    x, _ = next(iter(loader))
+
+    assert x[0, :4].tolist() == [6, 7, 0, 0]
+
+
 def test_numpy_loader_train_pads_object_dtype_sequences() -> None:
     """The train-split guard also pads ragged object-dtype sequences to maxlen (200)."""
     ds = DagnamDataset(

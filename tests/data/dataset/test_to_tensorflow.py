@@ -27,6 +27,10 @@ class _HasShape(Protocol):
     def shape(self) -> tuple[int, ...]: ...
 
 
+class _TensorBatch(_HasShape, Protocol):
+    def numpy(self) -> np.ndarray: ...
+
+
 def _tf_pair_identity(features: object, labels: object) -> tuple[object, object]:
     return features, labels
 
@@ -77,6 +81,14 @@ def test_to_tf_native_obj_array_pads_to_maxlen(tmp_path: Path) -> None:
     tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=1, shuffle=False)
     x_batch, _ = cast("tuple[_HasShape, _HasShape]", next(iter(tf_ds)))
     assert x_batch.shape[1] == 200
+
+
+def test_to_tf_native_obj_array_clamps_to_vocab_size(tmp_path: Path) -> None:
+    ds = make_native_obj_ds()
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=1, shuffle=False, vocab_size=8)
+    x_batch, _ = cast("tuple[_TensorBatch, _HasShape]", next(iter(tf_ds)))
+
+    assert x_batch.numpy()[0, :4].tolist() == [6, 7, 0, 0]
 
 
 def test_to_tf_native_numpy_not_padded(tmp_path: Path) -> None:

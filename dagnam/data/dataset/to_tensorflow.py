@@ -33,6 +33,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         seed: int,
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
+        vocab_size: int | None = None,
     ) -> TensorflowDataset:
         """Convert a torchvision-style native dataset into a tf.data.Dataset.
 
@@ -57,11 +58,16 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 x_test, y_test = native_test
             else:
                 x_test, y_test = (), ()
+            num_words = vocab_size if vocab_size is not None else 20000
             if np.asarray(x_train).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
                 # Rectangular numeric arrays keep their natural dtype and are left as-is.
-                x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
-                x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
+                x_train = self._pad_sequences(
+                    cast("Sequence[Sequence[int]]", x_train), num_words=num_words
+                )
+                x_test = self._pad_sequences(
+                    cast("Sequence[Sequence[int]]", x_test), num_words=num_words
+                )
             if split == "test":
                 x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
                 y = np.asarray(y_test).astype(np.int64)
@@ -249,6 +255,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         column_roles: dict[str, str] | None = None,
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
+        vocab_size: int | None = None,
     ) -> TensorflowDataset:
         """Create a TensorFlow Dataset for the specified split.
 
@@ -333,6 +340,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 seed=seed,
                 map_fn=map_fn,
                 batch_map_fn=batch_map_fn,
+                vocab_size=vocab_size,
             )
 
         fmt = self.format.lower()

@@ -39,6 +39,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         batch_transform: CollateFn | None = None,
         waveform_transform: TransformFn | None = None,
         spectrogram_transform: TransformFn | None = None,
+        vocab_size: int | None = None,
     ) -> DataLoader[object]:
         """Create a PyTorch DataLoader for the specified split.
 
@@ -87,6 +88,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 transform=transform,
                 target_transform=target_transform,
                 collate_fn=_wrap_collate(collate_fn, batch_transform),
+                vocab_size=vocab_size,
             )
 
         # --- File-based path (user datasets) ---
@@ -168,6 +170,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         transform: TransformFn | None = None,
         target_transform: TransformFn | None = None,
         collate_fn: CollateFn | None = None,
+        vocab_size: int | None = None,
     ) -> DataLoader[object]:
         """Build a DataLoader from native train/test datasets."""
         import torch
@@ -188,6 +191,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 transform=transform,
                 target_transform=target_transform,
                 collate_fn=collate_fn,
+                vocab_size=vocab_size,
             )
 
         # Handle torchvision map-style datasets
@@ -245,6 +249,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         transform: TransformFn | None = None,
         target_transform: TransformFn | None = None,
         collate_fn: CollateFn | None = None,
+        vocab_size: int | None = None,
     ) -> DataLoader[object]:
         """Build a DataLoader from numpy array tuples (e.g. IMDB)."""
         import torch
@@ -263,13 +268,16 @@ class PytorchDatasetMixin(DatasetMixinBase):
             x_test, y_test = self._native_test
         else:
             x_test, y_test = (), ()
+        num_words = vocab_size if vocab_size is not None else 20000
 
         if split == "test":
             # IMDB sequences are variable-length object arrays — pad them
             if np.asarray(x_test).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
                 # Rectangular numeric arrays keep their natural dtype and are left as-is.
-                x_test = self._pad_sequences(cast("Sequence[Sequence[int]]", x_test))
+                x_test = self._pad_sequences(
+                    cast("Sequence[Sequence[int]]", x_test), num_words=num_words
+                )
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = tensor(np.asarray(y_test), dtype=torch_float32).unsqueeze(1)
             ds = TensorDataset(x_t, y_t)
@@ -277,7 +285,9 @@ class PytorchDatasetMixin(DatasetMixinBase):
             if np.asarray(x_train).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
                 # Rectangular numeric arrays keep their natural dtype and are left as-is.
-                x_train = self._pad_sequences(cast("Sequence[Sequence[int]]", x_train))
+                x_train = self._pad_sequences(
+                    cast("Sequence[Sequence[int]]", x_train), num_words=num_words
+                )
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
                 x = tensor(np.asarray(x_train[-n_val:]), dtype=torch_long)
