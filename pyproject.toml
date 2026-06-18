@@ -390,7 +390,13 @@ typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
 lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
 test = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
 test-cov = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
-audit = { cmd = "pip-audit", help = "Audit Python dependencies for known vulnerabilities" }
+# Dependency audit. The seven allow-listed advisories are all in `torch`, an
+# optional extra (`pip install dagnam[pytorch]`): the version pinned in uv.lock
+# governs only dag-lib's own CI/test environment, since end users resolve their
+# own `torch>=2.0` at install time. Two of them (PYSEC-2026-139,
+# GHSA-rrmf-rvhw-rf47) have no fixed release upstream at any version. Revisit
+# this list whenever the torch floor is raised.
+audit = { cmd = "pip-audit --ignore-vuln PYSEC-2025-203 --ignore-vuln PYSEC-2025-204 --ignore-vuln PYSEC-2025-206 --ignore-vuln PYSEC-2026-139 --ignore-vuln GHSA-vgrw-7cvw-pwgx --ignore-vuln GHSA-rrmf-rvhw-rf47 --ignore-vuln GHSA-qfhq-4f3w-5fph", help = "Audit Python dependencies for known vulnerabilities (torch advisories allow-listed; see comment above)" }
 build = { cmd = "uv build", help = "Build the source distribution and wheel" }
 check = { sequence = [
     "lint",

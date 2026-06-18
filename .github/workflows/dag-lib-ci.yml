@@ -58,7 +58,10 @@ jobs:
           print('Base import is clean; no optional ML extras leaked into sys.modules')
           "
       - name: Dependency audit
-        run: uv run --with pip-audit pip-audit
+        # torch advisories are allow-listed (it is an optional extra whose
+        # pinned version is CI-only; users resolve their own torch>=2.0). See
+        # the audit task comment in pyproject.toml for the rationale.
+        run: uv run poe audit
 
   tests:
     # Validates the supported Python runtime with every optional integration

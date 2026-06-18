@@ -202,6 +202,43 @@ def test_login_chmod_failure_swallowed(
     assert json.loads(config_file.read_text())["api_key"] == "k"
 
 
+def test_login_skips_chmod_on_windows(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
+    """On Windows cmd_login saves credentials but skips the POSIX chmod (150->155)."""
+    config_dir = tmp_path / ".dagnam"
+    config_file = config_dir / "config.json"
+    monkeypatch.setattr("dagnam._core.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+    monkeypatch.setattr("getpass.getpass", lambda _prompt: "k")
+    monkeypatch.setattr(login_mod, "sys", SimpleNamespace(platform="win32"))
+
+    import os as real_os
+
+    def _fail_chmod(_path: Path | str, _mode: int) -> None:
+        raise AssertionError("chmod must not be called on Windows")
+
+    fake = SimpleNamespace(
+        getuid=lambda: 1000,
+        stat=lambda _path: SimpleNamespace(st_uid=1000, st_mode=0o700),
+        chmod=_fail_chmod,
+        O_WRONLY=real_os.O_WRONLY,
+        O_CREAT=real_os.O_CREAT,
+        O_TRUNC=real_os.O_TRUNC,
+        O_NOFOLLOW=getattr(real_os, "O_NOFOLLOW", 0),
+        open=real_os.open,
+        fdopen=real_os.fdopen,
+    )
+    monkeypatch.setattr(login_mod, "os", fake)
+
+    with mock.patch("dagnam._core.client.DagnamClient.list_datasets", return_value=[]):
+        monkeypatch.setattr("sys.argv", ["dagnam", "login"])
+        from dagnam.cli import main as cli_main
+
+        cli_main()
+
+    assert config_file.exists()
+    assert json.loads(config_file.read_text())["api_key"] == "k"
+
+
 def test_lock_down_config_path_existing_file_matching_uid_passes(
     force_linux: SimpleNamespace, monkeypatch: PytestMonkeyPatch, tmp_path: Path
 ) -> None:
