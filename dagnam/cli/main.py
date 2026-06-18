@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+import sys
 from typing import TYPE_CHECKING
 
 from dagnam.cli._parser import DagnamArgumentParser
@@ -82,7 +83,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     # renders on capable terminals; it degrades to ASCII on cp1252 (G019).
     configure_console_encoding()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    # argparse does not strip the ``--`` separator for *nested* subparsers
+    # (CPython gh-72795), so ``dagnam training attach <job> -- python train.py``
+    # would fail with "unrecognized arguments: --". Split it off ourselves and
+    # hand the trailing tokens to the subcommand's ``command`` passthrough.
+    passthrough: list[str] | None = None
+    if "--" in tokens:
+        split = tokens.index("--")
+        tokens, passthrough = tokens[:split], tokens[split + 1 :]
+    args = parser.parse_args(tokens)
+    if passthrough is not None:
+        # Only ``attach`` declares a ``command`` *positional* (nargs="*"), which
+        # materializes as a list; the top-level subparsers ``dest="command"`` is
+        # the subcommand-name string. So a list is our signal that a trailing
+        # command is accepted here -- anything else is a usage error.
+        existing = getattr(args, "command", None)
+        if not isinstance(existing, list):
+            parser.error("the '--' command separator is not valid here")
+        args.command = [*existing, *passthrough]
     if not hasattr(args, "func"):
         # Bare ``dagnam``: friendly welcome with the full banner.
         print(format_root_help(banner=True), end="")

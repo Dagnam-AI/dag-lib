@@ -351,3 +351,28 @@ class TestConfig:
             json.loads(config_file.read_text(encoding="utf-8"))["training_metrics_path"]
             == "./m.jsonl"
         )
+
+    def test_set_skips_chmod_on_windows(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        """On Windows `config set` writes the file but skips the POSIX chmod."""
+        import dagnam.cli.account as account_mod
+
+        config_file = tmp_path / "config.json"
+        monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", config_file)
+        monkeypatch.setattr(account_mod.sys, "platform", "win32")
+
+        def _fail_chmod(_path: object, _mode: int) -> None:
+            raise AssertionError("chmod must not be called on Windows")
+
+        monkeypatch.setattr(account_mod.os, "chmod", _fail_chmod)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dagnam", "config", "set", "training_metrics_path", "./m.jsonl"],
+        )
+        main()
+
+        assert (
+            json.loads(config_file.read_text(encoding="utf-8"))["training_metrics_path"]
+            == "./m.jsonl"
+        )

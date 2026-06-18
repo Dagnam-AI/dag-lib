@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -38,22 +37,19 @@ def test_resolve_system_dataset_flax_falls_back_on_missing_tfds(
     from dagnam.data.loaders.system import flax as flax_mod
 
     monkeypatch.setattr(flax_mod, "resolve_system_dataset", fallback_resolve)
-    import builtins
 
-    real_import = builtins.__import__
+    # Simulate tensorflow_datasets not being installed. The loader pulls it in
+    # via ``importlib.import_module`` (not a bare ``import`` statement), so the
+    # faithful way to force the missing-package branch is to make that call
+    # raise ImportError.
+    real_import_module = flax_mod.import_module
 
-    def fake_import(
-        name: str,
-        globals: Mapping[str, object] | None = None,
-        locals: Mapping[str, object] | None = None,
-        fromlist: Sequence[str] = (),
-        level: int = 0,
-    ) -> object:
+    def fake_import_module(name: str, package: str | None = None) -> object:
         if name == "tensorflow_datasets":
             raise ImportError("nope")
-        return real_import(name, globals, locals, fromlist, level)
+        return real_import_module(name, package)
 
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(flax_mod, "import_module", fake_import_module)
     assert resolve_system_dataset_flax({"name": "mnist"}) == "FB"
 
 

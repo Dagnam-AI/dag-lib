@@ -440,7 +440,7 @@ def test_attach_kills_windows_child_process_tree(
             return 0
 
     taskkill = mock.Mock()
-    monkeypatch.setattr("dagnam.training_attach.os.name", "nt")
+    monkeypatch.setattr("dagnam.training_attach.sys.platform", "win32")
     monkeypatch.setattr("dagnam.training_attach.subprocess.run", taskkill)
     monkeypatch.setattr("subprocess.Popen", lambda _command, env: FakeProcess())
     client = SimpleNamespace(
@@ -546,6 +546,14 @@ def test_attach_cli_parses_command_after_separator(
     assert args.job_id == "job-1"
     assert args.metrics_path == "events.jsonl"
     assert args.command == ["python", "train.py"]
+
+
+def test_cli_rejects_separator_for_command_without_passthrough(run_cli) -> None:
+    # ``--`` is only meaningful for subcommands that accept a trailing command
+    # (attach). Using it elsewhere is a usage error, not a silent no-op.
+    with pytest.raises(SystemExit) as exc_info:
+        run_cli(["version", "--", "python", "train.py"])
+    assert exc_info.value.code == 2
 
 
 # ---------------------------------------------------------------- tailer edge cases
@@ -671,7 +679,7 @@ def test_terminate_child_windows_without_wait(
             return object.__getattribute__(self, name)
 
     taskkill = mock.Mock()
-    monkeypatch.setattr("dagnam.training_attach.os.name", "nt")
+    monkeypatch.setattr("dagnam.training_attach.sys.platform", "win32")
     monkeypatch.setattr("dagnam.training_attach.subprocess.run", taskkill)
     monkeypatch.setattr("subprocess.Popen", lambda _command, env: FakeProcess())
     client = SimpleNamespace(

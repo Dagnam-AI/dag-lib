@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -60,23 +60,18 @@ def test_resolve_system_dataset_tf_falls_back_on_missing_tfds(
 
     monkeypatch.setattr(tfds_mod, "resolve_system_dataset", fallback_resolve)
 
-    # Force import of tensorflow_datasets to fail
-    import builtins
+    # Simulate tensorflow_datasets not being installed. The loader pulls it in
+    # via ``importlib.import_module`` (not a bare ``import`` statement), so the
+    # faithful way to force the missing-package branch is to make that call
+    # raise ImportError.
+    real_import_module = tfds_mod.import_module
 
-    real_import = builtins.__import__
-
-    def fake_import(
-        name: str,
-        globals: Mapping[str, object] | None = None,
-        locals: Mapping[str, object] | None = None,
-        fromlist: Sequence[str] = (),
-        level: int = 0,
-    ) -> object:
+    def fake_import_module(name: str, package: str | None = None) -> object:
         if name == "tensorflow_datasets":
             raise ImportError("not installed")
-        return real_import(name, globals, locals, fromlist, level)
+        return real_import_module(name, package)
 
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(tfds_mod, "import_module", fake_import_module)
     assert resolve_system_dataset_tf({"name": "mnist"}) == "FB"
 
 
