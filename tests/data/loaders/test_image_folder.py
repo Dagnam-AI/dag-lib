@@ -346,7 +346,7 @@ class TestPytorchExtra:
 
     def test_pytorch_extra_includes_torchvision(self) -> None:
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-        assert 'pytorch = ["torch>=2.0", "torchvision>=0.15"]' in pyproject
+        assert 'pytorch = ["torch>=2.12.1", "torchvision>=0.27.1"]' in pyproject
 
 
 # ------------------------------------------------------------------
