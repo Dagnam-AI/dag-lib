@@ -68,3 +68,19 @@ class DatasetMixinBase(Protocol):
         num_words: int = 20000,
     ) -> npt.NDArray[np.int32]:
         raise NotImplementedError
+
+    @staticmethod
+    def _tokenize_text(
+        texts: Sequence[object],
+        maxlen: int = 200,
+        num_words: int = 20000,
+    ) -> npt.NDArray[np.int32]:
+        raise NotImplementedError
+
+    @staticmethod
+    def _batches_need_padding(features_list: Sequence[np.ndarray]) -> bool:
+        raise NotImplementedError
+
+    @staticmethod
+    def _is_text_features(features: np.ndarray) -> bool:
+        raise NotImplementedError

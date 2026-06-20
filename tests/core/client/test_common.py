@@ -397,6 +397,54 @@ def test_raise_for_generic_413_raises_quota() -> None:
         common.raise_for_generic(_resp(413, text="big"))
 
 
+def test_entitlement_402_raises_quota_with_actionable_message() -> None:
+    """A backend plan-limit rejection (402) maps to QuotaExceededError carrying the
+    rejection message + remediation hints, across every raise_for_* entry point."""
+    import json
+
+    body = json.dumps(
+        {
+            "error": "limit_exceeded",
+            "limit_key": "projects.count",
+            "message": "You have reached the Pro plan limit for projects.count.",
+            "remediation_hints": ["Upgrade your plan", "Delete unused projects"],
+        }
+    )
+    for raiser in (
+        common.raise_for_generic,
+        common.raise_for_project,
+        common.raise_for_codegen,
+        common.raise_for_hub,
+        common.raise_for_upload,
+    ):
+        with pytest.raises(QuotaExceededError) as excinfo:
+            raiser(_resp(402, text=body, content_type="application/json"))
+        message = str(excinfo.value)
+        assert "Pro plan limit for projects.count" in message
+        assert "Upgrade your plan" in message
+
+
+def test_entitlement_402_falls_back_to_default_on_non_json_body() -> None:
+    with pytest.raises(QuotaExceededError) as excinfo:
+        common.raise_for_generic(_resp(402, text=""))
+    assert "Plan limit reached" in str(excinfo.value)
+
+
+def test_entitlement_402_message_without_hints() -> None:
+    import json
+
+    body = json.dumps({"message": "Limit reached", "remediation_hints": []})
+    with pytest.raises(QuotaExceededError) as excinfo:
+        common.raise_for_generic(_resp(402, text=body, content_type="application/json"))
+    assert str(excinfo.value) == "Limit reached"
+
+
+def test_entitlement_402_non_dict_json_falls_back() -> None:
+    with pytest.raises(QuotaExceededError) as excinfo:
+        common.raise_for_generic(_resp(402, text="[1, 2, 3]", content_type="application/json"))
+    assert "Plan limit reached" in str(excinfo.value)
+
+
 def test_raise_for_generic_413_uses_default_message_on_empty_body() -> None:
     with pytest.raises(QuotaExceededError, match="Storage quota exceeded"):
         common.raise_for_generic(_resp(413))

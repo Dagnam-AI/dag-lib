@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -64,6 +64,15 @@ def test_to_flax_native_numpy_object_pad(tmp_path: Path) -> None:
     assert batches
     # Ragged object-array sequences are padded/truncated to the fixed maxlen (200).
     assert batches[0].features.shape[1] == 200
+
+
+def test_to_flax_native_numpy_object_honors_sequence_length(tmp_path: Path) -> None:
+    # G079: the embedding-derived sequence_length overrides the default maxlen on
+    # the tuple-native ragged path too, so all paths pad to the same fixed length.
+    del tmp_path
+    ds = make_native_obj_ds()
+    batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False, sequence_length=12)
+    assert batches[0].features.shape[1] == 12
 
 
 def test_to_flax_native_numpy_object_clamps_to_vocab_size(tmp_path: Path) -> None:
@@ -230,6 +239,111 @@ def test_to_flax_native_flax_path(tmp_path: Path) -> None:
             split=split, batch_size=2, shuffle=split == "train", val_ratio=0.25
         )
         assert out
+
+
+def test_to_flax_native_flax_pads_ragged_sequences(tmp_path: Path) -> None:
+    # G079: a native-FLAX text dataset yields ragged (variable-length) token rows.
+    # They must be padded/truncated to a fixed length before np.concatenate so the
+    # batch is a rectangular integer array a jax.numpy array can hold.
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "native-flax-text",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 3,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    ragged = [
+        FlaxBatch(
+            features=cast("Any", np.array([[1, 2, 3, 4, 5], [1, 2, 3]], dtype=object)),
+            labels=cast("Any", np.asarray([0, 1], dtype=np.int64)),
+        ),
+        FlaxBatch(
+            features=cast("Any", np.array([[1, 2, 3, 4, 5, 6, 7, 8]], dtype=object)),
+            labels=cast("Any", np.asarray([1], dtype=np.int64)),
+        ),
+    ]
+    ds.native_train_flax = ragged
+    ds.native_test_flax = ragged
+    out = ds.to_flax_dataset(split="test", batch_size=8, shuffle=False, sequence_length=6)
+    feats = np.asarray(out[0].features)
+    assert feats.shape[1] == 6  # padded/truncated to the requested length
+    assert feats.dtype.kind in ("i", "u")  # integer tokens, never object
+
+
+def test_to_flax_native_flax_pads_rectangular_batches_of_different_lengths(tmp_path: Path) -> None:
+    # G079 (the REAL platform failure): each FlaxBatch is internally rectangular
+    # integer (dtype != object), but DIFFERENT batches have different sequence
+    # lengths (e.g. 4816 vs 3819). np.concatenate(axis=0) then fails on the
+    # mismatched dim-1 — the object-only guard missed this. They must pad to one
+    # length first.
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "native-flax-text",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 3,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    batches = [
+        FlaxBatch(
+            features=cast("Any", np.ones((2, 5), dtype=np.int64)),
+            labels=cast("Any", np.asarray([0, 1], dtype=np.int64)),
+        ),
+        FlaxBatch(
+            features=cast("Any", np.ones((1, 8), dtype=np.int64)),  # different length
+            labels=cast("Any", np.asarray([1], dtype=np.int64)),
+        ),
+    ]
+    ds.native_train_flax = batches
+    ds.native_test_flax = batches
+    out = ds.to_flax_dataset(split="test", batch_size=8, shuffle=False, sequence_length=6)
+    feats = np.asarray(out[0].features)
+    assert feats.shape == (3, 6)  # 3 samples, padded/truncated to length 6
+    assert feats.dtype.kind in ("i", "u")
+
+
+def test_to_flax_native_flax_tokenizes_string_rows(tmp_path: Path) -> None:
+    # G078 (flax defensive): if a native-FLAX batch carries raw text strings, they
+    # must be hash-tokenized to fixed-length integer ids, not left as strings.
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "n1",
+            "name": "native-flax-strings",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 2,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    strings = [
+        FlaxBatch(
+            features=cast("Any", np.array(["hello world foo", "bar baz"], dtype=object)),
+            labels=cast("Any", np.asarray([0, 1], dtype=np.int64)),
+        )
+    ]
+    ds.native_train_flax = strings
+    ds.native_test_flax = strings
+    out = ds.to_flax_dataset(split="test", batch_size=8, shuffle=False, sequence_length=5)
+    feats = np.asarray(out[0].features)
+    assert feats.shape[1] == 5
+    assert feats.dtype.kind in ("i", "u")
 
 
 def test_to_flax_native_flax_with_transforms(tmp_path: Path) -> None:

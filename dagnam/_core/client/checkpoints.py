@@ -9,6 +9,7 @@ from dagnam._core.client.base import (
     DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
+    is_redirect_response,
     is_success_response,
     requests,
     safe_error_body_from_response,
@@ -46,6 +47,11 @@ class CheckpointsClientMixin(BaseDagnamClient):
 
         GET /api/v1/training/jobs/{job_id}/checkpoints/{checkpoint_id}/download
 
+        The backend may either stream the file bytes directly (local storage) or
+        respond with a 307/308 redirect whose ``Location`` is a presigned
+        object-storage URL serving the bytes. Both are handled; the presigned URL
+        is fetched WITHOUT the API key.
+
         Returns (dest_path, expected_sha256) — the caller must verify.
         """
         job_path = quote_path_segment(job_id)
@@ -55,6 +61,17 @@ class CheckpointsClientMixin(BaseDagnamClient):
         )
         resp = self._get_stream(url)
 
+        # The checksum may ride on the redirect response or the final body
+        # response; prefer the one on whichever response carries the bytes,
+        # falling back to the redirect's header.
+        expected_checksum = resp.headers.get("X-Checksum-SHA256")
+
+        if is_redirect_response(resp):
+            location = resp.headers["Location"]
+            resp.close()
+            resp = self._get_stream_no_auth(location)
+            expected_checksum = resp.headers.get("X-Checksum-SHA256") or expected_checksum
+
         if not is_success_response(resp):
             code = resp.status_code
             if code == 401:
@@ -63,6 +80,5 @@ class CheckpointsClientMixin(BaseDagnamClient):
                 raise CheckpointNotFoundError(checkpoint_id)
             raise APIError(code, safe_error_body_from_response(resp))
 
-        expected_checksum = resp.headers.get("X-Checksum-SHA256")
         written = self._stream_response_to_file(resp, Path(dest_path))
         return written, expected_checksum

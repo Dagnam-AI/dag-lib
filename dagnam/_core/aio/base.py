@@ -78,6 +78,20 @@ class BaseAsyncDagnamClient:
         except httpx.TimeoutException as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
+    async def _get_no_auth(self, url: str) -> httpx.Response:
+        """GET an absolute URL with NO auth header (e.g. a presigned URL).
+
+        Presigned S3/GCS URLs carry their own signature in the query string and
+        reject (or are confused by) a forwarded ``Authorization`` header, so the
+        redirect follow-up must not send the API key.
+        """
+        try:
+            return await self._client.get(url, timeout=self.timeout)
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
 
 def raise_for_job_response(resp: httpx.Response, job_id: str) -> None:
     """Map training-job response errors (mirrors sync client.raise_for_job_response)."""

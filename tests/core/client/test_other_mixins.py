@@ -358,6 +358,95 @@ def test_download_checkpoint_stream(
     assert dest.read_bytes() == b"weights"
 
 
+def test_download_checkpoint_stream_307_redirect_to_presigned(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A 307 to a presigned URL is followed; the API key is NOT forwarded."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    presigned = "https://bucket.s3.example.com/ckpt1?sig=xyz"
+    rmock.get(
+        url,
+        status_code=307,
+        headers={"Location": presigned},
+    )
+    rmock.get(presigned, content=b"weights", headers={"X-Checksum-SHA256": "sha-from-s3"})
+    dest = tmp_path / "ckpt.bin"
+    written, checksum = client.download_checkpoint_stream("job1", "ckpt1", dest)
+    assert written == dest
+    assert dest.read_bytes() == b"weights"
+    assert checksum == "sha-from-s3"
+    # The presigned URL (the last request) must not receive the Bearer auth header.
+    presigned_req = rmock.last_request
+    assert "Authorization" not in presigned_req.headers
+
+
+def test_download_checkpoint_stream_308_redirect(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A 308 redirect is followed identically to a 307."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    presigned = "https://bucket.s3.example.com/ckpt1?sig=abc"
+    rmock.get(url, status_code=308, headers={"Location": presigned})
+    rmock.get(presigned, content=b"bytes")
+    dest = tmp_path / "ckpt.bin"
+    written, checksum = client.download_checkpoint_stream("job1", "ckpt1", dest)
+    assert written == dest
+    assert dest.read_bytes() == b"bytes"
+    assert checksum is None
+
+
+def test_download_checkpoint_stream_redirect_checksum_from_original(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """The checksum header on the redirect response itself is honored."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    presigned = "https://bucket.s3.example.com/ckpt1?sig=def"
+    rmock.get(
+        url,
+        status_code=307,
+        headers={"Location": presigned, "X-Checksum-SHA256": "sha-from-api"},
+    )
+    rmock.get(presigned, content=b"weights")
+    dest = tmp_path / "ckpt.bin"
+    written, checksum = client.download_checkpoint_stream("job1", "ckpt1", dest)
+    assert written == dest
+    assert checksum == "sha-from-api"
+
+
+def test_download_checkpoint_stream_redirect_missing_location(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A redirect with no Location header surfaces as an APIError."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    rmock.get(url, status_code=307)
+    with pytest.raises(APIError):
+        client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
+
+
+def test_download_checkpoint_stream_presigned_connectionerror(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A connection failure fetching the presigned URL maps to APIError."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    presigned = "https://bucket.s3.example.com/ckpt1?sig=xyz"
+    rmock.get(url, status_code=307, headers={"Location": presigned})
+    rmock.get(presigned, exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Connection failed"):
+        client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
+
+
+def test_download_checkpoint_stream_presigned_timeout(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A timeout fetching the presigned URL maps to APIError."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    presigned = "https://bucket.s3.example.com/ckpt1?sig=xyz"
+    rmock.get(url, status_code=307, headers={"Location": presigned})
+    rmock.get(presigned, exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request timed out"):
+        client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
+
+
 def test_download_checkpoint_stream_401(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:

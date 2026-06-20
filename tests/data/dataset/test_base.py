@@ -258,3 +258,53 @@ class TestToFlaxDataset:
         ds = DagnamDataset(meta, data_dir)
         with pytest.raises(ValueError, match="Unsupported format for Flax dataset: parquet"):
             ds.to_flax_dataset()
+
+
+def test_tokenize_text_is_deterministic_and_fixed_length() -> None:
+    # G078: hash-tokenization is deterministic (crc32, not Python's salted hash),
+    # pads/truncates to maxlen, reserves 0 for padding, and produces integers.
+    import numpy as np
+
+    out = DagnamDataset._tokenize_text(["hello world foo", "bar"], maxlen=4, num_words=50)
+    assert out.shape == (2, 4)
+    assert out.dtype == np.int32
+    assert (out >= 0).all()
+    assert (out < 50).all()
+    assert out[1, 1:].tolist() == [0, 0, 0]  # "bar" -> one token then padding
+    # deterministic across calls (stable hash)
+    again = DagnamDataset._tokenize_text(["hello world foo", "bar"], maxlen=4, num_words=50)
+    assert out.tolist() == again.tolist()
+
+
+def test_tokenize_text_truncates_to_maxlen() -> None:
+    out = DagnamDataset._tokenize_text(["a b c d e f"], maxlen=3, num_words=100)
+    assert out.shape == (1, 3)
+    assert (out[0] > 0).all()  # all three slots filled, none padding
+
+
+def test_is_text_features_classifies_arrays() -> None:
+    import numpy as np
+
+    assert DagnamDataset._is_text_features(np.array(["a", "b"]))  # unicode dtype
+    assert DagnamDataset._is_text_features(np.array(["a", "b"], dtype=object))  # object-of-str
+    assert not DagnamDataset._is_text_features(np.array([[1, 2], [3, 4]]))  # numeric
+    assert not DagnamDataset._is_text_features(
+        np.array([np.array([1, 2]), np.array([3])], dtype=object)
+    )  # object-of-int-lists
+    assert not DagnamDataset._is_text_features(np.array([], dtype=object))  # empty object array
+
+
+def test_batches_need_padding_classifies_all_branches() -> None:
+    import numpy as np
+
+    f = DagnamDataset._batches_need_padding
+    assert not f([])  # empty -> nothing to concatenate
+    assert not f([np.ones((2, 3), dtype=np.int64)])  # single batch
+    assert not f(
+        [np.ones((2, 3), dtype=np.int64), np.ones((1, 3), dtype=np.int64)]
+    )  # consistent trailing dims
+    assert f([np.array([[1, 2], [1]], dtype=object)])  # ragged/object dtype
+    assert f(
+        [np.ones((2, 3), dtype=np.int64), np.ones((1, 5), dtype=np.int64)]
+    )  # rectangular but different sequence length
+    assert not f([np.ones(3, dtype=np.int64), np.ones(4, dtype=np.int64)])  # 1-D: no trailing dims

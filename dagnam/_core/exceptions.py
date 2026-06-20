@@ -116,7 +116,7 @@ class UploadError(DagnamError):
 
 
 class QuotaExceededError(DagnamError):
-    """Storage quota exceeded (413 or 4xx quota response)."""
+    """Plan/usage limit reached: a storage quota (413) or a plan resource limit (402)."""
 
 
 class TaskNotFoundError(DagnamError):

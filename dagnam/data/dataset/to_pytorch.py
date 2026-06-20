@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence, Sized
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -20,6 +20,39 @@ CollateFn = Callable[[object], object]
 TensorFactory = Callable[..., "Tensor"]
 
 
+def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
+    roles: dict[str, str] = {}
+    input_column = binding.get("input_column")
+    target_column = binding.get("target_column")
+    if isinstance(input_column, str) and input_column:
+        roles[input_column] = "feature"
+    if isinstance(target_column, str) and target_column:
+        roles[target_column] = "target"
+    return roles or None
+
+
+def _native_target_tensor(
+    y: object,
+    tensor: TensorFactory,
+    torch_long: object,
+    torch_float32: object,
+) -> Tensor:
+    """Shape a native-numpy label array into the correct torch target tensor.
+
+    Integer labels are class indices, so they become a ``[B]`` long tensor — the
+    shape/dtype ``nn.CrossEntropyLoss`` expects. Float labels are regression /
+    ``BCEWithLogitsLoss`` targets, so they keep the ``[B, 1]`` float form.
+
+    A blanket ``float32 + unsqueeze(1)`` (the old behaviour) produced a ``[B, 1]``
+    float target that ``CrossEntropyLoss`` rejects with "0D or 1D target tensor
+    expected, multi-target not supported" — see gap G091.
+    """
+    y_arr = np.asarray(y)
+    if np.issubdtype(y_arr.dtype, np.integer):
+        return tensor(y_arr, dtype=torch_long)
+    return tensor(y_arr, dtype=torch_float32).unsqueeze(1)
+
+
 class PytorchDatasetMixin(DatasetMixinBase):
     """Pytorch conversion methods."""
 
@@ -33,6 +66,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         test_ratio: float = 0.1,
         seed: int = 42,
         column_roles: dict[str, str] | None = None,
+        binding: dict[str, Any] | None = None,
         transform: TransformFn | None = None,
         target_transform: TransformFn | None = None,
         collate_fn: CollateFn | None = None,
@@ -75,6 +109,8 @@ class PytorchDatasetMixin(DatasetMixinBase):
 
         if shuffle is None:
             shuffle = split == "train"
+        if column_roles is None and binding is not None:
+            column_roles = _column_roles_from_binding(binding)
 
         # --- Native dataset path (system datasets via torchvision etc.) ---
         if self._native_train is not None:
@@ -279,7 +315,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                     cast("Sequence[Sequence[int]]", x_test), num_words=num_words
                 )
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
-            y_t = tensor(np.asarray(y_test), dtype=torch_float32).unsqueeze(1)
+            y_t = _native_target_tensor(y_test, tensor, torch_long, torch_float32)
             ds = TensorDataset(x_t, y_t)
         else:
             if np.asarray(x_train).dtype == object:
@@ -291,16 +327,18 @@ class PytorchDatasetMixin(DatasetMixinBase):
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
                 x = tensor(np.asarray(x_train[-n_val:]), dtype=torch_long)
-                y = tensor(np.asarray(y_train[-n_val:]), dtype=torch_float32).unsqueeze(1)
+                y = _native_target_tensor(y_train[-n_val:], tensor, torch_long, torch_float32)
             else:
                 x = tensor(
                     np.asarray(x_train[:-n_val] if n_val > 0 else x_train),
                     dtype=torch_long,
                 )
-                y = tensor(
-                    np.asarray(y_train[:-n_val] if n_val > 0 else y_train),
-                    dtype=torch_float32,
-                ).unsqueeze(1)
+                y = _native_target_tensor(
+                    y_train[:-n_val] if n_val > 0 else y_train,
+                    tensor,
+                    torch_long,
+                    torch_float32,
+                )
             ds = TensorDataset(x, y)
 
         if transform is not None or target_transform is not None:

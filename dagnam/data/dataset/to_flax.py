@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from importlib.util import find_spec
-from typing import TYPE_CHECKING, SupportsInt, cast
+from typing import TYPE_CHECKING, Any, SupportsInt, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -22,6 +22,17 @@ JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
 BatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
 
 
+def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
+    roles: dict[str, str] = {}
+    input_column = binding.get("input_column")
+    target_column = binding.get("target_column")
+    if isinstance(input_column, str) and input_column:
+        roles[input_column] = "feature"
+    if isinstance(target_column, str) and target_column:
+        roles[target_column] = "target"
+    return roles or None
+
+
 class FlaxDatasetMixin(DatasetMixinBase):
     """Flax conversion methods."""
 
@@ -35,6 +46,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
         vocab_size: int | None = None,
+        sequence_length: int | None = None,
     ) -> list[FlaxBatch]:
         """Convert a torchvision-style native dataset into a list of FlaxBatch."""
         import jax.numpy as jnp
@@ -58,11 +70,14 @@ class FlaxDatasetMixin(DatasetMixinBase):
             if np.asarray(x_train).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
                 # Rectangular numeric arrays keep their natural dtype and are left as-is.
+                # The embedding-derived sequence_length (G079) sets the fixed length;
+                # fall back to _pad_sequences' default when unset.
+                pad_kwargs = {} if sequence_length is None else {"maxlen": sequence_length}
                 x_train = self._pad_sequences(
-                    cast("Sequence[Sequence[int]]", x_train), num_words=num_words
+                    cast("Sequence[Sequence[int]]", x_train), num_words=num_words, **pad_kwargs
                 )
                 x_test = self._pad_sequences(
-                    cast("Sequence[Sequence[int]]", x_test), num_words=num_words
+                    cast("Sequence[Sequence[int]]", x_test), num_words=num_words, **pad_kwargs
                 )
             if split == "test":
                 x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
@@ -149,6 +164,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         seed: int = 42,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
+        sequence_length: int | None = None,
     ) -> list[FlaxBatch]:
         """Route to a FLAX-native dataset when ``_native_train_flax`` is set.
 
@@ -179,10 +195,31 @@ class FlaxDatasetMixin(DatasetMixinBase):
             return []
 
         # Flatten to per-sample arrays so we can re-split and rebatch.
-        features_list: list[npt.NDArray[np.object_]] = [
-            np.asarray(b.features) for b in source_batches
-        ]
+        features_list: list[npt.NDArray[Any]] = [np.asarray(b.features) for b in source_batches]
         labels_list: list[npt.NDArray[np.int64]] = [np.asarray(b.labels) for b in source_batches]
+        # Text features need fixed-length integer tokens before np.concatenate /
+        # jnp.asarray: raw strings can't index an Embedding (G078); and sequence
+        # rows must share a length or np.concatenate(axis=0) fails. The ragged
+        # case is NOT only object-dtype-within-a-batch — each FlaxBatch is often
+        # internally rectangular but DIFFERENT batches have different sequence
+        # lengths (e.g. 4816 vs 3819), which my earlier object-only guard missed
+        # (G079). Pad/truncate every batch to one length whenever the batches
+        # can't be concatenated as-is.
+        if features_list and self._is_text_features(features_list[0]):
+            target = sequence_length or 200
+            features_list = [
+                self._tokenize_text(list(batch), maxlen=target) for batch in features_list
+            ]
+        elif features_list and self._batches_need_padding(features_list):
+            # ``len(row)`` works for both an object batch (rows are lists) and a
+            # rectangular 2-D batch (iterating yields per-sample rows).
+            target = sequence_length or max(
+                (len(row) for batch in features_list for row in batch), default=1
+            )
+            features_list = [
+                self._pad_sequences(cast("Sequence[Sequence[int]]", list(batch)), maxlen=target)
+                for batch in features_list
+            ]
         all_features = np.concatenate(features_list, axis=0)
         all_labels = np.concatenate(labels_list, axis=0)
 
@@ -278,9 +315,11 @@ class FlaxDatasetMixin(DatasetMixinBase):
         test_ratio: float = 0.1,
         seed: int = 42,
         column_roles: dict[str, str] | None = None,
+        binding: dict[str, Any] | None = None,
         transform_fn: ArrayTransform | None = None,
         batch_transform_fn: BatchTransform | None = None,
         vocab_size: int | None = None,
+        sequence_length: int | None = None,
     ) -> list[FlaxBatch]:
         """Create a list of Flax batches for the specified split.
 
@@ -297,6 +336,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
         valid_splits = ("train", "val", "test")
         if split not in valid_splits:
             raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'.")
+        if column_roles is None and binding is not None:
+            column_roles = _column_roles_from_binding(binding)
 
         # Format validation — before JAX import.
         fmt = self.format.lower()
@@ -339,6 +380,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 seed=seed,
                 transform_fn=transform_fn,
                 batch_transform_fn=batch_transform_fn,
+                sequence_length=sequence_length,
             )
         if self._native_train is not None:
             upgraded = self._try_upgrade_to_native_flax()
@@ -351,6 +393,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
                     seed=seed,
                     transform_fn=transform_fn,
                     batch_transform_fn=batch_transform_fn,
+                    sequence_length=sequence_length,
                 )
             return self._native_to_flax(
                 split=split,
@@ -361,6 +404,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 transform_fn=transform_fn,
                 batch_transform_fn=batch_transform_fn,
                 vocab_size=vocab_size,
+                sequence_length=sequence_length,
             )
 
         fmt = self.format.lower()

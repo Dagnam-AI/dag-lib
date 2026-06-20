@@ -205,14 +205,47 @@ def _status_code(resp: ResponseLike) -> int:
     return status_code if isinstance(status_code, int) else 0
 
 
+def _entitlement_message(resp: ResponseLike) -> str:
+    """Build a user-facing message from a backend LimitRejection payload.
+
+    The backend returns `{message, remediation_hints, required_plan, ...}` (see
+    entitlements.LimitRejection). We surface the message plus any remediation hints
+    so the caller sees an actionable error instead of a bare status code.
+    """
+    body = _text(resp)
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body or "Plan limit reached"
+    if not isinstance(data, dict):
+        return "Plan limit reached"
+    message = str(data.get("message") or "Plan limit reached")
+    hints = data.get("remediation_hints")
+    if isinstance(hints, list) and hints:
+        message = f"{message} ({'; '.join(str(h) for h in hints)})"
+    return message
+
+
+def _check_entitlement(resp: ResponseLike) -> None:
+    """Raise QuotaExceededError for an entitlement/plan-limit rejection (HTTP 402).
+
+    Centralizes the mapping so every `raise_for_*` surfaces plan-limit errors as a
+    clear QuotaExceededError rather than a generic APIError. (Backend maps a numeric
+    plan-limit hit to 402 Payment Required; see backend G088 fix.)
+    """
+    if _status_code(resp) == 402:
+        raise QuotaExceededError(_entitlement_message(resp))
+
+
 def raise_for_generic(
     resp: ResponseLike,
     not_found_exc: type[DagnamError] | None = None,
     not_found_arg: str | None = None,
 ) -> None:
-    """Map a response to (Auth|*NotFound|API)Error if not OK."""
+    """Map a response to (Auth|*NotFound|Quota|API)Error if not OK."""
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
@@ -232,6 +265,7 @@ def raise_for_dataset(resp: ResponseLike, dataset_id: str) -> None:
 def raise_for_deployment(resp: ResponseLike, deployment_id: str) -> None:
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 409:
         raise DeploymentStateError(_text(resp))
@@ -251,6 +285,7 @@ def raise_for_checkpoint(resp: ResponseLike, checkpoint_id: str) -> None:
 def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
@@ -266,6 +301,7 @@ def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
 def raise_for_project(resp: ResponseLike, project_id: str | None = None) -> None:
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
@@ -279,6 +315,7 @@ def raise_for_project(resp: ResponseLike, project_id: str | None = None) -> None
 def raise_for_codegen(resp: ResponseLike) -> None:
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
@@ -292,6 +329,7 @@ def raise_for_codegen(resp: ResponseLike) -> None:
 def raise_for_upload(resp: ResponseLike) -> None:
     if _ok(resp):
         return
+    _check_entitlement(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")

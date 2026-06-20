@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from importlib.util import find_spec
-from typing import SupportsInt, cast
+from typing import Any, SupportsInt, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -13,6 +13,17 @@ from dagnam._types import IndexedDataset, SupportsNumpy, TensorflowDataset, Tens
 from dagnam.data.dataset._typing import DatasetMixinBase
 
 TensorflowMapFn = Callable[..., object]
+
+
+def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
+    roles: dict[str, str] = {}
+    input_column = binding.get("input_column")
+    target_column = binding.get("target_column")
+    if isinstance(input_column, str) and input_column:
+        roles[input_column] = "feature"
+    if isinstance(target_column, str) and target_column:
+        roles[target_column] = "target"
+    return roles or None
 
 
 def _cardinality_to_int(value: object) -> int:
@@ -34,6 +45,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
         vocab_size: int | None = None,
+        sequence_length: int | None = None,
     ) -> TensorflowDataset:
         """Convert a torchvision-style native dataset into a tf.data.Dataset.
 
@@ -59,14 +71,21 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             else:
                 x_test, y_test = (), ()
             num_words = vocab_size if vocab_size is not None else 20000
-            if np.asarray(x_train).dtype == object:
-                # Ragged (variable-length) sequences arrive as object arrays; pad them.
-                # Rectangular numeric arrays keep their natural dtype and are left as-is.
+            maxlen = sequence_length if sequence_length is not None else 200
+            if self._is_text_features(np.asarray(x_train)):
+                # Raw text -> fixed-length integer tokens (G078): a keras Embedding
+                # cannot cast strings ("Cast string to int32"). Tokenize so the TF
+                # model receives integer ids, matching flax/pytorch.
+                x_train = self._tokenize_text(list(x_train), maxlen=maxlen, num_words=num_words)
+                x_test = self._tokenize_text(list(x_test), maxlen=maxlen, num_words=num_words)
+            elif np.asarray(x_train).dtype == object:
+                # Ragged (variable-length) integer sequences arrive as object arrays;
+                # pad them. Rectangular numeric arrays keep their natural dtype.
                 x_train = self._pad_sequences(
-                    cast("Sequence[Sequence[int]]", x_train), num_words=num_words
+                    cast("Sequence[Sequence[int]]", x_train), maxlen=maxlen, num_words=num_words
                 )
                 x_test = self._pad_sequences(
-                    cast("Sequence[Sequence[int]]", x_test), num_words=num_words
+                    cast("Sequence[Sequence[int]]", x_test), maxlen=maxlen, num_words=num_words
                 )
             if split == "test":
                 x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
@@ -139,6 +158,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         seed: int = 42,
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
+        vocab_size: int | None = None,
+        sequence_length: int | None = None,
     ) -> TensorflowDataset:
         """Route to a TF-native dataset when ``_native_train_tf`` is set.
 
@@ -180,6 +201,33 @@ class TensorflowDatasetMixin(DatasetMixinBase):
 
         if ds is None:
             raise ValueError(f"No native TF dataset for split '{split}'")
+
+        # Tokenize raw-text features (G078): tfds text datasets (imdb_reviews,
+        # wikitext) yield a tf.data of (string, label); an integer Embedding can't
+        # cast strings. Map each string to fixed-length int tokens (same crc32
+        # scheme as flax/pytorch via _tokenize_text) when the feature dtype is
+        # string and a sequence_length was provided.
+        tf_any = cast("Any", tf)
+        element_spec = cast("Any", ds).element_spec
+        feature_spec = element_spec[0] if isinstance(element_spec, tuple) else None
+        if (
+            sequence_length is not None
+            and feature_spec is not None
+            and getattr(feature_spec, "dtype", None) == tf_any.string
+        ):
+            maxlen = sequence_length
+            num_words = vocab_size if vocab_size is not None else 20000
+            # Materialize the (string, label) split, tokenize with the shared crc32
+            # scheme (identical tokens to flax/pytorch), and rebuild a numeric
+            # tf.data. Done eagerly in numpy rather than a tf.py_function map so the
+            # tokens match the other frameworks exactly and the path is verifiable.
+            rows = list(cast("Any", ds).as_numpy_iterator())
+            texts = [
+                feat.decode("utf-8") if isinstance(feat, bytes) else str(feat) for feat, _ in rows
+            ]
+            token_labels = np.asarray([label for _, label in rows])
+            tokens = self._tokenize_text(texts, maxlen=maxlen, num_words=num_words)
+            ds = tf.data.Dataset.from_tensor_slices((tokens, token_labels))
 
         if shuffle:
             ds = ds.shuffle(buffer_size=max(batch_size * 16, 1024), seed=seed)
@@ -253,9 +301,11 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         test_ratio: float = 0.1,
         seed: int = 42,
         column_roles: dict[str, str] | None = None,
+        binding: dict[str, Any] | None = None,
         map_fn: TensorflowMapFn | None = None,
         batch_map_fn: TensorflowMapFn | None = None,
         vocab_size: int | None = None,
+        sequence_length: int | None = None,
     ) -> TensorflowDataset:
         """Create a TensorFlow Dataset for the specified split.
 
@@ -273,6 +323,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         valid_splits = ("train", "val", "test")
         if split not in valid_splits:
             raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'.")
+        if column_roles is None and binding is not None:
+            column_roles = _column_roles_from_binding(binding)
 
         # Format validation — before TF import so unsupported formats raise
         # ValueError regardless of install state.
@@ -317,6 +369,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 seed=seed,
                 map_fn=map_fn,
                 batch_map_fn=batch_map_fn,
+                vocab_size=vocab_size,
+                sequence_length=sequence_length,
             )
         if self._native_train is not None:
             # Try to upgrade to a native TF path via tensorflow_datasets if available.
@@ -330,6 +384,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                     seed=seed,
                     map_fn=map_fn,
                     batch_map_fn=batch_map_fn,
+                    vocab_size=vocab_size,
+                    sequence_length=sequence_length,
                 )
             # Legacy native path: convert PyTorch-style native datasets to tf.data.
             return self._native_to_tensorflow(
@@ -341,6 +397,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 map_fn=map_fn,
                 batch_map_fn=batch_map_fn,
                 vocab_size=vocab_size,
+                sequence_length=sequence_length,
             )
 
         fmt = self.format.lower()

@@ -92,3 +92,22 @@ def test_load_infers_framework_when_unset(monkeypatch: PytestMonkeyPatch) -> Non
     monkeypatch.setattr(dispatch, "detect_installed_framework", lambda: dispatch.TENSORFLOW)
     monkeypatch.setattr(dispatch, "resolve_system_dataset_tf", lambda meta: ("TF", meta))
     assert dispatch.load_system_dataset(_META) == ("TF", _META)
+
+
+def test_load_routes_to_pytorch_with_binding(monkeypatch: PytestMonkeyPatch) -> None:
+    """A non-None binding is threaded to the native resolver (pytorch path)."""
+    captured: dict[str, object] = {}
+
+    def fake_torch(
+        meta: JsonObject,
+        transform: object | None = None,
+        binding: dict[str, object] | None = None,
+    ):
+        captured["binding"] = binding
+        return "TORCH"
+
+    monkeypatch.setattr(dispatch, "resolve_system_dataset", fake_torch)
+    payload: dict[str, object] = {"target_column": "label"}
+    result = dispatch.load_system_dataset(_META, framework="pytorch", binding=payload)
+    assert result == "TORCH"
+    assert captured["binding"] is payload

@@ -64,6 +64,7 @@ def load_system_dataset(
     *,
     framework: str | None = None,
     transform: TransformFn | None = None,
+    binding: dict[str, object] | None = None,
 ) -> DagnamDataset:
     """Resolve a system dataset with the loader native to *framework*.
 
@@ -81,4 +82,6 @@ def load_system_dataset(
         return resolve_system_dataset_tf(meta)
     if resolved == FLAX:
         return resolve_system_dataset_flax(meta)
-    return resolve_system_dataset(meta, transform)
+    if binding is None:
+        return resolve_system_dataset(meta, transform)
+    return resolve_system_dataset(meta, transform, binding)

@@ -6,7 +6,7 @@ from collections.abc import Iterator, Sequence
 import hashlib
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 import pytest
@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 class TorchTestModule(Protocol):
     def zeros(self, size: Sequence[int]) -> TorchTensor: ...
+
+
+class _RecordingStub(Protocol):
+    """The `_stub_dataset` instance shape: records construction args/kwargs."""
+
+    args: tuple[object, ...]
+    kwargs: dict[str, object]
 
 
 def _torch() -> TorchTestModule:
@@ -216,6 +223,157 @@ def testload_oxford_pets(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None
         }
     )
     assert ds.native_train is not None
+
+
+def testload_oxford_pets_binding_selects_label_target(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    _stub_dataset(monkeypatch, "OxfordIIITPet")
+    ds = tv_mod.load_oxford_pets(
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 37,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        binding={"target_column": "label"},
+    )
+    assert ds.native_train is not None
+    assert cast("_RecordingStub", ds.native_train).kwargs["target_types"] == "category"
+
+
+def testload_oxford_pets_binding_selects_segmentation_target(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    _stub_dataset(monkeypatch, "OxfordIIITPet")
+    ds = tv_mod.load_oxford_pets(
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 3,
+            "class_names": [],
+            "num_samples": 2,
+        },
+        binding={"target_column": "segmentation_mask"},
+    )
+    assert ds.native_train is not None
+    assert cast("_RecordingStub", ds.native_train).kwargs["target_types"] == "segmentation"
+
+
+def test_oxford_pets_mask_target_transform_remaps_trimap() -> None:
+    """The seg target transform resizes to the given (H, W) (nearest) and remaps {1,2,3}->{0,1,2}."""
+    from PIL import Image
+
+    _, transforms = tv_mod._load_torchvision()
+    fn = tv_mod._oxford_pets_mask_target_transform(transforms, (224, 224))
+    trimap = Image.fromarray(np.array([[1, 2, 3], [3, 2, 1]], dtype=np.uint8), mode="L")
+    result: Any = fn(trimap)
+    out = np.asarray(result)
+    assert out.shape == (224, 224)
+    assert int(out.min()) >= 0
+    assert int(out.max()) <= 2
+
+
+def test_oxford_pets_mask_target_transform_honors_nonsquare_size() -> None:
+    """A non-square architecture-derived (H, W) flows through to the mask, not a hardcode."""
+    from PIL import Image
+
+    _, transforms = tv_mod._load_torchvision()
+    fn = tv_mod._oxford_pets_mask_target_transform(transforms, (64, 96))
+    trimap = Image.fromarray(np.array([[1, 2, 3], [3, 2, 1]], dtype=np.uint8), mode="L")
+    out = np.asarray(fn(trimap))
+    assert out.shape == (64, 96)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ([128, 96], (128, 96)),
+        ((64, 64), (64, 64)),
+        (None, None),
+        ([128], None),
+        ([128, 96, 3], None),
+        ("128x96", None),
+        ([0, 96], None),
+        ([128, -1], None),
+        ([True, 96], None),
+        ([128, False], None),
+        (["128", "96"], None),
+    ],
+)
+def test_coerce_hw(value: object, expected: tuple[int, int] | None) -> None:
+    assert tv_mod._coerce_hw(value) == expected
+
+
+def test_oxford_image_size_precedence_binding_over_metadata() -> None:
+    """Binding input size (architecture-derived) wins over dataset metadata."""
+    binding = {"input_transform": {"params": {"size": [128, 128]}}}
+    assert tv_mod._oxford_image_size(binding, {"image_size": [64, 64]}) == (128, 128)
+
+
+def test_oxford_image_size_falls_back_to_metadata() -> None:
+    assert tv_mod._oxford_image_size(None, {"image_size": [64, 64]}) == (64, 64)
+
+
+def test_oxford_image_size_falls_back_to_default() -> None:
+    assert (
+        tv_mod._oxford_image_size({"input_transform": {}}, {}) == tv_mod._DEFAULT_OXFORD_IMAGE_SIZE
+    )
+
+
+def test_oxford_mask_size_prefers_binding_resize() -> None:
+    binding = {"target_transform": {"params": {"resize": [256, 256]}}}
+    assert tv_mod._oxford_mask_size(binding, (128, 128)) == (256, 256)
+
+
+def test_oxford_mask_size_defaults_to_image_size() -> None:
+    assert tv_mod._oxford_mask_size({"target_transform": {"params": {}}}, (128, 128)) == (128, 128)
+
+
+def test_transform_params_handles_malformed_sections() -> None:
+    assert tv_mod._transform_params(None, "input_transform") == {}
+    assert tv_mod._transform_params({"input_transform": "nope"}, "input_transform") == {}
+    assert tv_mod._transform_params({"input_transform": {"params": 5}}, "input_transform") == {}
+
+
+def testload_oxford_pets_binding_honors_resize_size(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """The segmentation mask is resized to the architecture's (H, W) from the binding."""
+    from PIL import Image
+
+    monkeypatch.setattr(tv_mod, "SYSTEM_CACHE_ROOT", tmp_path)
+    _stub_dataset(monkeypatch, "OxfordIIITPet")
+    ds = tv_mod.load_oxford_pets(
+        {
+            "name": "oxford pets",
+            "id": "1",
+            "format": "native",
+            "dataset_type": "image",
+            "num_classes": 3,
+            "class_names": [],
+            "num_samples": 2,
+            "image_size": [64, 64],
+        },
+        binding={
+            "target_column": "segmentation_mask",
+            "input_transform": {"params": {"size": [128, 128]}},
+            "target_transform": {"params": {"resize": [128, 128]}},
+        },
+    )
+    assert ds.native_train is not None
+    target_transform = cast("_RecordingStub", ds.native_train).kwargs["target_transform"]
+    assert callable(target_transform)
+    trimap = Image.fromarray(np.array([[1, 2, 3], [3, 2, 1]], dtype=np.uint8), mode="L")
+    out = np.asarray(target_transform(trimap))
+    assert out.shape == (128, 128)
 
 
 def testload_oxford_pets_with_transform(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:
@@ -476,6 +634,36 @@ def testload_speech_commands_success(monkeypatch: PytestMonkeyPatch, tmp_path: P
     assert ds.native_test is not None
     train = cast("_FakeSpeechCommands", ds.native_train)
     assert train.subset == "training"
+
+
+def testload_wikitext2_binding_reads_local_corpus(tmp_path: Path) -> None:
+    corpus = tmp_path / "wiki.train.tokens"
+    corpus.write_text("a b c d e f g h i j k l m n o p", encoding="utf-8")
+
+    ds = tv_mod.load_wikitext2(
+        {
+            "name": "WikiText-2",
+            "id": "wikitext-2",
+            "format": "text",
+            "dataset_type": "text",
+            "num_classes": 0,
+            "class_names": [],
+            "num_samples": 16,
+            "file_path": str(corpus),
+        },
+        binding={
+            "input_transform": {
+                "kind": "tokenize",
+                "params": {"sequence_length": 4, "vocab_size": 50},
+            },
+            "self_supervised": {"kind": "next_token", "where": "loader"},
+        },
+    )
+
+    assert ds.native_train is not None
+    x, y = cast("tuple[np.ndarray, np.ndarray]", ds.native_train)
+    assert x.shape == y.shape
+    assert x.shape[1] == 4
 
 
 def testload_wikitext2_success(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:

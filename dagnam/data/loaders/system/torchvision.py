@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Sequence
 import hashlib
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlparse
 
 import requests
@@ -24,16 +24,26 @@ _DOWNLOAD_TIMEOUT = (30, 60)
 TransformFn = Callable[[object], object]
 
 
+class _InterpolationModeEnum(Protocol):
+    """The ``transforms.InterpolationMode`` enum surface we use (G087 mask resize)."""
+
+    NEAREST: object
+
+
 class TorchVisionTransformsModule(Protocol):
     """TorchVision transform constructors used by system datasets."""
+
+    InterpolationMode: _InterpolationModeEnum
 
     def Compose(self, transforms: Sequence[TransformFn]) -> TransformFn: ...
 
     def ToTensor(self) -> TransformFn: ...
 
+    def PILToTensor(self) -> TransformFn: ...  # noqa: N802 - torchvision API name
+
     def Normalize(self, mean: Sequence[float], std: Sequence[float]) -> TransformFn: ...
 
-    def Resize(self, size: tuple[int, int]) -> TransformFn: ...
+    def Resize(self, size: tuple[int, int], interpolation: object = ...) -> TransformFn: ...
 
 
 class TorchVisionDatasetsModule(Protocol):
@@ -82,6 +92,8 @@ class TorchVisionDatasetsModule(Protocol):
         split: str,
         download: bool,
         transform: TransformFn | None,
+        target_types: str = ...,
+        target_transform: TransformFn | None = ...,
     ) -> IndexedDataset: ...
 
 
@@ -163,7 +175,12 @@ def ensure_verified_file(url: str, dest: Path, expected_sha256: str) -> None:
     download_verified_file(url, dest, expected_sha256)
 
 
-def load_mnist(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_mnist(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del binding
     from dagnam.data.dataset import DagnamDataset
 
     datasets, transforms = _load_torchvision()
@@ -189,7 +206,12 @@ def load_mnist(meta: JsonObject, transform: TransformFn | None = None) -> Dagnam
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def load_cifar10(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_cifar10(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del binding
     from dagnam.data.dataset import DagnamDataset
 
     datasets, transforms = _load_torchvision()
@@ -217,7 +239,12 @@ def load_cifar10(meta: JsonObject, transform: TransformFn | None = None) -> Dagn
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def load_cifar100(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_cifar100(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del binding
     from dagnam.data.dataset import DagnamDataset
 
     datasets, transforms = _load_torchvision()
@@ -245,7 +272,12 @@ def load_cifar100(meta: JsonObject, transform: TransformFn | None = None) -> Dag
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def load_fashion_mnist(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_fashion_mnist(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del binding
     from dagnam.data.dataset import DagnamDataset
 
     datasets, transforms = _load_torchvision()
@@ -273,8 +305,13 @@ def load_fashion_mnist(meta: JsonObject, transform: TransformFn | None = None) -
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def load_imdb(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_imdb(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
     """Load IMDB via direct npz download (no TensorFlow dependency)."""
+    del binding
     import numpy as np
 
     from dagnam.data.dataset import DagnamDataset
@@ -303,34 +340,129 @@ def load_imdb(meta: JsonObject, transform: TransformFn | None = None) -> DagnamD
     )
 
 
-def load_oxford_pets(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def _oxford_pets_mask_target_transform(
+    transforms: TorchVisionTransformsModule, size: tuple[int, int]
+) -> TransformFn:
+    """Build the trimap-mask target transform for Oxford-Pets segmentation (G087).
+
+    The torchvision ``target_types='segmentation'`` target is a PIL trimap whose
+    pixels are ``{1: foreground/pet, 2: background, 3: border}``. The supervised
+    segmentation train step needs a ``[H, W]`` *integer class index* mask matching
+    the resized image (``size`` is the architecture-derived ``(H, W)``, resolved
+    from the binding — never a hardcoded resolution — with nearest-neighbour
+    interpolation so labels are not blended) and zero-based class ids, so we remap
+    ``{1, 2, 3} -> {0, 1, 2}``.
+    """
+    resize = transforms.Resize(size, interpolation=transforms.InterpolationMode.NEAREST)
+    to_tensor = transforms.PILToTensor()  # uint8 [1, H, W], NOT scaled to [0, 1]
+
+    def _transform(mask: object) -> object:
+        tensor: Any = to_tensor(resize(mask))  # torch.Tensor [1, H, W] uint8 in {1, 2, 3}
+        return (tensor.squeeze(0).long() - 1).clamp_(0, 2)  # [H, W] long in {0, 1, 2}
+
+    return _transform
+
+
+_OXFORD_TARGET_MAP: dict[str, str] = {
+    "label": "category",
+    "segmentation_mask": "segmentation",
+}
+
+# Last-resort image size when neither the binding nor the dataset metadata
+# declares one (e.g. a no-binding local override). The binding's architecture-
+# derived size always wins so any model's spatial dims are honored.
+_DEFAULT_OXFORD_IMAGE_SIZE: tuple[int, int] = (224, 224)
+
+
+def _coerce_hw(value: object) -> tuple[int, int] | None:
+    """Coerce a ``[H, W]`` pair (a binding resize/size param) to a positive ``(H, W)``."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    height, width = value
+    if (
+        isinstance(height, int)
+        and not isinstance(height, bool)
+        and height > 0
+        and isinstance(width, int)
+        and not isinstance(width, bool)
+        and width > 0
+    ):
+        return (height, width)
+    return None
+
+
+def _transform_params(binding: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    """Return ``binding[key]["params"]`` as a dict, defensively (``{}`` when absent)."""
+    section = (binding or {}).get(key)
+    params = section.get("params") if isinstance(section, dict) else None
+    return params if isinstance(params, dict) else {}
+
+
+def _oxford_image_size(binding: dict[str, Any] | None, meta: JsonObject) -> tuple[int, int]:
+    """Resolve the input image ``(H, W)``: binding (arch input) -> metadata -> default."""
+    return (
+        _coerce_hw(_transform_params(binding, "input_transform").get("size"))
+        or _coerce_hw(meta.get("image_size"))
+        or _DEFAULT_OXFORD_IMAGE_SIZE
+    )
+
+
+def _oxford_mask_size(
+    binding: dict[str, Any] | None, image_size: tuple[int, int]
+) -> tuple[int, int]:
+    """Resolve the mask ``(H, W)``: binding (arch output) -> the image size.
+
+    Defaulting to ``image_size`` keeps the mask spatially aligned with the image
+    for a spatial-preserving model when the binding omits an explicit target size.
+    """
+    return _coerce_hw(_transform_params(binding, "target_transform").get("resize")) or image_size
+
+
+def load_oxford_pets(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
     from dagnam.data.dataset import DagnamDataset
 
     datasets, transforms = _load_torchvision()
     cache = SYSTEM_CACHE_ROOT / "oxford_pets"
     cache.mkdir(parents=True, exist_ok=True)
 
+    image_size = _oxford_image_size(binding, meta)
     base_transform = transform
     if base_transform is None:
         base_transform = transforms.Compose(
             [
-                transforms.Resize((224, 224)),
+                transforms.Resize(image_size),
                 transforms.ToTensor(),
             ]
         )
+
+    target_column = (binding or {}).get("target_column") or "label"
+    target_types = _OXFORD_TARGET_MAP.get(str(target_column), "category")
+    target_transform = (
+        _oxford_pets_mask_target_transform(transforms, _oxford_mask_size(binding, image_size))
+        if target_types == "segmentation"
+        else None
+    )
 
     try:
         train_ds = datasets.OxfordIIITPet(
             root=str(cache),
             split="trainval",
+            target_types=target_types,
             download=True,
             transform=base_transform,
+            target_transform=target_transform,
         )
         test_ds = datasets.OxfordIIITPet(
             root=str(cache),
             split="test",
+            target_types=target_types,
             download=True,
             transform=base_transform,
+            target_transform=target_transform,
         )
     except Exception:
         # Fallback: if torchvision doesn't have OxfordIIITPet, return file-based
@@ -339,7 +471,12 @@ def load_oxford_pets(meta: JsonObject, transform: TransformFn | None = None) -> 
     return DagnamDataset(meta, cache, _native_train=train_ds, _native_test=test_ds)
 
 
-def load_speech_commands(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_speech_commands(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del binding
     from dagnam.data.dataset import DagnamDataset
 
     cache = SYSTEM_CACHE_ROOT / "speech_commands"
@@ -363,11 +500,35 @@ def load_speech_commands(meta: JsonObject, transform: TransformFn | None = None)
         return DagnamDataset(meta, cache)
 
 
-def load_wikitext2(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def load_wikitext2(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, Any] | None = None,
+) -> DagnamDataset:
+    del transform
     from dagnam.data.dataset import DagnamDataset
 
     cache = SYSTEM_CACHE_ROOT / "wikitext2"
     cache.mkdir(parents=True, exist_ok=True)
+
+    self_supervised = (binding or {}).get("self_supervised")
+    if isinstance(self_supervised, dict) and self_supervised.get("kind") == "next_token":
+        from dagnam.data.loaders.text_lm import build_lm_sequences
+
+        transform_config = (binding or {}).get("input_transform")
+        params = transform_config.get("params", {}) if isinstance(transform_config, dict) else {}
+        seq_len = params.get("sequence_length") if isinstance(params, dict) else None
+        vocab_size = params.get("vocab_size") if isinstance(params, dict) else None
+        raw_path = meta.get("file_path")
+        corpus_path = Path(raw_path) if isinstance(raw_path, str) else cache / "wiki.train.tokens"
+        text = corpus_path.read_text(encoding="utf-8")
+        train = build_lm_sequences(
+            text,
+            seq_len=seq_len if isinstance(seq_len, int) and seq_len > 0 else 128,
+            vocab_size=vocab_size if isinstance(vocab_size, int) and vocab_size > 1 else None,
+        )
+        native: NativeSplit = cast("NativeSplit", train)
+        return DagnamDataset(meta, cache, _native_train=native, _native_test=native)
 
     try:
         torchtext_datasets = _load_torchtext_datasets()

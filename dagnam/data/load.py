@@ -84,6 +84,7 @@ def load_dataset(
     download_url: str | None = None,
     resume: bool = True,
     show_progress: bool = True,
+    binding: dict[str, object] | None = None,
 ) -> DagnamDataset:
     """Load a dataset by ID. Auto-downloads and caches if needed.
 
@@ -92,7 +93,7 @@ def load_dataset(
     resolves auth, checks cache, downloads if needed, and returns a dataset.
     """
     if os.environ.get("DAGNAM_INTERNAL"):
-        return _load_internal(dataset_id)
+        return _load_internal(dataset_id, binding=binding)
 
     resolved_key = get_api_key(override=api_key)
     resolved_url = get_api_url(override=api_url)
@@ -109,7 +110,7 @@ def load_dataset(
         try:
             from dagnam.data.loaders.system import load_system_dataset
 
-            return load_system_dataset(meta)
+            return load_system_dataset(meta, binding=binding)
         except Exception as exc:
             # Native resolution is the preferred path; if it fails (e.g. the
             # framework library or tfds isn't installed) fall back to the
@@ -169,7 +170,11 @@ def load_dataset(
     return DagnamDataset(meta, ds_cache_dir)
 
 
-def _load_internal(dataset_id: str) -> DagnamDataset:
+def _load_internal(
+    dataset_id: str,
+    *,
+    binding: dict[str, object] | None = None,
+) -> DagnamDataset:
     """Load dataset from sidecar metadata for server-side training."""
     _validate_internal_dataset_id(dataset_id)
     meta_dir_env = os.environ.get("DAGNAM_META_DIR", ".dagnam_meta")
@@ -196,7 +201,7 @@ def _load_internal(dataset_id: str) -> DagnamDataset:
         # cause rather than masking it as a FileNotFoundError below.
         from dagnam.data.loaders.system import load_system_dataset
 
-        return load_system_dataset(meta)
+        return load_system_dataset(meta, binding=binding)
 
     file_path_str = meta.get("file_path")
     if isinstance(file_path_str, str) and file_path_str:

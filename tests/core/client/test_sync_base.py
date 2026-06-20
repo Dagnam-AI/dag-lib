@@ -10,6 +10,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.client.base import (
     BaseDagnamClient,
     _sanitize_filename,
+    is_redirect_response,
     is_success_response,
     parse_content_disposition_filename,
     safe_error_body_from_response,
@@ -84,6 +85,34 @@ def testis_success_response_falls_back_to_ok_attr() -> None:
         ok = True
 
     assert is_success_response(_R())
+
+
+class _RedirectStub:
+    """Minimal ResponseLike for is_redirect_response branch coverage."""
+
+    text = ""
+    content = b""
+
+    def __init__(self, status_code: object, headers: dict[str, str]) -> None:
+        self.status_code = status_code
+        self.headers = headers
+
+
+def test_is_redirect_response_3xx_with_location() -> None:
+    stub = _RedirectStub(307, {"Location": "https://s3/presigned"})
+    assert is_redirect_response(stub)
+
+
+def test_is_redirect_response_3xx_without_location() -> None:
+    assert not is_redirect_response(_RedirectStub(307, {}))
+
+
+def test_is_redirect_response_non_3xx() -> None:
+    assert not is_redirect_response(_RedirectStub(200, {"Location": "https://s3/x"}))
+
+
+def test_is_redirect_response_non_int_status() -> None:
+    assert not is_redirect_response(_RedirectStub(None, {"Location": "https://s3/x"}))
 
 
 def test_safe_error_body_from_response_delegates_to_common(client: DagnamClient) -> None:

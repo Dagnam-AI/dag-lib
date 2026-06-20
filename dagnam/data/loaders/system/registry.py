@@ -22,10 +22,14 @@ if TYPE_CHECKING:
     from dagnam.data.dataset import DagnamDataset
 
 TransformFn = Callable[[object], object]
-NativeLoader = Callable[[JsonObject, TransformFn | None], "DagnamDataset"]
+NativeLoader = Callable[[JsonObject, TransformFn | None, dict[str, object] | None], "DagnamDataset"]
 
 
-def resolve_system_dataset(meta: JsonObject, transform: TransformFn | None = None) -> DagnamDataset:
+def resolve_system_dataset(
+    meta: JsonObject,
+    transform: TransformFn | None = None,
+    binding: dict[str, object] | None = None,
+) -> DagnamDataset:
     """Load a system dataset using its native library internally.
 
     Matches on the dataset name (case-insensitive, fuzzy).  Returns a
@@ -51,7 +55,7 @@ def resolve_system_dataset(meta: JsonObject, transform: TransformFn | None = Non
             f"Contact support or use a user-uploaded version."
         )
 
-    return loader(meta, transform)
+    return loader(meta, transform, binding)
 
 
 NATIVE_LOADERS: dict[str, NativeLoader] = {

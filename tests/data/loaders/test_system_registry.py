@@ -29,9 +29,14 @@ def test_resolve_system_dataset_unknown_raises() -> None:
 def test_resolve_system_dataset_exact_match(monkeypatch: PytestMonkeyPatch) -> None:
     called: dict[str, object] = {}
 
-    def fake_load(meta: JsonObject, transform: ObjectTransform | None = None):
+    def fake_load(
+        meta: JsonObject,
+        transform: ObjectTransform | None = None,
+        binding: dict[str, object] | None = None,
+    ):
         called["meta"] = meta
         called["transform"] = transform
+        called["binding"] = binding
         return "FAKE_DS"
 
     monkeypatch.setitem(tv_mod.load_mnist.__globals__, "load_mnist", fake_load)  # no-op
@@ -46,7 +51,11 @@ def test_resolve_system_dataset_exact_match(monkeypatch: PytestMonkeyPatch) -> N
 def test_resolve_system_dataset_substring_match(monkeypatch: PytestMonkeyPatch) -> None:
     fake_called: list[object] = []
 
-    def fake_load(meta: JsonObject, transform: ObjectTransform | None = None):
+    def fake_load(
+        meta: JsonObject,
+        transform: ObjectTransform | None = None,
+        binding: dict[str, object] | None = None,
+    ):
         fake_called.append(meta["name"])
         return "FAKE"
 

@@ -82,6 +82,49 @@ def test_numpy_loader_test_split(numpy_native_ds: DagnamDataset) -> None:
     assert y.dtype == torch.float32
 
 
+@pytest.fixture
+def int_label_numpy_native_ds() -> DagnamDataset:
+    """IMDB-style numpy tuples whose labels are INTEGER class indices (0/1)."""
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 12,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    x_train = np.arange(40).reshape(10, 4).astype(np.float32)
+    y_train = (np.arange(10) % 2).astype(np.int64)
+    x_test = np.arange(8).reshape(2, 4).astype(np.float32)
+    y_test = np.array([0, 1]).astype(np.int64)
+    ds.native_train = _native_split(x_train, y_train)
+    ds.native_test = _native_split(x_test, y_test)
+    return ds
+
+
+@pytest.mark.parametrize("split", ["test", "train", "val"])
+def test_numpy_loader_integer_labels_are_1d_long(
+    int_label_numpy_native_ds: DagnamDataset, split: str
+) -> None:
+    """Integer class labels must become a [B] long target (CrossEntropyLoss), not [B,1] float.
+
+    Regression for G091: `nn.CrossEntropyLoss` rejects a [B,1] float target with
+    "0D or 1D target tensor expected, multi-target not supported", which failed
+    every pytorch IMDB training job.
+    """
+    loader = int_label_numpy_native_ds.to_pytorch_loader(
+        split=split, batch_size=2, num_workers=0, val_ratio=0.2, shuffle=False
+    )
+    _x, y = next(iter(loader))
+    torch = _torch()
+    assert y.dtype == torch.long, f"{split}: integer labels must be long class indices"
+    assert y.ndim == 1, f"{split}: target must be 1-D [B], got shape {tuple(y.shape)}"
+
+
 def test_numpy_loader_val_split(numpy_native_ds: DagnamDataset) -> None:
     loader = numpy_native_ds.to_pytorch_loader(
         split="val", batch_size=2, num_workers=0, val_ratio=0.2

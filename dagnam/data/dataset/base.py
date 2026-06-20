@@ -6,6 +6,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 import random
 from typing import TYPE_CHECKING, cast
+import zlib
 
 import numpy as np
 import numpy.typing as npt
@@ -198,6 +199,57 @@ class DagnamDataset(
             trunc = filtered[:maxlen]
             result[i, : len(trunc)] = trunc
         return result
+
+    @staticmethod
+    @override
+    def _tokenize_text(
+        texts: Sequence[object],
+        maxlen: int = 200,
+        num_words: int = 20000,
+    ) -> npt.NDArray[np.int32]:
+        """Hash-tokenize raw text strings into fixed-length integer token ids (G078).
+
+        Deterministic and framework-agnostic: each whitespace token maps to
+        ``crc32(token) % (num_words - 1) + 1`` (id 0 is reserved for padding), then
+        rows are padded/truncated to ``maxlen``. This lets every framework feed a
+        keras/flax/torch Embedding integer ids instead of raw strings — an
+        integer-indexed Embedding cannot cast a string ("Cast string to int32").
+        """
+        vocab = max(2, num_words)
+        result = np.zeros((len(texts), maxlen), dtype=np.int32)
+        for i, text in enumerate(texts):
+            tokens = str(text).split()[:maxlen]
+            for j, tok in enumerate(tokens):
+                result[i, j] = zlib.crc32(tok.encode("utf-8")) % (vocab - 1) + 1
+        return result
+
+    @staticmethod
+    @override
+    def _batches_need_padding(features_list: Sequence[np.ndarray]) -> bool:
+        """Whether per-batch feature arrays can't be concatenated on axis 0 as-is.
+
+        True (G079) when some batch is ragged/object-dtype, or the batches are
+        rectangular but disagree on their trailing (sequence) dims. Either way the
+        rows must be padded/truncated to one common length before concatenation.
+        """
+        if not features_list:
+            return False
+        if any(getattr(f, "dtype", np.dtype(np.int64)).kind == "O" for f in features_list):
+            return True
+        trailing = {f.shape[1:] for f in features_list if getattr(f, "ndim", 0) >= 2}
+        return len(trailing) > 1
+
+    @staticmethod
+    @override
+    def _is_text_features(features: np.ndarray) -> bool:
+        """True if a feature array holds raw text strings (vs numeric tokens)."""
+        if features.dtype.kind in ("U", "S"):
+            return True
+        return (
+            features.dtype == object
+            and features.size > 0
+            and isinstance(features.flat[0], (str, bytes))
+        )
 
     def iter_samples(
         self,

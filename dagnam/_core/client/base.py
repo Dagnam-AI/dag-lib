@@ -45,6 +45,14 @@ def is_success_response(response: StatusResponseLike) -> bool:
     return bool(getattr(response, "ok", False))
 
 
+def is_redirect_response(response: ResponseLike) -> bool:
+    """True for a 3xx redirect that carries a ``Location`` to follow."""
+    code = response.status_code
+    if not isinstance(code, int) or not (300 <= code < 400):
+        return False
+    return bool(response.headers.get("Location"))
+
+
 def safe_error_body_from_response(response: ResponseLike) -> str:
     """Extract a short, log-safe error body from a failed HTTP response."""
     return safe_response_text(response)
@@ -123,6 +131,26 @@ class BaseDagnamClient:
             return requests.get(
                 url,
                 headers=self._headers(),
+                timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT),
+                stream=True,
+                allow_redirects=ALLOW_REDIRECTS,
+            )
+        except requests.ConnectionError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
+    @staticmethod
+    def _get_stream_no_auth(url: str) -> requests.Response:
+        """Stream a URL with NO auth header (e.g. a presigned object-storage URL).
+
+        Presigned S3/GCS URLs carry their own signature in the query string and
+        reject (or are confused by) a forwarded ``Authorization`` header, so the
+        redirect follow-up must not send the API key.
+        """
+        try:
+            return requests.get(
+                url,
                 timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT),
                 stream=True,
                 allow_redirects=ALLOW_REDIRECTS,

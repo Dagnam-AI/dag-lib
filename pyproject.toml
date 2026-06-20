@@ -55,7 +55,10 @@ dependencies = [
 [project.optional-dependencies]
 streaming = ["sseclient-py>=1.7"]
 pytorch = ["torch>=2.12.1", "torchvision>=0.27.1"]
-audio = ["torch>=2.12.1", "torchaudio>=2.0"]
+# torchaudio (>=2.x) decodes audio via TorchCodec, so torchcodec is required at
+# runtime to load audio datasets (else "TorchCodec is required for
+# load_with_torchcodec ... No module named 'torchcodec'"). (G083)
+audio = ["torch>=2.12.1", "torchaudio>=2.0", "torchcodec>=0.1"]
 # tensorflow-datasets lazily imports importlib_resources (via etils) but does
 # not declare it, so a bare install fails with ModuleNotFoundError; pin it here.
 # truststore routes tfds' requests-based downloads through the OS trust store so
@@ -82,6 +85,7 @@ all = [
     "torch>=2.12.1",
     "torchvision>=0.27.1",
     "torchaudio>=2.0",
+    "torchcodec>=0.1",
     "tensorflow>=2.12",
     "tensorflow-datasets>=4.9",
     "importlib_resources>=6.0",

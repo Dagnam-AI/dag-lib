@@ -115,7 +115,7 @@ class TestSystemDatasetRouting:
 
             mock_sys_meta.assert_called_once_with("mnist-digits", version=None)
             mock_user_meta.assert_not_called()
-            mock_resolve.assert_called_once_with(meta)
+            mock_resolve.assert_called_once_with(meta, binding=None)
             assert ds is mock_native_ds
 
     def test_friendly_name_with_dashes(self, tmp_path: Path) -> None:
@@ -141,7 +141,7 @@ class TestSystemDatasetRouting:
         ):
             ds = load_dataset("imdb-sentiment", cache_dir=str(tmp_path))
             assert ds is mock_native_ds
-            mock_resolve.assert_called_once_with(meta)
+            mock_resolve.assert_called_once_with(meta, binding=None)
 
 
 # ------------------------------------------------------------------

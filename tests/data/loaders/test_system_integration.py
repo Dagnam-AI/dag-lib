@@ -171,7 +171,7 @@ class TestSourceTypeDetection:
                 cache_dir=str(tmp_path),
             )
 
-            mock_resolve.assert_called_once_with(meta)
+            mock_resolve.assert_called_once_with(meta, binding=None)
             assert ds is mock_native_ds
 
 
@@ -252,7 +252,7 @@ class TestLoadInternal:
         ):
             ds = _load_internal(dataset_id)
 
-        mock_resolve.assert_called_once_with(meta)
+        mock_resolve.assert_called_once_with(meta, binding=None)
         assert ds is mock_native_ds
 
     def test_missing_sidecar_raises(self, tmp_path: Path) -> None:

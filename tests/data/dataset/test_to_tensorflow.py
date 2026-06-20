@@ -91,6 +91,68 @@ def test_to_tf_native_obj_array_clamps_to_vocab_size(tmp_path: Path) -> None:
     assert x_batch.numpy()[0, :4].tolist() == [6, 7, 0, 0]
 
 
+def test_to_tf_native_string_rows_tokenized_to_int(tmp_path: Path) -> None:
+    # G078: a tuple-native text dataset whose rows are raw strings must be
+    # tokenized to fixed-length integer ids — a keras Embedding cannot cast
+    # strings ("Cast string to int32").
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "txt1",
+            "name": "text",
+            "format": "custom",
+            "dataset_type": "text",
+            "num_samples": 2,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    ds.native_train = _native_split(
+        np.array(["hello world foo", "bar baz"], dtype=object),
+        np.array([0, 1], dtype=np.int64),
+    )
+    ds.native_test = ds.native_train
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False, sequence_length=5)
+    x_batch, _ = cast("tuple[_TensorBatch, _HasShape]", next(iter(tf_ds)))
+    arr = x_batch.numpy()
+    assert arr.shape[1] == 5
+    assert arr.dtype.kind in ("i", "u")  # integer tokens, never strings
+
+
+def test_to_tf_native_tf_string_dataset_tokenized(tmp_path: Path) -> None:
+    # G078 (the real imdb_reviews path): a native tf.data of (string, label) must
+    # be tokenized to fixed-length integer ids before reaching the model.
+    del tmp_path
+    import tensorflow as tf
+
+    ds = DagnamDataset(
+        {
+            "id": "ntftxt",
+            "name": "native-tf-text",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 4,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    texts = ["hello world foo bar", "baz qux", "a b c d e", "lorem ipsum"]
+    labels = [0, 1, 0, 1]
+    ds.native_train_tf = cast(
+        "TensorflowDataset", tf.data.Dataset.from_tensor_slices((texts, labels))
+    )
+    ds.native_test_tf = ds.native_train_tf
+    out = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False, sequence_length=6)
+    x_batch, _ = cast("tuple[_TensorBatch, _HasShape]", next(iter(out)))
+    arr = x_batch.numpy()
+    assert arr.shape[1] == 6
+    assert arr.dtype.kind in ("i", "u")  # integer tokens, never strings
+
+
 def test_to_tf_native_numpy_not_padded(tmp_path: Path) -> None:
     """Rectangular numeric arrays keep their width — the padding guard must not fire."""
     ds = make_native_numpy_ds(tmp_path)  # x_train is (10, 4)
@@ -123,6 +185,32 @@ def test_to_tf_invalid_split(tmp_path: Path) -> None:
     ds = make_native_numpy_ds(tmp_path)
     with pytest.raises(ValueError, match="Unknown split"):
         ds.to_tensorflow_dataset(split="bogus")
+
+
+def test_to_tf_custom_format_system_dataset_accepted(tmp_path: Path) -> None:
+    # G085: a system dataset with format='custom' but a native handle (WikiText-2,
+    # Oxford-Pets) must convert, not be rejected on format before the native check.
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "c1",
+            "name": "custom-system",
+            "format": "custom",
+            "dataset_type": "image",
+            "num_samples": 4,
+            "num_classes": 2,
+            "class_names": [],
+            "source_type": "system",
+        },
+        data_dir=None,
+    )
+    ds.native_train = _native_split(
+        np.arange(4 * 3 * 4 * 4, dtype=np.float32).reshape(4, 3, 4, 4),
+        np.array([0, 1, 0, 1], dtype=np.int64),
+    )
+    ds.native_test = ds.native_train
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False)  # must not raise
+    next(iter(tf_ds))
 
 
 def test_to_tf_unsupported_format(tmp_path: Path) -> None:

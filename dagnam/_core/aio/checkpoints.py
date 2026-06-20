@@ -24,6 +24,15 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
     async def download_checkpoint(
         self, job_id: str, checkpoint_id: str, dest_path: Path
     ) -> tuple[Path, str | None]:
+        """Download a checkpoint file to ``dest_path``.
+
+        The backend may either stream the bytes directly (local storage) or
+        respond with a 307/308 redirect whose ``Location`` is a presigned
+        object-storage URL serving the bytes. Both are handled; the presigned URL
+        is fetched WITHOUT the API key.
+
+        Returns (dest_path, expected_sha256) — the caller must verify.
+        """
         resp = await self._request(
             "GET",
             (
@@ -31,6 +40,14 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
                 f"/checkpoints/{quote_path_segment(checkpoint_id)}/download"
             ),
         )
+        # The checksum may ride on the redirect response or the final body
+        # response; prefer the one on whichever response carries the bytes.
+        expected_checksum = resp.headers.get("x-checksum-sha256")
+
+        if resp.is_redirect and resp.headers.get("location"):
+            resp = await self._get_no_auth(resp.headers["location"])
+            expected_checksum = resp.headers.get("x-checksum-sha256") or expected_checksum
+
         if not resp.is_success:
             code = resp.status_code
             if code == 401:
@@ -38,7 +55,6 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
             if code == 404:
                 raise CheckpointNotFoundError(checkpoint_id)
             raise APIError(code, safe_response_text(resp))
-        expected_checksum = resp.headers.get("x-checksum-sha256")
         dest = Path(dest_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(dest.write_bytes, resp.content)

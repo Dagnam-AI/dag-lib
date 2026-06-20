@@ -19,6 +19,7 @@ from dagnam._core.exceptions import (
     AuthError,
     CheckpointNotFoundError,
     DeploymentNotFoundError,
+    QuotaExceededError,
     TrainingJobNotFoundError,
 )
 
@@ -152,17 +153,29 @@ def test_checkpoint_404_maps_to_checkpoint_not_found(
         client.download_checkpoint_stream("job_1", "ck_bad", tmp_path / "x.pt")
 
 
-def test_checkpoint_redirect_is_rejected_not_written(
+def test_checkpoint_redirect_is_followed_to_presigned_url(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:
+    """A redirect Location (presigned object-storage URL) is followed and streamed.
+
+    The redirect follow-up must NOT carry the API key (presigned URLs are
+    self-authenticating and reject a forwarded Authorization header).
+    """
+    body = b"weights-from-s3"
+    sha = hashlib.sha256(body).hexdigest()
     url = f"{API}/api/v1/training/jobs/job_1/checkpoints/ck_1/download"
-    rmock.get(url, status_code=302, headers={"Location": "https://evil.test/ck.pt"})
-    dest = tmp_path / "x.pt"
+    presigned = "https://bucket.s3.example.com/ck_1?sig=xyz"
+    rmock.get(url, status_code=307, headers={"Location": presigned})
+    rmock.get(presigned, content=body, headers={"X-Checksum-SHA256": sha})
+    dest = tmp_path / "ck_1.pt"
 
-    with pytest.raises(APIError):
-        client.download_checkpoint_stream("job_1", "ck_1", dest)
+    written, expected_sha = client.download_checkpoint_stream("job_1", "ck_1", dest)
 
-    assert not dest.exists()
+    assert written == dest
+    assert dest.read_bytes() == body
+    assert expected_sha == sha
+    # The presigned follow-up (the last request) carries no Authorization header.
+    assert "Authorization" not in rmock.last_request.headers
 
 
 def test_sse_redirect_is_rejected(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -265,15 +278,15 @@ def test_create_training_job_posts_payload(client: DagnamClient, rmock: Requests
     assert req.headers["Authorization"] == "Bearer k"
 
 
-def test_create_training_job_over_limit_maps_to_apierror(
+def test_create_training_job_over_limit_maps_to_quota_exceeded(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
+    """A 402 plan-limit rejection surfaces as QuotaExceededError (see backend G088)."""
     url = f"{API}/api/v1/training/jobs"
     rmock.post(url, status_code=402, json={"detail": "limit_exceeded"})
 
-    with pytest.raises(APIError) as excinfo:
+    with pytest.raises(QuotaExceededError):
         client.create_training_job({"project_id": "p1"})
-    assert excinfo.value.status_code == 402
 
 
 def test_get_training_job(client: DagnamClient, rmock: RequestsMocker) -> None:
