@@ -344,9 +344,9 @@ class TestSafeArchiveExtraction:
 class TestPytorchExtra:
     """Packaging metadata must install image loader dependencies."""
 
-    def test_pytorch_extra_includes_torchvision(self) -> None:
+    def test_pytorch_extra_does_not_pull_system_loader_dependencies(self) -> None:
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-        assert 'pytorch = ["torch>=2.12.1", "torchvision>=0.27.1"]' in pyproject
+        assert 'pytorch = ["torch>=2.12.1"]' in pyproject
 
 
 # ------------------------------------------------------------------

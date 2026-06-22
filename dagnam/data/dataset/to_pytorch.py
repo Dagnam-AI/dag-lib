@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 
 from dagnam.data.dataset._typing import DatasetMixinBase
-from dagnam.data.dataset.hooks import _TransformDataset, _with_collate, _wrap_collate
+from dagnam.data.dataset.hooks import (
+    _ChannelsFirstImageDataset,
+    _TransformDataset,
+    _with_collate,
+    _wrap_collate,
+)
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
@@ -263,6 +268,11 @@ class PytorchDatasetMixin(DatasetMixinBase):
 
         if transform is not None or target_transform is not None:
             ds = _TransformDataset(ds, transform, target_transform)
+
+        # Canonical decoded images are channels-last [H, W, C]; PyTorch convs need
+        # channels-first [C, H, W]. Transpose only when the bound input is an image.
+        if getattr(native_train, "input_kind", None) == "image":
+            ds = _ChannelsFirstImageDataset(ds)
 
         return DataLoader(
             ds,

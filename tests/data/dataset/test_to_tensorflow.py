@@ -168,6 +168,26 @@ def test_to_tf_native_indexable_splits(tmp_path: Path) -> None:
         next(iter(tf_ds))
 
 
+def test_to_tf_native_indexable_segmentation_mask_label(tmp_path: Path) -> None:
+    # G109 regression: a 2-D segmentation mask target must materialize as a mask
+    # batch, not raise "only 0-dimensional arrays can be converted to Python scalars"
+    # from int(lbl). The mask keeps its [H, W] shape and integer dtype.
+    ds = make_indexable_native_ds(label_kind="mask")
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False)
+    _x, y_batch = cast("tuple[_HasShape, _TensorBatch]", next(iter(tf_ds)))
+    arr = y_batch.numpy()
+    assert arr.shape == (2, 4, 4)  # [batch, H, W] segmentation masks
+    assert arr.dtype.kind == "i"  # integer mask ids (int64)
+
+
+def test_to_tf_native_indexable_float_label_keeps_float(tmp_path: Path) -> None:
+    # A non-integer (regression) target keeps its float dtype (no int64 coercion).
+    ds = make_indexable_native_ds(label_kind="float")
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False)
+    _x, y_batch = cast("tuple[_HasShape, _TensorBatch]", next(iter(tf_ds)))
+    assert y_batch.numpy().dtype.kind == "f"
+
+
 def test_to_tf_native_indexable_with_map_and_batch_map(tmp_path: Path) -> None:
     ds = make_indexable_native_ds()
     tf_ds = ds.to_tensorflow_dataset(
@@ -426,19 +446,24 @@ def test_native_to_tensorflow_short_tuple_sample_raises() -> None:
         ds._native_to_tensorflow(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
 
 
-def test_native_to_tensorflow_non_int_label_raises() -> None:
-    class _BadLabelDs:
+def test_native_to_tensorflow_array_label_materializes() -> None:
+    # G109: a non-scalar (segmentation-mask) target must materialize as a 2-D array,
+    # not raise. Previously int(lbl) rejected any label that wasn't a scalar index.
+    class _MaskLabelDs:
         def __len__(self) -> int:
-            return 1
+            return 2
 
-        def __getitem__(self, _i: int) -> tuple[object, object]:
-            return np.zeros((2, 2), dtype=np.float32), "not-an-int"
+        def __getitem__(self, i: int) -> tuple[object, object]:
+            return np.zeros((2, 2), dtype=np.float32), np.full((2, 2), i, dtype=np.int64)
 
-    ds = DagnamDataset(_system_native_meta("badlabel"), data_dir=None)
-    ds.native_train = cast("NativeSplit", _BadLabelDs())
+    ds = DagnamDataset(_system_native_meta("masklabel"), data_dir=None)
+    ds.native_train = cast("NativeSplit", _MaskLabelDs())
     ds.native_test = None
-    with pytest.raises(TypeError, match="integer-compatible"):
-        ds._native_to_tensorflow(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
+    tf_ds = ds._native_to_tensorflow(
+        split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0
+    )
+    _x, y_batch = cast("tuple[_HasShape, _TensorBatch]", next(iter(tf_ds)))
+    assert y_batch.numpy().shape == (1, 2, 2)  # mask label preserved, not int(lbl)
 
 
 def _unknown_cardinality_ds(tmp_path: Path) -> DagnamDataset:
@@ -490,88 +515,6 @@ def test_try_upgrade_to_native_tf_already_native_returns_true() -> None:
 def test_try_upgrade_to_native_tf_non_system_returns_false() -> None:
     ds = DagnamDataset(_system_native_meta("nonsys"), data_dir=None)
     ds._raw_meta["source_type"] = "user"
-    assert ds._try_upgrade_to_native_tf() is False
-
-
-def test_try_upgrade_to_native_tf_no_tfds_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    ds = DagnamDataset(_system_native_meta("notfds"), data_dir=None)
-    monkeypatch.setattr("dagnam.data.dataset.to_tensorflow.find_spec", lambda _name: None)
-    assert ds._try_upgrade_to_native_tf() is False
-
-
-def test_to_tensorflow_upgrades_to_native_tf(
-    monkeypatch: PytestMonkeyPatch, tmp_path: Path
-) -> None:
-    """Drive the tfds-upgrade path: find_spec patched, resolvers stubbed."""
-    import tensorflow as tf
-
-    xs = np.arange(8 * 4, dtype=np.float32).reshape(8, 4)
-    ys = (np.arange(8) % 2).astype(np.int64)
-
-    upgraded = DagnamDataset(_system_native_meta("mnist"), data_dir=None)
-    upgraded.native_train_tf = cast(
-        "TensorflowDataset", tf.data.Dataset.from_tensor_slices((xs, ys))
-    )
-    upgraded.native_test_tf = cast(
-        "TensorflowDataset", tf.data.Dataset.from_tensor_slices((xs[:2], ys[:2]))
-    )
-
-    monkeypatch.setattr(
-        "dagnam.data.dataset.to_tensorflow.find_spec",
-        lambda _name: object(),
-    )
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_tfds_name",
-        lambda _meta: "mnist",
-    )
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_system_dataset_tf",
-        lambda _meta: upgraded,
-    )
-
-    ds = DagnamDataset(_system_native_meta("mnist"), data_dir=None)
-    # Legacy PT-native handle present so to_tensorflow_dataset tries the upgrade.
-    ds.native_train = _native_split(xs, ys)
-
-    out = ds.to_tensorflow_dataset(split="train", batch_size=2, shuffle=False)
-    next(iter(out))
-
-
-def test_try_upgrade_to_native_tf_unknown_name_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    ds = DagnamDataset(_system_native_meta("weird"), data_dir=None)
-    monkeypatch.setattr(
-        "dagnam.data.dataset.to_tensorflow.find_spec",
-        lambda _name: object(),
-    )
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_tfds_name",
-        lambda _meta: None,
-    )
-    assert ds._try_upgrade_to_native_tf() is False
-
-
-def test_try_upgrade_to_native_tf_upgrade_without_train_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    empty = DagnamDataset(_system_native_meta("empty"), data_dir=None)
-    empty.native_train_tf = None
-    monkeypatch.setattr(
-        "dagnam.data.dataset.to_tensorflow.find_spec",
-        lambda _name: object(),
-    )
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_tfds_name",
-        lambda _meta: "mnist",
-    )
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_system_dataset_tf",
-        lambda _meta: empty,
-    )
-    ds = DagnamDataset(_system_native_meta("empty"), data_dir=None)
     assert ds._try_upgrade_to_native_tf() is False
 
 

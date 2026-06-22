@@ -5,21 +5,17 @@ Covers the P1 regressions reported in the audit:
     instead of the full training set.
   * `_native_flax_dataset` must rebatch + reshuffle + honor `val_ratio`
     rather than returning the prebatched native list verbatim.
-  * `resolve_system_dataset_flax` must cope with text-like samples
-    (bytes / strings) and not divide them by 255.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol, SupportsInt, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytest
-from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam._types import JsonObject, TensorflowDataset
 from dagnam.data.dataset import DagnamDataset
@@ -175,59 +171,3 @@ def test_native_flax_dataset_reshapes_batches_and_splits_val(tmp_path: Path) -> 
     assert set(train_samples).isdisjoint(set(val_samples))
     # First train batch respects batch_size
     assert train[0].labels.shape[0] == 10
-
-
-# ---------------------------------------------------------------------------
-# resolve_system_dataset_flax handles text samples
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_system_dataset_flax_encodes_text_without_image_scaling(
-    monkeypatch: PytestMonkeyPatch, tmp_path: Path
-) -> None:
-    """tfds IMDB yields bytes/text samples; the loader must not divide by 255."""
-    pytest.importorskip("jax")
-
-    # Stub tensorflow_datasets with a text dataset so we don't need the real one.
-    import sys
-
-    def fake_load(
-        _name: str,
-        split: str,
-        _as_supervised: bool = True,
-        _data_dir: Path | None = None,
-    ) -> tuple[str, str]:
-        # Fake "dataset" — the as_numpy adapter reads from a sentinel generator.
-        return ("__fake_ds__", split)
-
-    def fake_as_numpy(_dataset: object) -> Iterator[tuple[bytes, int]]:
-        # Emit three synthetic bytes samples with class labels.
-        samples = [
-            (b"hello world", 1),
-            (b"another review here", 0),
-            (b"third", 1),
-        ]
-        return iter(samples)
-
-    fake_tfds = SimpleNamespace(load=fake_load, as_numpy=fake_as_numpy)
-    monkeypatch.setitem(sys.modules, "tensorflow_datasets", fake_tfds)
-
-    from dagnam.data.loaders.system import resolve_system_dataset_flax
-
-    meta: JsonObject = dict(_META)
-    meta["name"] = "imdb"
-    meta["dataset_type"] = "text"
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.SYSTEM_CACHE_ROOT",
-        tmp_path,
-    )
-
-    result = resolve_system_dataset_flax(meta)
-    assert result.native_train_flax is not None
-    batch = result.native_train_flax[0]
-
-    # Features must be an integer array (byte codepoints padded), NOT
-    # float-divided-by-255. Max value should exceed 1.0 for ASCII.
-    feats = cast("npt.NDArray[np.int64]", np.asarray(batch.features))
-    assert feats.dtype.kind in ("i", "u"), f"expected integer dtype, got {feats.dtype}"
-    assert feats.max() > 1, "text loader must not apply image normalization"

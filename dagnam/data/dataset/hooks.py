@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence, Sized
 from typing import TYPE_CHECKING, Protocol, cast
 
+import numpy as np
 from typing_extensions import override
 
 if TYPE_CHECKING:
@@ -152,4 +153,34 @@ class _TransformDataset(_TorchDataset[object]):
         return item
 
 
-__all__ = ["_TransformDataset", "_with_collate", "_wrap_collate"]
+class _ChannelsFirstImageDataset(_TorchDataset[object]):
+    """Transpose an image sample from channels-last to channels-first for PyTorch.
+
+    The decoder + transform pipeline produces canonical channels-last ``[H, W, C]``
+    images (numpy/PIL convention, which TF/Flax consume as-is); only PyTorch needs
+    ``[C, H, W]``, applied here per item before the default collate stacks the batch.
+    """
+
+    def __init__(self, dataset: _TorchDataset[object] | Sequence[object]) -> None:
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(cast("Sized", self.dataset))
+
+    @override
+    def __getitem__(self, index: int) -> object:
+        item = self.dataset[index]
+        if isinstance(item, tuple):
+            item_tuple = cast("tuple[object, ...]", item)
+            if len(item_tuple) >= 2:
+                data = np.moveaxis(np.asarray(item_tuple[0]), -1, 0)
+                return (data, *item_tuple[1:])
+        return item
+
+
+__all__ = [
+    "_ChannelsFirstImageDataset",
+    "_TransformDataset",
+    "_with_collate",
+    "_wrap_collate",
+]

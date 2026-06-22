@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,9 @@ import pytest
 from tests.typing_helpers import JsonObject
 
 from dagnam import load_dataset
-from dagnam._core.exceptions import DatasetNotFoundError
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.load import _load_internal
+from dagnam.data.loaders.system.decoders.base import DecodeError
 
 # ------------------------------------------------------------------
 # DagnamDataset with native datasets
@@ -58,48 +59,30 @@ class TestDagnamDatasetNativeFields:
 
 
 class TestResolveSystemDataset:
-    """Verify system dataset name matching."""
+    """Verify generic descriptor validation."""
 
     def test_unknown_dataset_raises(self) -> None:
         from dagnam.data.loaders.system import resolve_system_dataset
 
-        meta: JsonObject = {"name": "totally-unknown-dataset", "dataset_type": "tabular"}
-        with pytest.raises(DatasetNotFoundError):
+        meta: JsonObject = {
+            "name": "totally-unknown-dataset",
+            "format": "not-a-format",
+            "layout": {"x": {"key": "x"}},
+        }
+        with pytest.raises(DecodeError, match="unknown format"):
             resolve_system_dataset(meta)
 
-    def test_exact_match_mnist(self) -> None:
-        """MNIST should match via exact key."""
-        from dagnam.data.loaders.system import NATIVE_LOADERS
+    def test_missing_layout_raises(self) -> None:
+        from dagnam.data.loaders.system import resolve_system_dataset
 
-        assert "mnist" in NATIVE_LOADERS
-        assert "mnist handwritten digits" in NATIVE_LOADERS
-
-    def test_exact_match_cifar10(self) -> None:
-        from dagnam.data.loaders.system import NATIVE_LOADERS
-
-        assert "cifar-10" in NATIVE_LOADERS
-        assert "cifar10" in NATIVE_LOADERS
-
-    def test_exact_match_imdb(self) -> None:
-        from dagnam.data.loaders.system import NATIVE_LOADERS
-
-        assert "imdb" in NATIVE_LOADERS
-        assert "imdb movie reviews" in NATIVE_LOADERS
+        meta: JsonObject = {"name": "MNIST", "format": "array"}
+        with pytest.raises(ValueError, match="layout descriptor"):
+            resolve_system_dataset(meta)
 
 
 class TestVerifiedSystemDownloads:
-    def test_download_helper_rejects_non_https_urls(self, tmp_path: Path) -> None:
-        from dagnam.data.loaders.system import torchvision
-
-        with pytest.raises(ValueError, match="HTTPS"):
-            torchvision._download_verified_file(  # type: ignore[attr-defined]
-                "file:///tmp/imdb.npz",
-                tmp_path / "imdb.npz",
-                "0" * 64,
-            )
-
     def test_download_helper_verifies_sha256(self, tmp_path: Path) -> None:
-        from dagnam.data.loaders.system import torchvision
+        from dagnam.data.loaders.system import dispatch
 
         class Response:
             def __init__(self) -> None:
@@ -120,17 +103,33 @@ class TestVerifiedSystemDownloads:
                 return None
 
         with patch(
-            "dagnam.data.loaders.system.torchvision.requests.get",
+            "dagnam.data.loaders.system.dispatch.requests.get",
             return_value=Response(),
         ):
             with pytest.raises(ValueError, match="checksum"):
-                torchvision._download_verified_file(  # type: ignore[attr-defined]
+                dispatch._ensure_verified_file(  # type: ignore[attr-defined]
                     "https://example.test/imdb.npz",
                     tmp_path / "imdb.npz",
                     "0" * 64,
                 )
 
         assert not (tmp_path / "imdb.npz").exists()
+
+    def test_download_helper_reuses_matching_file(self, tmp_path: Path) -> None:
+        from dagnam.data.loaders.system import dispatch
+
+        destination = tmp_path / "artifact.npz"
+        destination.write_bytes(b"ok")
+        checksum = hashlib.sha256(b"ok").hexdigest()
+
+        with patch("dagnam.data.loaders.system.dispatch.requests.get") as request:
+            dispatch._ensure_verified_file(  # type: ignore[attr-defined]
+                "https://example.test/artifact.npz",
+                destination,
+                checksum,
+            )
+
+        request.assert_not_called()
 
 
 # ------------------------------------------------------------------
@@ -146,12 +145,13 @@ class TestSourceTypeDetection:
         meta = {
             "id": "550e8400-e29b-41d4-a716-446655440000",
             "name": "MNIST Handwritten Digits",
-            "format": "csv",
+            "format": "array",
             "dataset_type": "image",
             "source_type": "system",
             "num_samples": 60000,
             "num_classes": 10,
             "checksum": "abc123",
+            "layout": {"image": {"key": "x"}, "label": {"key": "y"}},
         }
 
         mock_native_ds = MagicMock(spec=DagnamDataset)
@@ -227,12 +227,13 @@ class TestLoadInternal:
         meta = {
             "id": dataset_id,
             "name": "MNIST Handwritten Digits",
-            "format": "csv",
+            "format": "array",
             "dataset_type": "image",
             "source_type": "system",
             "num_samples": 60000,
             "num_classes": 10,
             "file_path": None,
+            "layout": {"image": {"key": "x"}, "label": {"key": "y"}},
         }
         (meta_dir / f"{dataset_id}.meta.json").write_text(json.dumps(meta))
 

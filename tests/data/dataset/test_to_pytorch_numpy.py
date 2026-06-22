@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from importlib import import_module
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from tests.data.dataset._native_helpers import make_indexable_native_ds
 
-from dagnam._types import NativeSplit
+from dagnam._types import JsonObject, NativeSplit
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.dataset.hooks import _TransformDataset
 
@@ -377,3 +378,63 @@ def test_transform_dataset_no_transforms_returns_item() -> None:
 
     wrapped = _TransformDataset(cast("Sequence[object]", _Single()))
     assert wrapped[0] == "raw"
+
+
+def test_channels_first_image_dataset_transposes_hwc_to_chw() -> None:
+    from dagnam.data.dataset.hooks import _ChannelsFirstImageDataset
+
+    base = [(np.zeros((4, 5, 3), np.float32), 1), (np.ones((4, 5, 3), np.float32), 0)]
+    ds = _ChannelsFirstImageDataset(cast("Sequence[object]", base))
+
+    assert len(ds) == 2
+    item = cast("tuple[object, object]", ds[0])
+    data = cast("npt.NDArray[np.float32]", item[0])
+    assert data.shape == (3, 4, 5)
+    assert item[1] == 1
+
+
+def test_channels_first_image_dataset_passes_short_and_non_tuple_through() -> None:
+    from dagnam.data.dataset.hooks import _ChannelsFirstImageDataset
+
+    one_tuple = _ChannelsFirstImageDataset(cast("Sequence[object]", [(np.zeros((2, 2, 3)),)]))
+    short_item = one_tuple[0]
+    assert isinstance(short_item, tuple)
+    assert len(cast("tuple[object, ...]", short_item)) == 1
+
+    non_tuple = _ChannelsFirstImageDataset(cast("Sequence[object]", ["raw"]))
+    assert non_tuple[0] == "raw"
+
+
+def test_native_pytorch_loader_transposes_bound_image_to_channels_first() -> None:
+    from dagnam.data.loaders.system.bound_dataset import BoundNativeDataset
+    from dagnam.data.loaders.system.column_store import Column, ColumnStore
+
+    store = ColumnStore(
+        {
+            "image": Column.eager(np.zeros((6, 8, 8, 3), np.uint8)),
+            "label": Column.eager(np.arange(6, dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "image",
+        "target_column": "label",
+        "input_transform": {"kind": "image_resize", "params": {"size": [8, 8]}},
+        "target_transform": {"kind": "class_index", "params": {}},
+    }
+    bound = BoundNativeDataset(store, binding, [{"name": "image"}])
+    meta: JsonObject = {
+        "id": "img",
+        "name": "img",
+        "format": "array",
+        "dataset_type": "image",
+        "num_samples": 6,
+        "num_classes": 3,
+    }
+    ds = DagnamDataset(meta, None, _native_train=bound, _native_test=bound)
+
+    loader = ds.to_pytorch_loader(split="train", batch_size=2, num_workers=0, binding=binding)
+    torch = _torch()
+    batch = next(iter(loader))
+    x = cast("tuple[object, object]", batch)[0]
+    assert tuple(cast("Any", x).shape) == (2, 3, 8, 8)  # channels-first
+    del torch

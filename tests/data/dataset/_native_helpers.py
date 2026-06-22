@@ -78,16 +78,29 @@ def make_native_obj_ds() -> DagnamDataset:
 
 
 class _IndexableNativeDs:
-    """Mimics torchvision-style native: len() + __getitem__ returning (img, label)."""
+    """Mimics torchvision-style native: len() + __getitem__ returning (img, label).
 
-    def __init__(self, n: int = 8, with_numpy: bool = True) -> None:
+    ``label_kind`` selects the target shape: a scalar class index (the default), a
+    2-D segmentation mask, or a 0-d float regression target — so the same builder
+    exercises classification, segmentation, and regression label materialization.
+    """
+
+    def __init__(self, n: int = 8, with_numpy: bool = True, label_kind: str = "scalar") -> None:
         self.n = n
         self.with_numpy = with_numpy
+        self.label_kind = label_kind
 
     def __len__(self) -> int:
         return self.n
 
-    def __getitem__(self, index: int) -> tuple[object, int]:
+    def _label(self, index: int) -> object:
+        if self.label_kind == "mask":
+            return np.full((4, 4), index % 2, dtype=np.int64)  # 2-D segmentation mask
+        if self.label_kind == "float":
+            return np.asarray(float(index), dtype=np.float32)  # 0-d regression target
+        return index % 2  # scalar class index
+
+    def __getitem__(self, index: int) -> tuple[object, object]:
         arr = np.full((3, 4, 4), float(index), dtype=np.float32)
         if self.with_numpy:
 
@@ -98,11 +111,11 @@ class _IndexableNativeDs:
                 def numpy(self) -> npt.NDArray[np.float32]:
                     return self._a
 
-            return _T(arr), index % 2
-        return arr, index % 2
+            return _T(arr), self._label(index)
+        return arr, self._label(index)
 
 
-def make_indexable_native_ds(with_numpy: bool = True) -> DagnamDataset:
+def make_indexable_native_ds(with_numpy: bool = True, label_kind: str = "scalar") -> DagnamDataset:
     ds = DagnamDataset(
         {
             "id": "ix1",
@@ -115,6 +128,6 @@ def make_indexable_native_ds(with_numpy: bool = True) -> DagnamDataset:
         },
         data_dir=None,
     )
-    ds.native_train = _IndexableNativeDs(n=12, with_numpy=with_numpy)
-    ds.native_test = _IndexableNativeDs(n=4, with_numpy=with_numpy)
+    ds.native_train = _IndexableNativeDs(n=12, with_numpy=with_numpy, label_kind=label_kind)
+    ds.native_test = _IndexableNativeDs(n=4, with_numpy=with_numpy, label_kind=label_kind)
     return ds

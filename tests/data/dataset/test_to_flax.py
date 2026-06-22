@@ -120,6 +120,24 @@ def test_to_flax_native_indexable_test(tmp_path: Path) -> None:
     assert batches
 
 
+def test_to_flax_native_indexable_segmentation_mask_label(tmp_path: Path) -> None:
+    # G109 regression: a 2-D segmentation mask target must materialize as a mask
+    # batch, not raise "only 0-dimensional arrays can be converted to Python scalars"
+    # from int(lbl). The mask keeps its [H, W] shape and integer dtype.
+    ds = make_indexable_native_ds(label_kind="mask")
+    batches = ds.to_flax_dataset(split="test", batch_size=2, shuffle=False)
+    lbl = np.asarray(batches[0].labels)
+    assert lbl.shape == (2, 4, 4)  # [batch, H, W] segmentation masks
+    assert lbl.dtype.kind == "i"  # integer mask ids (int64)
+
+
+def test_to_flax_native_indexable_float_label_keeps_float(tmp_path: Path) -> None:
+    # A non-integer (regression) target keeps its float dtype (no int64 coercion).
+    ds = make_indexable_native_ds(label_kind="float")
+    batches = ds.to_flax_dataset(split="test", batch_size=2, shuffle=False)
+    assert np.asarray(batches[0].labels).dtype.kind == "f"
+
+
 def test_to_flax_native_indexable_no_numpy(tmp_path: Path) -> None:
     ds = make_indexable_native_ds(with_numpy=False)
     batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, val_ratio=0.25)

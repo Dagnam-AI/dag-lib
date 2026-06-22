@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from importlib.util import find_spec
 from typing import Any, SupportsInt, cast
 
 import numpy as np
@@ -109,7 +108,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             source = native_test if (split == "test" and native_test is not None) else native_train
             source_dataset = cast("IndexedDataset", source)
             images: list[npt.ArrayLike] = []
-            labels: list[int] = []
+            labels: list[npt.ArrayLike] = []
             for i in range(len(source_dataset)):
                 sample = source_dataset[i]
                 if not isinstance(sample, tuple):
@@ -121,11 +120,19 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 if isinstance(img, SupportsNumpy):
                     img = img.numpy()
                 images.append(cast("npt.ArrayLike", img))
-                if not isinstance(lbl, SupportsInt):
-                    raise TypeError("Expected native dataset labels to be integer-compatible")
-                labels.append(int(lbl))
+                # Materialize the target as an array, not int(lbl): a generic target
+                # may be a class index (0-d), a segmentation mask (2-D), or a float
+                # regression value. int() only accepts scalars and raises "only
+                # 0-dimensional arrays can be converted to Python scalars" on a mask;
+                # np.asarray (below) normalizes whatever the loader yields.
+                labels.append(cast("npt.ArrayLike", lbl))
             x = cast("npt.NDArray[np.object_]", np.stack(images))
-            y = np.array(labels, dtype=np.int64)
+            # Preserve the target's own shape/dtype (the transform layer already cast
+            # class indices/masks to int64 and regression targets to float); only
+            # normalize integer targets to int64 for cross-platform stability.
+            y = np.stack([np.asarray(v) for v in labels])
+            if np.issubdtype(y.dtype, np.integer):
+                y = y.astype(np.int64)
             # For split='val' or 'train' on the training set, apply val cut.
             if split in ("train", "val") and native_test is not None:
                 n = len(x)
@@ -260,37 +267,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         )
 
     def _try_upgrade_to_native_tf(self) -> bool:
-        """Upgrade a PT-native system dataset to a TF-native dataset via tfds.
-
-        Returns True if the upgrade succeeded and populated
-        ``_native_train_tf`` / ``_native_test_tf``. False when tfds isn't
-        available or the dataset doesn't map to a known tfds name; the caller
-        should then fall through to ``_native_to_tensorflow`` (in-memory).
-        """
-        if getattr(self, "_native_train_tf", None) is not None:
-            return True
-        if not self._raw_meta.get("source_type") == "system":
-            return False
-        if find_spec("tensorflow_datasets") is None:
-            return False
-        try:
-            from dagnam.data.loaders.system import (
-                resolve_system_dataset_tf,
-                resolve_tfds_name,
-            )
-        except ImportError:
-            return False
-
-        if resolve_tfds_name(self._raw_meta) is None:
-            return False
-
-        upgraded = resolve_system_dataset_tf(self._raw_meta)
-        if upgraded.native_train_tf is None:
-            return False
-        # Copy upgraded native handles onto self so subsequent calls use them.
-        self._native_train_tf = upgraded.native_train_tf
-        self._native_test_tf = upgraded.native_test_tf
-        return True
+        """Compatibility hook for already-populated native TensorFlow splits."""
+        return getattr(self, "_native_train_tf", None) is not None
 
     def to_tensorflow_dataset(
         self,
@@ -373,21 +351,6 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 sequence_length=sequence_length,
             )
         if self._native_train is not None:
-            # Try to upgrade to a native TF path via tensorflow_datasets if available.
-            upgraded = self._try_upgrade_to_native_tf()
-            if upgraded:
-                return self._native_tensorflow_dataset(
-                    split=split,
-                    batch_size=batch_size,
-                    shuffle=shuffle,
-                    val_ratio=val_ratio,
-                    seed=seed,
-                    map_fn=map_fn,
-                    batch_map_fn=batch_map_fn,
-                    vocab_size=vocab_size,
-                    sequence_length=sequence_length,
-                )
-            # Legacy native path: convert PyTorch-style native datasets to tf.data.
             return self._native_to_tensorflow(
                 split=split,
                 batch_size=batch_size,

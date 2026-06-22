@@ -69,8 +69,8 @@ class DagnamDataset(
         self._data: pl.DataFrame | dict[str, list[object]] | list[object] | None = None
         self._native_train: NativeSplit | None = _native_train
         self._native_test: NativeSplit | None = _native_test
-        # Framework-native dataset objects populated by system_loader when
-        # tensorflow_datasets or jax-native loaders are available (16.72-bb/16.82-bb).
+        # Framework-native dataset objects are retained for converter-level
+        # compatibility; generic system loaders populate _native_train/_test.
         self._native_train_tf = _native_train_tf
         self._native_test_tf = _native_test_tf
         self._native_train_flax = _native_train_flax

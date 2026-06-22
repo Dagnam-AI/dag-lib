@@ -1,9 +1,7 @@
 """Branch coverage for the to_flax mixin error paths and upgrade dispatch.
 
 These pin current behavior for the native-conversion guard rails (missing
-native dataset, malformed samples), the FLAX-native re-split helper, and the
-tensorflow_datasets upgrade path that promotes a PT-native system dataset to a
-FLAX-native one.
+native dataset, malformed samples), and the FLAX-native re-split helper.
 """
 
 from __future__ import annotations
@@ -50,10 +48,6 @@ def _system_meta(name: str) -> JsonObject:
         "class_names": [],
         "source_type": "system",
     }
-
-
-def _native_split(features: object, labels: object) -> NativeSplit:
-    return cast("NativeSplit", (features, labels))
 
 
 # ---------------------------------------------------------------- _native_to_flax guards
@@ -104,19 +98,21 @@ def test_native_to_flax_short_tuple_sample_raises() -> None:
         ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
 
 
-def test_native_to_flax_non_int_label_raises() -> None:
-    class _BadLabelDs:
+def test_native_to_flax_array_label_materializes() -> None:
+    # G109: a non-scalar (segmentation-mask) target must materialize as a 2-D array,
+    # not raise. Previously int(lbl) rejected any label that wasn't a scalar index.
+    class _MaskLabelDs:
         def __len__(self) -> int:
-            return 1
+            return 2
 
-        def __getitem__(self, _i: int) -> tuple[object, object]:
-            return np.zeros((2, 2), dtype=np.float32), "not-an-int"
+        def __getitem__(self, i: int) -> tuple[object, object]:
+            return np.zeros((2, 2), dtype=np.float32), np.full((2, 2), i, dtype=np.int64)
 
-    ds = DagnamDataset(_system_meta("badlabel"), data_dir=None)
-    ds.native_train = cast("NativeSplit", _BadLabelDs())
+    ds = DagnamDataset(_system_meta("masklabel"), data_dir=None)
+    ds.native_train = cast("NativeSplit", _MaskLabelDs())
     ds.native_test = None
-    with pytest.raises(TypeError, match="integer-compatible"):
-        ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
+    batches = ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
+    assert np.asarray(batches[0].labels).shape == (1, 2, 2)  # mask preserved, not int(lbl)
 
 
 # ---------------------------------------------------------------- _native_flax_dataset else
@@ -147,61 +143,6 @@ def test_try_upgrade_to_native_flax_non_system_returns_false() -> None:
     ds = DagnamDataset(_system_meta("nonsys"), data_dir=None)
     ds._raw_meta["source_type"] = "user"
     assert ds._try_upgrade_to_native_flax() is False
-
-
-def test_try_upgrade_to_native_flax_no_tfds_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    ds = DagnamDataset(_system_meta("notfds"), data_dir=None)
-    monkeypatch.setattr("dagnam.data.dataset.to_flax.find_spec", lambda _name: None)
-    assert ds._try_upgrade_to_native_flax() is False
-
-
-def test_try_upgrade_to_native_flax_unknown_name_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    ds = DagnamDataset(_system_meta("weird"), data_dir=None)
-    monkeypatch.setattr("dagnam.data.dataset.to_flax.find_spec", lambda _name: object())
-    monkeypatch.setattr("dagnam.data.loaders.system.resolve_tfds_name", lambda _meta: None)
-    assert ds._try_upgrade_to_native_flax() is False
-
-
-def test_try_upgrade_to_native_flax_upgrade_without_train_returns_false(
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    empty = DagnamDataset(_system_meta("empty"), data_dir=None)
-    empty.native_train_flax = None
-    monkeypatch.setattr("dagnam.data.dataset.to_flax.find_spec", lambda _name: object())
-    monkeypatch.setattr("dagnam.data.loaders.system.resolve_tfds_name", lambda _meta: "mnist")
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_system_dataset_flax",
-        lambda _meta: empty,
-    )
-    ds = DagnamDataset(_system_meta("empty"), data_dir=None)
-    assert ds._try_upgrade_to_native_flax() is False
-
-
-def test_to_flax_upgrades_to_native_flax(monkeypatch: PytestMonkeyPatch) -> None:
-    """Drive the tfds-upgrade dispatch: find_spec + resolvers stubbed (lines 245-263, 338)."""
-    upgraded = DagnamDataset(_system_meta("mnist"), data_dir=None)
-    upgraded.native_train_flax = [
-        _flax_batch(np.zeros((4, 4), dtype=np.float32), np.zeros(4, dtype=np.int64))
-    ]
-    upgraded.native_test_flax = [
-        _flax_batch(np.zeros((4, 4), dtype=np.float32), np.zeros(4, dtype=np.int64))
-    ]
-
-    monkeypatch.setattr("dagnam.data.dataset.to_flax.find_spec", lambda _name: object())
-    monkeypatch.setattr("dagnam.data.loaders.system.resolve_tfds_name", lambda _meta: "mnist")
-    monkeypatch.setattr(
-        "dagnam.data.loaders.system.resolve_system_dataset_flax",
-        lambda _meta: upgraded,
-    )
-
-    ds = DagnamDataset(_system_meta("mnist"), data_dir=None)
-    ds.native_train = _native_split(np.zeros((4, 4), dtype=np.float32), np.zeros(4, dtype=np.int64))
-    out = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False)
-    assert out
 
 
 # ---------------------------------------------------------------- audio dispatch

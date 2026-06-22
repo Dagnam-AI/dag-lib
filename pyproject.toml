@@ -54,42 +54,22 @@ dependencies = [
 
 [project.optional-dependencies]
 streaming = ["sseclient-py>=1.7"]
-pytorch = ["torch>=2.12.1", "torchvision>=0.27.1"]
+pytorch = ["torch>=2.12.1"]
 # torchaudio (>=2.x) decodes audio via TorchCodec, so torchcodec is required at
 # runtime to load audio datasets (else "TorchCodec is required for
 # load_with_torchcodec ... No module named 'torchcodec'"). (G083)
 audio = ["torch>=2.12.1", "torchaudio>=2.0", "torchcodec>=0.1"]
-# tensorflow-datasets lazily imports importlib_resources (via etils) but does
-# not declare it, so a bare install fails with ModuleNotFoundError; pin it here.
-# truststore routes tfds' requests-based downloads through the OS trust store so
-# they work behind TLS-inspection proxies (matching torchvision's urllib path).
-tensorflow = [
-    "tensorflow>=2.12",
-    "tensorflow-datasets>=4.9",
-    "importlib_resources>=6.0",
-    "truststore>=0.9",
-]
-# Flax system-dataset loading goes through tensorflow_datasets, which needs a
-# TensorFlow runtime to materialize tf.data splits (tfds.as_numpy), so the Flax
-# extra carries tfds + tensorflow (and tfds' undeclared deps) alongside JAX/Flax.
+tensorflow = ["tensorflow>=2.12"]
 flax = [
     "jax>=0.4",
     "flax>=0.7",
-    "tensorflow-datasets>=4.9",
-    "tensorflow>=2.12",
-    "importlib_resources>=6.0",
-    "truststore>=0.9",
 ]
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
 all = [
     "torch>=2.12.1",
-    "torchvision>=0.27.1",
     "torchaudio>=2.0",
     "torchcodec>=0.1",
     "tensorflow>=2.12",
-    "tensorflow-datasets>=4.9",
-    "importlib_resources>=6.0",
-    "truststore>=0.9",
     "jax>=0.4",
     "flax>=0.7",
     "httpx>=0.27",
@@ -210,8 +190,8 @@ reportImplicitOverride = "error"
 reportUnusedImport = "error"
 
 # Strict mode minus its "completeness" family. The SDK consumes untyped
-# third-party ML libraries (torch, torchvision, torchaudio, tensorflow,
-# tensorflow_datasets, jax/flax, numpy) and dynamic JSON server responses,
+# third-party ML libraries (torch, torchaudio, tensorflow, jax/flax, numpy)
+# and dynamic JSON server responses,
 # which makes the reportUnknown*/reportMissing* diagnostics pervasive noise
 # that cannot be resolved without sprinkling casts over every boundary. They
 # are disabled deliberately; every *bug-catching* strict diagnostic
@@ -332,8 +312,8 @@ ignore = [
     "UP028",
 ]
 # Framework-adapter modules are dominated by structural ``Protocol`` classes
-# that mirror external ML library surfaces (torch, torchvision, torchaudio,
-# tensorflow, tfds, jax/flax, soundfile). Their stub methods intentionally
+# that mirror external ML library surfaces (torch, torchaudio, tensorflow,
+# jax/flax, soundfile). Their stub methods intentionally
 # mirror the external API and carry no behaviour, so per-method docstrings
 # would be pure noise; the public API is the module-level loader functions.
 "dagnam/data/loaders/**" = ["D102"]
@@ -357,8 +337,8 @@ force-sort-within-sections = true
 # These names intentionally violate snake_case because they mirror the exact
 # public API surface of external ML libraries inside structural ``Protocol``
 # definitions (and the test fakes that satisfy them). Renaming them would
-# break the structural match against the real torch/torchvision/torchaudio/
-# tensorflow_datasets APIs they stand in for.
+# break the structural match against the real torch/torchaudio/tensorflow APIs
+# they stand in for.
 extend-ignore-names = [
     "Compose",
     "ToTensor",

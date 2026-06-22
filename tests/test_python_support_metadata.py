@@ -18,39 +18,22 @@ def test_all_ml_extras_are_available_on_python_3_12() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     optional_dependencies = pyproject["project"]["optional-dependencies"]
 
-    assert optional_dependencies["pytorch"] == ["torch>=2.12.1", "torchvision>=0.27.1"]
+    assert optional_dependencies["pytorch"] == ["torch>=2.12.1"]
     # torchaudio>=2.x decodes via TorchCodec, so torchcodec is a runtime dep (G083).
     assert optional_dependencies["audio"] == [
         "torch>=2.12.1",
         "torchaudio>=2.0",
         "torchcodec>=0.1",
     ]
-    # TF/Flax system-dataset loading goes through tensorflow_datasets, so both
-    # extras carry tfds (Flax also needs a TensorFlow runtime for tfds.as_numpy)
-    # plus tfds' undeclared importlib_resources and truststore (OS trust store
-    # for downloads behind TLS-inspection proxies).
-    assert optional_dependencies["tensorflow"] == [
-        "tensorflow>=2.12",
-        "tensorflow-datasets>=4.9",
-        "importlib_resources>=6.0",
-        "truststore>=0.9",
-    ]
+    assert optional_dependencies["tensorflow"] == ["tensorflow>=2.12"]
     assert optional_dependencies["flax"] == [
         "jax>=0.4",
         "flax>=0.7",
-        "tensorflow-datasets>=4.9",
-        "tensorflow>=2.12",
-        "importlib_resources>=6.0",
-        "truststore>=0.9",
     ]
     assert "torch>=2.12.1" in optional_dependencies["all"]
-    assert "torchvision>=0.27.1" in optional_dependencies["all"]
     assert "torchaudio>=2.0" in optional_dependencies["all"]
     assert "torchcodec>=0.1" in optional_dependencies["all"]
     assert "tensorflow>=2.12" in optional_dependencies["all"]
-    assert "tensorflow-datasets>=4.9" in optional_dependencies["all"]
-    assert "importlib_resources>=6.0" in optional_dependencies["all"]
-    assert "truststore>=0.9" in optional_dependencies["all"]
     assert "jax>=0.4" in optional_dependencies["all"]
     assert "flax>=0.7" in optional_dependencies["all"]
 
