@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any, SupportsInt, cast
 
 import numpy as np
@@ -31,6 +31,22 @@ def _cardinality_to_int(value: object) -> int:
     raise TypeError("TensorFlow cardinality did not return an integer-compatible value")
 
 
+def _iter_native_samples(
+    read_fn: Callable[[int], tuple[npt.NDArray[Any], npt.NDArray[Any]]],
+    indices: npt.NDArray[Any],
+) -> Iterator[tuple[npt.NDArray[Any], npt.NDArray[Any]]]:
+    """Lazily yield ``(feature, label)`` one sample at a time per split index.
+
+    Backs the ``tf.data.Dataset.from_generator`` stream for torchvision-style
+    native datasets so the whole split is never materialized at once. Kept at
+    module scope (rather than a closure) so it is directly unit-testable —
+    ``from_generator`` runs it inside tf.data's own thread, which the coverage
+    tracer cannot follow.
+    """
+    for idx in indices:
+        yield read_fn(int(idx))
+
+
 class TensorflowDatasetMixin(DatasetMixinBase):
     """Tensorflow conversion methods."""
 
@@ -57,6 +73,9 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         import tensorflow as tf
 
         tf = cast("TensorflowModule", tf)
+        # Some tf.data constructors used below (TensorSpec, as_dtype, from_generator)
+        # are not on the typed Protocol surface; reach them via an Any view.
+        tf_any = cast("Any", tf)
         native_train = self._native_train
         native_test = self._native_test
         if native_train is None:
@@ -102,53 +121,80 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 else:
                     x = np.asarray(x_train[:-n_val] if n_val > 0 else x_train)
                     y = np.asarray(y_train[:-n_val] if n_val > 0 else y_train).astype(np.int64)
+            source_ds = tf.data.Dataset.from_tensor_slices((x, y))
+            n_items = len(x)
+            skip_tf_shuffle = False
         else:
-            # torchvision-style: iterate to materialize
-
+            # torchvision-style: stream samples lazily into tf.data. Do NOT
+            # materialize the whole split — large corpora (e.g. Speech Commands
+            # audio: ~100k decoded waveforms, several GB) would OOM the smoke
+            # check and training. Resolve the split indices from the dataset
+            # length, then index the source per-sample via ``from_generator`` so
+            # only one batch is resident at a time. The binding/transform
+            # ``map_fn`` still runs via ``ds.map`` below, exactly as before, and
+            # the (lazy) pytorch path already worked this way.
             source = native_test if (split == "test" and native_test is not None) else native_train
             source_dataset = cast("IndexedDataset", source)
-            images: list[npt.ArrayLike] = []
-            labels: list[npt.ArrayLike] = []
-            for i in range(len(source_dataset)):
-                sample = source_dataset[i]
-                if not isinstance(sample, tuple):
+            total = len(source_dataset)
+            if split in ("train", "val") and native_test is not None:
+                n_val = int(total * val_ratio)
+                rng = np.random.default_rng(seed)
+                order = rng.permutation(total)
+                indices = order[:n_val] if split == "val" else order[n_val:]
+            else:
+                indices = np.arange(total)
+            # Shuffle the cheap index array up front, NOT the decoded samples: a
+            # full-size tf.data shuffle buffer over the from_generator stream would
+            # force EVERY waveform to be decoded into the buffer before the first
+            # batch is yielded (the Speech Commands OOM — ~85k waveforms, several
+            # GB). Pre-shuffling indices gives an equivalent random order in O(n)
+            # ints, so the tail skips the tf.data shuffle for this lazy branch.
+            if shuffle:
+                indices = np.random.default_rng(seed).permutation(indices)
+            skip_tf_shuffle = True
+
+            def _read_sample(idx: int) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+                sample = source_dataset[idx]
+                if not isinstance(sample, tuple) or len(sample) < 2:
                     raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                sample = cast("tuple[object, ...]", sample)
-                if len(sample) < 2:
-                    raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                img, lbl = sample[0], sample[1]
+                sample_t = cast("tuple[object, ...]", sample)
+                img, lbl = sample_t[0], sample_t[1]
                 if isinstance(img, SupportsNumpy):
                     img = img.numpy()
-                images.append(cast("npt.ArrayLike", img))
-                # Materialize the target as an array, not int(lbl): a generic target
-                # may be a class index (0-d), a segmentation mask (2-D), or a float
-                # regression value. int() only accepts scalars and raises "only
-                # 0-dimensional arrays can be converted to Python scalars" on a mask;
-                # np.asarray (below) normalizes whatever the loader yields.
-                labels.append(cast("npt.ArrayLike", lbl))
-            x = cast("npt.NDArray[np.object_]", np.stack(images))
-            # Preserve the target's own shape/dtype (the transform layer already cast
-            # class indices/masks to int64 and regression targets to float); only
-            # normalize integer targets to int64 for cross-platform stability.
-            y = np.stack([np.asarray(v) for v in labels])
-            if np.issubdtype(y.dtype, np.integer):
-                y = y.astype(np.int64)
-            # For split='val' or 'train' on the training set, apply val cut.
-            if split in ("train", "val") and native_test is not None:
-                n = len(x)
-                n_val = int(n * val_ratio)
-                rng = np.random.default_rng(seed)
-                order = rng.permutation(n)
-                val_idx = order[:n_val]
-                train_idx = order[n_val:]
-                if split == "val":
-                    x, y = x[val_idx], y[val_idx]
-                else:
-                    x, y = x[train_idx], y[train_idx]
+                # A generic target may be a class index (0-d), a segmentation mask
+                # (2-D), or a float regression value — np.asarray preserves each;
+                # only integer class/mask ids are normalized to int64.
+                y_arr = np.asarray(lbl)
+                if np.issubdtype(y_arr.dtype, np.integer):
+                    y_arr = y_arr.astype(np.int64)
+                return np.asarray(img), y_arr
 
-        ds = tf.data.Dataset.from_tensor_slices((x, y))
-        if shuffle:
-            ds = ds.shuffle(buffer_size=max(len(x), 1024), seed=seed)
+            if len(indices) == 0:
+                # Empty split (e.g. val_ratio rounds to 0): an empty, correctly
+                # typed dataset keeps downstream batching/iteration working.
+                source_ds = tf.data.Dataset.from_tensor_slices(
+                    (np.asarray([], dtype=np.float32), np.asarray([], dtype=np.int64))
+                )
+                n_items = 0
+            else:
+                probe_x, probe_y = _read_sample(int(indices[0]))
+                output_signature = (
+                    tf_any.TensorSpec(shape=probe_x.shape, dtype=tf_any.as_dtype(probe_x.dtype)),
+                    tf_any.TensorSpec(shape=probe_y.shape, dtype=tf_any.as_dtype(probe_y.dtype)),
+                )
+
+                source_ds = cast(
+                    "TensorflowDataset",
+                    tf_any.data.Dataset.from_generator(
+                        lambda: _iter_native_samples(_read_sample, indices),
+                        output_signature=output_signature,
+                    ),
+                )
+                n_items = len(indices)
+
+        ds = source_ds
+        if shuffle and not skip_tf_shuffle:
+            ds = ds.shuffle(buffer_size=max(n_items, 1024), seed=seed)
         if map_fn is not None:
             ds = ds.map(map_fn, num_parallel_calls=tf.data.AUTOTUNE)
         ds = ds.batch(batch_size)

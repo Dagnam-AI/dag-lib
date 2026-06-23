@@ -73,7 +73,7 @@ def _remap_contiguous(
 def apply_transform(
     value: npt.ArrayLike,
     transform: dict[str, Any],
-    normalize: dict[str, Any] | None,
+    normalize: dict[str, Any] | None = None,
 ) -> npt.NDArray[np.generic]:
     """Apply one binding transform to one column value."""
     kind = transform.get("kind", "identity")
@@ -110,4 +110,18 @@ def apply_transform(
             # would otherwise raise "index out of range" inside nn.Embedding.
             sequence = np.clip(sequence, 0, vocab_size - 1)
         return sequence
+    if kind == "audio":
+        waveform = np.asarray(value, dtype=np.float32)
+        target_length = params.get("target_length")
+        if (
+            not isinstance(target_length, int)
+            or isinstance(target_length, bool)
+            or target_length <= 0
+        ):
+            return waveform
+        if waveform.shape[0] > target_length:
+            return waveform[:target_length]
+        if waveform.shape[0] < target_length:
+            return np.pad(waveform, (0, target_length - waveform.shape[0])).astype(np.float32)
+        return waveform
     return np.asarray(value)

@@ -113,9 +113,39 @@ def test_system_transform_executor_tokenize_clamps_ids_to_vocab_size() -> None:
     assert out.tolist() == [3, 9999, 9999, 9999]  # clamped to [0, vocab_size - 1]
 
 
+def test_system_transform_executor_audio_pads_and_truncates_to_target_length() -> None:
+    short = np.zeros(10, dtype=np.float32)
+    long = np.ones(100, dtype=np.float32)
+    transform = {"kind": "audio", "params": {"target_length": 50}}
+
+    padded = apply_transform(short, transform)
+    truncated = apply_transform(long, transform)
+
+    assert padded.shape == (50,)
+    assert truncated.shape == (50,)
+    assert truncated.tolist() == [1.0] * 50
+
+
+def test_system_transform_executor_audio_without_target_length_is_identity() -> None:
+    waveform = np.ones(10, dtype=np.float32)
+
+    out = apply_transform(waveform, {"kind": "audio", "params": {"target_length": None}})
+
+    assert out.shape == (10,)
+
+
 def test_system_transform_executor_identity_returns_array_value() -> None:
     value = np.array([1, 2])
 
     out = apply_transform(value, {"kind": "identity", "params": {}}, None)
 
     assert out.tolist() == [1, 2]
+
+
+def test_system_transform_executor_audio_equal_length_returns_waveform() -> None:
+    waveform = np.arange(50, dtype=np.float32)
+
+    out = apply_transform(waveform, {"kind": "audio", "params": {"target_length": 50}})
+
+    assert out.shape == (50,)
+    assert out.tolist() == waveform.tolist()

@@ -79,8 +79,10 @@ def test_native_to_flax_sample_not_tuple_raises() -> None:
     ds = DagnamDataset(_system_meta("bad"), data_dir=None)
     ds.native_train = cast("NativeSplit", _BadDs())
     ds.native_test = None
+    # The native path is now lazy: the malformed-sample error surfaces when a
+    # batch is actually built (on iteration), not at construction.
     with pytest.raises(TypeError, match="feature, label"):
-        ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
+        list(ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0))
 
 
 def test_native_to_flax_short_tuple_sample_raises() -> None:
@@ -95,7 +97,7 @@ def test_native_to_flax_short_tuple_sample_raises() -> None:
     ds.native_train = cast("NativeSplit", _ShortDs())
     ds.native_test = None
     with pytest.raises(TypeError, match="feature, label"):
-        ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0)
+        list(ds._native_to_flax(split="train", batch_size=1, shuffle=False, val_ratio=0.0, seed=0))
 
 
 def test_native_to_flax_array_label_materializes() -> None:

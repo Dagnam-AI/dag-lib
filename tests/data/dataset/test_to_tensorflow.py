@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, cast, override
 
 import numpy as np
 import pytest
@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("tensorflow")
 
 from tests.data.dataset._native_helpers import (
+    _IndexableNativeDs,
     make_indexable_native_ds,
     make_native_numpy_ds,
     make_native_obj_ds,
@@ -19,7 +20,7 @@ from tests.typing_helpers import PytestMonkeyPatch
 
 from dagnam._types import JsonObject, NativeSplit, TensorflowDataset
 from dagnam.data.dataset import DagnamDataset
-from dagnam.data.dataset.to_tensorflow import _cardinality_to_int
+from dagnam.data.dataset.to_tensorflow import _cardinality_to_int, _iter_native_samples
 
 
 class _HasShape(Protocol):
@@ -186,6 +187,61 @@ def test_to_tf_native_indexable_float_label_keeps_float(tmp_path: Path) -> None:
     tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=False)
     _x, y_batch = cast("tuple[_HasShape, _TensorBatch]", next(iter(tf_ds)))
     assert y_batch.numpy().dtype.kind == "f"
+
+
+def test_to_tf_native_indexable_streams_lazily_not_materialized() -> None:
+    """A torchvision-style native dataset must stream per-sample into tf.data,
+    NOT be fully materialized up front. Regression for the Speech Commands audio
+    OOM: the old path ``np.stack``-ed every decoded sample (~100k waveforms,
+    several GB) at construction. Building the dataset now reads only a single
+    probe sample; pulling one batch reads a bounded prefix — never the whole
+    split."""
+    reads: list[int] = []
+
+    class _CountingNativeDs(_IndexableNativeDs):
+        @override
+        def __getitem__(self, index: int) -> tuple[object, object]:
+            reads.append(index)
+            return super().__getitem__(index)
+
+    ds = make_indexable_native_ds()
+    ds.native_test = _CountingNativeDs(n=50)
+
+    # shuffle=True is the real OOM condition: a full-size tf.data shuffle buffer
+    # over the lazy stream would decode EVERY sample into the buffer before the
+    # first batch. The fix shuffles cheap indices instead, so reads stay bounded.
+    tf_ds = ds.to_tensorflow_dataset(split="test", batch_size=2, shuffle=True)
+    # Construction must NOT walk the whole split — only the one probe sample.
+    assert len(reads) <= 2, f"dataset materialized {len(reads)} samples at build time"
+    next(iter(tf_ds))
+    # One batch reads only a bounded prefix, never all 50 samples (the buffer bug
+    # read all 50 here).
+    assert len(reads) < 50, f"shuffle decoded {len(reads)} samples for one batch"
+
+
+def test_to_tf_native_indexable_empty_val_split_is_safe() -> None:
+    """When val_ratio rounds the val count to 0, the 'val' split must yield an
+    empty (correctly typed) dataset instead of crashing the lazy generator."""
+    ds = make_indexable_native_ds()
+    ds.native_train = _IndexableNativeDs(n=4)
+    ds.native_test = _IndexableNativeDs(n=4)
+    # int(4 * 0.1) == 0 -> empty val split.
+    tf_ds = ds.to_tensorflow_dataset(split="val", batch_size=2, shuffle=False, val_ratio=0.1)
+    assert list(iter(tf_ds)) == []
+
+
+def test_iter_native_samples_streams_indices_in_order() -> None:
+    """The lazy sample generator yields one (feature, label) per index, in the
+    given order, reading the source only as it iterates."""
+    reads: list[int] = []
+
+    def _read(i: int) -> tuple[np.ndarray, np.ndarray]:
+        reads.append(i)
+        return np.asarray([float(i)], dtype=np.float32), np.asarray(i, dtype=np.int64)
+
+    out = list(_iter_native_samples(_read, np.asarray([2, 0, 1])))
+    assert reads == [2, 0, 1]
+    assert [int(y) for _, y in out] == [2, 0, 1]
 
 
 def test_to_tf_native_indexable_with_map_and_batch_map(tmp_path: Path) -> None:

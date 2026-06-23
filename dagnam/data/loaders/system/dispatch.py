@@ -147,14 +147,51 @@ def load_system_dataset(
     columns = cast("list[dict[str, Any]]", descriptor_columns)
     raw_roles = meta.get("column_roles", {})
     column_roles = cast("dict[str, str]", raw_roles if isinstance(raw_roles, dict) else {})
+    resolved_binding = cast("dict[str, Any]", binding or {})
+    if descriptor_format == "text":
+        layout = _text_layout_for_binding(layout, meta, resolved_binding)
+
     decoder = get_decoder(descriptor_format)
     artifact = _artifact_dir(meta)
     train_store = decoder.decode(artifact, layout, "train")
     test_store = decoder.decode(artifact, layout, "test")
-    resolved_binding = cast("dict[str, Any]", binding or {})
     return DagnamDataset(
         meta,
         artifact,
         _native_train=BoundNativeDataset(train_store, resolved_binding, columns, column_roles),
         _native_test=BoundNativeDataset(test_store, resolved_binding, columns, column_roles),
     )
+
+
+def _text_layout_for_binding(
+    layout: dict[str, object],
+    meta: JsonObject,
+    binding: dict[str, Any],
+) -> dict[str, object]:
+    raw_text = layout.get("text")
+    if not isinstance(raw_text, dict):
+        return layout
+    self_supervised = binding.get("self_supervised")
+    is_next_token = (
+        isinstance(self_supervised, dict)
+        and self_supervised.get("kind") == "next_token"
+        and self_supervised.get("where") == "loader"
+    )
+    task_hint = meta.get("task_type_hint") or meta.get("task_type")
+    if not is_next_token or task_hint != "language_modeling":
+        return layout
+
+    text_spec = dict(cast("dict[str, Any]", raw_text))
+    text_spec["self_supervised"] = "next_token"
+    transform = binding.get("input_transform")
+    params = transform.get("params") if isinstance(transform, dict) else None
+    if isinstance(params, dict):
+        sequence_length = params.get("sequence_length")
+        vocab_size = params.get("vocab_size")
+        if isinstance(sequence_length, int) and not isinstance(sequence_length, bool):
+            text_spec["sequence_length"] = sequence_length
+        if isinstance(vocab_size, int) and not isinstance(vocab_size, bool):
+            text_spec["vocab_size"] = vocab_size
+    updated = dict(layout)
+    updated["text"] = text_spec
+    return updated

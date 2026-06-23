@@ -9,8 +9,35 @@ import numpy as np
 import numpy.typing as npt
 
 from dagnam.data.loaders.system.column_store import Column, ColumnStore
-from dagnam.data.loaders.system.decoders._helpers import extensions, spec_dict
+from dagnam.data.loaders.system.decoders._helpers import (
+    extensions,
+    safe_extract_tar,
+    spec_dict,
+)
 from dagnam.data.loaders.system.decoders.base import DecodeError
+
+
+def _audio_root(artifact_dir: Path, configured_dir: str) -> Path:
+    """Resolve the directory that holds the class subdirectories.
+
+    Extracts a shipped tarball if present (mirrors ``image_mask_folder``), then
+    honours an explicit layout ``dir`` when it exists, else falls back to the
+    extracted root — Speech Commands, for example, places its class subdirectories
+    at the archive root with no ``audio/`` wrapper.
+    """
+    base = artifact_dir
+    tarballs = sorted(artifact_dir.glob("*.tar.gz"))
+    if tarballs:
+        unpacked = artifact_dir / "_unpacked_audio_folder"
+        if not unpacked.exists():
+            safe_extract_tar(tarballs[0], unpacked)
+        roots = [item for item in unpacked.iterdir() if item.is_dir()]
+        base = roots[0] if len(roots) == 1 else unpacked
+    if configured_dir:
+        candidate = base / configured_dir
+        if candidate.exists():
+            return candidate
+    return base
 
 
 def read_wav(path: Path) -> npt.NDArray[np.float32]:
@@ -34,10 +61,12 @@ class AudioFolderDecoder:
         del split
         audio_spec = spec_dict(layout, "audio")
         audio_exts = extensions(audio_spec)
-        root = artifact_dir / str(audio_spec.get("dir", "audio/"))
-        if not root.exists():
-            raise DecodeError(f"audio_folder: audio root does not exist: {root}")
-        classes = sorted(item for item in root.iterdir() if item.is_dir())
+        # _audio_root always resolves to an existing directory (the extracted root,
+        # an honoured configured subdir, or the artifact dir itself).
+        root = _audio_root(artifact_dir, str(audio_spec.get("dir", "")))
+        classes = sorted(
+            item for item in root.iterdir() if item.is_dir() and not item.name.startswith("_")
+        )
         if not classes:
             raise DecodeError(f"audio_folder: no label subdirectories under {root}")
 

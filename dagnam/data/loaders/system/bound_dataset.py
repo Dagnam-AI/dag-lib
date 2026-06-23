@@ -18,7 +18,7 @@ _INPUT_ROLES = ("image_input", "text_input", "audio_input")
 _TARGET_ROLES = ("target", "text_target")
 # Input modality inferred from the input transform's kind, so a framework converter
 # can apply its layout (pytorch transposes images to channels-first).
-_KIND_TO_MODALITY = {"image_resize": "image", "tokenize": "text", "audio_mel": "audio"}
+_KIND_TO_MODALITY = {"image_resize": "image", "tokenize": "text", "audio": "audio"}
 
 
 class BoundNativeDataset:
@@ -37,6 +37,15 @@ class BoundNativeDataset:
         roles = column_roles or {}
         self._input_column = self._resolve(binding.get("input_column"), _INPUT_ROLES, roles)
         self._target_column = self._resolve(binding.get("target_column"), _TARGET_ROLES, roles)
+        self_supervised = binding.get("self_supervised")
+        if (
+            self._target_column is None
+            and isinstance(self_supervised, dict)
+            and self_supervised.get("kind") == "next_token"
+            and self_supervised.get("where") == "loader"
+            and "target" in self._store.columns
+        ):
+            self._target_column = "target"
         self._normalize = next(
             (
                 column.get("normalize")

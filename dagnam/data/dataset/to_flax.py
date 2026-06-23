@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -32,6 +32,36 @@ def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None
     return roles or None
 
 
+class _LazyFlaxBatchStream:
+    """A ``len``/index/iterate view that builds each FlaxBatch on demand.
+
+    Backs the native (torchvision-style) flax path so a large split is never
+    fully materialized into a list of batches at once — the Speech Commands
+    audio OOM (~85k decoded waveforms, several GB). ``__getitem__`` decodes only
+    the requested batch, so the smoke check (one batch) and a training epoch
+    (one batch resident at a time) stay memory-bounded. Re-iterable, unlike a
+    bare generator, so multi-epoch training works.
+    """
+
+    def __init__(self, build_batch: Callable[[int], FlaxBatch], n_batches: int) -> None:
+        self._build_batch = build_batch
+        self._n_batches = n_batches
+
+    def __len__(self) -> int:
+        return self._n_batches
+
+    def __getitem__(self, index: int) -> FlaxBatch:
+        if index < 0:
+            index += self._n_batches
+        if not 0 <= index < self._n_batches:
+            raise IndexError("flax batch index out of range")
+        return self._build_batch(index)
+
+    def __iter__(self) -> Iterator[FlaxBatch]:
+        for i in range(self._n_batches):
+            yield self._build_batch(i)
+
+
 class FlaxDatasetMixin(DatasetMixinBase):
     """Flax conversion methods."""
 
@@ -46,8 +76,13 @@ class FlaxDatasetMixin(DatasetMixinBase):
         batch_transform_fn: BatchTransform | None = None,
         vocab_size: int | None = None,
         sequence_length: int | None = None,
-    ) -> list[FlaxBatch]:
-        """Convert a torchvision-style native dataset into a list of FlaxBatch."""
+    ) -> list[FlaxBatch] | _LazyFlaxBatchStream:
+        """Convert a torchvision-style native dataset into a sequence of FlaxBatch.
+
+        Returns a list for tuple (numpy) splits and a lazy, re-iterable
+        ``_LazyFlaxBatchStream`` for indexable (torchvision-style) splits so a
+        large native dataset is never fully materialized.
+        """
         import jax.numpy as jnp
 
         from dagnam.data.loaders.flax import FlaxBatch
@@ -101,43 +136,60 @@ class FlaxDatasetMixin(DatasetMixinBase):
                     )
                     y = np.asarray(y_train[:-n_val] if n_val > 0 else y_train).astype(np.int64)
         else:
+            # Lazily build batches by indexing the source per batch — NEVER
+            # materialize the whole split (the Speech Commands audio OOM: ~85k
+            # decoded waveforms, several GB). Resolve split indices from the
+            # dataset length and shuffle the cheap index array; the per-batch
+            # builder decodes only ``batch_size`` samples on access. Re-iterable,
+            # so multi-epoch training works.
             source = native_test if (split == "test" and native_test is not None) else native_train
             source_dataset = cast("IndexedDataset", source)
-            images: list[npt.ArrayLike] = []
-            labels: list[npt.ArrayLike] = []
-            for i in range(len(source_dataset)):
-                sample = source_dataset[i]
-                if not isinstance(sample, tuple):
-                    raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                sample = cast("tuple[object, ...]", sample)
-                if len(sample) < 2:
-                    raise TypeError("Expected native dataset samples to be (feature, label) pairs")
-                img, lbl = sample[0], sample[1]
-                if isinstance(img, SupportsNumpy):
-                    img = img.numpy()
-                images.append(cast("npt.ArrayLike", img))
-                # Materialize the target as an array, not int(lbl): a generic target
-                # may be a class index (0-d), a segmentation mask (2-D), or a float
-                # regression value. int() only accepts scalars and raises "only
-                # 0-dimensional arrays can be converted to Python scalars" on a mask;
-                # np.asarray (below) normalizes whatever the loader yields.
-                labels.append(cast("npt.ArrayLike", lbl))
-            x = cast("npt.NDArray[np.object_]", np.stack(images))
-            # Preserve the target's own shape/dtype (the transform layer already cast
-            # class indices/masks to int64 and regression targets to float); only
-            # normalize integer targets to int64 for cross-platform stability.
-            y = np.stack([np.asarray(v) for v in labels])
-            if np.issubdtype(y.dtype, np.integer):
-                y = y.astype(np.int64)
+            total = len(source_dataset)
             if split in ("train", "val") and native_test is not None:
-                n = len(x)
-                n_val = int(n * val_ratio)
-                rng_np = np.random.default_rng(seed)
-                order = rng_np.permutation(n)
-                if split == "val":
-                    x, y = x[order[:n_val]], y[order[:n_val]]
-                else:
-                    x, y = x[order[n_val:]], y[order[n_val:]]
+                n_val = int(total * val_ratio)
+                order = np.random.default_rng(seed).permutation(total)
+                indices = order[:n_val] if split == "val" else order[n_val:]
+            else:
+                indices = np.arange(total)
+            if shuffle:
+                indices = np.random.default_rng(seed).permutation(indices)
+
+            def _build_batch(batch_index: int) -> FlaxBatch:
+                start = batch_index * batch_size
+                batch_idx = indices[start : start + batch_size]
+                xs: list[npt.ArrayLike] = []
+                ys: list[npt.ArrayLike] = []
+                for i in batch_idx:
+                    sample = source_dataset[int(i)]
+                    if not isinstance(sample, tuple) or len(sample) < 2:
+                        raise TypeError(
+                            "Expected native dataset samples to be (feature, label) pairs"
+                        )
+                    sample_t = cast("tuple[object, ...]", sample)
+                    img, lbl = sample_t[0], sample_t[1]
+                    if isinstance(img, SupportsNumpy):
+                        img = img.numpy()
+                    xs.append(cast("npt.ArrayLike", img))
+                    # A generic target may be a class index (0-d), a segmentation
+                    # mask (2-D), or a float regression value — preserved by stack.
+                    ys.append(cast("npt.ArrayLike", lbl))
+                batch_x = cast("npt.NDArray[np.object_]", np.stack([np.asarray(s) for s in xs]))
+                batch_y = np.stack([np.asarray(v) for v in ys])
+                if np.issubdtype(batch_y.dtype, np.integer):
+                    batch_y = batch_y.astype(np.int64)
+                if transform_fn is not None:
+                    batch_x = cast(
+                        "npt.NDArray[np.object_]",
+                        np.stack([transform_fn(cast("npt.ArrayLike", s)) for s in batch_x]),
+                    )
+                built = FlaxBatch(features=as_jax_array(batch_x), labels=as_jax_array(batch_y))
+                if batch_transform_fn is not None:
+                    f, l = batch_transform_fn(built.features, built.labels)
+                    built = FlaxBatch(features=f, labels=l)
+                return built
+
+            n_batches = -(-len(indices) // batch_size)  # ceil division
+            return _LazyFlaxBatchStream(_build_batch, n_batches)
 
         if shuffle:
             rng_np = np.random.default_rng(seed)
@@ -305,8 +357,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
         batch_transform_fn: BatchTransform | None = None,
         vocab_size: int | None = None,
         sequence_length: int | None = None,
-    ) -> list[FlaxBatch]:
-        """Create a list of Flax batches for the specified split.
+    ) -> list[FlaxBatch] | _LazyFlaxBatchStream:
+        """Create a sequence of Flax batches for the specified split.
 
         Supports tabular (CSV/TSV/JSON/JSONL), image-folder, and audio-folder
         datasets, plus system datasets (via the native path).

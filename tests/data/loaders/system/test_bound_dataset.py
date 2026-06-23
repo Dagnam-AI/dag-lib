@@ -78,6 +78,27 @@ def test_system_bound_dataset_input_kind_image_and_self_supervised_target() -> N
     assert np.array_equal(x, y)  # self-supervised returns (x, x)
 
 
+def test_system_bound_dataset_uses_loader_next_token_target_column() -> None:
+    store = ColumnStore(
+        {
+            "text": Column.eager(np.array([[1, 2, 3]], dtype=np.int64)),
+            "target": Column.eager(np.array([[2, 3, 4]], dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "text",
+        "target_column": None,
+        "input_transform": {"kind": "tokenize", "params": {"sequence_length": 3}},
+        "self_supervised": {"kind": "next_token", "where": "loader"},
+    }
+
+    dataset = BoundNativeDataset(store, binding, descriptor_columns=[{"name": "text"}])
+
+    x, y = dataset[0]
+    assert x.tolist() == [1, 2, 3]
+    assert y.tolist() == [2, 3, 4]
+
+
 def test_system_bound_dataset_raises_when_no_input_column_resolves() -> None:
     store = ColumnStore({"feature": Column.eager(np.zeros((1, 3)))})
     binding = {"input_column": "missing", "input_transform": {"kind": "identity", "params": {}}}

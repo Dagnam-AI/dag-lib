@@ -73,7 +73,8 @@ def test_array_decoder_missing_artifact_and_key(tmp_path: Path) -> None:
 def test_audio_decoder_error_paths_and_stereo_wav(tmp_path: Path) -> None:
     decoder = AudioFolderDecoder()
     layout = cast("dict[str, object]", {"audio": {"dir": "audio", "ext": [".wav"]}})
-    with pytest.raises(DecodeError, match="does not exist"):
+    # A configured dir that is absent falls back to the (empty) artifact root.
+    with pytest.raises(DecodeError, match="no label subdirectories"):
         decoder.decode(tmp_path, layout, "train")
     (tmp_path / "audio").mkdir()
     with pytest.raises(DecodeError, match="no label subdirectories"):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 import numpy as np
 import numpy.typing as npt
@@ -13,6 +13,7 @@ import pytest
 pytest.importorskip("jax")
 
 from tests.data.dataset._native_helpers import (
+    _IndexableNativeDs,
     array_identity,
     array_scale,
     make_indexable_native_ds,
@@ -21,6 +22,7 @@ from tests.data.dataset._native_helpers import (
 )
 
 from dagnam.data.dataset import DagnamDataset
+from dagnam.data.dataset.to_flax import _LazyFlaxBatchStream
 from dagnam.data.loaders.flax import FlaxBatch
 
 if TYPE_CHECKING:
@@ -142,6 +144,60 @@ def test_to_flax_native_indexable_no_numpy(tmp_path: Path) -> None:
     ds = make_indexable_native_ds(with_numpy=False)
     batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, val_ratio=0.25)
     assert batches
+
+
+def test_to_flax_native_indexable_streams_lazily() -> None:
+    """The native flax path streams per batch, decoding only on access — the
+    whole split is never materialized (the Speech Commands audio OOM). Exercises
+    the shuffle (cheap-index) and transform branches lazily."""
+    reads: list[int] = []
+
+    class _CountingNativeDs(_IndexableNativeDs):
+        @override
+        def __getitem__(self, index: int) -> tuple[object, object]:
+            reads.append(index)
+            return super().__getitem__(index)
+
+    ds = make_indexable_native_ds()
+    ds.native_test = _CountingNativeDs(n=50)
+
+    def _scale(sample: npt.ArrayLike) -> npt.ArrayLike:
+        return np.asarray(sample) * 1.0
+
+    def _batch_identity(features: Any, labels: Any) -> tuple[Any, Any]:
+        return features, labels
+
+    batches = ds.to_flax_dataset(
+        split="test",
+        batch_size=2,
+        shuffle=True,
+        transform_fn=_scale,
+        batch_transform_fn=_batch_identity,
+    )
+    assert isinstance(batches, _LazyFlaxBatchStream)
+    assert len(reads) == 0  # construction decodes nothing
+    assert len(batches) == 25  # 50 / 2
+    first = batches[0]  # decodes only this batch (2 samples)
+    assert isinstance(first, FlaxBatch)
+    assert 0 < len(reads) <= 2
+
+
+def test_lazy_flax_batch_stream_index_bounds_and_iteration() -> None:
+    """_LazyFlaxBatchStream supports len, (negative) indexing, IndexError, and
+    re-iteration — building each batch on access."""
+    built: list[int] = []
+
+    def _build(i: int) -> FlaxBatch:
+        built.append(i)
+        arr = cast("jax.Array", np.asarray([i]))
+        return FlaxBatch(features=arr, labels=arr)
+
+    stream = _LazyFlaxBatchStream(_build, 3)
+    assert len(stream) == 3
+    assert int(stream[-1].features[0]) == 2  # negative index resolves
+    with pytest.raises(IndexError):
+        _ = stream[5]
+    assert [int(b.features[0]) for b in stream] == [0, 1, 2]  # re-iterable
 
 
 def test_to_flax_invalid_split(tmp_path: Path) -> None:
