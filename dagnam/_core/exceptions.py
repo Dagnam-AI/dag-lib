@@ -1,5 +1,7 @@
 """Custom exception classes for the dagnam library."""
 
+from dagnam._contracts import ParamError
+
 
 class DagnamError(Exception):
     """Base exception for all dagnam errors."""
@@ -109,6 +111,21 @@ class CodegenError(DagnamError):
 
 class CodegenValidationError(DagnamError):
     """Codegen validation returned errors (422)."""
+
+
+class ArchitectureValidationError(DagnamError):
+    """An architecture failed SDK-local validation before persist.
+
+    Raised by ``resources.save_architecture`` so a model the Studio would
+    reject never reaches the backend. ``errors`` carries the structured
+    per-node param failures.
+    """
+
+    def __init__(self, errors: list[ParamError]) -> None:
+        self.errors = errors
+        preview = "; ".join(e.message for e in errors[:3])
+        suffix = "" if len(errors) <= 3 else f" (+{len(errors) - 3} more)"
+        super().__init__(f"Architecture validation failed: {preview}{suffix}")
 
 
 class UploadError(DagnamError):

@@ -10,16 +10,18 @@ match the Phase 3 style (``dagnam.inference``, ``dagnam.deployments``).
 from __future__ import annotations
 
 from builtins import list as builtin_list
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Optional
 from unittest.mock import Mock
 from uuid import UUID
 
+from dagnam._contracts import validate_architecture
 from dagnam._contracts.normalize import (
     normalize_architecture_config,
     normalize_diagram_state,
 )
 from dagnam._core.client import DagnamClient
+from dagnam._core.exceptions import ArchitectureValidationError
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
 
@@ -187,14 +189,28 @@ def save_architecture(
     architecture_config: JsonValue,
     *,
     commit_message: Optional[str] = None,
+    validate_locally: bool = True,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Save the architecture (diagram state + config) for a project."""
+    """Save the architecture (diagram state + config) for a project.
+
+    When ``validate_locally`` is true (default), the diagram is validated against
+    the shared component schema first and an ``ArchitectureValidationError`` is
+    raised *before* any network call if a parameter is invalid (e.g. bare-int
+    padding) — mirroring the Studio's gate and the backend's authoritative one.
+    Set ``validate_locally=False`` to bypass the check for power users.
+
+    Legacy-but-valid forms the validator tolerates (bare ``'same'``/``'valid'``
+    padding strings) are then upgraded to canonical typed form before persisting,
+    so an SDK-built model can never be saved in a state the Studio would reject.
+    """
+    if validate_locally and isinstance(diagram_state, Mapping):
+        errors = validate_architecture(diagram_state)
+        if errors:
+            raise ArchitectureValidationError(errors)
     resolved = resolve_client(client, api_key, api_url)
-    # Normalize legacy/bare padding to canonical typed form before persisting, so
-    # an SDK-built model can never be saved in a state the Studio would reject.
     payload: JsonObject = {
         "diagram_state": normalize_diagram_state(diagram_state),
         "architecture_config": normalize_architecture_config(architecture_config),

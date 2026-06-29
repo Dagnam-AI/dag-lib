@@ -17,6 +17,7 @@ import dagnam
 # diff to this list is an obvious, reviewable change to the public contract.
 EXPECTED_ALL = sorted(
     [
+        "ArchitectureValidationError",
         "AsyncDagnamClient",
         "ChecksumError",
         "DagnamClient",

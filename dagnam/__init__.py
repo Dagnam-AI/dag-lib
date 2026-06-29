@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from dagnam._core.auth import configure, get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
-from dagnam._core.exceptions import ChecksumError
+from dagnam._core.exceptions import ArchitectureValidationError, ChecksumError
 from dagnam._core.lro import LongRunningOperation
 from dagnam.data.cache import (
     compute_file_checksum,
@@ -65,6 +65,7 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "ArchitectureValidationError",
     "AsyncDagnamClient",
     "ChecksumError",
     "DagnamClient",

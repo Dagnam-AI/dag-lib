@@ -398,7 +398,7 @@ release-check = { sequence = ["check", "audit", "build"], help = "Run quality ga
 root_package = "dagnam"
 
 [[tool.importlinter.contracts]]
-name = "layered SDK: _core <- data <- resources/cli"
+name = "layered SDK: _contracts <- _core <- data <- resources/cli"
 type = "layers"
-layers = ["cli", "resources", "data", "_core"]
+layers = ["cli", "resources", "data", "_core", "_contracts"]
 containers = ["dagnam"]

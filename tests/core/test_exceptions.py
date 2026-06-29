@@ -2,14 +2,32 @@
 
 import pytest
 
+from dagnam._contracts import ParamError
 from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
     APIError,
+    ArchitectureValidationError,
     AuthError,
     ChecksumError,
     DagnamError,
     DatasetNotFoundError,
 )
+
+
+def _perr(message: str, node_id: str = "c1") -> ParamError:
+    return ParamError(type="parameter_error", message=message, node_id=node_id, severity="error")
+
+
+class TestArchitectureValidationError:
+    def test_carries_param_errors_and_summarizes(self) -> None:
+        e = ArchitectureValidationError([_perr("conv: padding bad")])
+        assert isinstance(e, DagnamError)
+        assert e.errors[0].node_id == "c1"
+        assert "padding" in str(e)
+
+    def test_summary_truncates_after_three_errors(self) -> None:
+        e = ArchitectureValidationError([_perr(f"err {i}") for i in range(5)])
+        assert "(+2 more)" in str(e)
 
 
 class TestExceptionHierarchy:
