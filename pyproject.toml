@@ -118,6 +118,9 @@ include = [
     "dagnam/_agent/skill/**",
     "dagnam/_agent/claude/**",
     "dagnam/_agent/codex/**",
+    # Generated validation contract — read at runtime via importlib.resources by
+    # dagnam._contracts.normalize (SDK-local padding normalization).
+    "dagnam/_contracts/*.json",
 ]
 force-include = { "NOTICE" = "dagnam/NOTICE" }
 
