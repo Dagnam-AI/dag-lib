@@ -10,13 +10,42 @@ import pytest
 
 from dagnam import projects
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import ProjectNotFoundError
+from dagnam._core.exceptions import ArchitectureValidationError, ProjectNotFoundError
+from dagnam._types import JsonValue
 
 
 def _client(**overrides: object) -> MagicMock:
     client = MagicMock(spec=DagnamClient)
     client.configure_mock(**overrides)
     return client
+
+
+_BAD_DIAGRAM: JsonValue = {
+    "nodes": [
+        {
+            "id": "c1",
+            "data": {
+                "componentId": "convolution-layer",
+                "config": {"filters": 8, "kernelSize": 3, "padding": 2},
+            },
+        }
+    ]
+}
+_GOOD_DIAGRAM: JsonValue = {
+    "nodes": [
+        {
+            "id": "c1",
+            "data": {
+                "componentId": "convolution-layer",
+                "config": {
+                    "filters": 8,
+                    "kernelSize": 3,
+                    "padding": {"mode": "explicit", "value": 2},
+                },
+            },
+        }
+    ]
+}
 
 
 class TestReadOperations:
@@ -271,41 +300,71 @@ class TestGetattrGatedNewApi:
         assert payload["diagram_state"] == {"nodes": []}
         assert payload["commit_message"] == "v1"
 
-    def test_save_architecture_normalizes_bare_int_padding(self) -> None:
-        """An SDK-built model with legacy bare-int padding is upgraded to the
-        canonical typed form before it is sent, so it can never persist in a
-        state the Studio would reject (closes the e2e-06 hole at the SDK side)."""
-        c = _client(save_architecture=MagicMock(return_value={"ok": True}))
+    def test_save_architecture_rejects_bare_int_padding_before_persisting(self) -> None:
+        """An SDK-built model with bare-int padding is the e2e-06 hole: it is
+        invalid in the Studio, so the SDK rejects it BEFORE any network call,
+        mirroring the backend's authoritative gate (legacy-row upgrade is Plan 2's
+        job; new bad input is a hard error, not a silent rewrite)."""
+        c = _client(save_architecture=MagicMock(return_value={"version_id": "v1"}))
+        with pytest.raises(ArchitectureValidationError) as exc:
+            projects.save_architecture("p1", _BAD_DIAGRAM, {"layers": []}, client=c)
+        assert any(e.node_id == "c1" for e in exc.value.errors)
+        c.save_architecture.assert_not_called()  # never reached the wire
+
+    def test_save_architecture_persists_when_padding_is_typed(self) -> None:
+        c = _client(save_architecture=MagicMock(return_value={"version_id": "v1"}))
+        assert projects.save_architecture("p1", _GOOD_DIAGRAM, {"layers": []}, client=c) == {
+            "version_id": "v1"
+        }
+        c.save_architecture.assert_called_once()
+
+    def test_save_architecture_bypass_skips_local_validation(self) -> None:
+        """validate_locally=False preserves the legacy bypass for power users; the
+        normalizer still upgrades the bare-int form before it is sent."""
+        c = _client(save_architecture=MagicMock(return_value={"version_id": "v1"}))
         projects.save_architecture(
-            "p1",
-            {
-                "nodes": [
-                    {
-                        "id": "c1",
-                        "data": {
-                            "componentId": "convolution-layer",
-                            "config": {"filters": 8, "kernelSize": 3, "padding": 2},
-                        },
-                    }
-                ]
-            },
-            {
-                "layers": [
-                    {"id": "c1", "type": "conv2d", "config": {"padding": 2, "filters": 8, "kernelSize": 3}}
-                ],
-                "connections": [],
-            },
-            client=c,
+            "p1", _BAD_DIAGRAM, {"layers": []}, validate_locally=False, client=c
         )
+        c.save_architecture.assert_called_once()
         _pid, payload = c.save_architecture.call_args.args
         assert payload["diagram_state"]["nodes"][0]["data"]["config"]["padding"] == {
             "mode": "explicit",
             "value": 2,
         }
-        assert payload["architecture_config"]["layers"][0]["config"]["padding"] == {
-            "mode": "explicit",
-            "value": 2,
+
+    def test_save_architecture_upgrades_tolerated_legacy_string_padding(self) -> None:
+        """Legacy bare 'same'/'valid' strings pass validation and are upgraded to
+        the canonical typed form before persisting."""
+        c = _client(save_architecture=MagicMock(return_value={"version_id": "v1"}))
+        diagram: JsonValue = {
+            "nodes": [
+                {
+                    "id": "c1",
+                    "data": {
+                        "componentId": "convolution-layer",
+                        "config": {"filters": 8, "kernelSize": 3, "padding": "same"},
+                    },
+                }
+            ]
         }
+        projects.save_architecture(
+            "p1",
+            diagram,
+            {"layers": [{"id": "c1", "type": "conv2d", "config": {"padding": "valid"}}]},
+            client=c,
+        )
+        _pid, payload = c.save_architecture.call_args.args
+        assert payload["diagram_state"]["nodes"][0]["data"]["config"]["padding"] == {"mode": "same"}
+        assert payload["architecture_config"]["layers"][0]["config"]["padding"] == {"mode": "valid"}
+
+    def test_save_architecture_skips_validation_for_non_mapping_diagram(self) -> None:
+        # A non-mapping diagram_state can't be walked; the guard is skipped and the
+        # value is forwarded unchanged (normalizer is also a no-op on non-mappings).
+        c = _client(save_architecture=MagicMock(return_value={"version_id": "v1"}))
+        projects.save_architecture("p1", ["not", "a", "mapping"], {"layers": []}, client=c)
+        c.save_architecture.assert_called_once()
+        _pid, payload = c.save_architecture.call_args.args
+        assert payload["diagram_state"] == ["not", "a", "mapping"]
 
     def test_import_dag_uses_import_dag(self) -> None:
         c = _client(import_dag=MagicMock(return_value={"id": "p1"}))
