@@ -1816,5 +1816,67 @@
       ]
     }
   ],
-  "version": 1
+  "diagnostics": [
+    {
+      "code": "PARAM_ENUM_NOT_ALLOWED",
+      "fix_hint": "choose {field} from {expected}",
+      "severity": "error",
+      "template": "{component_id}: {field} must be one of {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_NUMBER_ABOVE_MAX",
+      "fix_hint": "decrease {field} to at most {expected}",
+      "severity": "error",
+      "template": "{component_id}: {field} must be at most {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_NUMBER_BELOW_MIN",
+      "fix_hint": "increase {field} to at least {expected}",
+      "severity": "error",
+      "template": "{component_id}: {field} must be at least {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_NUMBER_NOT_A_NUMBER",
+      "fix_hint": "set {field} to a numeric value",
+      "severity": "error",
+      "template": "{component_id}: {field} must be a number, got {got}"
+    },
+    {
+      "code": "PARAM_NUMBER_NOT_INTEGER",
+      "fix_hint": "round {field} to an integer",
+      "severity": "error",
+      "template": "{component_id}: {field} must be a whole number, got {got}"
+    },
+    {
+      "code": "PARAM_PADDING_BAD_EXPLICIT_VALUE",
+      "fix_hint": "set {field}.value to a non-negative integer",
+      "severity": "error",
+      "template": "{component_id}: explicit {field} needs a non-negative integer value, got {got}"
+    },
+    {
+      "code": "PARAM_PADDING_BAD_MODE",
+      "fix_hint": "set {field}.mode to one of valid|same|explicit",
+      "severity": "error",
+      "template": "{component_id}: {field}.mode must be 'valid', 'same', or 'explicit', got {got}"
+    },
+    {
+      "code": "PARAM_PADDING_BAD_STRING",
+      "fix_hint": "use {{mode:'same'}} or {{mode:'explicit', value:N}}",
+      "severity": "error",
+      "template": "{component_id}: {field} must be 'valid', 'same', or a typed object {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_PADDING_NOT_TYPED",
+      "fix_hint": "wrap an explicit pad as {{mode:'explicit', value:N}}",
+      "severity": "error",
+      "template": "{component_id}: {field} must be a typed object {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_REQUIRED_MISSING",
+      "fix_hint": "provide a value for {field}",
+      "severity": "error",
+      "template": "{component_id}: missing required parameter '{field}'"
+    }
+  ],
+  "version": 2
 }

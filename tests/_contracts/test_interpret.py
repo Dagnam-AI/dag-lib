@@ -13,14 +13,20 @@ from dagnam._contracts._interpret import _check_number
 # --- Padding (the motivating bug) -------------------------------------------
 
 
-def test_bare_int_padding_is_rejected_with_actionable_message() -> None:
-    errs = validate_params("convolution-layer", {"filters": 8, "kernelSize": 3, "padding": 2}, "n1")
-    assert len(errs) == 1
-    assert errs[0].node_id == "n1"
-    assert errs[0].type == "parameter_error"
-    assert errs[0].severity == "error"
-    assert "padding" in errs[0].message.lower()
-    assert "explicit" in errs[0].message.lower()
+def test_bare_int_padding_emits_structured_payload() -> None:
+    [e] = validate_params("convolution-layer", {"filters": 8, "kernelSize": 3, "padding": 2}, "n1")
+    assert e.node_id == "n1"
+    assert e.type == "parameter_error"
+    assert e.severity == "error"
+    assert e.code == "PARAM_PADDING_NOT_TYPED"
+    assert e.field == "padding"
+    assert e.expected == "{mode:'same'|'valid'|'explicit', value?}"
+    assert e.got == "2"
+    assert e.fix_hint == "wrap an explicit pad as {mode:'explicit', value:N}"
+    assert e.message == (
+        "convolution-layer: padding must be a typed object "
+        "{mode:'same'|'valid'|'explicit', value?}, got 2"
+    )
 
 
 def test_typed_padding_passes() -> None:
