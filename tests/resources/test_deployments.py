@@ -257,3 +257,104 @@ class TestEndToEndLRO:
         dep = op.wait(timeout=5).result()
         assert dep["status"] == "running"
         assert dep["endpoint_url"] == "https://e"
+
+
+# ---------------------------------------------------------------------------
+# Planning delegation — estimate-cost / validate / platforms / retry
+# ---------------------------------------------------------------------------
+
+
+class TestPlanningDelegation:
+    def test_estimate_cost_minimal_payload(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.estimate_cost.return_value = {"monthly_cost": 12.0}
+        out = deployments.estimate_cost(
+            platform="fastapi", instance_type="cpu.small", client=client
+        )
+        assert out["monthly_cost"] == 12.0
+        sent = client.estimate_cost.call_args.args[0]
+        assert sent == {
+            "platform": "fastapi",
+            "instance_type": "cpu.small",
+            "num_instances": 1,
+            "auto_scaling_enabled": False,
+        }
+
+    def test_estimate_cost_includes_optional_fields(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.estimate_cost.return_value = {"monthly_cost": 99.0}
+        deployments.estimate_cost(
+            platform="fastapi",
+            instance_type="gpu.large",
+            num_instances=3,
+            auto_scaling_enabled=True,
+            min_instances=1,
+            max_instances=5,
+            region="us-east-1",
+            client=client,
+        )
+        sent = client.estimate_cost.call_args.args[0]
+        assert sent["num_instances"] == 3
+        assert sent["min_instances"] == 1
+        assert sent["max_instances"] == 5
+        assert sent["region"] == "us-east-1"
+
+    def test_validate_minimal_payload(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.validate_deployment.return_value = {"valid": True, "errors": []}
+        out = deployments.validate(
+            name="d",
+            project_id="p1",
+            checkpoint_path="/c.pt",
+            platform="fastapi",
+            deployment_type="text",
+            instance_type="cpu.small",
+            client=client,
+        )
+        assert out["valid"] is True
+        sent = client.validate_deployment.call_args.args[0]
+        assert sent["project_id"] == "p1"
+        assert "min_instances" not in sent
+        assert "config" not in sent
+
+    def test_validate_includes_optional_fields(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.validate_deployment.return_value = {
+            "valid": False,
+            "errors": [{"field": "name", "message": "bad", "code": "x"}],
+        }
+        deployments.validate(
+            name="d",
+            project_id="p1",
+            checkpoint_path="/c.pt",
+            platform="fastapi",
+            deployment_type="text",
+            instance_type="cpu.small",
+            num_instances=2,
+            auto_scaling_enabled=True,
+            min_instances=1,
+            max_instances=5,
+            region="us-east-1",
+            config={"k": "v"},
+            client=client,
+        )
+        sent = client.validate_deployment.call_args.args[0]
+        assert sent["min_instances"] == 1
+        assert sent["max_instances"] == 5
+        assert sent["region"] == "us-east-1"
+        assert sent["config"] == {"k": "v"}
+
+    def test_platforms_delegates(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.list_deployment_platforms.return_value = [{"platform": "fastapi"}]
+        out = deployments.platforms(client=client)
+        first = out[0]
+        assert isinstance(first, dict)
+        assert first["platform"] == "fastapi"
+
+    def test_retry_delegates(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.retry_deployment.return_value = {"id": "d1", "status": "deploying"}
+        out = deployments.retry("d1", client=client)
+        client.retry_deployment.assert_called_once_with("d1")
+        assert out["status"] == "deploying"

@@ -91,6 +91,7 @@ def test_hub_featured_output_saves_full_json(
         (["hub", "fork", "m1"], "fork"),
         (["hub", "featured"], "featured"),
         (["hub", "trending"], "trending"),
+        (["hub", "upload-file", "m1", "/tmp/w.bin"], "upload_file"),
     ],
 )
 def test_hub_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
@@ -114,3 +115,15 @@ def test_hub_featured_list_with_non_dict_item(run_cli: CliRunner, capsys: StrCap
     with mock.patch("dagnam.hub", fake):
         run_cli(["hub", "featured"])
     assert "model-name-string" in capsys.readouterr().out
+
+
+def test_hub_upload_file(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+    fake = SimpleNamespace(
+        upload_file=mock.Mock(return_value={"id": "f1", "file_name": "weights.bin"})
+    )
+    with mock.patch("dagnam.hub", fake):
+        run_cli(["hub", "upload-file", "m1", str(f)])
+    assert "f1" in capsys.readouterr().out
+    fake.upload_file.assert_called_once_with("m1", str(f))

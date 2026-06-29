@@ -64,6 +64,19 @@ def cmd_inference_health(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_inference_schema(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.inference_schema(args.deployment_id)
+    except DagnamError as exc:
+        error(str(exc))
+    if args.output:
+        write_json_file(args.output, result)
+    print_json(result)
+
+
 def register_inference(subparsers: SubParsersAction) -> None:
     """Register the ``inference`` command group on the top-level subparsers."""
     inference = subparsers.add_parser(
@@ -99,3 +112,12 @@ def register_inference(subparsers: SubParsersAction) -> None:
     health.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     health.add_argument("--output", help="Write the JSON response to this path.")
     health.set_defaults(func=cmd_inference_health)
+    schema = inference_sub.add_parser(
+        "schema",
+        help="Show a deployment's inference schema.",
+        description="Show the input/output schema for a deployment's inference endpoint.",
+    )
+    schema.add_argument("deployment_id", help="ID of the deployment.")
+    schema.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    schema.add_argument("--output", help="Write the JSON response to this path.")
+    schema.set_defaults(func=cmd_inference_schema)

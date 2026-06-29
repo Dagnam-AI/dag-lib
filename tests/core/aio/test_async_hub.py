@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -92,3 +93,31 @@ async def test_async_hub_text_response(client: AsyncDagnamClient, mock: RespxMoc
 async def test_async_hub_empty_response(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/categories").mock(return_value=httpx.Response(204))
     assert await client.list_hub_categories() is None
+
+
+# ---------------------------------------------------------------- file upload
+
+
+async def test_async_hub_upload_model_file(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00\x01\x02")
+    route = mock.post("/api/v1/hub/models/m1/files").mock(
+        return_value=httpx.Response(
+            201, json={"id": "f1", "model_id": "m1", "file_name": "weights.bin"}
+        )
+    )
+    out = await client.upload_model_file("m1", str(f))
+    assert out["id"] == "f1"
+    assert b'name="file"' in route.calls[0].request.content
+
+
+async def test_async_hub_upload_model_file_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+    mock.post("/api/v1/hub/models/missing/files").mock(return_value=httpx.Response(404))
+    with pytest.raises(HubModelNotFoundError):
+        await client.upload_model_file("missing", str(f))

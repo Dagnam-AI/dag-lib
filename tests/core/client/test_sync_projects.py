@@ -119,3 +119,50 @@ def test_projects_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonke
     monkeypatch.setattr(requests, "request", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.list_projects()
+
+
+# ---------------------------------------------------------------- project versions
+
+
+def test_project_versions_surface(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/projects/p1/versions", json={"items": [], "total": 0})
+    rmock.get(f"{API}/api/v1/projects/p1/versions/v1", json={"id": "v1", "version_number": "1.0.0"})
+    rmock.get(f"{API}/api/v1/projects/p1/versions/compare", json={"version_a": {}, "version_b": {}})
+    rmock.post(
+        f"{API}/api/v1/projects/p1/restore/v1",
+        json={"id": "v2", "is_current": True},
+        status_code=201,
+    )
+    rmock.delete(f"{API}/api/v1/projects/p1/versions/v1", status_code=204)
+    rmock.get(f"{API}/api/v1/projects/p1/latest", json={"id": "v2", "is_current": True})
+
+    assert "items" in client.list_project_versions("p1")
+    assert client.get_project_version("p1", "v1")["version_number"] == "1.0.0"
+    assert "version_a" in client.compare_project_versions("p1", "v1", "v2")
+    assert client.restore_project_version("p1", "v1")["is_current"] is True
+    assert client.delete_project_version("p1", "v1") is None
+    assert client.get_latest_project_version("p1")["is_current"] is True
+
+
+def test_list_project_versions_passes_pagination(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/projects/p1/versions", json={"items": []})
+    client.list_project_versions("p1", page=2, limit=5)
+    qs = rmock.last_request.qs
+    assert qs["page"] == ["2"]
+    assert qs["limit"] == ["5"]
+
+
+def test_compare_project_versions_passes_query(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/projects/p1/versions/compare", json={"version_a": {}, "version_b": {}})
+    client.compare_project_versions("p1", "va", "vb")
+    qs = rmock.last_request.qs
+    assert qs["version_a"] == ["va"]
+    assert qs["version_b"] == ["vb"]
+
+
+def test_get_project_version_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/projects/p1/versions/missing", status_code=404)
+    with pytest.raises(ProjectNotFoundError):
+        client.get_project_version("p1", "missing")

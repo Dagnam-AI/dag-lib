@@ -248,6 +248,22 @@ def list_files(
     return resolved.list_hub_model_files(_stringify_id(model_id))
 
 
+def upload_file(
+    model_id: str,
+    file_path: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Upload a file to a hub model you own.
+
+    >>> dagnam.hub.upload_file("model_abc", "./weights.safetensors")["id"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.upload_model_file(_stringify_id(model_id), file_path)
+
+
 def download(
     model_id: str,
     *,
@@ -452,5 +468,6 @@ __all__ = [
     "trending",
     "unstar",
     "update",
+    "upload_file",
     "use_in_studio",
 ]

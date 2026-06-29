@@ -173,3 +173,84 @@ class ProjectsClientMixin(BaseDagnamClient):
             ),
             project_id=project_id,
         )
+
+    # ---------------------------------------------------------------- versions
+
+    def list_project_versions(self, project_id: str, **filters: QueryValue) -> JsonObject:
+        """List a project's architecture versions. ``GET /api/v1/projects/{id}/versions``."""
+        return self._expect_object(
+            self._project_request(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/versions",
+                project_id=project_id,
+                params=filters,
+            )
+        )
+
+    def get_project_version(self, project_id: str, version_id: str) -> JsonObject:
+        """Get one architecture version. ``GET /api/v1/projects/{id}/versions/{version_id}``."""
+        return self._expect_object(
+            self._project_request(
+                "GET",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/versions/{quote_path_segment(version_id)}"
+                ),
+                project_id=project_id,
+            )
+        )
+
+    def compare_project_versions(
+        self, project_id: str, version_a: str, version_b: str
+    ) -> JsonObject:
+        """Compare two architecture versions.
+
+        ``GET /api/v1/projects/{id}/versions/compare?version_a=&version_b=``.
+        """
+        return self._expect_object(
+            self._project_request(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/versions/compare",
+                project_id=project_id,
+                params={"version_a": version_a, "version_b": version_b},
+            )
+        )
+
+    def restore_project_version(self, project_id: str, version_id: str) -> JsonObject:
+        """Restore a project to a prior version (creates a new current version).
+
+        ``POST /api/v1/projects/{id}/restore/{version_id}`` — note the path is
+        ``/restore/{version_id}``, a sibling of ``/versions``, not
+        ``/versions/{version_id}/restore``.
+        """
+        return self._expect_object(
+            self._project_request(
+                "POST",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/restore/{quote_path_segment(version_id)}"
+                ),
+                project_id=project_id,
+            )
+        )
+
+    def delete_project_version(self, project_id: str, version_id: str) -> None:
+        """Delete one architecture version. ``DELETE /api/v1/projects/{id}/versions/{version_id}``."""
+        self._project_request(
+            "DELETE",
+            (
+                f"/api/v1/projects/{quote_path_segment(project_id)}"
+                f"/versions/{quote_path_segment(version_id)}"
+            ),
+            project_id=project_id,
+        )
+
+    def get_latest_project_version(self, project_id: str) -> JsonObject:
+        """Get the current (latest) architecture version. ``GET /api/v1/projects/{id}/latest``."""
+        return self._expect_object(
+            self._project_request(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/latest",
+                project_id=project_id,
+            )
+        )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -159,3 +160,60 @@ def test_hub_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonkeyPatc
     monkeypatch.setattr(requests, "request", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.list_hub_categories()
+
+
+# ---------------------------------------------------------------- file upload
+
+
+def test_upload_model_file(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00\x01\x02")
+    rmock.post(
+        f"{API}/api/v1/hub/models/m1/files",
+        json={"id": "f1", "model_id": "m1", "file_name": "weights.bin", "file_size": 3},
+        status_code=201,
+    )
+    out = client.upload_model_file("m1", str(f))
+    assert out["id"] == "f1"
+    assert out["file_name"] == "weights.bin"
+    # Multipart sends a `file` part; the boundary Content-Type is set by requests,
+    # not by our bearer-only headers.
+    body = rmock.last_request.text
+    assert body is not None
+    assert 'name="file"' in body
+
+
+def test_upload_model_file_404(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+    rmock.post(f"{API}/api/v1/hub/models/missing/files", status_code=404)
+    with pytest.raises(HubModelNotFoundError):
+        client.upload_model_file("missing", str(f))
+
+
+def test_upload_model_file_connectionerror(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.ConnectionError("nope")
+
+    monkeypatch.setattr(requests, "post", _boom)
+    with pytest.raises(APIError, match="Connection failed"):
+        client.upload_model_file("m1", str(f))
+
+
+def test_upload_model_file_timeout(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.Timeout("slow")
+
+    monkeypatch.setattr(requests, "post", _boom)
+    with pytest.raises(APIError, match="Request timed out"):
+        client.upload_model_file("m1", str(f))

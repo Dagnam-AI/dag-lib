@@ -202,6 +202,125 @@ def cmd_projects_architecture(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_projects_versions_list(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.projects.list_versions(args.project_id, page=args.page, limit=args.limit)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_projects_versions_get(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.projects.get_version(args.project_id, args.version_id)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_projects_versions_compare(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.projects.compare_versions(args.project_id, args.version_a, args.version_b)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_projects_versions_restore(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.projects.restore_version(args.project_id, args.version_id)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_projects_versions_delete(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        dagnam.projects.delete_version(args.project_id, args.version_id)
+    except DagnamError as exc:
+        error(str(exc))
+    print(f"Deleted version {args.version_id}")
+
+
+def cmd_projects_versions_latest(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.projects.latest_version(args.project_id)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def _register_project_versions(project_sub: SubParsersAction) -> None:
+    """Register the nested ``projects versions …`` command group."""
+    versions = project_sub.add_parser(
+        "versions",
+        help="Manage project architecture versions.",
+        description="List, inspect, compare, restore, and delete project versions.",
+    )
+    versions_sub = versions.add_subparsers(dest="versions_command", required=True)
+
+    v_list = versions_sub.add_parser(
+        "list", help="List versions.", description="List a project's architecture versions."
+    )
+    v_list.add_argument("project_id", help="ID of the project.")
+    v_list.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
+    v_list.add_argument("--limit", type=int, default=20, help="Results per page (default: 20).")
+    v_list.set_defaults(func=cmd_projects_versions_list)
+
+    v_get = versions_sub.add_parser(
+        "get", help="Show a version.", description="Show one architecture version."
+    )
+    v_get.add_argument("project_id", help="ID of the project.")
+    v_get.add_argument("version_id", help="ID of the version.")
+    v_get.set_defaults(func=cmd_projects_versions_get)
+
+    v_cmp = versions_sub.add_parser(
+        "compare", help="Compare two versions.", description="Compare two architecture versions."
+    )
+    v_cmp.add_argument("project_id", help="ID of the project.")
+    v_cmp.add_argument("version_a", help="First version ID.")
+    v_cmp.add_argument("version_b", help="Second version ID.")
+    v_cmp.set_defaults(func=cmd_projects_versions_compare)
+
+    v_restore = versions_sub.add_parser(
+        "restore", help="Restore a version.", description="Restore a project to a prior version."
+    )
+    v_restore.add_argument("project_id", help="ID of the project.")
+    v_restore.add_argument("version_id", help="ID of the version to restore.")
+    v_restore.set_defaults(func=cmd_projects_versions_restore)
+
+    v_delete = versions_sub.add_parser(
+        "delete", help="Delete a version.", description="Delete one architecture version."
+    )
+    v_delete.add_argument("project_id", help="ID of the project.")
+    v_delete.add_argument("version_id", help="ID of the version to delete.")
+    v_delete.set_defaults(func=cmd_projects_versions_delete)
+
+    v_latest = versions_sub.add_parser(
+        "latest", help="Show the latest version.", description="Show the current (latest) version."
+    )
+    v_latest.add_argument("project_id", help="ID of the project.")
+    v_latest.set_defaults(func=cmd_projects_versions_latest)
+
+
 def register_projects(subparsers: SubParsersAction) -> None:
     """Register the ``projects`` command group on the top-level subparsers."""
     projects = subparsers.add_parser(
@@ -274,3 +393,4 @@ def register_projects(subparsers: SubParsersAction) -> None:
     project_arch.add_argument("--message", help="Optional commit message for the version.")
     add_collection_output_args(project_arch)
     project_arch.set_defaults(func=cmd_projects_architecture)
+    _register_project_versions(project_sub)

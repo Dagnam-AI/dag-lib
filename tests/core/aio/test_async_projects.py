@@ -76,3 +76,50 @@ async def test_async_projects_empty_response(
 ) -> None:
     mock.get("/api/v1/projects").mock(return_value=httpx.Response(204))
     assert await client.list_projects() is None
+
+
+# ---------------------------------------------------------------- project versions
+
+
+async def test_async_project_versions(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.get("/api/v1/projects/p1/versions").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    mock.get("/api/v1/projects/p1/versions/v1").mock(
+        return_value=httpx.Response(200, json={"id": "v1"})
+    )
+    mock.get("/api/v1/projects/p1/versions/compare").mock(
+        return_value=httpx.Response(200, json={"version_a": {}, "version_b": {}})
+    )
+    mock.post("/api/v1/projects/p1/restore/v1").mock(
+        return_value=httpx.Response(201, json={"id": "v2"})
+    )
+    mock.delete("/api/v1/projects/p1/versions/v1").mock(return_value=httpx.Response(204))
+    mock.get("/api/v1/projects/p1/latest").mock(return_value=httpx.Response(200, json={"id": "v2"}))
+
+    assert "items" in await client.list_project_versions("p1")
+    assert (await client.get_project_version("p1", "v1"))["id"] == "v1"
+    assert "version_a" in await client.compare_project_versions("p1", "v1", "v2")
+    assert (await client.restore_project_version("p1", "v1"))["id"] == "v2"
+    assert await client.delete_project_version("p1", "v1") is None
+    assert (await client.get_latest_project_version("p1"))["id"] == "v2"
+
+
+async def test_async_compare_project_versions_query(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/projects/p1/versions/compare").mock(
+        return_value=httpx.Response(200, json={"version_a": {}, "version_b": {}})
+    )
+    await client.compare_project_versions("p1", "va", "vb")
+    params = route.calls[0].request.url.params
+    assert params["version_a"] == "va"
+    assert params["version_b"] == "vb"
+
+
+async def test_async_get_project_version_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/projects/p1/versions/missing").mock(return_value=httpx.Response(404))
+    with pytest.raises(ProjectNotFoundError):
+        await client.get_project_version("p1", "missing")

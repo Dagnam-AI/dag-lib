@@ -191,6 +191,70 @@ def cmd_deployments_metrics(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_deployments_platforms(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.deployments.platforms()
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_deployments_retry(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.deployments.retry(args.deployment_id)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_deployments_estimate_cost(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.deployments.estimate_cost(
+            platform=args.platform,
+            instance_type=args.instance_type,
+            num_instances=args.num_instances,
+            auto_scaling_enabled=args.auto_scaling,
+            min_instances=args.min_instances,
+            max_instances=args.max_instances,
+            region=args.region,
+        )
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
+def cmd_deployments_validate(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.deployments.validate(
+            name=args.name,
+            project_id=args.project_id,
+            checkpoint_path=args.checkpoint_path,
+            platform=args.platform,
+            deployment_type=args.deployment_type,
+            instance_type=args.instance_type,
+            num_instances=args.num_instances,
+            auto_scaling_enabled=args.auto_scaling,
+            min_instances=args.min_instances,
+            max_instances=args.max_instances,
+            region=args.region,
+        )
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
 def register_deployments(subparsers: SubParsersAction) -> None:
     """Register the ``deployments`` command group on the top-level subparsers."""
     deployments = subparsers.add_parser(
@@ -243,6 +307,7 @@ def register_deployments(subparsers: SubParsersAction) -> None:
     deployment_help = {
         "pause": ("Pause a deployment.", "Pause a running deployment."),
         "resume": ("Resume a deployment.", "Resume a paused deployment."),
+        "retry": ("Retry a deployment.", "Retry a failed or stuck deployment."),
         "delete": ("Delete a deployment.", "Delete a deployment permanently."),
         "logs": ("Show deployment logs.", "Fetch logs for a deployment."),
         "metrics": ("Show deployment metrics.", "Fetch metrics for a deployment."),
@@ -250,6 +315,7 @@ def register_deployments(subparsers: SubParsersAction) -> None:
     for command_name, handler in {
         "pause": cmd_deployments_pause,
         "resume": cmd_deployments_resume,
+        "retry": cmd_deployments_retry,
         "delete": cmd_deployments_delete,
         "logs": cmd_deployments_logs,
         "metrics": cmd_deployments_metrics,
@@ -268,3 +334,58 @@ def register_deployments(subparsers: SubParsersAction) -> None:
                 "--time-range", default="24h", help="Window, e.g. 24h (default: 24h)."
             )
         command.set_defaults(func=handler)
+
+    platforms = deployment_sub.add_parser(
+        "platforms",
+        help="List deployment platforms.",
+        description="List available serving platforms and their capabilities.",
+    )
+    platforms.set_defaults(func=cmd_deployments_platforms)
+
+    estimate = deployment_sub.add_parser(
+        "estimate-cost",
+        help="Estimate deployment cost.",
+        description="Estimate hourly/daily/monthly cost for a deployment shape.",
+    )
+    estimate.add_argument("--platform", required=True, help="Serving platform.")
+    estimate.add_argument(
+        "--instance-type", required=True, dest="instance_type", help="Compute instance type."
+    )
+    estimate.add_argument(
+        "--num-instances", type=int, default=1, dest="num_instances", help="Instance count."
+    )
+    estimate.add_argument(
+        "--auto-scaling", action="store_true", dest="auto_scaling", help="Enable auto-scaling."
+    )
+    estimate.add_argument("--min-instances", type=int, default=None, dest="min_instances")
+    estimate.add_argument("--max-instances", type=int, default=None, dest="max_instances")
+    estimate.add_argument("--region", default=None, help="Deployment region.")
+    estimate.set_defaults(func=cmd_deployments_estimate_cost)
+
+    validate = deployment_sub.add_parser(
+        "validate",
+        help="Validate a deployment config.",
+        description="Validate a deployment configuration without creating it.",
+    )
+    validate.add_argument("--name", required=True, help="Deployment name.")
+    validate.add_argument("--project-id", required=True, dest="project_id", help="Project ID.")
+    validate.add_argument(
+        "--checkpoint-path", required=True, dest="checkpoint_path", help="Checkpoint path."
+    )
+    validate.add_argument("--platform", required=True, help="Serving platform.")
+    validate.add_argument(
+        "--deployment-type", required=True, dest="deployment_type", help="Deployment type."
+    )
+    validate.add_argument(
+        "--instance-type", required=True, dest="instance_type", help="Compute instance type."
+    )
+    validate.add_argument(
+        "--num-instances", type=int, default=1, dest="num_instances", help="Instance count."
+    )
+    validate.add_argument(
+        "--auto-scaling", action="store_true", dest="auto_scaling", help="Enable auto-scaling."
+    )
+    validate.add_argument("--min-instances", type=int, default=None, dest="min_instances")
+    validate.add_argument("--max-instances", type=int, default=None, dest="max_instances")
+    validate.add_argument("--region", default=None, help="Deployment region.")
+    validate.set_defaults(func=cmd_deployments_validate)

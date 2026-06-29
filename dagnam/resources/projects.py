@@ -339,17 +339,112 @@ def unlink_dataset(
     )
 
 
+# ---------------------------------------------------------------------------
+# Architecture versioning
+# ---------------------------------------------------------------------------
+
+
+def list_versions(
+    project_id: str,
+    *,
+    page: int = 1,
+    limit: int = 20,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """List a project's architecture versions.
+
+    >>> dagnam.projects.list_versions("proj_abc")["items"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_project_versions(_stringify_id(project_id), page=page, limit=limit)
+
+
+def get_version(
+    project_id: str,
+    version_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Get one architecture version (full diagram state + config)."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_project_version(_stringify_id(project_id), _stringify_id(version_id))
+
+
+def compare_versions(
+    project_id: str,
+    version_a: str,
+    version_b: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Compare two architecture versions of a project."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.compare_project_versions(
+        _stringify_id(project_id), _stringify_id(version_a), _stringify_id(version_b)
+    )
+
+
+def restore_version(
+    project_id: str,
+    version_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Restore a project to a prior version (creates a new current version)."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.restore_project_version(_stringify_id(project_id), _stringify_id(version_id))
+
+
+def delete_version(
+    project_id: str,
+    version_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> None:
+    """Delete one architecture version."""
+    resolved = resolve_client(client, api_key, api_url)
+    resolved.delete_project_version(_stringify_id(project_id), _stringify_id(version_id))
+
+
+def latest_version(
+    project_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Get the current (latest) architecture version of a project."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_latest_project_version(_stringify_id(project_id))
+
+
 __all__ = [
     "bulk_delete",
+    "compare_versions",
     "create",
     "delete",
+    "delete_version",
     "duplicate",
     "get",
     "get_datasets",
+    "get_version",
     "import_dag",
     "import_dag_existing",
+    "latest_version",
     "link_dataset",
     "list",
+    "list_versions",
+    "restore_version",
     "save_architecture",
     "unlink_dataset",
     "update",

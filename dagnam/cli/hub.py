@@ -139,6 +139,17 @@ def cmd_hub_trending(args: argparse.Namespace) -> None:
     _emit_collection(args, result)
 
 
+def cmd_hub_upload_file(args: argparse.Namespace) -> None:
+    import dagnam
+    from dagnam._core.exceptions import DagnamError
+
+    try:
+        result = dagnam.hub.upload_file(args.model_id, args.file_path)
+    except DagnamError as exc:
+        error(str(exc))
+    print_json(result)
+
+
 def register_hub(subparsers: SubParsersAction) -> None:
     """Register the ``hub`` command group on the top-level subparsers."""
     hub = subparsers.add_parser(
@@ -187,3 +198,11 @@ def register_hub(subparsers: SubParsersAction) -> None:
     )
     add_collection_output_args(hub_trending)
     hub_trending.set_defaults(func=cmd_hub_trending)
+    hub_upload = hub_sub.add_parser(
+        "upload-file",
+        help="Upload a file to a hub model.",
+        description="Upload a file to a hub model you own.",
+    )
+    hub_upload.add_argument("model_id", help="ID of the hub model.")
+    hub_upload.add_argument("file_path", help="Path to the file to upload.")
+    hub_upload.set_defaults(func=cmd_hub_upload_file)

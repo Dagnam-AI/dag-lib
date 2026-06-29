@@ -44,3 +44,14 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
         )
         raise_for_deployment(resp, deployment_id)
         return resp.json()
+
+    async def schema(self, deployment_id: str, timeout: int | None = None) -> JsonObject:
+        """Return a deployment's inference schema. ``GET /api/v1/inference/{id}/schema``."""
+        resp = await self._request(
+            "GET",
+            f"/api/v1/inference/{quote_path_segment(deployment_id)}/schema",
+            headers=self._headers(),
+            timeout=timeout,
+        )
+        raise_for_deployment(resp, deployment_id)
+        return resp.json()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -125,6 +127,33 @@ class HubClientMixin(BaseDagnamClient):
         return self._hub_object(
             "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
         )
+
+    def upload_model_file(self, model_id: str, file_path: str) -> JsonObject:
+        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files``.
+
+        Sends ``multipart/form-data`` with a single ``file`` part. The multipart
+        boundary Content-Type is set by ``requests`` itself, so only the bearer
+        auth header is supplied (a manual Content-Type would corrupt the body).
+        """
+        from dagnam._core.client.common import raise_for_hub, response_json_object
+
+        path = Path(file_path)
+        url = f"{self.api_url}/api/v1/hub/models/{quote_path_segment(model_id)}/files"
+        try:
+            with path.open("rb") as fh:
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    files={"file": (path.name, fh)},
+                    timeout=DEFAULT_TIMEOUT,
+                    allow_redirects=ALLOW_REDIRECTS,
+                )
+        except requests.ConnectionError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+        raise_for_hub(resp, model_id)
+        return response_json_object(resp)
 
     def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
         path = f"/api/v1/hub/models/{quote_path_segment(model_id)}/download"

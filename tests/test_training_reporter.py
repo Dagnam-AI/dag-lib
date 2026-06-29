@@ -196,3 +196,79 @@ def test_public_api_surface():
         "write_training_state",
     ):
         assert callable(getattr(training, name))
+
+
+# ---------------------------------------------------------------- one-time diagnostics
+
+
+def test_write_event_failure_warns_once(
+    reporter, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    training, _ = reporter
+
+    def _boom(*_a: object, **_k: object) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(training.json, "dumps", _boom)
+    training.report_metric(epoch=1, step=1, metrics={"loss": 0.1})
+    training.report_metric(epoch=2, step=2, metrics={"loss": 0.2})  # must NOT re-warn
+
+    err = capsys.readouterr().err
+    assert err.count("failed to write a metrics event") == 1
+
+
+def test_close_file_failure_warns_once(
+    reporter, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    training, _ = reporter
+
+    class _BadFile:
+        closed = False
+
+        def close(self) -> None:
+            raise OSError("cannot close")
+
+    monkeypatch.setattr(training, "_file", _BadFile())
+    training._close_file()
+    training._close_file()  # _file is now None -> no second warning
+
+    err = capsys.readouterr().err
+    assert err.count("failed to close the metrics file") == 1
+
+
+def test_write_training_state_failure_warns_once(
+    reporter, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+):
+    training, _ = reporter
+    monkeypatch.setenv("DAGNAM_TRAINING_DIR", str(tmp_path))
+
+    def _boom(*_a: object, **_k: object) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(training.json, "dumps", _boom)
+    training.write_training_state(epoch=1, step=1, latest_checkpoint_path=None)
+    training.write_training_state(epoch=2, step=2, latest_checkpoint_path=None)
+
+    err = capsys.readouterr().err
+    assert err.count("failed to write training state") == 1
+
+
+def test_warn_once_survives_stderr_failure(reporter, monkeypatch: pytest.MonkeyPatch):
+    training, _ = reporter
+
+    class _BadStderr:
+        def write(self, _msg: str) -> int:
+            raise OSError("no stderr")
+
+    monkeypatch.setattr(training.sys, "stderr", _BadStderr())
+    # The diagnostic itself must never raise, even if stderr is unwritable.
+    training._warn_once("unique-key", "message\n")
+    assert "unique-key" in training._warned_keys
+
+
+def test_reset_clears_warned_keys(reporter):
+    training, _ = reporter
+    training._warn_once("some-key", "msg\n")
+    assert "some-key" in training._warned_keys
+    training._reset()
+    assert training._warned_keys == set()
