@@ -45,6 +45,13 @@
     {
       "component_id": "batch-normalization",
       "layer_type": "batch_normalization",
+      "param_formula": {
+        "kind": "norm",
+        "roles": {
+          "affine": "scale,center",
+          "scope": "channel"
+        }
+      },
       "params": [
         {
           "key": "momentum",
@@ -139,6 +146,10 @@
     {
       "component_id": "convolution-layer",
       "layer_type": "conv2d",
+      "param_formula": {
+        "kind": "conv",
+        "roles": {}
+      },
       "params": [
         {
           "enum_values": [
@@ -202,6 +213,14 @@
     {
       "component_id": "cross-attention",
       "layer_type": "cross_attention",
+      "param_formula": {
+        "kind": "attention",
+        "roles": {
+          "context_dim": "context_dim",
+          "heads": "num_heads",
+          "model_dim": "query_dim"
+        }
+      },
       "params": [
         {
           "key": "query_dim",
@@ -248,6 +267,12 @@
     {
       "component_id": "dense-layer",
       "layer_type": "dense",
+      "param_formula": {
+        "kind": "dense",
+        "roles": {
+          "bias": "useBias"
+        }
+      },
       "params": [
         {
           "key": "units",
@@ -281,6 +306,10 @@
     {
       "component_id": "depthwise-separable-conv",
       "layer_type": "depthwise_conv2d",
+      "param_formula": {
+        "kind": "depthwise_separable_conv",
+        "roles": {}
+      },
       "params": [
         {
           "enum_values": [
@@ -395,6 +424,13 @@
     {
       "component_id": "embedding-layer",
       "layer_type": "embedding",
+      "param_formula": {
+        "kind": "embedding",
+        "roles": {
+          "embed_dim": "embeddingDim",
+          "vocab": "vocabSize"
+        }
+      },
       "params": [
         {
           "key": "vocabSize",
@@ -436,6 +472,13 @@
     {
       "component_id": "ffn-block",
       "layer_type": "ffn_block",
+      "param_formula": {
+        "kind": "ffn",
+        "roles": {
+          "ff": "dFf",
+          "model_dim": "dModel"
+        }
+      },
       "params": [
         {
           "key": "dModel",
@@ -498,6 +541,13 @@
     {
       "component_id": "group-normalization",
       "layer_type": "group_normalization",
+      "param_formula": {
+        "kind": "norm",
+        "roles": {
+          "affine": "scale,center",
+          "scope": "channel"
+        }
+      },
       "params": [
         {
           "key": "numGroups",
@@ -524,6 +574,12 @@
     {
       "component_id": "gru-layer",
       "layer_type": "gru",
+      "param_formula": {
+        "kind": "rnn",
+        "roles": {
+          "gates": "3"
+        }
+      },
       "params": [
         {
           "key": "units",
@@ -570,6 +626,13 @@
     {
       "component_id": "instance-normalization",
       "layer_type": "instance_normalization",
+      "param_formula": {
+        "kind": "norm",
+        "roles": {
+          "affine": "scale,center",
+          "scope": "channel"
+        }
+      },
       "params": [
         {
           "key": "epsilon",
@@ -623,6 +686,13 @@
     {
       "component_id": "layer-normalization",
       "layer_type": "layer_normalization",
+      "param_formula": {
+        "kind": "norm",
+        "roles": {
+          "affine": "scale,center",
+          "scope": "feature"
+        }
+      },
       "params": [
         {
           "key": "epsilon",
@@ -649,6 +719,12 @@
     {
       "component_id": "lora-adapter",
       "layer_type": "lora_adapter",
+      "param_formula": {
+        "kind": "lora",
+        "roles": {
+          "rank": "rank"
+        }
+      },
       "params": [
         {
           "key": "rank",
@@ -675,6 +751,12 @@
     {
       "component_id": "lstm-layer",
       "layer_type": "lstm",
+      "param_formula": {
+        "kind": "rnn",
+        "roles": {
+          "gates": "4"
+        }
+      },
       "params": [
         {
           "key": "units",
@@ -825,6 +907,14 @@
     {
       "component_id": "moe-layer",
       "layer_type": "moe",
+      "param_formula": {
+        "kind": "moe",
+        "roles": {
+          "experts": "num_experts",
+          "ff": "d_ff",
+          "model_dim": "d_model"
+        }
+      },
       "params": [
         {
           "key": "num_experts",
@@ -891,6 +981,14 @@
     {
       "component_id": "multi-head-attention",
       "layer_type": "multi_head_attention",
+      "param_formula": {
+        "kind": "attention",
+        "roles": {
+          "head_dim": "keyDim",
+          "heads": "numHeads",
+          "kv_heads": "numKvHeads"
+        }
+      },
       "params": [
         {
           "key": "numHeads",
@@ -1258,6 +1356,13 @@
     {
       "component_id": "patch-embedding",
       "layer_type": "patch_embedding",
+      "param_formula": {
+        "kind": "patch_embedding",
+        "roles": {
+          "embed_dim": "embed_dim",
+          "patch": "patch_size"
+        }
+      },
       "params": [
         {
           "key": "patch_size",
@@ -1431,6 +1536,13 @@
     {
       "component_id": "rms-normalization",
       "layer_type": "rms_normalization",
+      "param_formula": {
+        "kind": "norm",
+        "roles": {
+          "affine": "scale_only",
+          "scope": "feature"
+        }
+      },
       "params": [
         {
           "key": "epsilon",
@@ -1581,6 +1693,10 @@
     {
       "component_id": "transposed-convolution",
       "layer_type": "conv2d_transpose",
+      "param_formula": {
+        "kind": "conv",
+        "roles": {}
+      },
       "params": [
         {
           "enum_values": [
