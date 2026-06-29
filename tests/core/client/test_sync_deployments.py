@@ -191,3 +191,51 @@ def test_deployments_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMo
 def test_deployments_text_response(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/deployments", text="plain", headers={"Content-Type": "text/plain"})
     assert client.list_deployments() == "plain"
+
+
+# ---------------------------------------------------------------- deployment planning
+
+
+def test_estimate_cost(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/estimate-cost",
+        json={"hourly_cost": 0.5, "daily_cost": 12.0, "monthly_cost": 360.0},
+    )
+    out = client.estimate_cost({"platform": "fastapi", "instance_type": "cpu.small"})
+    assert out["monthly_cost"] == 360.0
+    assert rmock.last_request.json()["platform"] == "fastapi"
+
+
+def test_validate_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/deployments/validate", json={"valid": True, "errors": []})
+    assert client.validate_deployment({"name": "x"})["valid"] is True
+
+
+def test_list_deployment_platforms(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/deployments-platforms",
+        json=[{"platform": "fastapi", "name": "FastAPI"}],
+    )
+    out = client.list_deployment_platforms()
+    first = out[0]
+    assert isinstance(first, dict)
+    assert first["platform"] == "fastapi"
+
+
+def test_list_deployment_platforms_rejects_non_array(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/deployments-platforms", json={"not": "an array"})
+    with pytest.raises(TypeError, match="Expected JSON array"):
+        client.list_deployment_platforms()
+
+
+def test_retry_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/deployments/d1/retry", json={"id": "d1", "status": "deploying"})
+    assert client.retry_deployment("d1")["status"] == "deploying"
+
+
+def test_retry_deployment_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/deployments/d1/retry", status_code=404)
+    with pytest.raises(DeploymentNotFoundError):
+        client.retry_deployment("d1")

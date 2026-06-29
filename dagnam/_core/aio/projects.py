@@ -148,3 +148,70 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
             ),
             project_id=project_id,
         )
+
+    # ---------------------------------------------------------------- versions
+
+    async def list_project_versions(self, project_id: str, **filters: QueryValue) -> JsonObject:
+        return ensure_json_object(
+            await self._project_req(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/versions",
+                project_id=project_id,
+                params=filters,
+            )
+        )
+
+    async def get_project_version(self, project_id: str, version_id: str) -> JsonObject:
+        return ensure_json_object(
+            await self._project_req(
+                "GET",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/versions/{quote_path_segment(version_id)}"
+                ),
+                project_id=project_id,
+            )
+        )
+
+    async def compare_project_versions(
+        self, project_id: str, version_a: str, version_b: str
+    ) -> JsonObject:
+        return ensure_json_object(
+            await self._project_req(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/versions/compare",
+                project_id=project_id,
+                params={"version_a": version_a, "version_b": version_b},
+            )
+        )
+
+    async def restore_project_version(self, project_id: str, version_id: str) -> JsonObject:
+        return ensure_json_object(
+            await self._project_req(
+                "POST",
+                (
+                    f"/api/v1/projects/{quote_path_segment(project_id)}"
+                    f"/restore/{quote_path_segment(version_id)}"
+                ),
+                project_id=project_id,
+            )
+        )
+
+    async def delete_project_version(self, project_id: str, version_id: str) -> None:
+        await self._project_req(
+            "DELETE",
+            (
+                f"/api/v1/projects/{quote_path_segment(project_id)}"
+                f"/versions/{quote_path_segment(version_id)}"
+            ),
+            project_id=project_id,
+        )
+
+    async def get_latest_project_version(self, project_id: str) -> JsonObject:
+        return ensure_json_object(
+            await self._project_req(
+                "GET",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/latest",
+                project_id=project_id,
+            )
+        )

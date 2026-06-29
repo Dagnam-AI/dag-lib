@@ -101,6 +101,24 @@ def test_deployment_health_timeout(client: DagnamClient, monkeypatch: PytestMonk
         client.deployment_health("dep1")
 
 
+def test_schema_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.ConnectionError("nope")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    with pytest.raises(APIError, match="Connection failed"):
+        client.schema("dep1")
+
+
+def test_schema_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.Timeout("slow")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    with pytest.raises(APIError, match="Request timed out"):
+        client.schema("dep1")
+
+
 # ---------------------------------------------------------------- training stream
 
 

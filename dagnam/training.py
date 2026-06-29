@@ -36,6 +36,7 @@ _uploader_stop: threading.Event | None = None
 _stream_finalized = False
 _run_failed = False
 _finalize_registered = False
+_warned_keys: set[str] = set()
 
 
 def _configured_metrics_path() -> str | None:
@@ -76,6 +77,24 @@ def _warn_fallback_once() -> None:
         pass
 
 
+def _warn_once(key: str, message: str) -> None:
+    """Emit a one-time stderr diagnostic, keyed so a recurring failure never spams.
+
+    The metrics reporter must never crash a training run, so its write paths
+    swallow exceptions. Without a signal, a misconfigured sink (full disk,
+    permission error) would silently drop every metric. Emitting exactly one
+    diagnostic per failure kind makes the loss visible while keeping the run
+    alive.
+    """
+    if key in _warned_keys:
+        return
+    _warned_keys.add(key)
+    try:
+        sys.stderr.write(message)
+    except Exception:
+        pass
+
+
 def _get_file():
     """Return the open file handle, opening it lazily on first call."""
     global _file, _metrics_path, _using_fallback_path
@@ -99,7 +118,11 @@ def _close_file() -> None:
         try:
             _file.close()
         except Exception:
-            pass
+            _warn_once(
+                "close_file",
+                "Dagnam metrics reporter: failed to close the metrics file; "
+                "some buffered metrics may be lost.\n",
+            )
     _file = None
 
 
@@ -113,7 +136,11 @@ def _write_event(event: dict[str, Any]) -> None:
         f.write(line + "\n")
         f.flush()
     except Exception:
-        pass
+        _warn_once(
+            "write_event",
+            "Dagnam metrics reporter: failed to write a metrics event; "
+            "this and possibly later events were dropped.\n",
+        )
 
 
 def _utcnow_iso() -> str:
@@ -223,7 +250,11 @@ def write_training_state(
             f.write(json.dumps(payload))
         os.replace(tmp_path, state_path)
     except Exception:
-        pass
+        _warn_once(
+            "training_state",
+            "Dagnam metrics reporter: failed to write training state; "
+            "crash-recovery progress may be unavailable.\n",
+        )
 
 
 def _online_context() -> bool:
@@ -234,6 +265,8 @@ def _online_context() -> bool:
         auth_mod = __import__("dagnam._core.auth", fromlist=["get_api_key"])
         auth_mod.get_api_key()
     except Exception:
+        # No _warn_once here: a missing key simply means "run offline", which is a
+        # supported mode (metrics still save locally), not a data-loss failure.
         return False
     return True
 
@@ -395,6 +428,7 @@ def _reset() -> None:  # pyright: ignore[reportUnusedFunction]
     _close_file()
     _metrics_path, _using_fallback_path = _resolve_metrics_path()
     _fallback_warning_emitted = False
+    _warned_keys.clear()
     _project_id = None
     _schema_version = None
     _uploader_thread = None

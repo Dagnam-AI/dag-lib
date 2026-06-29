@@ -19,7 +19,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
 from dagnam._core.sse import TERMINAL_DEPLOYMENT_EVENTS, SSEEvent, iter_with_reconnect
-from dagnam._types import JsonMapping, JsonObject
+from dagnam._types import JsonArray, JsonMapping, JsonObject
 
 # Terminal status values returned by the deployment status enum.
 _ACTIVE_STATES = frozenset({"running"})
@@ -356,6 +356,111 @@ def rollback(
 
 
 # ---------------------------------------------------------------------------
+# Planning — estimate cost, validate config, list platforms, retry
+# ---------------------------------------------------------------------------
+
+
+def estimate_cost(
+    *,
+    platform: str,
+    instance_type: str,
+    num_instances: int = 1,
+    auto_scaling_enabled: bool = False,
+    min_instances: Optional[int] = None,
+    max_instances: Optional[int] = None,
+    region: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Estimate hourly/daily/monthly cost for a deployment shape."""
+    resolved = resolve_client(client, api_key, api_url)
+    payload: JsonObject = {
+        "platform": platform,
+        "instance_type": instance_type,
+        "num_instances": num_instances,
+        "auto_scaling_enabled": auto_scaling_enabled,
+    }
+    if min_instances is not None:
+        payload["min_instances"] = min_instances
+    if max_instances is not None:
+        payload["max_instances"] = max_instances
+    if region is not None:
+        payload["region"] = region
+    return resolved.estimate_cost(payload)
+
+
+def validate(
+    *,
+    name: str,
+    project_id: str,
+    checkpoint_path: str,
+    platform: str,
+    deployment_type: str,
+    instance_type: str,
+    num_instances: int = 1,
+    auto_scaling_enabled: bool = False,
+    min_instances: Optional[int] = None,
+    max_instances: Optional[int] = None,
+    region: Optional[str] = None,
+    config: Optional[JsonMapping] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Validate a deployment configuration without creating it."""
+    resolved = resolve_client(client, api_key, api_url)
+    payload: JsonObject = {
+        "name": name,
+        "project_id": _stringify_id(project_id),
+        "checkpoint_path": checkpoint_path,
+        "platform": platform,
+        "deployment_type": deployment_type,
+        "instance_type": instance_type,
+        "num_instances": num_instances,
+        "auto_scaling_enabled": auto_scaling_enabled,
+    }
+    if min_instances is not None:
+        payload["min_instances"] = min_instances
+    if max_instances is not None:
+        payload["max_instances"] = max_instances
+    if region is not None:
+        payload["region"] = region
+    if config is not None:
+        payload["config"] = _json_object_from_mapping(config)
+    return resolved.validate_deployment(payload)
+
+
+def platforms(
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonArray:
+    """List available serving platforms and their capabilities."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_deployment_platforms()
+
+
+def retry(
+    deployment_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Retry a failed or stuck deployment (re-queues it; returns the record).
+
+    Unlike :func:`pause`/:func:`resume`/:func:`rollback`, this returns the
+    re-queued deployment object directly rather than a
+    :class:`~dagnam._core.lro.LongRunningOperation`; poll :func:`get` if you
+    need to wait for it to reach ``running``.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.retry_deployment(_stringify_id(deployment_id))
+
+
+# ---------------------------------------------------------------------------
 # SSE stream
 # ---------------------------------------------------------------------------
 
@@ -398,15 +503,19 @@ def stream_events(
 __all__ = [
     "create",
     "delete",
+    "estimate_cost",
     "get",
     "health",
     "list",
     "logs",
     "metrics",
     "pause",
+    "platforms",
     "resume",
+    "retry",
     "rollback",
     "scale",
     "stream_events",
     "update",
+    "validate",
 ]

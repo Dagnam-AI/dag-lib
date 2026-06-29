@@ -153,3 +153,32 @@ def test_inference_batch_writes_output_file(run_cli: CliRunner, tmp_path: Path) 
     with mock.patch("dagnam.inference_batch", return_value=[{"y": 1}]):
         run_cli(["inference", "batch", "dep-1", "--inputs", "[1]", "--output", str(output)])
     assert json.loads(output.read_text(encoding="utf-8")) == [{"y": 1}]
+
+
+def test_inference_schema(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch(
+        "dagnam.inference_schema",
+        return_value={"input_schema": {"type": "object"}, "output_schema": {}},
+    ):
+        run_cli(["inference", "schema", "dep-1"])
+    assert "input_schema" in capsys.readouterr().out
+
+
+def test_inference_schema_writes_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
+    output = tmp_path / "schema.json"
+    with mock.patch(
+        "dagnam.inference_schema", return_value={"input_schema": {}, "output_schema": {}}
+    ):
+        run_cli(["inference", "schema", "dep-1", "--output", str(output)])
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "input_schema": {},
+        "output_schema": {},
+    }
+
+
+def test_inference_schema_apierror_exits(run_cli: CliRunner) -> None:
+    from dagnam._core.exceptions import APIError
+
+    with mock.patch("dagnam.inference_schema", side_effect=APIError(500, "boom")):
+        with pytest.raises(SystemExit):
+            run_cli(["inference", "schema", "dep-1"])

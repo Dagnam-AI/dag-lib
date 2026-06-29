@@ -352,3 +352,15 @@ class TestPayloadValidation:
         c = _client(update_hub_model=MagicMock(return_value={}))
         with pytest.raises(TypeError, match="must be JSON-compatible"):
             hub.update("m1", bad=object(), client=c)
+
+
+class TestFileUpload:
+    def test_upload_file_delegates(self) -> None:
+        c = _client(
+            upload_model_file=MagicMock(
+                return_value={"id": "f1", "model_id": "m1", "file_name": "w.bin"}
+            )
+        )
+        out = hub.upload_file("m1", "/tmp/w.bin", client=c)
+        c.upload_model_file.assert_called_once_with("m1", "/tmp/w.bin")
+        assert out["id"] == "f1"

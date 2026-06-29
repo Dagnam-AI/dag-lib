@@ -320,3 +320,42 @@ class TestOptionalPayloadOmission:
         projects.import_dag_existing("p1", {"nodes": []}, client=c)
         payload = c.import_dag_existing.call_args.args[1]
         assert "commit_message" not in payload
+
+
+class TestVersionOperations:
+    def test_list_versions_delegates(self) -> None:
+        c = _client(list_project_versions=MagicMock(return_value={"items": [], "total": 0}))
+        out = projects.list_versions("p1", page=2, limit=5, client=c)
+        c.list_project_versions.assert_called_once_with("p1", page=2, limit=5)
+        assert "items" in out
+
+    def test_get_version_delegates(self) -> None:
+        c = _client(get_project_version=MagicMock(return_value={"id": "v1"}))
+        out = projects.get_version("p1", "v1", client=c)
+        c.get_project_version.assert_called_once_with("p1", "v1")
+        assert out["id"] == "v1"
+
+    def test_compare_versions_delegates(self) -> None:
+        c = _client(compare_project_versions=MagicMock(return_value={"version_a": {}}))
+        out = projects.compare_versions("p1", "va", "vb", client=c)
+        c.compare_project_versions.assert_called_once_with("p1", "va", "vb")
+        assert "version_a" in out
+
+    def test_restore_version_delegates(self) -> None:
+        c = _client(
+            restore_project_version=MagicMock(return_value={"id": "v2", "is_current": True})
+        )
+        out = projects.restore_version("p1", "v1", client=c)
+        c.restore_project_version.assert_called_once_with("p1", "v1")
+        assert out["is_current"] is True
+
+    def test_delete_version_delegates(self) -> None:
+        c = _client(delete_project_version=MagicMock(return_value=None))
+        assert projects.delete_version("p1", "v1", client=c) is None
+        c.delete_project_version.assert_called_once_with("p1", "v1")
+
+    def test_latest_version_delegates(self) -> None:
+        c = _client(get_latest_project_version=MagicMock(return_value={"id": "v2"}))
+        out = projects.latest_version("p1", client=c)
+        c.get_latest_project_version.assert_called_once_with("p1")
+        assert out["id"] == "v2"

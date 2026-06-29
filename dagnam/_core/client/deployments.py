@@ -10,7 +10,7 @@ from dagnam._core.client.base import (
     requests,
 )
 from dagnam._core.client.common import quote_path_segment, requests_query_params
-from dagnam._types import JsonObject, JsonValue, QueryParams
+from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, ensure_json_array
 
 
 class DeploymentsClientMixin(BaseDagnamClient):
@@ -118,6 +118,24 @@ class DeploymentsClientMixin(BaseDagnamClient):
         """POST /api/v1/deployments"""
         return self._deployment_object("POST", "/api/v1/deployments", json_body=payload)
 
+    def estimate_cost(self, payload: JsonObject) -> JsonObject:
+        """Estimate deployment cost. ``POST /api/v1/deployments/estimate-cost``."""
+        return self._deployment_object(
+            "POST", "/api/v1/deployments/estimate-cost", json_body=payload
+        )
+
+    def validate_deployment(self, payload: JsonObject) -> JsonObject:
+        """Validate a deployment config without creating it. ``POST /api/v1/deployments/validate``."""
+        return self._deployment_object("POST", "/api/v1/deployments/validate", json_body=payload)
+
+    def list_deployment_platforms(self) -> JsonArray:
+        """List serving platforms and capabilities. ``GET /api/v1/deployments-platforms``.
+
+        Note the hyphenated path: this is a sibling of ``/deployments`` on the
+        backend router, not a ``/deployments/platforms`` child route.
+        """
+        return ensure_json_array(self._deployment_request("GET", "/api/v1/deployments-platforms"))
+
     def update_deployment(self, deployment_id: str, payload: JsonObject) -> JsonObject:
         """PUT /api/v1/deployments/{id}"""
         return self._deployment_object(
@@ -168,6 +186,19 @@ class DeploymentsClientMixin(BaseDagnamClient):
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
             deployment_id=deployment_id,
             params={"checkpoint_path": checkpoint_path},
+        )
+
+    def retry_deployment(self, deployment_id: str) -> JsonObject:
+        """Retry a failed or stuck deployment. ``POST /api/v1/deployments/{id}/retry``.
+
+        Distinct from :meth:`rollback_deployment` (which redeploys a prior
+        checkpoint) and :meth:`resume_deployment` (which un-pauses): retry
+        re-queues the existing deployment task with no body.
+        """
+        return self._deployment_object(
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/retry",
+            deployment_id=deployment_id,
         )
 
     def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> JsonObject:

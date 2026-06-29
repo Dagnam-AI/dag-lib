@@ -44,6 +44,7 @@ EXPECTED_ALL = sorted(
         "hub",
         "inference",
         "inference_batch",
+        "inference_schema",
         "init",
         "is_cached",
         "list_training_jobs",

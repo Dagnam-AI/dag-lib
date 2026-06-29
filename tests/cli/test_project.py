@@ -114,6 +114,12 @@ def test_projects_list_output_saves_full_json(
         (["projects", "create", "--title", "x"], "create"),
         (["projects", "delete", "p1"], "delete"),
         (["projects", "duplicate", "p1"], "duplicate"),
+        (["projects", "versions", "list", "p1"], "list_versions"),
+        (["projects", "versions", "get", "p1", "v1"], "get_version"),
+        (["projects", "versions", "compare", "p1", "va", "vb"], "compare_versions"),
+        (["projects", "versions", "restore", "p1", "v1"], "restore_version"),
+        (["projects", "versions", "delete", "p1", "v1"], "delete_version"),
+        (["projects", "versions", "latest", "p1"], "latest_version"),
     ],
 )
 def test_projects_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
@@ -334,3 +340,62 @@ def test_projects_list_bare_list_result(run_cli: CliRunner, capsys: StrCapture) 
     with mock.patch("dagnam.projects", fake):
         run_cli(["projects", "list"])
     assert "Solo" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- projects versions
+
+
+def test_projects_versions_list(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(
+        list_versions=mock.Mock(
+            return_value={"items": [{"id": "v1", "version_number": "1.0.0"}], "total": 1}
+        )
+    )
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "list", "p1", "--page", "2", "--limit", "5"])
+    assert "v1" in capsys.readouterr().out
+    fake.list_versions.assert_called_once_with("p1", page=2, limit=5)
+
+
+def test_projects_versions_get(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(
+        get_version=mock.Mock(return_value={"id": "v1", "version_number": "1.0.0"})
+    )
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "get", "p1", "v1"])
+    assert "1.0.0" in capsys.readouterr().out
+    fake.get_version.assert_called_once_with("p1", "v1")
+
+
+def test_projects_versions_compare(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(
+        compare_versions=mock.Mock(return_value={"version_a": {}, "version_b": {}})
+    )
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "compare", "p1", "va", "vb"])
+    assert "version_a" in capsys.readouterr().out
+    fake.compare_versions.assert_called_once_with("p1", "va", "vb")
+
+
+def test_projects_versions_restore(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(restore_version=mock.Mock(return_value={"id": "v2", "is_current": True}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "restore", "p1", "v1"])
+    assert "v2" in capsys.readouterr().out
+    fake.restore_version.assert_called_once_with("p1", "v1")
+
+
+def test_projects_versions_delete(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(delete_version=mock.Mock(return_value=None))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "delete", "p1", "v1"])
+    assert "v1" in capsys.readouterr().out
+    fake.delete_version.assert_called_once_with("p1", "v1")
+
+
+def test_projects_versions_latest(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(latest_version=mock.Mock(return_value={"id": "v2", "is_current": True}))
+    with mock.patch("dagnam.projects", fake):
+        run_cli(["projects", "versions", "latest", "p1"])
+    assert "v2" in capsys.readouterr().out
+    fake.latest_version.assert_called_once_with("p1")

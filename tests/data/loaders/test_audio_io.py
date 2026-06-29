@@ -92,6 +92,42 @@ def test_load_waveform_falls_back_to_torchaudio(
     assert len(wav) == 100
 
 
+def test_real_soundfile_read_error_propagates(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """A genuine ``sf.read`` failure must surface, not be masked as a torchaudio fallback.
+
+    Regression for the over-broad ``except (ImportError, Exception)``: soundfile
+    imports fine but its read raises, so the error must propagate unchanged — the
+    torchaudio fallback is reserved for a *missing* soundfile only.
+    """
+    from dagnam.data.loaders.audio import io as audio_io
+
+    p = tmp_path / "x.wav"
+    p.write_bytes(b"x")
+
+    def _boom_read(
+        _path: str, *, dtype: str | None = None, always_2d: bool | None = None
+    ) -> tuple[WaveformArray, int]:
+        raise RuntimeError("corrupt wav")
+
+    fake_sf = SimpleNamespace(read=_boom_read)
+    real_import_module = audio_io.import_module  # pyright: ignore[reportPrivateImportUsage]
+
+    def fake_import(name: str, package: str | None = None):
+        if name == "soundfile":
+            return fake_sf
+        # Make torchaudio unavailable so the buggy fallback (if it fired) would
+        # raise a *different* error — proving the real RuntimeError propagated.
+        if name == "torchaudio":
+            raise ImportError("no torchaudio")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(audio_io, "import_module", fake_import)
+    with pytest.raises(RuntimeError, match="corrupt wav"):
+        audio_io.load_waveform_py(str(p), target_sr=16000, target_len=100)
+
+
 def test_load_waveform_raises_when_no_backend(
     monkeypatch: PytestMonkeyPatch, tmp_path: Path
 ) -> None:

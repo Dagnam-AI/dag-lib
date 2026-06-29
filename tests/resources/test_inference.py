@@ -8,7 +8,7 @@ import pytest
 import requests
 from tests.typing_helpers import JsonValue
 
-from dagnam import deployment_health, inference, inference_batch
+from dagnam import deployment_health, inference, inference_batch, inference_schema
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
     APIError,
@@ -47,6 +47,13 @@ class TestInferenceDelegation:
         result = deployment_health("dep_1", client=client)
         client.deployment_health.assert_called_once_with("dep_1")
         assert result == {"status": "healthy"}
+
+    def test_schema_uses_provided_client(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.schema.return_value = {"input_schema": {}, "output_schema": {}}
+        result = inference_schema("dep_1", client=client)
+        client.schema.assert_called_once_with("dep_1")
+        assert "input_schema" in result
 
 
 class TestAuthResolution:
@@ -89,3 +96,16 @@ class TestClientErrorMapping:
         resp = _mock_response(200, body={"status": "healthy"})
         with patch("dagnam._core.client.base.requests.get", return_value=resp):
             assert client.deployment_health("dep_1") == {"status": "healthy"}
+
+    def test_schema_returns_json(self) -> None:
+        client = DagnamClient("https://x", "key")
+        resp = _mock_response(200, body={"input_schema": {"type": "object"}, "output_schema": {}})
+        with patch("dagnam._core.client.base.requests.get", return_value=resp):
+            out = client.schema("dep_1")
+            assert out["input_schema"] == {"type": "object"}
+
+    def test_schema_maps_404(self) -> None:
+        client = DagnamClient("https://x", "key")
+        with patch("dagnam._core.client.base.requests.get", return_value=_mock_response(404)):
+            with pytest.raises(DeploymentNotFoundError):
+                client.schema("dep_404")

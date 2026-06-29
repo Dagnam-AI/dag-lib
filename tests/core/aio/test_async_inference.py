@@ -48,3 +48,20 @@ async def test_async_deployment_health(client: AsyncDagnamClient, mock: RespxMoc
         return_value=httpx.Response(200, json={"status": "healthy"})
     )
     assert await client.deployment_health("dep1") == {"status": "healthy"}
+
+
+async def test_async_inference_schema(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.get("/api/v1/inference/d1/schema").mock(
+        return_value=httpx.Response(
+            200, json={"input_schema": {"type": "object"}, "output_schema": {"type": "array"}}
+        )
+    )
+    out = await client.schema("d1")
+    assert out["input_schema"] == {"type": "object"}
+    assert out["output_schema"] == {"type": "array"}
+
+
+async def test_async_inference_schema_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.get("/api/v1/inference/missing/schema").mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        await client.schema("missing")

@@ -78,3 +78,26 @@ class InferenceClientMixin(BaseDagnamClient):
             raise APIError(0, f"Request timed out: {exc}") from exc
         self._raise_for_deployment(resp, deployment_id)
         return resp.json()
+
+    def schema(self, deployment_id: str, timeout: int = DEFAULT_TIMEOUT) -> JsonObject:
+        """Return a deployment's inference input/output schema.
+
+        ``GET /api/v1/inference/{deployment_id}/schema`` →
+        ``{input_schema, output_schema, examples?}``.
+        """
+        deployment_path = quote_path_segment(deployment_id)
+        url = f"{self.api_url}/api/v1/inference/{deployment_path}/schema"
+        headers = self._headers()
+        try:
+            resp = requests.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=ALLOW_REDIRECTS,
+            )
+        except requests.ConnectionError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+        self._raise_for_deployment(resp, deployment_id)
+        return resp.json()

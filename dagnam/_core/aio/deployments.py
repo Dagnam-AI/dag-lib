@@ -8,7 +8,14 @@ from dagnam._core.client.common import (
     raise_for_deployment,
     response_json_value,
 )
-from dagnam._types import JsonObject, JsonValue, QueryParams, ensure_json_object
+from dagnam._types import (
+    JsonArray,
+    JsonObject,
+    JsonValue,
+    QueryParams,
+    ensure_json_array,
+    ensure_json_object,
+)
 
 
 class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
@@ -70,6 +77,24 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             await self._deployment_req("POST", "/api/v1/deployments", json_body=payload)
         )
 
+    async def estimate_cost(self, payload: JsonObject) -> JsonObject:
+        """Estimate deployment cost. ``POST /api/v1/deployments/estimate-cost``."""
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST", "/api/v1/deployments/estimate-cost", json_body=payload
+            )
+        )
+
+    async def validate_deployment(self, payload: JsonObject) -> JsonObject:
+        """Validate a deployment config. ``POST /api/v1/deployments/validate``."""
+        return ensure_json_object(
+            await self._deployment_req("POST", "/api/v1/deployments/validate", json_body=payload)
+        )
+
+    async def list_deployment_platforms(self) -> JsonArray:
+        """List serving platforms. ``GET /api/v1/deployments-platforms`` (hyphenated sibling)."""
+        return ensure_json_array(await self._deployment_req("GET", "/api/v1/deployments-platforms"))
+
     async def update_deployment(self, deployment_id: str, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
             await self._deployment_req(
@@ -125,6 +150,16 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
                 deployment_id=deployment_id,
                 params={"checkpoint_path": checkpoint_path},
+            )
+        )
+
+    async def retry_deployment(self, deployment_id: str) -> JsonObject:
+        """Retry a failed/stuck deployment. ``POST /api/v1/deployments/{id}/retry`` (no body)."""
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/retry",
+                deployment_id=deployment_id,
             )
         )
 

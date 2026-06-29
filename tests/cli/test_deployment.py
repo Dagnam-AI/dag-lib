@@ -183,9 +183,28 @@ def test_deployments_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
         ],
         ["deployments", "pause", "x"],
         ["deployments", "resume", "x"],
+        ["deployments", "retry", "x"],
         ["deployments", "delete", "x"],
         ["deployments", "logs", "x"],
         ["deployments", "metrics", "x"],
+        ["deployments", "platforms"],
+        ["deployments", "estimate-cost", "--platform", "aws", "--instance-type", "s"],
+        [
+            "deployments",
+            "validate",
+            "--name",
+            "x",
+            "--project-id",
+            "p",
+            "--checkpoint-path",
+            "c",
+            "--platform",
+            "aws",
+            "--deployment-type",
+            "production",
+            "--instance-type",
+            "s",
+        ],
     ],
 )
 def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> None:
@@ -197,9 +216,13 @@ def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> 
         create=mock.Mock(side_effect=APIError(500, "boom")),
         pause=mock.Mock(side_effect=APIError(500, "boom")),
         resume=mock.Mock(side_effect=APIError(500, "boom")),
+        retry=mock.Mock(side_effect=APIError(500, "boom")),
         delete=mock.Mock(side_effect=APIError(500, "boom")),
         logs=mock.Mock(side_effect=APIError(500, "boom")),
         metrics=mock.Mock(side_effect=APIError(500, "boom")),
+        platforms=mock.Mock(side_effect=APIError(500, "boom")),
+        estimate_cost=mock.Mock(side_effect=APIError(500, "boom")),
+        validate=mock.Mock(side_effect=APIError(500, "boom")),
     )
     with mock.patch("dagnam.deployments", fake):
         with pytest.raises(SystemExit):
@@ -237,3 +260,83 @@ def test_deployments_list_dict_without_list_items(run_cli: CliRunner, capsys: St
     with mock.patch("dagnam.deployments", fake):
         run_cli(["deployments", "list"])
     assert "No deployments found." in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- planning
+
+
+def test_deployments_platforms(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(
+        platforms=mock.Mock(return_value=[{"platform": "fastapi", "name": "FastAPI"}])
+    )
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "platforms"])
+    assert "fastapi" in capsys.readouterr().out
+    fake.platforms.assert_called_once_with()
+
+
+def test_deployments_retry(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(retry=mock.Mock(return_value={"id": "d1", "status": "deploying"}))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "retry", "d1"])
+    out = capsys.readouterr().out
+    assert "d1" in out
+    assert "deploying" in out
+    fake.retry.assert_called_once_with("d1")
+
+
+def test_deployments_estimate_cost(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(estimate_cost=mock.Mock(return_value={"monthly_cost": 12.0}))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(
+            [
+                "deployments",
+                "estimate-cost",
+                "--platform",
+                "fastapi",
+                "--instance-type",
+                "cpu.small",
+                "--auto-scaling",
+                "--min-instances",
+                "1",
+                "--max-instances",
+                "3",
+                "--region",
+                "us-east-1",
+            ]
+        )
+    assert "monthly_cost" in capsys.readouterr().out
+    kwargs = fake.estimate_cost.call_args.kwargs
+    assert kwargs["platform"] == "fastapi"
+    assert kwargs["instance_type"] == "cpu.small"
+    assert kwargs["auto_scaling_enabled"] is True
+    assert kwargs["min_instances"] == 1
+    assert kwargs["max_instances"] == 3
+    assert kwargs["region"] == "us-east-1"
+
+
+def test_deployments_validate(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(validate=mock.Mock(return_value={"valid": True, "errors": []}))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(
+            [
+                "deployments",
+                "validate",
+                "--name",
+                "x",
+                "--project-id",
+                "p1",
+                "--checkpoint-path",
+                "/c.pt",
+                "--platform",
+                "fastapi",
+                "--deployment-type",
+                "text",
+                "--instance-type",
+                "cpu.small",
+            ]
+        )
+    assert "valid" in capsys.readouterr().out
+    kwargs = fake.validate.call_args.kwargs
+    assert kwargs["name"] == "x"
+    assert kwargs["deployment_type"] == "text"

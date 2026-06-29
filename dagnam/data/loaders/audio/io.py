@@ -83,30 +83,41 @@ def _enumerate_audio_samples(root: Path) -> tuple[list[tuple[Path, int]], list[s
     return samples, classes
 
 
+def _load_via_torchaudio(path: str) -> tuple[WaveformArray, int]:
+    """Decode audio via torchaudio (the fallback when soundfile is unavailable).
+
+    Raises a clear :class:`ImportError` when torchaudio is also missing, so the
+    caller never sees a bare ``No module named 'torchaudio'``.
+    """
+    try:
+        torchaudio = _load_torchaudio_module()
+    except ImportError as exc:
+        raise ImportError(
+            "Either 'soundfile' or 'torchaudio' is required to load audio. "
+            "Install with: pip install soundfile  OR  pip install dagnam[audio]"
+        ) from exc
+    t, sr = torchaudio.load(path)
+    if len(t.shape) > 1 and t.shape[0] > 1:
+        t = t.mean(dim=0)
+    waveform = np.asarray(t.numpy(), dtype=np.float32)
+    return waveform, sr
+
+
 def load_waveform_py(path: str, target_sr: int, target_len: int) -> WaveformArray:
     """Load an audio file as a 1-D float32 numpy array at *target_sr*.
 
-    Tries soundfile first (pure-Python), then falls back to torchaudio.
-    Pads/truncates to *target_len* samples.
+    Uses soundfile when available; falls back to torchaudio **only** when
+    soundfile is not installed. A genuine soundfile read error propagates (it is
+    not masked as a torchaudio failure). Pads/truncates to *target_len* samples.
     """
     try:
         sf = _load_soundfile()
-
+    except ImportError:
+        waveform, sr = _load_via_torchaudio(path)
+    else:
         waveform, sr = sf.read(path, dtype="float32", always_2d=False)
         if waveform.ndim > 1:
             waveform = waveform.mean(axis=1).astype(np.float32)
-    except (ImportError, Exception):
-        try:
-            torchaudio = _load_torchaudio_module()
-            t, sr = torchaudio.load(path)
-            if len(t.shape) > 1 and t.shape[0] > 1:
-                t = t.mean(dim=0)
-            waveform = np.asarray(t.numpy(), dtype=np.float32)
-        except ImportError:
-            raise ImportError(
-                "Either 'soundfile' or 'torchaudio' is required to load audio. "
-                "Install with: pip install soundfile  OR  pip install dagnam[audio]"
-            )
 
     if sr != target_sr:
         # Cheap linear-interpolation resample (adequate for model smoke tests).

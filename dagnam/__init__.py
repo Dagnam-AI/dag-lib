@@ -21,7 +21,12 @@ from dagnam.data.cache import (
 )
 from dagnam.resources import account, codegen, datasets, deployments, hub, projects, studio
 from dagnam.resources.checkpoints import download_checkpoint
-from dagnam.resources.inference import deployment_health, inference, inference_batch
+from dagnam.resources.inference import (
+    deployment_health,
+    inference,
+    inference_batch,
+    inference_schema,
+)
 from dagnam.resources.training import (
     TrainingEvent,
     cancel_training_job,
@@ -87,6 +92,7 @@ __all__ = [
     "hub",
     "inference",
     "inference_batch",
+    "inference_schema",
     "init",
     "is_cached",
     "list_training_jobs",

@@ -63,3 +63,19 @@ def deployment_health(
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.deployment_health(deployment_id)
+
+
+def inference_schema(
+    deployment_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Return the input/output schema for a deployment's inference endpoint.
+
+    >>> schema = dagnam.inference_schema("dep_abc123")
+    >>> schema["input_schema"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.schema(deployment_id)

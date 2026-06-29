@@ -102,3 +102,35 @@ async def test_async_delete_deployment_returns_object(
         return_value=httpx.Response(200, json={"deleted": True})
     )
     assert await client.delete_deployment("dep1") == {"deleted": True}
+
+
+# ---------------------------------------------------------------- deployment planning
+
+
+async def test_async_deployment_planning(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.post("/api/v1/deployments/estimate-cost").mock(
+        return_value=httpx.Response(200, json={"monthly_cost": 12.0})
+    )
+    mock.post("/api/v1/deployments/validate").mock(
+        return_value=httpx.Response(200, json={"valid": True, "errors": []})
+    )
+    mock.get("/api/v1/deployments-platforms").mock(
+        return_value=httpx.Response(200, json=[{"platform": "fastapi"}])
+    )
+    mock.post("/api/v1/deployments/d1/retry").mock(
+        return_value=httpx.Response(200, json={"id": "d1", "status": "deploying"})
+    )
+
+    assert (await client.estimate_cost({"platform": "fastapi"}))["monthly_cost"] == 12.0
+    assert (await client.validate_deployment({"name": "x"}))["valid"] is True
+    platforms = await client.list_deployment_platforms()
+    first = platforms[0]
+    assert isinstance(first, dict)
+    assert first["platform"] == "fastapi"
+    assert (await client.retry_deployment("d1"))["status"] == "deploying"
+
+
+async def test_async_retry_deployment_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.post("/api/v1/deployments/missing/retry").mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        await client.retry_deployment("missing")

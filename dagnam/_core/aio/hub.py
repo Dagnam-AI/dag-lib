@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import quote_path_segment, raise_for_hub, response_json_value
 from dagnam._types import (
@@ -74,6 +76,22 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
                 "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
             )
         )
+
+    async def upload_model_file(self, model_id: str, file_path: str) -> JsonObject:
+        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files``.
+
+        Sends ``multipart/form-data`` with a single ``file`` part; ``httpx`` sets
+        the boundary Content-Type itself, so only the bearer auth header is sent.
+        """
+        path = Path(file_path)
+        with path.open("rb") as fh:
+            resp = await self._request(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/files",
+                files={"file": (path.name, fh)},
+            )
+        raise_for_hub(resp, model_id)
+        return ensure_json_object(response_json_value(resp))
 
     async def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
         params: QueryParams | None = {"file_id": file_id} if file_id else None
