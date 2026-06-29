@@ -15,6 +15,10 @@ from typing import Optional
 from unittest.mock import Mock
 from uuid import UUID
 
+from dagnam._contracts.normalize import (
+    normalize_architecture_config,
+    normalize_diagram_state,
+)
 from dagnam._core.client import DagnamClient
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
@@ -189,9 +193,11 @@ def save_architecture(
 ) -> JsonObject:
     """Save the architecture (diagram state + config) for a project."""
     resolved = resolve_client(client, api_key, api_url)
+    # Normalize legacy/bare padding to canonical typed form before persisting, so
+    # an SDK-built model can never be saved in a state the Studio would reject.
     payload: JsonObject = {
-        "diagram_state": diagram_state,
-        "architecture_config": architecture_config,
+        "diagram_state": normalize_diagram_state(diagram_state),
+        "architecture_config": normalize_architecture_config(architecture_config),
     }
     if commit_message is not None:
         payload["commit_message"] = commit_message

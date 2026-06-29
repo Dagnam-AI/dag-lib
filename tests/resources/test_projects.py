@@ -271,6 +271,42 @@ class TestGetattrGatedNewApi:
         assert payload["diagram_state"] == {"nodes": []}
         assert payload["commit_message"] == "v1"
 
+    def test_save_architecture_normalizes_bare_int_padding(self) -> None:
+        """An SDK-built model with legacy bare-int padding is upgraded to the
+        canonical typed form before it is sent, so it can never persist in a
+        state the Studio would reject (closes the e2e-06 hole at the SDK side)."""
+        c = _client(save_architecture=MagicMock(return_value={"ok": True}))
+        projects.save_architecture(
+            "p1",
+            {
+                "nodes": [
+                    {
+                        "id": "c1",
+                        "data": {
+                            "componentId": "convolution-layer",
+                            "config": {"filters": 8, "kernelSize": 3, "padding": 2},
+                        },
+                    }
+                ]
+            },
+            {
+                "layers": [
+                    {"id": "c1", "type": "conv2d", "config": {"padding": 2, "filters": 8, "kernelSize": 3}}
+                ],
+                "connections": [],
+            },
+            client=c,
+        )
+        _pid, payload = c.save_architecture.call_args.args
+        assert payload["diagram_state"]["nodes"][0]["data"]["config"]["padding"] == {
+            "mode": "explicit",
+            "value": 2,
+        }
+        assert payload["architecture_config"]["layers"][0]["config"]["padding"] == {
+            "mode": "explicit",
+            "value": 2,
+        }
+
     def test_import_dag_uses_import_dag(self) -> None:
         c = _client(import_dag=MagicMock(return_value={"id": "p1"}))
         projects.import_dag({"nodes": []}, "Imported", tags=["t"], client=c)
