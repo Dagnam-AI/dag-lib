@@ -216,9 +216,7 @@
       "param_formula": {
         "kind": "attention",
         "roles": {
-          "context_dim": "context_dim",
-          "heads": "num_heads",
-          "model_dim": "query_dim"
+          "heads": "num_heads"
         }
       },
       "params": [
@@ -474,10 +472,7 @@
       "layer_type": "ffn_block",
       "param_formula": {
         "kind": "ffn",
-        "roles": {
-          "ff": "dFf",
-          "model_dim": "dModel"
-        }
+        "roles": {}
       },
       "params": [
         {
@@ -721,9 +716,7 @@
       "layer_type": "lora_adapter",
       "param_formula": {
         "kind": "lora",
-        "roles": {
-          "rank": "rank"
-        }
+        "roles": {}
       },
       "params": [
         {
@@ -909,11 +902,7 @@
       "layer_type": "moe",
       "param_formula": {
         "kind": "moe",
-        "roles": {
-          "experts": "num_experts",
-          "ff": "d_ff",
-          "model_dim": "d_model"
-        }
+        "roles": {}
       },
       "params": [
         {
@@ -1357,10 +1346,10 @@
       "component_id": "patch-embedding",
       "layer_type": "patch_embedding",
       "param_formula": {
-        "kind": "patch_embedding",
+        "kind": "conv",
         "roles": {
-          "embed_dim": "embed_dim",
-          "patch": "patch_size"
+          "filters": "embed_dim",
+          "kernel": "patch_size"
         }
       },
       "params": [
