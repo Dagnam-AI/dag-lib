@@ -1844,6 +1844,138 @@
       }
     },
     {
+      "name": "insufficient-merge-inputs",
+      "description": "A minimal valid input->merge->output path where the merge node has only ONE connected input (on the numbered 'input-0' handle, as the real studio emits). A merge requires at least 2 inputs, so both validators emit the per-node insufficient_merge_inputs rule (normalized INSUFFICIENT_MERGE_INPUTS) and nothing else. Pins FE/BE parity for the merge-min-inputs check, which the frontend previously counted on the wrong (literal 'input') handle and the backend lacked.",
+      "diagram": {
+        "nodes": [
+          {
+            "id": "inp",
+            "type": "inputLayer",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "input-layer",
+              "componentId": "input-layer",
+              "config": {
+                "audio_channels": 1,
+                "channels": 1,
+                "column_count": 10,
+                "duration": 4,
+                "feature_types": "numeric",
+                "fps": 30,
+                "frame_count": 16,
+                "height": 28,
+                "inputType": "image",
+                "normalization": "none",
+                "num_workers": 4,
+                "sample_rate": 16000,
+                "shape": "28,28,1",
+                "width": 28
+              },
+              "isValid": true,
+              "orientation": "horizontal"
+            }
+          },
+          {
+            "id": "mrg",
+            "type": "merge",
+            "position": {
+              "x": 240.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "merge-node",
+              "componentId": "merge-node",
+              "config": {
+                "axis": -1,
+                "mergeType": "concatenate",
+                "operation": "concatenate"
+              },
+              "isValid": true,
+              "orientation": "horizontal"
+            }
+          },
+          {
+            "id": "out",
+            "type": "outputLayer",
+            "position": {
+              "x": 480.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "output-layer",
+              "componentId": "output-layer",
+              "config": {
+                "batchSize": 64,
+                "compile_model": false,
+                "computeConfig": {
+                  "mode": "cpu",
+                  "precision": "fp32"
+                },
+                "device": "cuda",
+                "early_stopping_patience": 10,
+                "epochs": 1,
+                "gpu_model": "auto",
+                "gradient_accumulation_steps": 1,
+                "gradient_checkpointing": false,
+                "gradient_clip_value": 0,
+                "learningRate": 0.001,
+                "log_frequency": 10,
+                "log_level": "INFO",
+                "lossFunction": "CrossEntropyLoss",
+                "lr_scheduler_type": "none",
+                "max_checkpoints": 5,
+                "metrics": [
+                  "accuracy"
+                ],
+                "mixed_precision": "no",
+                "numClasses": 10,
+                "num_gpus": 1,
+                "num_nodes": 1,
+                "optimizer": "adam",
+                "outputType": "classification",
+                "postProcessing": "softmax",
+                "regularization_enabled": false,
+                "save_best_only": true,
+                "save_frequency_epochs": 1,
+                "save_optimizer_state": true,
+                "training_library": "none",
+                "warmup_epochs": 0
+              },
+              "isValid": true,
+              "orientation": "horizontal"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "inp:output->mrg:input-0",
+            "source": "inp",
+            "target": "mrg",
+            "sourceHandle": "output",
+            "targetHandle": "input-0",
+            "type": "validated"
+          },
+          {
+            "id": "mrg:output->out:input",
+            "source": "mrg",
+            "target": "out",
+            "sourceHandle": "output",
+            "targetHandle": "input",
+            "type": "validated"
+          }
+        ]
+      },
+      "expected": {
+        "is_valid": false,
+        "normalized_codes": [
+          "INSUFFICIENT_MERGE_INPUTS"
+        ]
+      }
+    },
+    {
       "name": "realfixture-01-lenet5",
       "description": "Real e2e architecture 01-lenet5 (ground-truth). Reconciled verdict + per-node golden shapes.",
       "diagram": {
