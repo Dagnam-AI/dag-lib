@@ -135,6 +135,12 @@
     {
       "component_id": "cls-token",
       "layer_type": "cls_token",
+      "param_formula": {
+        "kind": "cls_token",
+        "roles": {
+          "embed_dim": "embedDim"
+        }
+      },
       "params": [
         {
           "key": "embed_dim",
@@ -1740,6 +1746,13 @@
     {
       "component_id": "timestep-embedding",
       "layer_type": "timestep_embedding",
+      "param_formula": {
+        "kind": "timestep_embedding",
+        "roles": {
+          "hidden": "hidden_dim",
+          "in": "time_dim"
+        }
+      },
       "params": [
         {
           "key": "time_dim",
