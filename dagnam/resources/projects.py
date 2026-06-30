@@ -207,9 +207,11 @@ def save_architecture(
     so an SDK-built model can never be saved in a state the Studio would reject.
     """
     if validate_locally and isinstance(diagram_state, Mapping):
-        errors = validate_architecture(diagram_state)
-        if errors:
-            raise ArchitectureValidationError(errors)
+        # Only error-severity diagnostics block persistence; non-blocking
+        # advisories (warning/info) are surfaced by the Studio/CLI, not the gate.
+        blocking = [e for e in validate_architecture(diagram_state) if e.severity == "error"]
+        if blocking:
+            raise ArchitectureValidationError(blocking)
     resolved = resolve_client(client, api_key, api_url)
     payload: JsonObject = {
         "diagram_state": normalize_diagram_state(diagram_state),

@@ -12,7 +12,8 @@
           "field": "function",
           "fix_hint": "choose function from ['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish']",
           "got": "'__invalid__'",
-          "message": "activation-function: function must be one of ['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish'], got '__invalid__'"
+          "message": "activation-function: function must be one of ['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -29,7 +30,8 @@
           "field": "momentum",
           "fix_hint": "increase momentum to at least 0",
           "got": "-1",
-          "message": "batch-normalization: momentum must be at least 0, got -1"
+          "message": "batch-normalization: momentum must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -46,7 +48,8 @@
           "field": "guidance_scale",
           "fix_hint": "increase guidance_scale to at least 1",
           "got": "0",
-          "message": "classifier-free-guidance: guidance_scale must be at least 1, got 0"
+          "message": "classifier-free-guidance: guidance_scale must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -63,7 +66,8 @@
           "field": "position",
           "fix_hint": "increase position to at least 0",
           "got": "-1",
-          "message": "cls-extract: position must be at least 0, got -1"
+          "message": "cls-extract: position must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -80,7 +84,8 @@
           "field": "embed_dim",
           "fix_hint": "increase embed_dim to at least 1",
           "got": "0",
-          "message": "cls-token: embed_dim must be at least 1, got 0"
+          "message": "cls-token: embed_dim must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -97,7 +102,8 @@
           "field": "dimensions",
           "fix_hint": "choose dimensions from ['1d', '2d', '3d']",
           "got": "'__invalid__'",
-          "message": "convolution-layer: dimensions must be one of ['1d', '2d', '3d'], got '__invalid__'"
+          "message": "convolution-layer: dimensions must be one of ['1d', '2d', '3d'], got '__invalid__'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -105,7 +111,8 @@
           "field": "filters",
           "fix_hint": "provide a value for filters",
           "got": null,
-          "message": "convolution-layer: missing required parameter 'filters'"
+          "message": "convolution-layer: missing required parameter 'filters'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -113,7 +120,8 @@
           "field": "kernelSize",
           "fix_hint": "provide a value for kernelSize",
           "got": null,
-          "message": "convolution-layer: missing required parameter 'kernelSize'"
+          "message": "convolution-layer: missing required parameter 'kernelSize'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -130,7 +138,8 @@
           "field": "query_dim",
           "fix_hint": "increase query_dim to at least 1",
           "got": "0",
-          "message": "cross-attention: query_dim must be at least 1, got 0"
+          "message": "cross-attention: query_dim must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -147,7 +156,8 @@
           "field": "units",
           "fix_hint": "increase units to at least 1",
           "got": "0",
-          "message": "dense-layer: units must be at least 1, got 0"
+          "message": "dense-layer: units must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -164,7 +174,8 @@
           "field": "dimensions",
           "fix_hint": "choose dimensions from ['1d', '2d']",
           "got": "'__invalid__'",
-          "message": "depthwise-separable-conv: dimensions must be one of ['1d', '2d'], got '__invalid__'"
+          "message": "depthwise-separable-conv: dimensions must be one of ['1d', '2d'], got '__invalid__'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -172,7 +183,8 @@
           "field": "filters",
           "fix_hint": "provide a value for filters",
           "got": null,
-          "message": "depthwise-separable-conv: missing required parameter 'filters'"
+          "message": "depthwise-separable-conv: missing required parameter 'filters'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -180,7 +192,8 @@
           "field": "kernelSize",
           "fix_hint": "provide a value for kernelSize",
           "got": null,
-          "message": "depthwise-separable-conv: missing required parameter 'kernelSize'"
+          "message": "depthwise-separable-conv: missing required parameter 'kernelSize'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -197,7 +210,8 @@
           "field": "rate",
           "fix_hint": "increase rate to at least 0",
           "got": "-1",
-          "message": "dropout: rate must be at least 0, got -1"
+          "message": "dropout: rate must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -214,7 +228,8 @@
           "field": "vocabSize",
           "fix_hint": "increase vocabSize to at least 1",
           "got": "0",
-          "message": "embedding-layer: vocabSize must be at least 1, got 0"
+          "message": "embedding-layer: vocabSize must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -231,7 +246,8 @@
           "field": "dModel",
           "fix_hint": "increase dModel to at least 1",
           "got": "0",
-          "message": "ffn-block: dModel must be at least 1, got 0"
+          "message": "ffn-block: dModel must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -248,7 +264,8 @@
           "field": "startDim",
           "fix_hint": "increase startDim to at least 0",
           "got": "-1",
-          "message": "flatten: startDim must be at least 0, got -1"
+          "message": "flatten: startDim must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -265,7 +282,8 @@
           "field": "numGroups",
           "fix_hint": "increase numGroups to at least 1",
           "got": "0",
-          "message": "group-normalization: numGroups must be at least 1, got 0"
+          "message": "group-normalization: numGroups must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -282,7 +300,8 @@
           "field": "units",
           "fix_hint": "increase units to at least 1",
           "got": "0",
-          "message": "gru-layer: units must be at least 1, got 0"
+          "message": "gru-layer: units must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -299,7 +318,8 @@
           "field": "epsilon",
           "fix_hint": "increase epsilon to at least 1e-10",
           "got": "-0.9999999999",
-          "message": "instance-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+          "message": "instance-normalization: epsilon must be at least 1e-10, got -0.9999999999",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -316,7 +336,8 @@
           "field": "l1",
           "fix_hint": "increase l1 to at least 0",
           "got": "-1",
-          "message": "l1-regularization: l1 must be at least 0, got -1"
+          "message": "l1-regularization: l1 must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -333,7 +354,8 @@
           "field": "l2",
           "fix_hint": "increase l2 to at least 0",
           "got": "-1",
-          "message": "l2-regularization: l2 must be at least 0, got -1"
+          "message": "l2-regularization: l2 must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -350,7 +372,8 @@
           "field": "epsilon",
           "fix_hint": "increase epsilon to at least 1e-10",
           "got": "-0.9999999999",
-          "message": "layer-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+          "message": "layer-normalization: epsilon must be at least 1e-10, got -0.9999999999",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -367,7 +390,8 @@
           "field": "rank",
           "fix_hint": "increase rank to at least 1",
           "got": "0",
-          "message": "lora-adapter: rank must be at least 1, got 0"
+          "message": "lora-adapter: rank must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -384,7 +408,8 @@
           "field": "units",
           "fix_hint": "increase units to at least 1",
           "got": "0",
-          "message": "lstm-layer: units must be at least 1, got 0"
+          "message": "lstm-layer: units must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -401,7 +426,8 @@
           "field": "n_fft",
           "fix_hint": "increase n_fft to at least 128",
           "got": "127",
-          "message": "mel-spectrogram: n_fft must be at least 128, got 127"
+          "message": "mel-spectrogram: n_fft must be at least 128, got 127",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -418,7 +444,8 @@
           "field": "operation",
           "fix_hint": "choose operation from ['add', 'concatenate', 'multiply', 'average']",
           "got": "'__invalid__'",
-          "message": "merge-node: operation must be one of ['add', 'concatenate', 'multiply', 'average'], got '__invalid__'"
+          "message": "merge-node: operation must be one of ['add', 'concatenate', 'multiply', 'average'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -435,7 +462,8 @@
           "field": "n_mfcc",
           "fix_hint": "increase n_mfcc to at least 1",
           "got": "0",
-          "message": "mfcc: n_mfcc must be at least 1, got 0"
+          "message": "mfcc: n_mfcc must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -452,7 +480,8 @@
           "field": "num_experts",
           "fix_hint": "increase num_experts to at least 2",
           "got": "1",
-          "message": "moe-layer: num_experts must be at least 2, got 1"
+          "message": "moe-layer: num_experts must be at least 2, got 1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -469,7 +498,8 @@
           "field": "numHeads",
           "fix_hint": "increase numHeads to at least 1",
           "got": "0",
-          "message": "multi-head-attention: numHeads must be at least 1, got 0"
+          "message": "multi-head-attention: numHeads must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -486,7 +516,8 @@
           "field": "schedule_type",
           "fix_hint": "choose schedule_type from ['linear', 'cosine']",
           "got": "'__invalid__'",
-          "message": "noise-scheduler: schedule_type must be one of ['linear', 'cosine'], got '__invalid__'"
+          "message": "noise-scheduler: schedule_type must be one of ['linear', 'cosine'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -503,7 +534,8 @@
           "field": "outputType",
           "fix_hint": "choose outputType from ['classification', 'regression', 'segmentation', 'language_modeling', 'generation']",
           "got": "'__invalid__'",
-          "message": "output-layer: outputType must be one of ['classification', 'regression', 'segmentation', 'language_modeling', 'generation'], got '__invalid__'"
+          "message": "output-layer: outputType must be one of ['classification', 'regression', 'segmentation', 'language_modeling', 'generation'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -520,7 +552,8 @@
           "field": "patch_size",
           "fix_hint": "increase patch_size to at least 1",
           "got": "0",
-          "message": "patch-embedding: patch_size must be at least 1, got 0"
+          "message": "patch-embedding: patch_size must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -543,7 +576,8 @@
           "field": "poolingType",
           "fix_hint": "choose poolingType from ['max', 'average', 'global_max', 'global_average']",
           "got": "'__invalid__'",
-          "message": "pooling-layer: poolingType must be one of ['max', 'average', 'global_max', 'global_average'], got '__invalid__'"
+          "message": "pooling-layer: poolingType must be one of ['max', 'average', 'global_max', 'global_average'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -560,7 +594,8 @@
           "field": "encoding_type",
           "fix_hint": "choose encoding_type from ['sinusoidal', 'learned']",
           "got": "'__invalid__'",
-          "message": "positional-encoding: encoding_type must be one of ['sinusoidal', 'learned'], got '__invalid__'"
+          "message": "positional-encoding: encoding_type must be one of ['sinusoidal', 'learned'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -577,7 +612,8 @@
           "field": "bits",
           "fix_hint": "choose bits from ['4', '8']",
           "got": "'__invalid__'",
-          "message": "quantization-aware: bits must be one of ['4', '8'], got '__invalid__'"
+          "message": "quantization-aware: bits must be one of ['4', '8'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -600,7 +636,8 @@
           "field": "epsilon",
           "fix_hint": "increase epsilon to at least 1e-10",
           "got": "-0.9999999999",
-          "message": "rms-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+          "message": "rms-normalization: epsilon must be at least 1e-10, got -0.9999999999",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -617,7 +654,8 @@
           "field": "dim",
           "fix_hint": "increase dim to at least 1",
           "got": "0",
-          "message": "rope: dim must be at least 1, got 0"
+          "message": "rope: dim must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -634,7 +672,8 @@
           "field": "num_experts",
           "fix_hint": "increase num_experts to at least 2",
           "got": "1",
-          "message": "router-gating: num_experts must be at least 2, got 1"
+          "message": "router-gating: num_experts must be at least 2, got 1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -651,7 +690,8 @@
           "field": "drop_prob",
           "fix_hint": "increase drop_prob to at least 0",
           "got": "-1",
-          "message": "stochastic-depth: drop_prob must be at least 0, got -1"
+          "message": "stochastic-depth: drop_prob must be at least 0, got -1",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -668,7 +708,8 @@
           "field": "variant",
           "fix_hint": "choose variant from ['swiglu', 'geglu']",
           "got": "'__invalid__'",
-          "message": "swiglu-activation: variant must be one of ['swiglu', 'geglu'], got '__invalid__'"
+          "message": "swiglu-activation: variant must be one of ['swiglu', 'geglu'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -685,7 +726,8 @@
           "field": "time_dim",
           "fix_hint": "increase time_dim to at least 16",
           "got": "15",
-          "message": "timestep-embedding: time_dim must be at least 16, got 15"
+          "message": "timestep-embedding: time_dim must be at least 16, got 15",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -702,7 +744,8 @@
           "field": "dimensions",
           "fix_hint": "choose dimensions from ['2d', '3d']",
           "got": "'__invalid__'",
-          "message": "transposed-convolution: dimensions must be one of ['2d', '3d'], got '__invalid__'"
+          "message": "transposed-convolution: dimensions must be one of ['2d', '3d'], got '__invalid__'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -710,7 +753,8 @@
           "field": "filters",
           "fix_hint": "provide a value for filters",
           "got": null,
-          "message": "transposed-convolution: missing required parameter 'filters'"
+          "message": "transposed-convolution: missing required parameter 'filters'",
+          "severity": "error"
         },
         {
           "code": "PARAM_REQUIRED_MISSING",
@@ -718,7 +762,8 @@
           "field": "kernelSize",
           "fix_hint": "provide a value for kernelSize",
           "got": null,
-          "message": "transposed-convolution: missing required parameter 'kernelSize'"
+          "message": "transposed-convolution: missing required parameter 'kernelSize'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -735,7 +780,8 @@
           "field": "dimensions",
           "fix_hint": "choose dimensions from ['2d']",
           "got": "'__invalid__'",
-          "message": "unpooling-layer: dimensions must be one of ['2d'], got '__invalid__'"
+          "message": "unpooling-layer: dimensions must be one of ['2d'], got '__invalid__'",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -752,7 +798,8 @@
           "field": "scaleFactor",
           "fix_hint": "increase scaleFactor to at least 1",
           "got": "0",
-          "message": "upsample-layer: scaleFactor must be at least 1, got 0"
+          "message": "upsample-layer: scaleFactor must be at least 1, got 0",
+          "severity": "error"
         }
       ],
       "node_id": "n"
@@ -769,7 +816,458 @@
           "field": "latent_dim",
           "fix_hint": "increase latent_dim to at least 1",
           "got": "0",
-          "message": "vae-reparameterization: latent_dim must be at least 1, got 0"
+          "message": "vae-reparameterization: latent_dim must be at least 1, got 0",
+          "severity": "error"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "classifier-free-guidance",
+      "config": {
+        "guidance_scale": 16
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "15",
+          "field": "guidance_scale",
+          "fix_hint": "reduce guidance_scale toward 15 unless this is deliberate",
+          "got": "16",
+          "message": "classifier-free-guidance: guidance_scale = 16 is unusually high (recommended <= 15)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "convolution-layer",
+      "config": {
+        "filters": 1025
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "1024",
+          "field": "filters",
+          "fix_hint": "reduce filters toward 1024 unless this is deliberate",
+          "got": "1025",
+          "message": "convolution-layer: filters = 1025 is unusually high (recommended <= 1024)",
+          "severity": "warning"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "convolution-layer: missing required parameter 'kernelSize'",
+          "severity": "error"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "convolution-layer",
+      "config": {
+        "activation": "none"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "filters",
+          "fix_hint": "provide a value for filters",
+          "got": null,
+          "message": "convolution-layer: missing required parameter 'filters'",
+          "severity": "error"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "convolution-layer: missing required parameter 'kernelSize'",
+          "severity": "error"
+        },
+        {
+          "code": "INFO_LINEAR_ACTIVATION",
+          "expected": null,
+          "field": "activation",
+          "fix_hint": "add a nonlinear activation (relu/gelu/...) unless a linear projection is intended",
+          "got": "'none'",
+          "message": "convolution-layer: activation = 'none' applies no nonlinearity; consecutive linear layers without an activation collapse into a single linear map",
+          "severity": "info"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "cross-attention",
+      "config": {
+        "num_heads": 17
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "16",
+          "field": "num_heads",
+          "fix_hint": "reduce num_heads toward 16 unless this is deliberate",
+          "got": "17",
+          "message": "cross-attention: num_heads = 17 is unusually high (recommended <= 16)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "cross-attention",
+      "config": {
+        "dropout": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "dropout",
+          "fix_hint": "reduce dropout toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "cross-attention: dropout = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "dense-layer",
+      "config": {
+        "activation": "linear"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "units",
+          "fix_hint": "provide a value for units",
+          "got": null,
+          "message": "dense-layer: missing required parameter 'units'",
+          "severity": "error"
+        },
+        {
+          "code": "INFO_LINEAR_ACTIVATION",
+          "expected": null,
+          "field": "activation",
+          "fix_hint": "add a nonlinear activation (relu/gelu/...) unless a linear projection is intended",
+          "got": "'linear'",
+          "message": "dense-layer: activation = 'linear' applies no nonlinearity; consecutive linear layers without an activation collapse into a single linear map",
+          "severity": "info"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "depthwise-separable-conv",
+      "config": {
+        "filters": 1025
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "1024",
+          "field": "filters",
+          "fix_hint": "reduce filters toward 1024 unless this is deliberate",
+          "got": "1025",
+          "message": "depthwise-separable-conv: filters = 1025 is unusually high (recommended <= 1024)",
+          "severity": "warning"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "depthwise-separable-conv: missing required parameter 'kernelSize'",
+          "severity": "error"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "dropout",
+      "config": {
+        "rate": 0.85
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.7",
+          "field": "rate",
+          "fix_hint": "reduce rate toward 0.7 unless this is deliberate",
+          "got": "0.85",
+          "message": "dropout: rate = 0.85 is unusually high (recommended <= 0.7)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "ffn-block",
+      "config": {
+        "dropout": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "dropout",
+          "fix_hint": "reduce dropout toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "ffn-block: dropout = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "gru-layer",
+      "config": {
+        "dropout": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "dropout",
+          "fix_hint": "reduce dropout toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "gru-layer: dropout = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "lora-adapter",
+      "config": {
+        "rank": 129
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "128",
+          "field": "rank",
+          "fix_hint": "reduce rank toward 128 unless this is deliberate",
+          "got": "129",
+          "message": "lora-adapter: rank = 129 is unusually high (recommended <= 128)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "lstm-layer",
+      "config": {
+        "dropout": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "dropout",
+          "fix_hint": "reduce dropout toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "lstm-layer: dropout = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "moe-layer",
+      "config": {
+        "num_experts": 33
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "32",
+          "field": "num_experts",
+          "fix_hint": "reduce num_experts toward 32 unless this is deliberate",
+          "got": "33",
+          "message": "moe-layer: num_experts = 33 is unusually high (recommended <= 32)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "multi-head-attention",
+      "config": {
+        "numHeads": 17
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "16",
+          "field": "numHeads",
+          "fix_hint": "reduce numHeads toward 16 unless this is deliberate",
+          "got": "17",
+          "message": "multi-head-attention: numHeads = 17 is unusually high (recommended <= 16)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "multi-head-attention",
+      "config": {
+        "dropout": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "dropout",
+          "fix_hint": "reduce dropout toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "multi-head-attention: dropout = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "learningRate": 0.55
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.1",
+          "field": "learningRate",
+          "fix_hint": "reduce learningRate toward 0.1 unless this is deliberate",
+          "got": "0.55",
+          "message": "output-layer: learningRate = 0.55 is unusually high (recommended <= 0.1)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "epochs": 501
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "500",
+          "field": "epochs",
+          "fix_hint": "reduce epochs toward 500 unless this is deliberate",
+          "got": "501",
+          "message": "output-layer: epochs = 501 is unusually high (recommended <= 500)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "gradient_clip_value": 11
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "10",
+          "field": "gradient_clip_value",
+          "fix_hint": "reduce gradient_clip_value toward 10 unless this is deliberate",
+          "got": "11",
+          "message": "output-layer: gradient_clip_value = 11 is unusually high (recommended <= 10)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "mixed_precision": "no"
+      },
+      "diagnostics": [
+        {
+          "code": "INFO_MIXED_PRECISION_OFF",
+          "expected": null,
+          "field": "mixed_precision",
+          "fix_hint": "set mixed_precision to bf16 (or fp16) on supported hardware",
+          "got": "'no'",
+          "message": "output-layer: mixed_precision = 'no' trains in full precision; bf16/fp16 cuts memory and speeds up training on supported accelerators",
+          "severity": "info"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "lr_scheduler_type": "none"
+      },
+      "diagnostics": [
+        {
+          "code": "INFO_NO_LR_SCHEDULE",
+          "expected": null,
+          "field": "lr_scheduler_type",
+          "fix_hint": "set lr_scheduler_type to cosine, step, or plateau to anneal the learning rate",
+          "got": "'none'",
+          "message": "output-layer: lr_scheduler_type = 'none' keeps the learning rate constant; a schedule (cosine/step/plateau) often improves convergence",
+          "severity": "info"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "stochastic-depth",
+      "config": {
+        "drop_prob": 0.75
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "0.5",
+          "field": "drop_prob",
+          "fix_hint": "reduce drop_prob toward 0.5 unless this is deliberate",
+          "got": "0.75",
+          "message": "stochastic-depth: drop_prob = 0.75 is unusually high (recommended <= 0.5)",
+          "severity": "warning"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "transposed-convolution",
+      "config": {
+        "filters": 1025
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+          "expected": "1024",
+          "field": "filters",
+          "fix_hint": "reduce filters toward 1024 unless this is deliberate",
+          "got": "1025",
+          "message": "transposed-convolution: filters = 1025 is unusually high (recommended <= 1024)",
+          "severity": "warning"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "transposed-convolution: missing required parameter 'kernelSize'",
+          "severity": "error"
         }
       ],
       "node_id": "n"

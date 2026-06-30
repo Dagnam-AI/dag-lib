@@ -41,5 +41,7 @@ def test_corpus_exposes_cases() -> None:
 def test_sdk_reproduces_param_tier_verdict(case: dict[str, Any]) -> None:
     diagram = normalize_diagram_state(case["diagram"])
     assert isinstance(diagram, Mapping)
-    errors = validate_architecture(diagram)
+    # The corpus PARAMETER_ERROR multiset is the blocking (error-severity) slice;
+    # non-blocking advisories (warning/info) are not part of the reconciled verdict.
+    errors = [e for e in validate_architecture(diagram) if e.severity == "error"]
     assert len(errors) == _expected_param_errors(case), case["name"]

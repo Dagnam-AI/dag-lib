@@ -12,10 +12,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from dagnam._contracts._schema import COMPONENT_REGISTRY, render
+from dagnam._contracts._schema import COMPONENT_REGISTRY, DIAGNOSTICS, render
 
 _PADDING_MODES = ("valid", "same", "explicit")
 _PADDING_SHAPE = "{mode:'same'|'valid'|'explicit', value?}"
+
+# Severity -> diagnostic type. Error-severity keeps the historical
+# ``parameter_error`` type; advisory severities get distinct types that are NOT
+# spec rule ids, so they stay out of the count-stable corpus and never block.
+_SEVERITY_TYPE = {
+    "error": "parameter_error",
+    "warning": "parameter_warning",
+    "info": "parameter_info",
+}
 
 
 @dataclass(frozen=True)
@@ -50,11 +59,12 @@ def _diag(
     message, fix_hint = render(
         code, component_id=component_id, field=field, expected=expected, got=got
     )
+    severity = DIAGNOSTICS[code].get("severity", "error")
     return ParamError(
-        type="parameter_error",
+        type=_SEVERITY_TYPE[severity],
         message=message,
         node_id=node_id,
-        severity="error",
+        severity=severity,
         code=code,
         field=field or None,
         expected=expected or None,
@@ -222,6 +232,30 @@ def _check_number(value: Any, param: Mapping[str, Any], cid: str, node_id: str) 
                 got=_repr(value),
             )
         ]
+    # Hard bounds passed: advisory SOFT bounds (non-blocking warnings).
+    warn_lo, warn_hi = nc.get("warn_min"), nc.get("warn_max")
+    if warn_lo is not None and value < warn_lo:
+        return [
+            _diag(
+                "PARAM_NUMBER_BELOW_RECOMMENDED",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                expected=_fmt(warn_lo),
+                got=_repr(value),
+            )
+        ]
+    if warn_hi is not None and value > warn_hi:
+        return [
+            _diag(
+                "PARAM_NUMBER_ABOVE_RECOMMENDED",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                expected=_fmt(warn_hi),
+                got=_repr(value),
+            )
+        ]
     return []
 
 
@@ -264,6 +298,19 @@ def validate_params(component_id: str, config: Mapping[str, Any], node_id: str) 
                         component_id=component_id,
                         field=param["key"],
                         expected=str(enum_values),
+                        got=_repr(value),
+                    )
+                )
+        # Categorical advisories (non-blocking info/warning), kind-independent.
+        present_value = str(value).lower()
+        for adv in param.get("advisories") or []:
+            if str(adv["when_value"]).lower() == present_value:
+                errors.append(
+                    _diag(
+                        adv["code"],
+                        node_id,
+                        component_id=component_id,
+                        field=param["key"],
                         got=_repr(value),
                     )
                 )
