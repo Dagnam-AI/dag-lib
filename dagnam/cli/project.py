@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from dagnam.cli.common import (
     add_collection_output_args,
     error,
+    format_local,
     load_json_arg,
     print_json,
     print_next_step,
@@ -26,10 +27,6 @@ def _collection_items(result: object) -> list[object]:
     return result if isinstance(result, list) else []
 
 
-def _date(value: object) -> str:
-    return str(value or "-").split("T", maxsplit=1)[0]
-
-
 def _render_projects(result: object) -> str:
     items = _collection_items(result)
     if not items:
@@ -43,7 +40,7 @@ def _render_projects(result: object) -> str:
                 "title": project.get("title") or project.get("name") or "-",
                 "status": project.get("status") or "-",
                 "version": project.get("latest_version_number") or "-",
-                "updated": _date(project.get("updated_at")),
+                "updated": format_local(project.get("updated_at")),
             }
         )
     table = render_table(
@@ -70,7 +67,7 @@ def _print_project_summary_text(result: object) -> str:
             f"Status: {project.get('status') or '-'}",
             f"Framework: {project.get('framework') or '-'}",
             f"Latest version: {project.get('latest_version_number') or '-'}",
-            f"Updated: {_date(project.get('updated_at'))}",
+            f"Updated: {format_local(project.get('updated_at'))}",
         )
     )
 

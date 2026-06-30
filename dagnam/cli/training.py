@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from dagnam.cli.common import (
     add_collection_output_args,
     error,
+    format_local,
     load_json_arg,
     print_json,
     print_next_step,
@@ -137,7 +138,7 @@ def _render_jobs(result: object) -> str:
                 **job,
                 "epoch": f"{job.get('current_epoch', 0)}/{job.get('total_epochs', 0)}",
                 "progress": f"{job.get('progress_percentage', 0)}%",
-                "created": str(job.get("created_at") or "-").split("T", maxsplit=1)[0],
+                "created": format_local(job.get("created_at")),
             }
         )
     table = render_table(

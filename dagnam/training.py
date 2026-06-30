@@ -144,8 +144,12 @@ def _write_event(event: dict[str, Any]) -> None:
 
 
 def _utcnow_iso() -> str:
-    """Return a naive UTC ISO timestamp without the deprecated utcnow call."""
-    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat()
+    """Return an explicit-UTC ISO timestamp (tz-aware, includes ``+00:00``).
+
+    Emitting the offset keeps the marker unambiguous so consumers never parse
+    these events as local time.
+    """
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def report_metric(epoch: int, step: int, metrics: dict[str, float]) -> None:

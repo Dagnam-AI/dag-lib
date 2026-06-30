@@ -5,7 +5,13 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, error, print_json, print_next_step
+from dagnam.cli.common import (
+    add_collection_output_args,
+    error,
+    format_local,
+    print_json,
+    print_next_step,
+)
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 if TYPE_CHECKING:
@@ -17,10 +23,6 @@ def _collection_items(result: object) -> list[object]:
         items = result.get("items")
         return items if isinstance(items, list) else []
     return result if isinstance(result, list) else []
-
-
-def _date(value: object) -> str:
-    return str(value or "-").split("T", maxsplit=1)[0]
 
 
 def _redact_deployment_secrets(deployment: object) -> object:
@@ -55,7 +57,7 @@ def _render_deployments(result: object) -> str:
                 "name": deployment.get("name") or deployment.get("title") or "-",
                 "status": deployment.get("status") or "-",
                 "platform": deployment.get("platform") or "-",
-                "updated": _date(deployment.get("updated_at")),
+                "updated": format_local(deployment.get("updated_at")),
             }
         )
     table = render_table(

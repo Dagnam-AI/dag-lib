@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,34 @@ DAGNAM_ASCII_FALLBACK_ART = r"""
                     DAGNAM.AI
 ==================================================
 """
+
+
+def parse_api_datetime(value: str) -> datetime:
+    """Parse an ISO-8601 API timestamp, treating a tz-naive value as UTC.
+
+    Backend timestamps are UTC; some are serialized without an explicit offset.
+    A naive result is anchored to UTC so callers never misread it as local time.
+    Raises ``ValueError`` on an unparseable string (same as ``fromisoformat``).
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def format_local(value: object) -> str:
+    """Render a UTC API timestamp as a local-time date string for display.
+
+    Falsy or non-string inputs render as ``"-"``. An unparseable string falls
+    back to its leading date portion so display never crashes on malformed data.
+    """
+    if not value or not isinstance(value, str):
+        return "-"
+    try:
+        parsed = parse_api_datetime(value)
+    except ValueError:
+        return value.split("T", maxsplit=1)[0]
+    return parsed.astimezone().strftime("%Y-%m-%d")
 
 
 def configure_console_encoding() -> None:

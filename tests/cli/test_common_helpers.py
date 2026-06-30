@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dagnam.cli import common
-from dagnam.cli.common import format_ascii_art, mask_key, resolve_version
+from dagnam.cli.common import (
+    format_ascii_art,
+    format_local,
+    mask_key,
+    parse_api_datetime,
+    resolve_version,
+)
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -188,3 +194,55 @@ class TestRunCommand:
 
         args = argparse.Namespace(func=boom, debug=False)
         assert common.run_command(args) == 130
+
+
+class TestParseApiDatetime:
+    def test_naive_string_is_assumed_utc(self) -> None:
+        parsed = parse_api_datetime("2026-05-11T03:01:26")
+        assert parsed.tzinfo is not None
+        offset = parsed.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 0
+
+    def test_aware_string_offset_is_preserved(self) -> None:
+        parsed = parse_api_datetime("2026-05-11T03:01:26+05:30")
+        offset = parsed.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 5.5 * 3600
+
+    def test_zulu_suffix_is_utc(self) -> None:
+        parsed = parse_api_datetime("2026-05-11T03:01:26Z")
+        offset = parsed.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 0
+
+
+class TestFormatLocal:
+    def test_none_renders_dash(self) -> None:
+        assert format_local(None) == "-"
+
+    def test_empty_string_renders_dash(self) -> None:
+        assert format_local("") == "-"
+
+    def test_non_string_truthy_renders_dash(self) -> None:
+        assert format_local(123) == "-"
+
+    def test_unparseable_string_falls_back_to_date_portion(self) -> None:
+        assert format_local("not-a-dateThh:mm") == "not-a-date"
+
+    def test_utc_timestamp_renders_as_local_date(self) -> None:
+        # Compare against the same UTC->local conversion the helper performs so
+        # the assertion holds regardless of the test machine's timezone.
+        expected = parse_api_datetime("2026-05-11T03:01:26").astimezone().strftime("%Y-%m-%d")
+        assert format_local("2026-05-11T03:01:26") == expected
+
+    def test_local_conversion_matches_utc_to_local(self) -> None:
+        # Verify the helper converts UTC->local rather than truncating the raw
+        # UTC date. Compared against the helper's own conversion to stay
+        # timezone-portable across CI machines.
+        raw = "2026-05-11T23:30:00"
+        as_utc = parse_api_datetime(raw)
+        offset = as_utc.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 0
+        assert format_local(raw) == as_utc.astimezone().strftime("%Y-%m-%d")

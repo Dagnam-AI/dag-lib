@@ -36,16 +36,20 @@ def test_report_metric_round_trip(reporter):
     assert "timestamp" in events[0]
 
 
-def test_timestamp_is_naive_no_tz_suffix(reporter):
+def test_timestamp_carries_explicit_utc_marker(reporter):
     training, path = reporter
     training.report_metric(epoch=1, step=1, metrics={"loss": 0.1})
     ts = _read_events(path)[0]["timestamp"]
-    assert "+" not in ts, f"timestamp must be naive UTC, got {ts!r}"
-    assert "Z" not in ts, f"timestamp must be naive UTC, got {ts!r}"
+    # The marker must be explicit UTC so consumers never read it as local time.
+    assert ts.endswith("+00:00"), f"timestamp must be explicit UTC, got {ts!r}"
 
     from datetime import datetime as _dt
 
-    assert _dt.fromisoformat(ts) is not None
+    parsed = _dt.fromisoformat(ts)
+    assert parsed.tzinfo is not None
+    offset = parsed.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() == 0
 
 
 def test_report_progress_round_trip(reporter):
