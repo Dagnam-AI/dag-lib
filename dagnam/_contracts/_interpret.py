@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from dagnam._contracts._schema import COMPONENT_REGISTRY
+from dagnam._contracts._schema import COMPONENT_REGISTRY, render
 
 _PADDING_MODES = ("valid", "same", "explicit")
 _PADDING_SHAPE = "{mode:'same'|'valid'|'explicit', value?}"
@@ -20,16 +20,51 @@ _PADDING_SHAPE = "{mode:'same'|'valid'|'explicit', value?}"
 
 @dataclass(frozen=True)
 class ParamError:
-    """A single declarative-parameter validation failure."""
+    """A single declarative-parameter validation failure.
+
+    Carries the structured diagnostic payload (spec §6) rendered from the same
+    shipped catalog the backend and frontend use, so all three runtimes emit
+    byte-identical messages.
+    """
 
     type: str
     message: str
     node_id: str | None
     severity: str
+    code: str | None = None
+    field: str | None = None
+    expected: str | None = None
+    got: str | None = None
+    fix_hint: str | None = None
 
 
-def _err(message: str, node_id: str) -> ParamError:
-    return ParamError(type="parameter_error", message=message, node_id=node_id, severity="error")
+def _diag(
+    code: str,
+    node_id: str,
+    *,
+    component_id: str,
+    field: str = "",
+    expected: str = "",
+    got: str = "",
+) -> ParamError:
+    message, fix_hint = render(
+        code, component_id=component_id, field=field, expected=expected, got=got
+    )
+    return ParamError(
+        type="parameter_error",
+        message=message,
+        node_id=node_id,
+        severity="error",
+        code=code,
+        field=field or None,
+        expected=expected or None,
+        got=got or None,
+        fix_hint=fix_hint or None,
+    )
+
+
+def _repr(value: Any) -> str:
+    return f"{value!r}"
 
 
 def _snake_to_camel(key: str) -> str:
@@ -93,35 +128,44 @@ def _check_padding(value: Any, key: str, cid: str, node_id: str) -> list[ParamEr
         if value in ("valid", "same"):
             return []
         return [
-            _err(
-                f"{cid}: {key} must be 'valid', 'same', or a typed object {_PADDING_SHAPE}, got {value!r}",
+            _diag(
+                "PARAM_PADDING_BAD_STRING",
                 node_id,
+                component_id=cid,
+                field=key,
+                expected=_PADDING_SHAPE,
+                got=_repr(value),
             )
         ]
     if isinstance(value, dict):
         mode = value.get("mode")
         if mode not in _PADDING_MODES:
             return [
-                _err(
-                    f"{cid}: {key}.mode must be 'valid', 'same', or 'explicit', got {mode!r}",
-                    node_id,
+                _diag(
+                    "PARAM_PADDING_BAD_MODE", node_id, component_id=cid, field=key, got=_repr(mode)
                 )
             ]
         if mode == "explicit":
             v = value.get("value")
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 return [
-                    _err(
-                        f"{cid}: explicit {key} needs a non-negative integer value, got {v!r}",
+                    _diag(
+                        "PARAM_PADDING_BAD_EXPLICIT_VALUE",
                         node_id,
+                        component_id=cid,
+                        field=key,
+                        got=_repr(v),
                     )
                 ]
         return []
     return [
-        _err(
-            f"{cid}: {key} must be a typed object {_PADDING_SHAPE}, got {value!r} — "
-            f"wrap an explicit pad as {{mode:'explicit', value:{value!r}}}",
+        _diag(
+            "PARAM_PADDING_NOT_TYPED",
             node_id,
+            component_id=cid,
+            field=key,
+            expected=_PADDING_SHAPE,
+            got=_repr(value),
         )
     ]
 
@@ -136,14 +180,48 @@ def _check_number(value: Any, param: Mapping[str, Any], cid: str, node_id: str) 
         return []
     # bool is an int subclass in Python; a checkbox value is never a valid number.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return [_err(f"{cid}: {param['key']} must be a number, got {value!r}", node_id)]
+        return [
+            _diag(
+                "PARAM_NUMBER_NOT_A_NUMBER",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                got=_repr(value),
+            )
+        ]
     lo, hi, integer = nc.get("min"), nc.get("max"), nc.get("integer", False)
     if integer and not float(value).is_integer():
-        return [_err(f"{cid}: {param['key']} must be a whole number, got {value!r}", node_id)]
+        return [
+            _diag(
+                "PARAM_NUMBER_NOT_INTEGER",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                got=_repr(value),
+            )
+        ]
     if lo is not None and value < lo:
-        return [_err(f"{cid}: {param['key']} must be at least {_fmt(lo)}, got {value!r}", node_id)]
+        return [
+            _diag(
+                "PARAM_NUMBER_BELOW_MIN",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                expected=_fmt(lo),
+                got=_repr(value),
+            )
+        ]
     if hi is not None and value > hi:
-        return [_err(f"{cid}: {param['key']} must be at most {_fmt(hi)}, got {value!r}", node_id)]
+        return [
+            _diag(
+                "PARAM_NUMBER_ABOVE_MAX",
+                node_id,
+                component_id=cid,
+                field=param["key"],
+                expected=_fmt(hi),
+                got=_repr(value),
+            )
+        ]
     return []
 
 
@@ -163,7 +241,12 @@ def validate_params(component_id: str, config: Mapping[str, Any], node_id: str) 
         if not present:
             if param.get("required"):
                 errors.append(
-                    _err(f"{component_id}: missing required parameter '{param['key']}'", node_id)
+                    _diag(
+                        "PARAM_REQUIRED_MISSING",
+                        node_id,
+                        component_id=component_id,
+                        field=param["key"],
+                    )
                 )
             continue
         kind = param["kind"]
@@ -175,9 +258,13 @@ def validate_params(component_id: str, config: Mapping[str, Any], node_id: str) 
             enum_values = param.get("enum_values")
             if enum_values is not None and str(value) not in enum_values:
                 errors.append(
-                    _err(
-                        f"{component_id}: {param['key']} must be one of {enum_values}, got {value!r}",
+                    _diag(
+                        "PARAM_ENUM_NOT_ALLOWED",
                         node_id,
+                        component_id=component_id,
+                        field=param["key"],
+                        expected=str(enum_values),
+                        got=_repr(value),
                     )
                 )
     return errors

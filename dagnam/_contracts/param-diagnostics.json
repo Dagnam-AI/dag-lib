@@ -1,0 +1,779 @@
+{
+  "cases": [
+    {
+      "component_id": "activation-function",
+      "config": {
+        "function": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish']",
+          "field": "function",
+          "fix_hint": "choose function from ['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish']",
+          "got": "'__invalid__'",
+          "message": "activation-function: function must be one of ['relu', 'gelu', 'sigmoid', 'tanh', 'softmax', 'leaky_relu', 'clipped_relu', 'elu', 'swish'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "batch-normalization",
+      "config": {
+        "momentum": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "momentum",
+          "fix_hint": "increase momentum to at least 0",
+          "got": "-1",
+          "message": "batch-normalization: momentum must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "classifier-free-guidance",
+      "config": {
+        "guidance_scale": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "guidance_scale",
+          "fix_hint": "increase guidance_scale to at least 1",
+          "got": "0",
+          "message": "classifier-free-guidance: guidance_scale must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "cls-extract",
+      "config": {
+        "position": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "position",
+          "fix_hint": "increase position to at least 0",
+          "got": "-1",
+          "message": "cls-extract: position must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "cls-token",
+      "config": {
+        "embed_dim": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "embed_dim",
+          "fix_hint": "increase embed_dim to at least 1",
+          "got": "0",
+          "message": "cls-token: embed_dim must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "convolution-layer",
+      "config": {
+        "dimensions": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['1d', '2d', '3d']",
+          "field": "dimensions",
+          "fix_hint": "choose dimensions from ['1d', '2d', '3d']",
+          "got": "'__invalid__'",
+          "message": "convolution-layer: dimensions must be one of ['1d', '2d', '3d'], got '__invalid__'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "filters",
+          "fix_hint": "provide a value for filters",
+          "got": null,
+          "message": "convolution-layer: missing required parameter 'filters'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "convolution-layer: missing required parameter 'kernelSize'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "cross-attention",
+      "config": {
+        "query_dim": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "query_dim",
+          "fix_hint": "increase query_dim to at least 1",
+          "got": "0",
+          "message": "cross-attention: query_dim must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "dense-layer",
+      "config": {
+        "units": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "units",
+          "fix_hint": "increase units to at least 1",
+          "got": "0",
+          "message": "dense-layer: units must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "depthwise-separable-conv",
+      "config": {
+        "dimensions": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['1d', '2d']",
+          "field": "dimensions",
+          "fix_hint": "choose dimensions from ['1d', '2d']",
+          "got": "'__invalid__'",
+          "message": "depthwise-separable-conv: dimensions must be one of ['1d', '2d'], got '__invalid__'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "filters",
+          "fix_hint": "provide a value for filters",
+          "got": null,
+          "message": "depthwise-separable-conv: missing required parameter 'filters'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "depthwise-separable-conv: missing required parameter 'kernelSize'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "dropout",
+      "config": {
+        "rate": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "rate",
+          "fix_hint": "increase rate to at least 0",
+          "got": "-1",
+          "message": "dropout: rate must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "embedding-layer",
+      "config": {
+        "vocabSize": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "vocabSize",
+          "fix_hint": "increase vocabSize to at least 1",
+          "got": "0",
+          "message": "embedding-layer: vocabSize must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "ffn-block",
+      "config": {
+        "dModel": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "dModel",
+          "fix_hint": "increase dModel to at least 1",
+          "got": "0",
+          "message": "ffn-block: dModel must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "flatten",
+      "config": {
+        "startDim": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "startDim",
+          "fix_hint": "increase startDim to at least 0",
+          "got": "-1",
+          "message": "flatten: startDim must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "group-normalization",
+      "config": {
+        "numGroups": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "numGroups",
+          "fix_hint": "increase numGroups to at least 1",
+          "got": "0",
+          "message": "group-normalization: numGroups must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "gru-layer",
+      "config": {
+        "units": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "units",
+          "fix_hint": "increase units to at least 1",
+          "got": "0",
+          "message": "gru-layer: units must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "instance-normalization",
+      "config": {
+        "epsilon": -0.9999999999
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1e-10",
+          "field": "epsilon",
+          "fix_hint": "increase epsilon to at least 1e-10",
+          "got": "-0.9999999999",
+          "message": "instance-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "l1-regularization",
+      "config": {
+        "l1": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "l1",
+          "fix_hint": "increase l1 to at least 0",
+          "got": "-1",
+          "message": "l1-regularization: l1 must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "l2-regularization",
+      "config": {
+        "l2": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "l2",
+          "fix_hint": "increase l2 to at least 0",
+          "got": "-1",
+          "message": "l2-regularization: l2 must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "layer-normalization",
+      "config": {
+        "epsilon": -0.9999999999
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1e-10",
+          "field": "epsilon",
+          "fix_hint": "increase epsilon to at least 1e-10",
+          "got": "-0.9999999999",
+          "message": "layer-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "lora-adapter",
+      "config": {
+        "rank": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "rank",
+          "fix_hint": "increase rank to at least 1",
+          "got": "0",
+          "message": "lora-adapter: rank must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "lstm-layer",
+      "config": {
+        "units": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "units",
+          "fix_hint": "increase units to at least 1",
+          "got": "0",
+          "message": "lstm-layer: units must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "mel-spectrogram",
+      "config": {
+        "n_fft": 127
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "128",
+          "field": "n_fft",
+          "fix_hint": "increase n_fft to at least 128",
+          "got": "127",
+          "message": "mel-spectrogram: n_fft must be at least 128, got 127"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "merge-node",
+      "config": {
+        "operation": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['add', 'concatenate', 'multiply', 'average']",
+          "field": "operation",
+          "fix_hint": "choose operation from ['add', 'concatenate', 'multiply', 'average']",
+          "got": "'__invalid__'",
+          "message": "merge-node: operation must be one of ['add', 'concatenate', 'multiply', 'average'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "mfcc",
+      "config": {
+        "n_mfcc": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "n_mfcc",
+          "fix_hint": "increase n_mfcc to at least 1",
+          "got": "0",
+          "message": "mfcc: n_mfcc must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "moe-layer",
+      "config": {
+        "num_experts": 1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "2",
+          "field": "num_experts",
+          "fix_hint": "increase num_experts to at least 2",
+          "got": "1",
+          "message": "moe-layer: num_experts must be at least 2, got 1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "multi-head-attention",
+      "config": {
+        "numHeads": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "numHeads",
+          "fix_hint": "increase numHeads to at least 1",
+          "got": "0",
+          "message": "multi-head-attention: numHeads must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "noise-scheduler",
+      "config": {
+        "schedule_type": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['linear', 'cosine']",
+          "field": "schedule_type",
+          "fix_hint": "choose schedule_type from ['linear', 'cosine']",
+          "got": "'__invalid__'",
+          "message": "noise-scheduler: schedule_type must be one of ['linear', 'cosine'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "output-layer",
+      "config": {
+        "outputType": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['classification', 'regression', 'segmentation', 'language_modeling', 'generation']",
+          "field": "outputType",
+          "fix_hint": "choose outputType from ['classification', 'regression', 'segmentation', 'language_modeling', 'generation']",
+          "got": "'__invalid__'",
+          "message": "output-layer: outputType must be one of ['classification', 'regression', 'segmentation', 'language_modeling', 'generation'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "patch-embedding",
+      "config": {
+        "patch_size": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "patch_size",
+          "fix_hint": "increase patch_size to at least 1",
+          "got": "0",
+          "message": "patch-embedding: patch_size must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "permute",
+      "config": {},
+      "diagnostics": [],
+      "node_id": "n"
+    },
+    {
+      "component_id": "pooling-layer",
+      "config": {
+        "poolingType": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['max', 'average', 'global_max', 'global_average']",
+          "field": "poolingType",
+          "fix_hint": "choose poolingType from ['max', 'average', 'global_max', 'global_average']",
+          "got": "'__invalid__'",
+          "message": "pooling-layer: poolingType must be one of ['max', 'average', 'global_max', 'global_average'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "positional-encoding",
+      "config": {
+        "encoding_type": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['sinusoidal', 'learned']",
+          "field": "encoding_type",
+          "fix_hint": "choose encoding_type from ['sinusoidal', 'learned']",
+          "got": "'__invalid__'",
+          "message": "positional-encoding: encoding_type must be one of ['sinusoidal', 'learned'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "quantization-aware",
+      "config": {
+        "bits": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['4', '8']",
+          "field": "bits",
+          "fix_hint": "choose bits from ['4', '8']",
+          "got": "'__invalid__'",
+          "message": "quantization-aware: bits must be one of ['4', '8'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "reshape",
+      "config": {},
+      "diagnostics": [],
+      "node_id": "n"
+    },
+    {
+      "component_id": "rms-normalization",
+      "config": {
+        "epsilon": -0.9999999999
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1e-10",
+          "field": "epsilon",
+          "fix_hint": "increase epsilon to at least 1e-10",
+          "got": "-0.9999999999",
+          "message": "rms-normalization: epsilon must be at least 1e-10, got -0.9999999999"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "rope",
+      "config": {
+        "dim": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "dim",
+          "fix_hint": "increase dim to at least 1",
+          "got": "0",
+          "message": "rope: dim must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "router-gating",
+      "config": {
+        "num_experts": 1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "2",
+          "field": "num_experts",
+          "fix_hint": "increase num_experts to at least 2",
+          "got": "1",
+          "message": "router-gating: num_experts must be at least 2, got 1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "stochastic-depth",
+      "config": {
+        "drop_prob": -1
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "0",
+          "field": "drop_prob",
+          "fix_hint": "increase drop_prob to at least 0",
+          "got": "-1",
+          "message": "stochastic-depth: drop_prob must be at least 0, got -1"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "swiglu-activation",
+      "config": {
+        "variant": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['swiglu', 'geglu']",
+          "field": "variant",
+          "fix_hint": "choose variant from ['swiglu', 'geglu']",
+          "got": "'__invalid__'",
+          "message": "swiglu-activation: variant must be one of ['swiglu', 'geglu'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "timestep-embedding",
+      "config": {
+        "time_dim": 15
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "16",
+          "field": "time_dim",
+          "fix_hint": "increase time_dim to at least 16",
+          "got": "15",
+          "message": "timestep-embedding: time_dim must be at least 16, got 15"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "transposed-convolution",
+      "config": {
+        "dimensions": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['2d', '3d']",
+          "field": "dimensions",
+          "fix_hint": "choose dimensions from ['2d', '3d']",
+          "got": "'__invalid__'",
+          "message": "transposed-convolution: dimensions must be one of ['2d', '3d'], got '__invalid__'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "filters",
+          "fix_hint": "provide a value for filters",
+          "got": null,
+          "message": "transposed-convolution: missing required parameter 'filters'"
+        },
+        {
+          "code": "PARAM_REQUIRED_MISSING",
+          "expected": null,
+          "field": "kernelSize",
+          "fix_hint": "provide a value for kernelSize",
+          "got": null,
+          "message": "transposed-convolution: missing required parameter 'kernelSize'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "unpooling-layer",
+      "config": {
+        "dimensions": "__invalid__"
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_ENUM_NOT_ALLOWED",
+          "expected": "['2d']",
+          "field": "dimensions",
+          "fix_hint": "choose dimensions from ['2d']",
+          "got": "'__invalid__'",
+          "message": "unpooling-layer: dimensions must be one of ['2d'], got '__invalid__'"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "upsample-layer",
+      "config": {
+        "scaleFactor": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "scaleFactor",
+          "fix_hint": "increase scaleFactor to at least 1",
+          "got": "0",
+          "message": "upsample-layer: scaleFactor must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    },
+    {
+      "component_id": "vae-reparameterization",
+      "config": {
+        "latent_dim": 0
+      },
+      "diagnostics": [
+        {
+          "code": "PARAM_NUMBER_BELOW_MIN",
+          "expected": "1",
+          "field": "latent_dim",
+          "fix_hint": "increase latent_dim to at least 1",
+          "got": "0",
+          "message": "vae-reparameterization: latent_dim must be at least 1, got 0"
+        }
+      ],
+      "node_id": "n"
+    }
+  ],
+  "version": 1
+}
