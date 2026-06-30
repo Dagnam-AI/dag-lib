@@ -40,7 +40,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "batch-normalization",
@@ -83,7 +84,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "classifier-free-guidance",
@@ -109,7 +111,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "cls-extract",
@@ -125,7 +128,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "cls-token",
@@ -141,7 +145,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "convolution-layer",
@@ -208,7 +213,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "cross-attention",
@@ -260,7 +266,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "dense-layer",
@@ -299,7 +306,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "depthwise-separable-conv",
@@ -377,7 +385,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "dropout",
@@ -417,7 +426,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "embedding-layer",
@@ -465,7 +475,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "ffn-block",
@@ -515,7 +526,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "flatten",
@@ -531,7 +543,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "group-normalization",
@@ -564,7 +577,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "gru-layer",
@@ -616,7 +630,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "instance-normalization",
@@ -644,7 +659,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "l1-regularization",
@@ -660,7 +676,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "l2-regularization",
@@ -676,7 +693,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "layer-normalization",
@@ -709,7 +727,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "lora-adapter",
@@ -739,7 +758,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "lstm-layer",
@@ -796,7 +816,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "mel-spectrogram",
@@ -832,7 +853,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "merge-node",
@@ -859,7 +881,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "mfcc",
@@ -895,7 +918,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "moe-layer",
@@ -965,7 +989,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "multi-head-attention",
@@ -1029,7 +1054,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "noise-scheduler",
@@ -1070,7 +1096,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "output-layer",
@@ -1340,7 +1367,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "patch-embedding",
@@ -1383,7 +1411,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "permute",
@@ -1394,7 +1423,8 @@
           "kind": "string",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "pooling-layer",
@@ -1450,7 +1480,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "positional-encoding",
@@ -1485,7 +1516,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "quantization-aware",
@@ -1509,7 +1541,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "reshape",
@@ -1520,7 +1553,8 @@
           "kind": "string",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "rms-normalization",
@@ -1543,7 +1577,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "rope",
@@ -1577,7 +1612,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "router-gating",
@@ -1612,7 +1648,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "stochastic-depth",
@@ -1628,7 +1665,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "swiglu-activation",
@@ -1643,7 +1681,8 @@
           "kind": "enum",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "timestep-embedding",
@@ -1677,7 +1716,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": false
     },
     {
       "component_id": "transposed-convolution",
@@ -1731,7 +1771,8 @@
           "kind": "padding",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "unpooling-layer",
@@ -1755,7 +1796,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "upsample-layer",
@@ -1797,7 +1839,8 @@
           "kind": "bool",
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     },
     {
       "component_id": "vae-reparameterization",
@@ -1813,7 +1856,8 @@
           },
           "required": false
         }
-      ]
+      ],
+      "requires_incoming_input": true
     }
   ],
   "diagnostics": [
@@ -1878,5 +1922,5 @@
       "template": "{component_id}: missing required parameter '{field}'"
     }
   ],
-  "version": 2
+  "version": 3
 }
