@@ -1376,8 +1376,8 @@
       "param_formula": {
         "kind": "conv",
         "roles": {
-          "filters": "embed_dim",
-          "kernel": "patch_size"
+          "filters": "embedDim",
+          "kernel": "patchSize"
         }
       },
       "params": [
