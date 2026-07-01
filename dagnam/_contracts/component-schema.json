@@ -97,7 +97,8 @@
           "numeric": {
             "integer": false,
             "max": 20.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 15.0
           },
           "required": false
         },
@@ -172,7 +173,8 @@
           "numeric": {
             "integer": true,
             "max": 2048.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 1024.0
           },
           "required": true
         },
@@ -202,6 +204,16 @@
           "required": false
         },
         {
+          "advisories": [
+            {
+              "code": "INFO_LINEAR_ACTIVATION",
+              "when_value": "none"
+            },
+            {
+              "code": "INFO_LINEAR_ACTIVATION",
+              "when_value": "linear"
+            }
+          ],
           "enum_values": [
             "none",
             "relu",
@@ -252,7 +264,8 @@
           "numeric": {
             "integer": true,
             "max": 32.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 16.0
           },
           "required": false
         },
@@ -262,7 +275,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         }
@@ -290,6 +304,12 @@
           "required": true
         },
         {
+          "advisories": [
+            {
+              "code": "INFO_LINEAR_ACTIVATION",
+              "when_value": "linear"
+            }
+          ],
           "enum_values": [
             "relu",
             "sigmoid",
@@ -332,7 +352,8 @@
           "numeric": {
             "integer": true,
             "max": 2048.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 1024.0
           },
           "required": true
         },
@@ -401,7 +422,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.7
           },
           "required": false
         },
@@ -522,7 +544,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         }
@@ -621,7 +644,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         },
@@ -655,6 +679,12 @@
           "required": false
         },
         {
+          "advisories": [
+            {
+              "code": "INFO_NO_NORMALIZATION_AFFINE",
+              "when_value": "false"
+            }
+          ],
           "key": "affine",
           "kind": "bool",
           "required": false
@@ -744,7 +774,8 @@
           "numeric": {
             "integer": true,
             "max": 256.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 128.0
           },
           "required": false
         },
@@ -807,7 +838,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         },
@@ -935,7 +967,8 @@
           "numeric": {
             "integer": true,
             "max": 64.0,
-            "min": 2.0
+            "min": 2.0,
+            "warn_max": 32.0
           },
           "required": false
         },
@@ -1010,7 +1043,8 @@
           "numeric": {
             "integer": true,
             "max": 32.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 16.0
           },
           "required": false
         },
@@ -1030,7 +1064,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         },
@@ -1163,7 +1198,9 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 1e-08
+            "min": 1e-08,
+            "warn_max": 0.1,
+            "warn_min": 1e-05
           },
           "required": false
         },
@@ -1173,7 +1210,8 @@
           "numeric": {
             "integer": true,
             "max": 1000.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 500.0
           },
           "required": false
         },
@@ -1215,7 +1253,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.1
           },
           "required": false
         },
@@ -1225,7 +1264,8 @@
           "numeric": {
             "integer": false,
             "max": 100.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 10.0
           },
           "required": false
         },
@@ -1311,6 +1351,12 @@
           "required": false
         },
         {
+          "advisories": [
+            {
+              "code": "INFO_MIXED_PRECISION_OFF",
+              "when_value": "no"
+            }
+          ],
           "enum_values": [
             "no",
             "fp16",
@@ -1332,6 +1378,12 @@
           "required": false
         },
         {
+          "advisories": [
+            {
+              "code": "INFO_NO_LR_SCHEDULE",
+              "when_value": "none"
+            }
+          ],
           "enum_values": [
             "none",
             "step",
@@ -1661,7 +1713,8 @@
           "numeric": {
             "integer": false,
             "max": 1.0,
-            "min": 0.0
+            "min": 0.0,
+            "warn_max": 0.5
           },
           "required": false
         }
@@ -1742,7 +1795,8 @@
           "numeric": {
             "integer": true,
             "max": 2048.0,
-            "min": 1.0
+            "min": 1.0,
+            "warn_max": 1024.0
           },
           "required": true
         },
@@ -1862,6 +1916,30 @@
   ],
   "diagnostics": [
     {
+      "code": "INFO_LINEAR_ACTIVATION",
+      "fix_hint": "add a nonlinear activation (relu/gelu/...) unless a linear projection is intended",
+      "severity": "info",
+      "template": "{component_id}: {field} = {got} applies no nonlinearity; consecutive linear layers without an activation collapse into a single linear map"
+    },
+    {
+      "code": "INFO_MIXED_PRECISION_OFF",
+      "fix_hint": "set {field} to bf16 (or fp16) on supported hardware",
+      "severity": "info",
+      "template": "{component_id}: {field} = {got} trains in full precision; bf16/fp16 cuts memory and speeds up training on supported accelerators"
+    },
+    {
+      "code": "INFO_NO_LR_SCHEDULE",
+      "fix_hint": "set {field} to cosine, step, or plateau to anneal the learning rate",
+      "severity": "info",
+      "template": "{component_id}: {field} = {got} keeps the learning rate constant; a schedule (cosine/step/plateau) often improves convergence"
+    },
+    {
+      "code": "INFO_NO_NORMALIZATION_AFFINE",
+      "fix_hint": "enable {field} to restore the per-feature scale/shift unless intended",
+      "severity": "info",
+      "template": "{component_id}: {field} = {got} disables the learnable affine transform; the layer normalizes but adds no trainable scale/shift"
+    },
+    {
       "code": "PARAM_ENUM_NOT_ALLOWED",
       "fix_hint": "choose {field} from {expected}",
       "severity": "error",
@@ -1874,10 +1952,22 @@
       "template": "{component_id}: {field} must be at most {expected}, got {got}"
     },
     {
+      "code": "PARAM_NUMBER_ABOVE_RECOMMENDED",
+      "fix_hint": "reduce {field} toward {expected} unless this is deliberate",
+      "severity": "warning",
+      "template": "{component_id}: {field} = {got} is unusually high (recommended <= {expected})"
+    },
+    {
       "code": "PARAM_NUMBER_BELOW_MIN",
       "fix_hint": "increase {field} to at least {expected}",
       "severity": "error",
       "template": "{component_id}: {field} must be at least {expected}, got {got}"
+    },
+    {
+      "code": "PARAM_NUMBER_BELOW_RECOMMENDED",
+      "fix_hint": "increase {field} toward {expected} unless this is deliberate",
+      "severity": "warning",
+      "template": "{component_id}: {field} = {got} is unusually low (recommended >= {expected})"
     },
     {
       "code": "PARAM_NUMBER_NOT_A_NUMBER",

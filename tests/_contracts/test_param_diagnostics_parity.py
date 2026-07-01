@@ -23,6 +23,7 @@ def test_sdk_reproduces_param_diagnostics_golden() -> None:
         got = [
             {
                 "code": e.code,
+                "severity": e.severity,
                 "field": e.field,
                 "expected": e.expected,
                 "got": e.got,
