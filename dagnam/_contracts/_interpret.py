@@ -157,7 +157,31 @@ def _check_padding(value: Any, key: str, cid: str, node_id: str) -> list[ParamEr
             ]
         if mode == "explicit":
             v = value.get("value")
-            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            # A per-axis list holds one symmetric pad per spatial axis; length must
+            # be 1..3 (broadcast .. Conv3D). Element validity mirrors the scalar
+            # check. A scalar is the length-1 broadcast case and stays valid.
+            if isinstance(v, list):
+                if len(v) < 1 or len(v) > 3:
+                    return [
+                        _diag(
+                            "PARAM_PADDING_BAD_AXIS_LENGTH",
+                            node_id,
+                            component_id=cid,
+                            field=key,
+                            got=_repr(v),
+                        )
+                    ]
+                if any(isinstance(e, bool) or not isinstance(e, int) or e < 0 for e in v):
+                    return [
+                        _diag(
+                            "PARAM_PADDING_BAD_EXPLICIT_VALUE",
+                            node_id,
+                            component_id=cid,
+                            field=key,
+                            got=_repr(v),
+                        )
+                    ]
+            elif isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 return [
                     _diag(
                         "PARAM_PADDING_BAD_EXPLICIT_VALUE",

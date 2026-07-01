@@ -1995,10 +1995,16 @@
       "template": "{component_id}: {field} must be a whole number, got {got}"
     },
     {
-      "code": "PARAM_PADDING_BAD_EXPLICIT_VALUE",
-      "fix_hint": "set {field}.value to a non-negative integer",
+      "code": "PARAM_PADDING_BAD_AXIS_LENGTH",
+      "fix_hint": "provide one pad per spatial axis, e.g. [padH, padW]",
       "severity": "error",
-      "template": "{component_id}: explicit {field} needs a non-negative integer value, got {got}"
+      "template": "{component_id}: explicit {field} list must hold 1 to 3 entries (one symmetric pad per spatial axis), got {got}"
+    },
+    {
+      "code": "PARAM_PADDING_BAD_EXPLICIT_VALUE",
+      "fix_hint": "set {field}.value to a non-negative integer or a list of non-negative integers",
+      "severity": "error",
+      "template": "{component_id}: explicit {field} needs a non-negative integer or a list of non-negative integers, got {got}"
     },
     {
       "code": "PARAM_PADDING_BAD_MODE",

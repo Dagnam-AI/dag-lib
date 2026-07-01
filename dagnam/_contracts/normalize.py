@@ -54,6 +54,16 @@ def _normalize_padding_value(value: Any) -> Any:
         return value
     if isinstance(value, int):
         return {"mode": "explicit", "value": value} if value >= 0 else value
+    # A bare tuple/list of pads (SDK/PyTorch dump of Conv2d(padding=(1, 2)))
+    # upgrades to per-axis explicit; an invalid list is passed through unchanged
+    # so the validator can report it.
+    if isinstance(value, (list, tuple)):
+        pads = list(value)
+        if 1 <= len(pads) <= 3 and all(
+            isinstance(e, int) and not isinstance(e, bool) and e >= 0 for e in pads
+        ):
+            return {"mode": "explicit", "value": pads}
+        return value
     if isinstance(value, str) and value in ("same", "valid"):
         return {"mode": value}
     return value

@@ -182,3 +182,30 @@ def test_idempotent() -> None:
         }
     )
     assert normalize_diagram_state(once) == once
+
+
+def test_bare_list_padding_upgrades_to_per_axis_explicit() -> None:
+    state = {
+        "nodes": [
+            {
+                "id": "c",
+                "data": {"componentId": "convolution-layer", "config": {"padding": [1, 2]}},
+            }
+        ]
+    }
+    out = _obj(normalize_diagram_state(cast(JsonValue, state)))
+    cfg = out["nodes"][0]["data"]["config"]
+    assert cfg["padding"] == {"mode": "explicit", "value": [1, 2]}
+
+
+def test_canonical_and_invalid_list_padding_pass_through() -> None:
+    from dagnam._contracts.normalize import _normalize_padding_value
+
+    # Already-canonical typed padding with a list value is left untouched.
+    assert _normalize_padding_value({"mode": "explicit", "value": [1, 2]}) == {
+        "mode": "explicit",
+        "value": [1, 2],
+    }
+    # An over-long / bad list passes through so the validator can report it.
+    assert _normalize_padding_value([1, 2, 3, 4]) == [1, 2, 3, 4]
+    assert _normalize_padding_value([1, -2]) == [1, -2]
