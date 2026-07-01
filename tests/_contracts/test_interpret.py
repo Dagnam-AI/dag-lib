@@ -106,6 +106,18 @@ def test_non_numeric_value_rejected() -> None:
     assert any("filters" in e.message and "must be a number" in e.message for e in errs)
 
 
+def test_number_below_recommended_emits_soft_warning() -> None:
+    # Hard bounds pass (>= 1e-8) but the value is below the recommended floor
+    # (warn_min 1e-5): a non-blocking advisory, not an error. Covers the SOFT
+    # below-recommended branch of _check_number.
+    [w] = validate_params("output-layer", {"learningRate": 1e-6}, "n2")
+    assert w.code == "PARAM_NUMBER_BELOW_RECOMMENDED"
+    assert w.severity == "warning"
+    assert w.field == "learningRate"
+    assert "unusually low" in w.message
+    assert "recommended >= 1e-05" in w.message
+
+
 def test_check_number_without_numeric_block_is_a_noop() -> None:
     # Defensive guard: a number-kind param always carries a numeric block in the
     # canonical schema, so validate_params never reaches this with nc is None;
