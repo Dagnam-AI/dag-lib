@@ -37076,6 +37076,316 @@
         ],
         "node_shapes": {}
       }
+    },
+    {
+      "name": "realfixture-11-conv-per-axis-padding",
+      "description": "Real e2e architecture 11-conv-per-axis-padding (ground-truth). Reconciled verdict + per-node golden shapes.",
+      "diagram": {
+        "nodes": [
+          {
+            "id": "pa-input",
+            "type": "inputLayer",
+            "position": {
+              "x": -600.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "Input",
+              "config": {
+                "fps": 30,
+                "shape": "32,32,3",
+                "width": 224,
+                "height": 224,
+                "channels": 3,
+                "duration": 4,
+                "inputType": "image",
+                "frame_count": 16,
+                "num_workers": 4,
+                "sample_rate": 16000,
+                "column_count": 10,
+                "feature_types": "numeric",
+                "normalization": "none",
+                "audio_channels": 1
+              },
+              "isValid": true,
+              "componentId": "input-layer",
+              "orientation": "horizontal",
+              "inferredShape": "[32, 32, 3]",
+              "tensorShape": {
+                "dims": [
+                  32,
+                  32,
+                  3
+                ],
+                "status": "known",
+                "layout": "HWC"
+              },
+              "shapeStatus": "known"
+            },
+            "width": null,
+            "height": null,
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "pa-conv",
+            "type": "layer",
+            "position": {
+              "x": -300.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "Conv Layer (copy)",
+              "config": {
+                "stride": 1,
+                "filters": 8,
+                "padding": {
+                  "mode": "explicit",
+                  "value": [
+                    1,
+                    2
+                  ]
+                },
+                "activation": "relu",
+                "dimensions": "2d",
+                "kernelSize": 3
+              },
+              "isValid": true,
+              "componentId": "convolution-layer",
+              "orientation": "horizontal",
+              "inferredShape": "[32, 34, 8]",
+              "validationErrors": [],
+              "tensorShape": {
+                "dims": [
+                  32,
+                  34,
+                  8
+                ],
+                "status": "known",
+                "layout": "HWC"
+              },
+              "shapeStatus": "known"
+            },
+            "width": null,
+            "height": null,
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "pa-pool",
+            "type": "pooling",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "Pooling",
+              "config": {
+                "stride": 1,
+                "padding": "valid",
+                "poolSize": 1,
+                "dimensions": "2d",
+                "poolingType": "global_average"
+              },
+              "isValid": true,
+              "componentId": "pooling-layer",
+              "orientation": "horizontal",
+              "inferredShape": "[8]",
+              "tensorShape": {
+                "dims": [
+                  8
+                ],
+                "status": "known",
+                "layout": "NC"
+              },
+              "shapeStatus": "known"
+            },
+            "width": null,
+            "height": null,
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "pa-dense",
+            "type": "layer",
+            "position": {
+              "x": 300.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "Dense Layer",
+              "config": {
+                "units": 10,
+                "useBias": true,
+                "activation": "linear",
+                "_savedActivation": "relu"
+              },
+              "isValid": true,
+              "componentId": "dense-layer",
+              "orientation": "horizontal",
+              "inferredShape": "[10]",
+              "tensorShape": {
+                "dims": [
+                  10
+                ],
+                "status": "known",
+                "layout": "NC"
+              },
+              "shapeStatus": "known"
+            },
+            "width": null,
+            "height": null,
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "pa-output",
+            "type": "outputLayer",
+            "position": {
+              "x": 600.0,
+              "y": 0.0
+            },
+            "data": {
+              "label": "Output",
+              "config": {
+                "device": "cuda",
+                "epochs": 50,
+                "metrics": [
+                  "accuracy"
+                ],
+                "num_gpus": 1,
+                "batchSize": 128,
+                "gpu_model": "auto",
+                "log_level": "INFO",
+                "num_nodes": 1,
+                "optimizer": "adamw",
+                "numClasses": 10,
+                "outputType": "classification",
+                "learningRate": 0.001,
+                "lossFunction": "CrossEntropyLoss",
+                "compile_model": false,
+                "log_frequency": 10,
+                "warmup_epochs": 10,
+                "postProcessing": "softmax",
+                "save_best_only": true,
+                "max_checkpoints": 5,
+                "mixed_precision": "no",
+                "training_library": "none",
+                "lr_scheduler_type": "cosine",
+                "gradient_clip_value": 0,
+                "save_optimizer_state": true,
+                "save_frequency_epochs": 1,
+                "gradient_checkpointing": false,
+                "regularization_enabled": false,
+                "early_stopping_patience": 10,
+                "gradient_accumulation_steps": 1
+              },
+              "isValid": true,
+              "componentId": "output-layer",
+              "orientation": "horizontal",
+              "inferredShape": "[10]",
+              "tensorShape": {
+                "dims": [
+                  10
+                ],
+                "status": "known",
+                "layout": "NC"
+              },
+              "shapeStatus": "known"
+            },
+            "width": null,
+            "height": null,
+            "selected": false,
+            "dragging": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "pa-input:output->pa-conv:input",
+            "source": "pa-input",
+            "target": "pa-conv",
+            "sourceHandle": "output",
+            "targetHandle": "input",
+            "type": "validated",
+            "data": {
+              "isValid": true
+            }
+          },
+          {
+            "id": "pa-conv:output->pa-pool:input",
+            "source": "pa-conv",
+            "target": "pa-pool",
+            "sourceHandle": "output",
+            "targetHandle": "input",
+            "type": "validated",
+            "data": {
+              "isValid": true
+            }
+          },
+          {
+            "id": "pa-pool:output->pa-dense:input",
+            "source": "pa-pool",
+            "target": "pa-dense",
+            "sourceHandle": "output",
+            "targetHandle": "input",
+            "type": "validated",
+            "data": {
+              "isValid": true
+            }
+          },
+          {
+            "id": "pa-dense:output->pa-output:input",
+            "source": "pa-dense",
+            "target": "pa-output",
+            "sourceHandle": "output",
+            "targetHandle": "input",
+            "type": "validated",
+            "data": {
+              "isValid": true
+            }
+          }
+        ]
+      },
+      "expected": {
+        "is_valid": true,
+        "normalized_codes": [],
+        "node_shapes": {
+          "pa-input": {
+            "dims": [
+              32,
+              32,
+              3
+            ],
+            "layout": "HWC"
+          },
+          "pa-conv": {
+            "dims": [
+              32,
+              34,
+              8
+            ],
+            "layout": "HWC"
+          },
+          "pa-pool": {
+            "dims": [
+              8
+            ],
+            "layout": "NC"
+          },
+          "pa-dense": {
+            "dims": [
+              10
+            ],
+            "layout": "NC"
+          },
+          "pa-output": {
+            "dims": [
+              10
+            ],
+            "layout": "NC"
+          }
+        }
+      }
     }
   ]
 }

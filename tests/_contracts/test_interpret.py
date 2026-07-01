@@ -180,3 +180,40 @@ def test_applies_when_is_case_insensitive() -> None:
 
 def test_unknown_component_yields_no_errors() -> None:
     assert validate_params("does-not-exist", {"whatever": 1}, "n5") == []
+
+
+# --- Per-axis (Stage 1) padding — backend parity ----------------------------
+
+
+def test_per_axis_list_padding_passes() -> None:
+    for value in ([1, 2], [1], [1, 2, 3]):
+        errs = validate_params(
+            "convolution-layer",
+            {"filters": 8, "kernelSize": 3, "padding": {"mode": "explicit", "value": value}},
+            "n1",
+        )
+        assert errs == [], value
+
+
+def test_per_axis_list_wrong_length_is_flagged() -> None:
+    [e] = validate_params(
+        "convolution-layer",
+        {"filters": 8, "kernelSize": 3, "padding": {"mode": "explicit", "value": [1, 2, 3, 4]}},
+        "n1",
+    )
+    assert e.code == "PARAM_PADDING_BAD_AXIS_LENGTH"
+    assert e.got == "[1, 2, 3, 4]"
+    assert e.message == (
+        "convolution-layer: explicit padding list must hold 1 to 3 entries "
+        "(one symmetric pad per spatial axis), got [1, 2, 3, 4]"
+    )
+
+
+def test_per_axis_list_bad_element_is_flagged() -> None:
+    [e] = validate_params(
+        "convolution-layer",
+        {"filters": 8, "kernelSize": 3, "padding": {"mode": "explicit", "value": [1, -2]}},
+        "n1",
+    )
+    assert e.code == "PARAM_PADDING_BAD_EXPLICIT_VALUE"
+    assert e.got == "[1, -2]"
