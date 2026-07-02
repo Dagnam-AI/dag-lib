@@ -487,6 +487,7 @@ def stream_events(
     resolved = resolve_client(client, api_key, api_url)
     dep_id = _stringify_id(deployment_id)
 
+    # open_deployment_stream mints a fresh stream token per call, so iter_with_reconnect re-mints on every reconnect.
     def _open(cursor: Optional[str]):
         return resolved.open_deployment_stream(dep_id, last_event_id=cursor)
 

@@ -123,32 +123,38 @@ def test_schema_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) ->
 
 
 def test_open_training_stream_with_cursor(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/job1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/job1/stream", text="")
     resp = client.open_training_stream("job1", last_event_id="c1")
     assert resp.request.headers["Last-Event-ID"] == "c1"
     assert resp.request.headers["Accept"] == "text/event-stream"
-    assert rmock.last_request.qs == {"api_key": ["k"]}
+    assert rmock.last_request.qs == {"token": ["stream-t"]}
+    assert "api_key" not in rmock.last_request.qs
 
 
 def test_open_training_stream_without_cursor(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/job1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/job1/stream", text="")
     resp = client.open_training_stream("job1")
     assert "Last-Event-ID" not in resp.request.headers
 
 
 def test_open_training_stream_401(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/job1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/job1/stream", status_code=401)
     with pytest.raises(AuthError):
         client.open_training_stream("job1")
 
 
 def test_open_training_stream_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/job1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/job1/stream", status_code=404)
     with pytest.raises(TrainingJobNotFoundError):
         client.open_training_stream("job1")
 
 
 def test_open_training_stream_500(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/job1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/job1/stream", status_code=500, text="boom")
     with pytest.raises(APIError):
         client.open_training_stream("job1")
@@ -160,6 +166,7 @@ def test_open_training_stream_connectionerror(
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Connection failed"):
         client.open_training_stream("job1")
@@ -169,6 +176,7 @@ def test_open_training_stream_timeout(client: DagnamClient, monkeypatch: PytestM
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.Timeout("slow")
 
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.open_training_stream("job1")

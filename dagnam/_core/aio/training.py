@@ -26,6 +26,7 @@ from dagnam._core.client.common import (
     raise_for_generic,
     response_json_object,
     response_json_value,
+    stream_query_params,
 )
 from dagnam._core.exceptions import APIError, TrainingJobNotFoundError
 from dagnam._core.sse import SSEEvent, parse_raw_event
@@ -102,6 +103,17 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 job_id=job_id,
             )
         )
+
+    async def mint_training_stream_token(self, job_id: str) -> str:
+        """Mint a short-lived stream-access token for one training job's SSE stream."""
+        body = ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/stream-access-token",
+                job_id=job_id,
+            )
+        )
+        return str(body["token"])
 
     async def get_training_job(self, job_id: str) -> JsonObject:
         """Fetch one training job. ``GET /api/v1/training/jobs/{id}``."""
@@ -217,8 +229,9 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         the caller via the shared :func:`parse_raw_event`. There is no
         auto-reconnect — reconnection is a future resource-layer concern.
 
-        ``GET /api/v1/streaming/training-jobs/{job_id}/stream?api_key=...``
+        ``GET /api/v1/streaming/training-jobs/{job_id}/stream?token=...``
         """
+        token = await self.mint_training_stream_token(job_id)
         job_path = quote_path_segment(job_id)
         url = f"{self.api_url}/api/v1/streaming/training-jobs/{job_path}/stream"
         headers = {"Accept": "text/event-stream"}
@@ -229,7 +242,7 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 self._client,
                 "GET",
                 url,
-                params={"api_key": self.api_key},
+                params=stream_query_params(token),
                 headers=headers,
                 timeout=self.timeout,
             ) as event_source:

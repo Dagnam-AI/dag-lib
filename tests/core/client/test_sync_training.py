@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import requests
@@ -113,6 +113,30 @@ def test_register_local_run_with_max_duration(client: DagnamClient, rmock: Reque
 def test_mint_run_token(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/training/jobs/j1/stream-token", json={"token": "t"})
     assert client.mint_run_token("j1") == {"token": "t"}
+
+
+def test_mint_training_stream_token_posts_with_bearer_header(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
+    assert client.mint_training_stream_token("j1") == "stream-t"
+    assert rmock.last_request.headers["Authorization"] == "Bearer k"
+
+
+def test_mint_training_stream_token_401_maps_auth_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", status_code=401)
+    with pytest.raises(AuthError):
+        client.mint_training_stream_token("j1")
+
+
+def test_mint_training_stream_token_404_maps_job_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/missing/stream-access-token", status_code=404)
+    with pytest.raises(TrainingJobNotFoundError):
+        client.mint_training_stream_token("missing")
 
 
 def test_list_training_jobs_passes_filters(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -233,6 +257,7 @@ def test_upload_training_events_404_raises_job_not_found(
 
 
 def test_open_training_stream_success(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
     rmock.get(
         f"{API}/api/v1/streaming/training-jobs/j1/stream",
         text="data: hi\n\n",
@@ -240,12 +265,17 @@ def test_open_training_stream_success(client: DagnamClient, rmock: RequestsMocke
     )
     resp = client.open_training_stream("j1")
     assert resp.status_code == 200
-    assert rmock.last_request.qs == {"api_key": ["k"]}
+    history = cast("Any", rmock).request_history
+    assert history[0].method == "POST"
+    assert history[1].method == "GET"
+    assert rmock.last_request.qs == {"token": ["stream-t"]}
+    assert "api_key" not in rmock.last_request.qs
 
 
 def test_open_training_stream_with_last_event_id(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/j1/stream", text="ok")
     client.open_training_stream("j1", last_event_id="evt-9")
     assert rmock.last_request.headers["Last-Event-ID"] == "evt-9"
@@ -257,6 +287,7 @@ def test_open_training_stream_connectionerror(
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Connection failed"):
         client.open_training_stream("j1")
@@ -266,24 +297,28 @@ def test_open_training_stream_timeout(client: DagnamClient, monkeypatch: PytestM
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.Timeout("slow")
 
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.open_training_stream("j1")
 
 
 def test_open_training_stream_401(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/j1/stream", status_code=401)
     with pytest.raises(AuthError):
         client.open_training_stream("j1")
 
 
 def test_open_training_stream_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/j1/stream", status_code=404)
     with pytest.raises(TrainingJobNotFoundError):
         client.open_training_stream("j1")
 
 
 def test_open_training_stream_500(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/streaming/training-jobs/j1/stream", status_code=500, text="boom")
     with pytest.raises(APIError):
         client.open_training_stream("j1")

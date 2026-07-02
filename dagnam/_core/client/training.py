@@ -17,6 +17,7 @@ from dagnam._core.client.common import (
     requests_query_params,
     response_json_object,
     response_json_value,
+    stream_query_params,
 )
 from dagnam._core.exceptions import AuthError, TrainingJobNotFoundError
 from dagnam._types import JsonObject, JsonValue, QueryParams, QueryValue
@@ -103,6 +104,17 @@ class TrainingClientMixin(BaseDagnamClient):
                 job_id=job_id,
             )
         )
+
+    def mint_training_stream_token(self, job_id: str) -> str:
+        """Mint a short-lived stream-access token for one training job's SSE stream."""
+        body = self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/stream-access-token",
+                job_id=job_id,
+            )
+        )
+        return str(body["token"])
 
     def get_training_job(self, job_id: str) -> JsonObject:
         """Fetch one training job. ``GET /api/v1/training/jobs/{id}``."""
@@ -223,14 +235,15 @@ class TrainingClientMixin(BaseDagnamClient):
     ) -> requests.Response:
         """Open an SSE stream for a training job.
 
-        GET /api/v1/streaming/training-jobs/{job_id}/stream?api_key=...
+        GET /api/v1/streaming/training-jobs/{job_id}/stream?token=...
 
         Returns the raw streaming Response; the caller is responsible for
         wrapping it (e.g. via sseclient-py) and closing it.
         """
+        token = self.mint_training_stream_token(job_id)
         job_path = quote_path_segment(job_id)
         url = f"{self.api_url}/api/v1/streaming/training-jobs/{job_path}/stream"
-        params = {"api_key": self.api_key}
+        params = stream_query_params(token)
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id
@@ -251,7 +264,7 @@ class TrainingClientMixin(BaseDagnamClient):
         if not is_success_response(resp):
             code = resp.status_code
             if code == 401:
-                raise AuthError("Authentication failed: invalid or expired API key")
+                raise AuthError("Authentication failed: stream token rejected")
             if code == 404:
                 raise TrainingJobNotFoundError(job_id)
             raise APIError(code, safe_error_body_from_response(resp))

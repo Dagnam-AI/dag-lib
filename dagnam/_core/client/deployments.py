@@ -9,7 +9,11 @@ from dagnam._core.client.base import (
     BaseDagnamClient,
     requests,
 )
-from dagnam._core.client.common import quote_path_segment, requests_query_params
+from dagnam._core.client.common import (
+    quote_path_segment,
+    requests_query_params,
+    stream_query_params,
+)
 from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, ensure_json_array
 
 
@@ -248,17 +252,27 @@ class DeploymentsClientMixin(BaseDagnamClient):
             deployment_id=deployment_id,
         )
 
+    def mint_deployment_stream_token(self, deployment_id: str) -> str:
+        """Mint a short-lived stream-access token for one deployment's SSE stream."""
+        body = self._deployment_object(
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/stream-access-token",
+            deployment_id=deployment_id,
+        )
+        return str(body["token"])
+
     def open_deployment_stream(
         self, deployment_id: str, last_event_id: str | None = None
     ) -> requests.Response:
-        """Open an SSE stream for a deployment (``?api_key=`` auth).
+        """Open an SSE stream for a deployment.
 
-        GET /api/v1/deployments/{id}/stream?api_key=...
+        GET /api/v1/deployments/{id}/stream?token=...
         """
         from dagnam._core.client.common import raise_for_deployment
 
+        token = self.mint_deployment_stream_token(deployment_id)
         url = f"{self.api_url}/api/v1/deployments/{quote_path_segment(deployment_id)}/stream"
-        params = {"api_key": self.api_key}
+        params = stream_query_params(token)
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id

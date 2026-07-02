@@ -81,6 +81,15 @@ def bearer_headers(api_key: str, *, extra: Mapping[str, str] | None = None) -> d
     return h
 
 
+def stream_query_params(token: str) -> dict[str, str]:
+    """Query params carrying a short-lived stream-access token for SSE reads.
+
+    Long-lived API keys stay in headers; only short-lived, resource-scoped stream
+    tokens appear in URL query strings.
+    """
+    return {"token": token}
+
+
 def requests_query_params(params: QueryParams | None) -> list[tuple[str, str]] | None:
     """Convert SDK query params to a requests-compatible repeated-key list."""
     if params is None:

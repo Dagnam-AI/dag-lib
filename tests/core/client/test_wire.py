@@ -108,10 +108,14 @@ def test_checkpoint_download_streams_and_returns_checksum(
     assert rmock.last_request.headers["Authorization"] == "Bearer k"
 
 
-def test_sse_uses_api_key_query_param_not_header(
+def test_sse_mints_stream_token_query_param_not_api_key(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    """Contract: SSE auth goes in ?api_key=..., NOT in a custom header."""
+    """Contract: SSE uses a minted short-lived ?token=, never ?api_key=."""
+    rmock.post(
+        f"{API}/api/v1/training/jobs/job_1/stream-access-token",
+        json={"token": "stream-t"},
+    )
     url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
     rmock.get(url, text="")
 
@@ -119,7 +123,8 @@ def test_sse_uses_api_key_query_param_not_header(
     resp.close()
 
     req = rmock.last_request
-    assert req.qs.get("api_key") == ["k"]
+    assert req.qs.get("token") == ["stream-t"]
+    assert "api_key" not in req.qs
     assert req.headers["Accept"] == "text/event-stream"
     assert req.headers["Last-Event-ID"] == "42"
     assert "X-API-Key" not in req.headers
@@ -179,6 +184,10 @@ def test_checkpoint_redirect_is_followed_to_presigned_url(
 
 
 def test_sse_redirect_is_rejected(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/training/jobs/job_1/stream-access-token",
+        json={"token": "stream-t"},
+    )
     url = f"{API}/api/v1/streaming/training-jobs/job_1/stream"
     rmock.get(url, status_code=302, headers={"Location": "https://evil.test/stream"})
 

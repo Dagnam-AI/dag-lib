@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+import time
+
+import pytest
+import requests_mock as rm_module
+
+from dagnam._core.client import DagnamClient
 from dagnam.resources import training as training_mod
+
+
+@pytest.fixture
+def rmock():
+    with rm_module.Mocker() as m:
+        yield m
 
 
 def test_stream_training_delegates_to_iter_with_reconnect(monkeypatch):
@@ -32,3 +44,39 @@ def test_stream_training_delegates_to_iter_with_reconnect(monkeypatch):
     assert "complete" in captured["terminal_events"]
     assert [event.event for event in events] == ["metric", "complete"]
     assert training_mod.TrainingEvent is not None
+
+
+def test_stream_training_remints_stream_token_on_reconnect(rmock, monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    client = DagnamClient("https://api.test", "k")
+    mint_route = rmock.post(
+        "https://api.test/api/v1/training/jobs/job_x/stream-access-token",
+        [
+            {"json": {"token": "stream-t-1"}},
+            {"json": {"token": "stream-t-2"}},
+        ],
+    )
+    stream_route = rmock.get(
+        "https://api.test/api/v1/streaming/training-jobs/job_x/stream",
+        [
+            {
+                "text": 'event: progress\ndata: {"loss": 1}\nid: evt-1\n\n',
+                "headers": {"Content-Type": "text/event-stream"},
+            },
+            {
+                "text": "event: stream_end\ndata: {}\nid: evt-2\n\n",
+                "headers": {"Content-Type": "text/event-stream"},
+            },
+        ],
+    )
+
+    events = list(training_mod.stream_training("job_x", max_reconnects=2, client=client))
+
+    assert [event.event for event in events] == ["progress", "stream_end"]
+    assert mint_route.call_count == 2
+    assert stream_route.call_count == 2
+    assert stream_route.request_history[0].qs == {"token": ["stream-t-1"]}
+    assert stream_route.request_history[1].qs == {"token": ["stream-t-2"]}
+    assert "api_key" not in stream_route.request_history[0].qs
+    assert "api_key" not in stream_route.request_history[1].qs

@@ -31,6 +31,9 @@ async def test_async_training_full_surface(
     mock.post("/api/v1/training/jobs/j1/stream-token").mock(
         return_value=httpx.Response(200, json={"token": "t"})
     )
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get("/api/v1/training/jobs/j1").mock(return_value=httpx.Response(200, json={"id": "j1"}))
     mock.get("/api/v1/training/jobs").mock(return_value=httpx.Response(200, json={"items": []}))
     mock.post("/api/v1/training/jobs/j1/cancel").mock(
@@ -62,6 +65,7 @@ async def test_async_training_full_surface(
         )
     )["id"] == "j1"
     assert (await client.mint_run_token("j1"))["token"] == "t"
+    assert await client.mint_training_stream_token("j1") == "stream-t"
     assert (await client.get_training_job("j1"))["id"] == "j1"
     assert "items" in await client.list_training_jobs(status="running")
     assert (await client.cancel_training_job("j1"))["message"] == "cancelled"
@@ -106,6 +110,24 @@ async def test_async_get_training_job_404(client: AsyncDagnamClient, mock: Respx
     mock.get("/api/v1/training/jobs/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(TrainingJobNotFoundError):
         await client.get_training_job("missing")
+
+
+async def test_async_mint_training_stream_token_401_maps_auth_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(return_value=httpx.Response(401))
+    with pytest.raises(AuthError):
+        await client.mint_training_stream_token("j1")
+
+
+async def test_async_mint_training_stream_token_404_maps_job_not_found(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/training/jobs/missing/stream-access-token").mock(
+        return_value=httpx.Response(404)
+    )
+    with pytest.raises(TrainingJobNotFoundError):
+        await client.mint_training_stream_token("missing")
 
 
 async def test_async_training_empty_body_raises_type_error(
@@ -201,6 +223,9 @@ _STREAM_URL = "/api/v1/streaming/training-jobs/j1/stream"
 async def test_async_stream_training_events(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     body = (
         ": heartbeat\n"
         "event: progress\n"
@@ -224,12 +249,16 @@ async def test_async_stream_training_events(
     assert events[1].data == "done"
     # last_event_id is forwarded as a Last-Event-ID request header.
     assert route.calls[0].request.headers["Last-Event-ID"] == "3"
-    assert route.calls[0].request.url.params["api_key"] == "k"
+    assert route.calls[0].request.url.params["token"] == "stream-t"
+    assert "api_key" not in route.calls[0].request.url.params
 
 
 async def test_async_stream_training_events_no_cursor(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     route = mock.get(_STREAM_URL).mock(
         return_value=httpx.Response(
             200, text="data: hi\n\n", headers={"Content-Type": "text/event-stream"}
@@ -241,6 +270,9 @@ async def test_async_stream_training_events_no_cursor(
 
 
 async def test_async_stream_training_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.post("/api/v1/training/jobs/missing/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get("/api/v1/streaming/training-jobs/missing/stream").mock(
         return_value=httpx.Response(404)
     )
@@ -251,6 +283,9 @@ async def test_async_stream_training_404(client: AsyncDagnamClient, mock: RespxM
 async def test_async_stream_training_auth_error(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get(_STREAM_URL).mock(return_value=httpx.Response(401))
     with pytest.raises(AuthError):
         _ = [e async for e in client.stream_training_events("j1")]
@@ -259,6 +294,9 @@ async def test_async_stream_training_auth_error(
 async def test_async_stream_training_server_error(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get(_STREAM_URL).mock(return_value=httpx.Response(500, text="boom"))
     with pytest.raises(APIError):
         _ = [e async for e in client.stream_training_events("j1")]
@@ -267,6 +305,9 @@ async def test_async_stream_training_server_error(
 async def test_async_stream_training_connect_error(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get(_STREAM_URL).mock(side_effect=httpx.ConnectError("down"))
     with pytest.raises(APIError, match="Connection failed"):
         _ = [e async for e in client.stream_training_events("j1")]
@@ -275,6 +316,9 @@ async def test_async_stream_training_connect_error(
 async def test_async_stream_training_timeout(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
     mock.get(_STREAM_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(APIError, match="Request timed out"):
         _ = [e async for e in client.stream_training_events("j1")]

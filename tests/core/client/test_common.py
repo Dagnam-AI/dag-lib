@@ -149,6 +149,10 @@ def test_bearer_headers_without_extras() -> None:
     assert common.bearer_headers("KEY") == {"Authorization": "Bearer KEY"}
 
 
+def test_stream_query_params_uses_short_lived_token_query() -> None:
+    assert common.stream_query_params("abc") == {"token": "abc"}
+
+
 def test_inference_headers_removed() -> None:
     assert not hasattr(common, "inference_headers")
 

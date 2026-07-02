@@ -34,6 +34,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING (SDK/SSE):** `open_training_stream`, `open_deployment_stream`, and
+  async `stream_training_events` now mint short-lived, resource-scoped
+  stream-access tokens per (re)connect and send streams `?token=...`; the SDK no
+  longer sends long-lived `?api_key=` on SSE URLs. Direct consumers of the SSE
+  endpoints must switch to `POST .../stream-access-token` before opening a
+  stream, and the backend + SDK must deploy together.
 - **BREAKING (CLI):** `dagnam codegen download --output PATH` is renamed to
   `--dest PATH` (no alias). `--output` now uniformly means "write the JSON result
   to a file"; `--dest` is the downloaded-artifact destination (a file path streams

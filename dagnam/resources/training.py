@@ -36,6 +36,7 @@ def stream_training(
     """Yield training events for ``job_id`` until the job terminates."""
     resolved = resolve_client(client, api_key, api_url)
 
+    # open_training_stream mints a fresh stream token per call, so iter_with_reconnect re-mints on every reconnect.
     def _open(cursor: Optional[str]):
         return resolved.open_training_stream(job_id, last_event_id=cursor)
 

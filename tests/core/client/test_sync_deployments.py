@@ -10,6 +10,7 @@ import requests
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
     APIError,
+    AuthError,
     DeploymentNotFoundError,
 )
 
@@ -56,6 +57,30 @@ def test_get_deployment_404(client: DagnamClient, rmock: RequestsMocker) -> None
     rmock.get(f"{API}/api/v1/deployments/missing", status_code=404)
     with pytest.raises(DeploymentNotFoundError):
         client.get_deployment("missing")
+
+
+def test_mint_deployment_stream_token_posts_with_bearer_header(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/stream-access-token", json={"token": "stream-t"})
+    assert client.mint_deployment_stream_token("dep1") == "stream-t"
+    assert rmock.last_request.headers["Authorization"] == "Bearer k"
+
+
+def test_mint_deployment_stream_token_401_maps_auth_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/stream-access-token", status_code=401)
+    with pytest.raises(AuthError):
+        client.mint_deployment_stream_token("dep1")
+
+
+def test_mint_deployment_stream_token_404_maps_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/missing/stream-access-token", status_code=404)
+    with pytest.raises(DeploymentNotFoundError):
+        client.mint_deployment_stream_token("missing")
 
 
 def test_create_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -131,16 +156,19 @@ def test_get_deployment_health_full(client: DagnamClient, rmock: RequestsMocker)
 
 
 def test_open_deployment_stream_sets_headers(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/deployments/dep1/stream", text="data: x\n\n")
     resp = client.open_deployment_stream("dep1", last_event_id="cursor")
     assert resp.status_code == 200
     req = rmock.last_request
     assert req.headers["Accept"] == "text/event-stream"
     assert req.headers["Last-Event-ID"] == "cursor"
-    assert req.qs == {"api_key": ["k"]}
+    assert req.qs == {"token": ["stream-t"]}
+    assert "api_key" not in req.qs
 
 
 def test_open_deployment_stream_without_cursor(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/stream-access-token", json={"token": "stream-t"})
     rmock.get(f"{API}/api/v1/deployments/dep1/stream", text="")
     resp = client.open_deployment_stream("dep1")
     assert "Last-Event-ID" not in resp.request.headers
@@ -152,6 +180,7 @@ def test_open_deployment_stream_connectionerror(
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
+    monkeypatch.setattr(client, "mint_deployment_stream_token", lambda _deployment_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Connection failed"):
         client.open_deployment_stream("dep1")
@@ -163,6 +192,7 @@ def test_open_deployment_stream_timeout(
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.Timeout("slow")
 
+    monkeypatch.setattr(client, "mint_deployment_stream_token", lambda _deployment_id: "stream-t")
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.open_deployment_stream("dep1")

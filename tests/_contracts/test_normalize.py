@@ -193,7 +193,7 @@ def test_bare_list_padding_upgrades_to_per_axis_explicit() -> None:
             }
         ]
     }
-    out = _obj(normalize_diagram_state(cast(JsonValue, state)))
+    out = _obj(normalize_diagram_state(cast("JsonValue", state)))
     cfg = out["nodes"][0]["data"]["config"]
     assert cfg["padding"] == {"mode": "explicit", "value": [1, 2]}
 
