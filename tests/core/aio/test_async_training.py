@@ -261,12 +261,49 @@ async def test_async_stream_training_events_no_cursor(
     )
     route = mock.get(_STREAM_URL).mock(
         return_value=httpx.Response(
-            200, text="data: hi\n\n", headers={"Content-Type": "text/event-stream"}
+            200,
+            text="data: hi\n\nevent: stream_end\ndata: bye\n\n",
+            headers={"Content-Type": "text/event-stream"},
         )
     )
     events = [e async for e in client.stream_training_events("j1")]
     assert events[0].data == "hi"
     assert "Last-Event-ID" not in route.calls[0].request.headers
+
+
+async def test_async_stream_training_reconnects_when_stream_ends_without_terminal(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    # A stream that ends WITHOUT a terminal event is a silent drop, not
+    # completion: the client must reconnect (re-minting the token, forwarding
+    # the last event id) rather than return as if the job finished.
+    mock.post("/api/v1/training/jobs/j1/stream-access-token").mock(
+        side_effect=[
+            httpx.Response(200, json={"token": "tok-1"}),
+            httpx.Response(200, json={"token": "tok-2"}),
+        ]
+    )
+    route = mock.get(_STREAM_URL).mock(
+        side_effect=[
+            # First connection drops after one event, no terminal marker.
+            httpx.Response(
+                200,
+                text="event: progress\ndata: {}\nid: 9\n\n",
+                headers={"Content-Type": "text/event-stream"},
+            ),
+            # Reconnect resumes and reaches a terminal event.
+            httpx.Response(
+                200,
+                text="event: complete\ndata: done\n\n",
+                headers={"Content-Type": "text/event-stream"},
+            ),
+        ]
+    )
+    events = [e async for e in client.stream_training_events("j1")]
+    assert [e.event for e in events] == ["progress", "complete"]
+    assert len(route.calls) == 2  # reconnected
+    assert route.calls[1].request.headers["Last-Event-ID"] == "9"  # cursor preserved
+    assert route.calls[1].request.url.params["token"] == "tok-2"  # fresh token
 
 
 async def test_async_stream_training_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:

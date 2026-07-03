@@ -5,7 +5,8 @@ Used by ``dagnam.training.stream_training`` and ``dagnam.deployments.stream_logs
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from importlib import import_module
 import json
@@ -153,3 +154,56 @@ def iter_with_reconnect(
         delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
         if delay:
             time.sleep(delay + random.uniform(0, delay * 0.1))
+
+
+async def aiter_with_reconnect(
+    open_stream: Callable[[Optional[str]], AsyncIterator[SSEEvent]],
+    *,
+    terminal_events: frozenset[str],
+    transient_errors: tuple[type[BaseException], ...] = (ConnectionError, OSError),
+    include_heartbeats: bool = False,
+    max_reconnects: int = DEFAULT_MAX_RECONNECTS,
+    backoff_base: float = DEFAULT_BACKOFF_BASE,
+    resource_label: str = "SSE stream",
+    last_event_id: Optional[str] = None,
+) -> AsyncIterator[SSEEvent]:
+    """Async counterpart of :func:`iter_with_reconnect`.
+
+    ``open_stream(cursor)`` returns an async iterator over one connection's
+    events. A connect-time failure it raises (a 404/auth error, or an already
+    translated ``APIError``) surfaces immediately; a mid-stream drop — one of
+    ``transient_errors``, or the iterator simply ending without a terminal
+    event — triggers a reconnect. Each reconnect re-invokes ``open_stream``,
+    re-minting the short-lived stream token and preserving the Last-Event-ID
+    cursor, so a stream outlives its token's TTL. After ``max_reconnects``
+    consecutive no-progress attempts a :class:`StreamError` is raised, so a
+    dropped stream is never silently mistaken for completion.
+    """
+    attempts = 0
+    cursor = last_event_id
+
+    while True:
+        made_progress = False
+        try:
+            async for ev in open_stream(cursor):
+                if ev.id:
+                    cursor = ev.id
+                made_progress = True
+                attempts = 0
+                if ev.event == "heartbeat" and not include_heartbeats:
+                    continue
+                yield ev
+                if ev.event in terminal_events:
+                    return
+        except transient_errors:
+            pass
+
+        if not made_progress:
+            attempts += 1
+            if attempts > max_reconnects:
+                raise StreamError(
+                    f"{resource_label} dropped after {max_reconnects} reconnect attempts"
+                )
+        delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
+        if delay:
+            await asyncio.sleep(delay + random.uniform(0, delay * 0.1))

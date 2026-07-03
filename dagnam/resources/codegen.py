@@ -18,6 +18,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject
+from dagnam.data.loaders.media import safe_extract_zip
 
 
 def generate(
@@ -129,7 +130,10 @@ def download(
                 if not isinstance(downloaded, Path):
                     raise TypeError("Expected a download path for the temporary archive")
                 with zipfile.ZipFile(downloaded) as zf:
-                    zf.extractall(dest)
+                    # Hardened extraction: a tampered archive with traversal /
+                    # absolute / symlink members is refused, never written
+                    # outside dest (zip-slip).
+                    safe_extract_zip(zf, dest)
             finally:
                 archive_path.unlink(missing_ok=True)
             return dest

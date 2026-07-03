@@ -309,7 +309,7 @@ def ensure_extracted(data_dir: Path) -> Path:
 
     if zipfile.is_zipfile(archive_path):
         with zipfile.ZipFile(archive_path, "r") as zf:
-            _safe_extract_zip(zf, extracted_dir)
+            safe_extract_zip(zf, extracted_dir)
     elif tarfile.is_tarfile(archive_path):
         with tarfile.open(archive_path, "r:*") as tf:
             _safe_extract_tar(tf, extracted_dir)
@@ -342,7 +342,7 @@ def _validate_archive_target(destination: Path, member_name: str) -> None:
         raise ValueError(f"Unsafe archive member path: {member_name}")
 
 
-def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
+def safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
     members = archive.infolist()
     _validate_archive_size((member.file_size for member in members), len(members))
     for member in members:

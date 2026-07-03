@@ -173,10 +173,8 @@ def test_projects_create_with_description() -> None:
 
 
 def test_projects_import_dag_with_description_tags_commit() -> None:
-    # NOTE: resources.projects calls client.import_project_dag(), which is not
-    # part of the strict DagnamClient interface — use a loose mock.
-    client = MagicMock()
-    client.import_project_dag.return_value = {"id": "p1"}
+    client = MagicMock(spec=DagnamClient)
+    client.import_dag.return_value = {"id": "p1"}
     projects.import_dag(
         {"ir": "..."},
         "title",
@@ -185,25 +183,25 @@ def test_projects_import_dag_with_description_tags_commit() -> None:
         tags=["t1"],
         commit_message="msg",
     )
-    payload = client.import_project_dag.call_args[0][0]
+    payload = client.import_dag.call_args[0][0]
     assert payload["description"] == "d"
     assert payload["tags"] == ["t1"]
     assert payload["commit_message"] == "msg"
 
 
 def test_projects_import_dag_existing_with_commit() -> None:
-    client = MagicMock()
-    client.import_project_dag_existing.return_value = {"id": "p1"}
+    client = MagicMock(spec=DagnamClient)
+    client.import_dag_existing.return_value = {"id": "p1"}
     projects.import_dag_existing("p1", {"ir": "..."}, client=client, commit_message="msg")
-    payload = client.import_project_dag_existing.call_args[0][1]
+    payload = client.import_dag_existing.call_args[0][1]
     assert payload["commit_message"] == "msg"
 
 
 def test_projects_save_architecture_with_commit() -> None:
-    client = MagicMock()
-    client.save_project_architecture.return_value = {"version_id": "v1"}
+    client = MagicMock(spec=DagnamClient)
+    client.save_architecture.return_value = {"version_id": "v1"}
     projects.save_architecture("p1", {"d": 1}, {"a": 1}, client=client, commit_message="m")
-    payload = client.save_project_architecture.call_args[0][1]
+    payload = client.save_architecture.call_args[0][1]
     assert payload["commit_message"] == "m"
 
 

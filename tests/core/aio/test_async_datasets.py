@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
+    APIError,
     DatasetNotFoundError,
 )
 
@@ -72,6 +73,60 @@ async def test_async_download_dataset(
     )
     out = await client.download_dataset("ds1", tmp_path)
     assert out.read_bytes() == b"data"
+
+
+async def test_async_download_dataset_streams_to_disk(
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The download must stream via httpx (client.stream) and write chunks to
+    # disk, never buffer the entire body into memory (an OOM risk for large
+    # datasets).
+    mock.get("/api/v1/datasets/ds1/download").mock(
+        return_value=httpx.Response(
+            200,
+            content=b"streamed-bytes",
+            headers={"content-disposition": 'attachment; filename="ds.bin"'},
+        )
+    )
+    stream_used = {"called": False}
+    real_stream = client._client.stream
+
+    def spy_stream(*args: Any, **kwargs: Any) -> Any:
+        stream_used["called"] = True
+        return real_stream(*args, **kwargs)
+
+    monkeypatch.setattr(client._client, "stream", spy_stream)
+    out = await client.download_dataset("ds1", tmp_path)
+
+    assert out.read_bytes() == b"streamed-bytes"
+    assert stream_used["called"] is True
+
+
+async def test_async_download_dataset_raises_on_error_status(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    mock.get("/api/v1/datasets/missing/download").mock(return_value=httpx.Response(404))
+    with pytest.raises(DatasetNotFoundError):
+        await client.download_dataset("missing", tmp_path)
+
+
+async def test_async_download_dataset_connect_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    mock.get("/api/v1/datasets/ds1/download").mock(side_effect=httpx.ConnectError("down"))
+    with pytest.raises(APIError, match="Connection failed"):
+        await client.download_dataset("ds1", tmp_path)
+
+
+async def test_async_download_dataset_timeout(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    mock.get("/api/v1/datasets/ds1/download").mock(side_effect=httpx.ConnectTimeout("slow"))
+    with pytest.raises(APIError, match="Request timed out"):
+        await client.download_dataset("ds1", tmp_path)
 
 
 async def test_async_download_system_dataset(

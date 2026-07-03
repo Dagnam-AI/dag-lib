@@ -7,7 +7,7 @@ streams, deployments, projects, code generation, and the Model Hub from scripts,
 notebooks, services, and generated training code.
 
 This is the first public PyPI release line. The API is usable today and will
-remain backwards-compatible within the `0.1.x` line where practical, but the SDK
+remain backwards-compatible within the `0.6.x` line where practical, but the SDK
 is still marked alpha while the platform API continues to mature.
 
 ## Installation
@@ -422,11 +422,11 @@ Environment variables:
 
 | SDK version | Backend version | Notes |
 | --- | --- | --- |
-| `0.5.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
+| `0.6.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
 
 The SDK follows semantic versioning. Public APIs may still expand quickly while
 the package is alpha, but patch releases should avoid breaking documented
-`0.5.x` behavior.
+`0.6.x` behavior.
 
 ## Development
 

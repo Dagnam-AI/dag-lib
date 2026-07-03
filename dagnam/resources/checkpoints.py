@@ -96,6 +96,19 @@ def download_checkpoint(
             raise ChecksumError(
                 f"Checkpoint checksum mismatch: expected {expected_sha}, got {actual}"
             )
+    else:
+        # No server checksum (e.g. an S3 presigned redirect, which cannot carry
+        # the X-Checksum-SHA256 header). The file is accepted so S3-backed
+        # deployments keep working, but the unverified state is surfaced LOUDLY
+        # — never silently — because a checkpoint is loaded downstream via
+        # torch.load and a swapped file is a code-execution vector.
+        logger.warning(
+            "Checkpoint '%s' for job '%s' was downloaded WITHOUT a server "
+            "checksum; integrity could not be verified. Only load checkpoints "
+            "from sources you trust.",
+            checkpoint_id,
+            job_id,
+        )
 
     # Mark just-downloaded entry as most-recently-used BEFORE eviction so it
     # cannot evict itself when the budget is tight.

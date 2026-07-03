@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import requests
@@ -13,9 +14,15 @@ from dagnam._core import sse as sse_mod
 from dagnam._core.exceptions import StreamError
 from dagnam._core.sse import (
     SSEEvent,
+    aiter_with_reconnect,
     iter_with_reconnect,
     parse_raw_event,
 )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class _FakeRawEvent:
@@ -258,3 +265,62 @@ def test_iter_with_reconnect_gives_up_after_max_attempts(monkeypatch: PytestMonk
                 backoff_base=0.01,
             )
         )
+
+
+class TestAiterWithReconnect:
+    """The async reconnect loop mirrors iter_with_reconnect."""
+
+    @pytest.mark.anyio
+    async def test_skips_heartbeats_and_stops_at_terminal(self) -> None:
+        async def open_stream(_cursor: str | None) -> AsyncIterator[SSEEvent]:
+            yield SSEEvent(event="heartbeat", data={})
+            yield SSEEvent(event="progress", data={}, id="2")
+            yield SSEEvent(event="complete", data="done")
+            yield SSEEvent(event="progress", data={})  # pragma: no cover - after terminal
+
+        events = [
+            e
+            async for e in aiter_with_reconnect(
+                open_stream, terminal_events=frozenset({"complete"})
+            )
+        ]
+        assert [e.event for e in events] == ["progress", "complete"]
+
+    @pytest.mark.anyio
+    async def test_recovers_from_transient_error(self, monkeypatch: PytestMonkeyPatch) -> None:
+        monkeypatch.setattr(sse_mod.asyncio, "sleep", AsyncMock())
+        scripts: list[object] = [RuntimeError("drop"), [SSEEvent(event="complete", data="x")]]
+
+        async def open_stream(_cursor: str | None) -> AsyncIterator[SSEEvent]:
+            step = scripts.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            for ev in step:  # type: ignore[union-attr]
+                yield ev
+
+        events = [
+            e
+            async for e in aiter_with_reconnect(
+                open_stream,
+                terminal_events=frozenset({"complete"}),
+                transient_errors=(RuntimeError,),
+            )
+        ]
+        assert [e.event for e in events] == ["complete"]
+
+    @pytest.mark.anyio
+    async def test_gives_up_after_max_reconnects(self) -> None:
+        async def open_stream(_cursor: str | None) -> AsyncIterator[SSEEvent]:
+            return
+            yield  # pragma: no cover - unreachable sentinel making this an async generator
+
+        with pytest.raises(StreamError, match="dropped after 2 reconnect"):
+            _ = [
+                e
+                async for e in aiter_with_reconnect(
+                    open_stream,
+                    terminal_events=frozenset({"x"}),
+                    max_reconnects=2,
+                    backoff_base=0,
+                )
+            ]

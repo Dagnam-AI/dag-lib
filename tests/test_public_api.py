@@ -12,14 +12,44 @@ from __future__ import annotations
 import importlib
 
 import dagnam
+from dagnam._core import exceptions as _core_exceptions
+
+# Every user-catchable exception, re-exported at the top level so callers can
+# write ``except dagnam.APIError`` without reaching into the private
+# ``dagnam._core.exceptions`` path.
+EXCEPTION_EXPORTS = [
+    "APIError",
+    "ArchitectureValidationError",
+    "ArchitectureVersionNotFoundError",
+    "AuthError",
+    "CheckpointError",
+    "CheckpointNotFoundError",
+    "ChecksumError",
+    "CodegenError",
+    "CodegenValidationError",
+    "DagnamError",
+    "DatasetNotFoundError",
+    "DeploymentNotFoundError",
+    "DeploymentStateError",
+    "DeploymentValidationError",
+    "HubError",
+    "HubModelNotFoundError",
+    "LROFailedError",
+    "LROTimeoutError",
+    "ProjectNotFoundError",
+    "QuotaExceededError",
+    "StreamError",
+    "TaskNotFoundError",
+    "TrainingJobNotFoundError",
+    "UploadError",
+]
 
 # The exported public surface (mirrors ``dagnam.__all__``). Kept sorted so a
 # diff to this list is an obvious, reviewable change to the public contract.
 EXPECTED_ALL = sorted(
     [
-        "ArchitectureValidationError",
+        *EXCEPTION_EXPORTS,
         "AsyncDagnamClient",
-        "ChecksumError",
         "DagnamClient",
         "DagnamDataset",
         "LongRunningOperation",
@@ -89,6 +119,7 @@ DOCUMENTED_PATHS = [
     "dagnam._core.client",
     "dagnam._core.config",
     "dagnam._core.exceptions",
+    "dagnam.exceptions",
     "dagnam._core.lro",
     "dagnam.data.load",
 ]
@@ -113,3 +144,19 @@ def test_lazy_exports_resolve() -> None:
 
     assert DagnamDataset is not None
     assert load_dataset is not None
+
+
+def test_exception_hierarchy_is_exported_at_top_level() -> None:
+    # Every catchable exception is reachable as ``dagnam.<Name>`` and is the
+    # SAME object as the canonical one in the private module.
+    for name in EXCEPTION_EXPORTS:
+        exported = getattr(dagnam, name)
+        assert exported is getattr(_core_exceptions, name)
+        assert issubclass(exported, dagnam.DagnamError)
+
+
+def test_exceptions_submodule_reexports_full_hierarchy() -> None:
+    exceptions_module = importlib.import_module("dagnam.exceptions")
+    for name in EXCEPTION_EXPORTS:
+        assert getattr(exceptions_module, name) is getattr(_core_exceptions, name)
+    assert sorted(exceptions_module.__all__) == sorted(EXCEPTION_EXPORTS)

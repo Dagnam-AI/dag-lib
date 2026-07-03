@@ -7,8 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-02
+
 ### Added
 
+- Full public **exception hierarchy** re-exported from the top-level package and
+  a new `dagnam.exceptions` module, so callers can write `except dagnam.APIError`
+  (or `except dagnam.DagnamError`) without reaching into the private
+  `dagnam._core.exceptions` path.
+- `numpy` and `Pillow` are now declared **base dependencies** (they are imported
+  eagerly by the dataset layer / image loaders), so a plain `pip install dagnam`
+  can load datasets instead of failing with a bare `ModuleNotFoundError`.
+- `torchvision` is now part of the `pytorch` and `all` extras — the PyTorch
+  image-folder loaders require it, and the README already promised it.
 - Cross-platform **Agent Skill** for AI coding agents (Claude Code and Codex),
   shipped as package data and activated with `dagnam agent install`
   (auto-detect & prompt; `--claude` / `--codex` / `--all` / `--yes` / `--symlink`
@@ -53,6 +64,37 @@ and this project follows [Semantic Versioning](https://semver.org/).
   to disk via `asyncio.to_thread` so they no longer block the event loop, and
   `dagnam.data.loaders` submodules are imported lazily via `__getattr__`
   (PEP 562). No public API or runtime behavior changed.
+- Widened `requires-python` to `>=3.12` (no upper cap) and declared Python 3.13
+  support; corrected dependency floors so extras are actually installable
+  (`tensorflow>=2.16`, the first Python-3.12-capable TF; `torch>=2.4` for the
+  `pytorch` extra).
+- Label encoding is unified across `to_arrays()` and every framework loader via
+  one canonical string-identity mapping, so an integer label column no longer
+  crashes `to_pytorch_loader()` / `to_tensorflow_dataset()` / `to_flax_dataset()`
+  with a bare `KeyError`.
+
+### Fixed
+
+- The PyTorch native-numpy validation split no longer leaks the **entire** train
+  set into "val" when the validation ratio rounds down to zero.
+- Cache size/info scans skip a file removed mid-scan (concurrent eviction)
+  instead of aborting with `FileNotFoundError`.
+- A corrupt (non-integer) `max_cache_size` config value no longer crashes a
+  freshly completed download; it falls back to the default eviction budget.
+- `to_arrays()` builds an object array for ragged (variable-length) features
+  instead of raising `ValueError` under numpy ≥ 1.24.
+
+### Security
+
+- System-dataset `.npz` decoding now uses `allow_pickle=False` and refuses
+  pickled object arrays — closing an arbitrary-code-execution vector where a
+  crafted dataset could run code inside `numpy.load`.
+- Generated-code ZIP extraction is hardened against **zip-slip**: archive
+  members with path-traversal, absolute, or symlink paths are rejected instead
+  of being written outside the destination directory.
+- Checkpoint downloads that arrive without a server checksum (e.g. an S3
+  presigned redirect) are now flagged with a loud warning instead of being
+  silently accepted unverified.
 
 ## [0.5.0] - 2026-06-03
 

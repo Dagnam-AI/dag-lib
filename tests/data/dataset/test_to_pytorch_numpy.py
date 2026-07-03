@@ -134,6 +134,19 @@ def test_numpy_loader_val_split(numpy_native_ds: DagnamDataset) -> None:
     assert len(batches) >= 1
 
 
+def test_numpy_loader_val_split_empty_when_ratio_rounds_to_zero(
+    numpy_native_ds: DagnamDataset,
+) -> None:
+    # 10 train samples, val_ratio 0.05 -> n_val == int(0.5) == 0. The val split
+    # MUST be empty, never the entire train set (x_train[-0:] == whole array),
+    # which would fully overlap train and val. TF/Flax already guard this.
+    loader = numpy_native_ds.to_pytorch_loader(
+        split="val", batch_size=2, num_workers=0, val_ratio=0.05
+    )
+    total = sum(len(x) for x, _ in loader)
+    assert total == 0
+
+
 def test_numpy_loader_train_split(numpy_native_ds: DagnamDataset) -> None:
     loader = numpy_native_ds.to_pytorch_loader(
         split="train", batch_size=2, num_workers=0, val_ratio=0.2, shuffle=False

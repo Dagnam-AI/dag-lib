@@ -9,6 +9,7 @@ import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
+    APIError,
     DeploymentNotFoundError,
 )
 
@@ -69,6 +70,105 @@ async def test_async_get_deployment_404(client: AsyncDagnamClient, mock: RespxMo
     mock.get("/api/v1/deployments/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         await client.get_deployment("missing")
+
+
+# ---------------------------------------------------------------- deployment SSE stream
+
+_DEP_STREAM_URL = "/api/v1/streaming/deployments/dep1/stream"
+
+
+async def test_async_mint_deployment_stream_token(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments/dep1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "dep-stream-t"})
+    )
+    assert await client.mint_deployment_stream_token("dep1") == "dep-stream-t"
+    assert route.calls[0].request.headers["Authorization"] == "Bearer k"
+
+
+async def test_async_stream_deployment_events(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/dep1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "stream-t"})
+    )
+    route = mock.get(_DEP_STREAM_URL).mock(
+        return_value=httpx.Response(
+            200,
+            text='event: deployment_status\ndata: {"status":"running"}\n\nevent: deployment_ready\ndata: ok\n\n',
+            headers={"Content-Type": "text/event-stream"},
+        )
+    )
+    events = [e async for e in client.stream_deployment_events("dep1")]
+    assert [e.event for e in events] == ["deployment_status", "deployment_ready"]
+    assert route.calls[0].request.url.params["token"] == "stream-t"
+    assert "api_key" not in route.calls[0].request.url.params
+
+
+async def test_async_stream_deployment_reconnects_without_terminal(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    # A stream that ends without a terminal event must reconnect (re-mint token,
+    # forward the cursor), not stop as if the deployment finished.
+    mock.post("/api/v1/deployments/dep1/stream-access-token").mock(
+        side_effect=[
+            httpx.Response(200, json={"token": "tok-1"}),
+            httpx.Response(200, json={"token": "tok-2"}),
+        ]
+    )
+    route = mock.get(_DEP_STREAM_URL).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                text="event: log\ndata: line\nid: 4\n\n",
+                headers={"Content-Type": "text/event-stream"},
+            ),
+            httpx.Response(
+                200,
+                text="event: deployment_failed\ndata: boom\n\n",
+                headers={"Content-Type": "text/event-stream"},
+            ),
+        ]
+    )
+    events = [e async for e in client.stream_deployment_events("dep1")]
+    assert [e.event for e in events] == ["log", "deployment_failed"]
+    assert len(route.calls) == 2
+    assert route.calls[1].request.headers["Last-Event-ID"] == "4"
+    assert route.calls[1].request.url.params["token"] == "tok-2"
+
+
+async def test_async_stream_deployment_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/missing/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "t"})
+    )
+    mock.get("/api/v1/streaming/deployments/missing/stream").mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        _ = [e async for e in client.stream_deployment_events("missing")]
+
+
+async def test_async_stream_deployment_connect_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/dep1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "t"})
+    )
+    mock.get(_DEP_STREAM_URL).mock(side_effect=httpx.ConnectError("down"))
+    with pytest.raises(APIError, match="Connection failed"):
+        _ = [e async for e in client.stream_deployment_events("dep1")]
+
+
+async def test_async_stream_deployment_timeout(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/dep1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "t"})
+    )
+    mock.get(_DEP_STREAM_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
+    with pytest.raises(APIError, match="Request timed out"):
+        _ = [e async for e in client.stream_deployment_events("dep1")]
 
 
 async def test_async_deployments_text_response(

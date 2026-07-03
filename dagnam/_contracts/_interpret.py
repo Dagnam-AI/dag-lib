@@ -1,9 +1,10 @@
-"""SDK-local mirror of the backend's declarative parameter interpreter.
+"""SDK-local mirror of the platform's declarative parameter interpreter.
 
-Verdicts and messages match mvp-backend/src/validation/contracts/interpret.py
-exactly (the test cases are shared). Scope is the declarative param tier only:
-numeric bounds, enums, typed padding, required-ness, conditional applicability.
-Cross-parameter / shape rules are out of scope (a later plan).
+Verdicts and messages match the Dagnam platform's authoritative validator
+exactly (the conformance corpus is shared), so the SDK and the platform never
+disagree on whether an architecture is valid. Scope is the declarative param
+tier only: numeric bounds, enums, typed padding, required-ness, conditional
+applicability. Cross-parameter / shape rules are out of scope.
 """
 
 from __future__ import annotations

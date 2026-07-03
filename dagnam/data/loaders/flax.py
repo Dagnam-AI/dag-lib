@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 import numpy as np
 import numpy.typing as npt
 
-from dagnam.data._polars_utils import factorize, numeric_columns
+from dagnam.data._polars_utils import encode_label_series, numeric_columns
 from dagnam.data.loaders.csv import detect_label_column
 from dagnam.data.loaders.media import select_split_indices
 
@@ -108,11 +108,7 @@ def create_flax_dataset(
 
     # Label encoding
     label_series = df[label_col]
-    if dagnam_ds.class_names:
-        mapping: dict[object, int] = {name: idx for idx, name in enumerate(dagnam_ds.class_names)}
-        labels = np.array([mapping[v] for v in label_series.to_list()], dtype=np.int64)
-    else:
-        labels = factorize(label_series)
+    labels = encode_label_series(label_series, dagnam_ds.class_names)
 
     # Feature encoding
     feature_cols = [c for c in df.columns if c != label_col]

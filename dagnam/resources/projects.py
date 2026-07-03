@@ -12,7 +12,6 @@ from __future__ import annotations
 from builtins import list as builtin_list
 from collections.abc import Mapping, Sequence
 from typing import Optional
-from unittest.mock import Mock
 from uuid import UUID
 
 from dagnam._contracts import validate_architecture
@@ -23,17 +22,11 @@ from dagnam._contracts.normalize import (
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import ArchitectureValidationError
 from dagnam._core.resolver import resolve_client
-from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_object
+from dagnam._types import JsonObject, JsonValue, QueryValue
 
 
 def _stringify_id(value: object) -> str:
-    if isinstance(value, UUID):
-        return str(value)
     return str(value)
-
-
-def _is_mock_client(value: object) -> bool:
-    return isinstance(value, Mock)
 
 
 # ---------------------------------------------------------------------------
@@ -77,10 +70,6 @@ def list(
         params["tags"] = ",".join(tags)
     if search is not None:
         params["search"] = search
-    if _is_mock_client(resolved):
-        legacy_list = getattr(resolved, "list_projects", None)
-        if callable(legacy_list):
-            return ensure_json_object(legacy_list(params=params))
     return resolved.list_projects(**params)
 
 
@@ -175,11 +164,6 @@ def duplicate(
     >>> copy = dagnam.projects.duplicate("proj_abc", title="Copy of My Model")
     """
     resolved = resolve_client(client, api_key, api_url)
-    if _is_mock_client(resolved):
-        payload: JsonObject | None = {"title": title} if title is not None else None
-        legacy_duplicate = getattr(resolved, "duplicate_project", None)
-        if callable(legacy_duplicate):
-            return ensure_json_object(legacy_duplicate(_stringify_id(project_id), payload))
     return resolved.duplicate_project(_stringify_id(project_id), title=title)
 
 
@@ -219,9 +203,6 @@ def save_architecture(
     }
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    legacy_save = getattr(resolved, "save_project_architecture", None)
-    if callable(legacy_save):
-        return ensure_json_object(legacy_save(_stringify_id(project_id), payload))
     return resolved.save_architecture(_stringify_id(project_id), payload)
 
 
@@ -261,9 +242,6 @@ def import_dag(
         payload["tags"] = tag_values
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    legacy_import = getattr(resolved, "import_project_dag", None)
-    if callable(legacy_import):
-        return ensure_json_object(legacy_import(payload))
     return resolved.import_dag(payload)
 
 
@@ -281,9 +259,6 @@ def import_dag_existing(
     payload: JsonObject = {"ir": ir}
     if commit_message is not None:
         payload["commit_message"] = commit_message
-    legacy_import = getattr(resolved, "import_project_dag_existing", None)
-    if callable(legacy_import):
-        return ensure_json_object(legacy_import(_stringify_id(project_id), payload))
     return resolved.import_dag_existing(_stringify_id(project_id), payload)
 
 
@@ -302,10 +277,6 @@ def bulk_delete(
     """Delete multiple projects at once."""
     resolved = resolve_client(client, api_key, api_url)
     ids = [_stringify_id(pid) for pid in project_ids]
-    if _is_mock_client(resolved):
-        legacy_bulk_delete = getattr(resolved, "bulk_delete_projects", None)
-        if callable(legacy_bulk_delete):
-            return ensure_json_object(legacy_bulk_delete({"project_ids": ids}))
     return resolved.bulk_delete_projects(ids)
 
 
@@ -320,14 +291,6 @@ def link_dataset(
 ) -> JsonObject:
     """Link a dataset to a project with the given role."""
     resolved = resolve_client(client, api_key, api_url)
-    legacy_link = getattr(resolved, "link_project_dataset", None)
-    if callable(legacy_link):
-        return ensure_json_object(
-            legacy_link(
-                _stringify_id(project_id),
-                {"dataset_id": _stringify_id(dataset_id), "role": role},
-            )
-        )
     return resolved.link_dataset(_stringify_id(project_id), _stringify_id(dataset_id), role)
 
 
@@ -353,10 +316,6 @@ def unlink_dataset(
 ) -> None:
     """Unlink a dataset from a project."""
     resolved = resolve_client(client, api_key, api_url)
-    legacy_unlink = getattr(resolved, "unlink_project_dataset", None)
-    if callable(legacy_unlink):
-        legacy_unlink(_stringify_id(project_id), _stringify_id(dataset_id))
-        return
     resolved.unlink_dataset(
         _stringify_id(project_id),
         _stringify_id(dataset_id),

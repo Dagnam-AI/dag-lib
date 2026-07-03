@@ -272,6 +272,31 @@ def test_open_training_stream_success(client: DagnamClient, rmock: RequestsMocke
     assert "api_key" not in rmock.last_request.qs
 
 
+def test_open_training_stream_uses_sse_read_timeout(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+) -> None:
+    # The SSE open must use a (connect, read) tuple with a read timeout above the
+    # heartbeat interval, not the bare 30s used for ordinary requests — otherwise
+    # a quiet or slow-to-start stream trips a spurious ReadTimeout.
+    from unittest.mock import MagicMock
+
+    from dagnam._core.client import base as base_mod, training as training_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_get(_url: str, **kwargs: object) -> MagicMock:
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        return resp
+
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job_id: "stream-t")
+    monkeypatch.setattr(training_mod.requests, "get", fake_get)
+    client.open_training_stream("j1")
+    assert captured["timeout"] == (base_mod.STREAM_CONNECT_TIMEOUT, base_mod.SSE_READ_TIMEOUT)
+
+
 def test_open_training_stream_with_last_event_id(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:

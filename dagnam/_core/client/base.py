@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import re
+import sys
 
 import requests
 from tqdm import tqdm
@@ -27,7 +29,24 @@ DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-strea
 # on dead sockets mid-download and the loop can fail fast.
 STREAM_CONNECT_TIMEOUT = 30  # seconds
 STREAM_READ_TIMEOUT = 60  # seconds — per-chunk read timeout
+# SSE streams are long-lived and quiet between events; the server sends a
+# heartbeat every ~30s. A read timeout comfortably above that (3x) tolerates a
+# missed heartbeat / a slow-to-start stream without a spurious ReadTimeout, while
+# still failing a genuinely dead socket so the reconnect loop can recover.
+SSE_READ_TIMEOUT = 90  # seconds
 ALLOW_REDIRECTS = False
+
+
+def _progress_disabled(total_bytes: int | None, *, show_progress: bool) -> bool:
+    r"""Whether the tqdm download bar should be suppressed.
+
+    Disabled without a known total (nothing to measure against), when the caller
+    opts out, or in a non-TTY (CI logs, notebooks, a pipe) where a
+    carriage-return progress bar is just ``\r`` spam.
+    """
+    return total_bytes is None or not show_progress or not sys.stderr.isatty()
+
+
 _WINDOWS_RESERVED_FILENAMES = {
     "con",
     "prn",
@@ -105,13 +124,14 @@ class BaseDagnamClient:
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         with (
+            closing(resp),
             open(dest, "wb") as fh,
             tqdm(
                 total=total_bytes,
                 unit="B",
                 unit_scale=True,
                 unit_divisor=1024,
-                disable=total_bytes is None or not show_progress,
+                disable=_progress_disabled(total_bytes, show_progress=show_progress),
             ) as bar,
         ):
             for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
@@ -172,13 +192,14 @@ class BaseDagnamClient:
         total_bytes = int(total) if total is not None else None
 
         with (
+            closing(resp),
             open(dest, "ab") as fh,
             tqdm(
                 total=total_bytes,
                 unit="B",
                 unit_scale=True,
                 unit_divisor=1024,
-                disable=total_bytes is None or not show_progress,
+                disable=_progress_disabled(total_bytes, show_progress=show_progress),
             ) as bar,
         ):
             for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):

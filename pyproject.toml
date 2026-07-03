@@ -1,11 +1,11 @@
 [project]
 name = "dagnam"
-version = "0.5.0"
+version = "0.6.0"
 description = "Official Python SDK for Dagnam.AI - datasets, training, model hub, deployments, and inference."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 authors = [
     { name = "Dagnam.AI", email = "dagnam@dagnam.ai" },
 ]
@@ -41,12 +41,19 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 dependencies = [
     "requests>=2.28",
+    # numpy is imported eagerly by the dataset layer (dagnam.data.dataset.base),
+    # so it is required for any dataset operation, not optional.
+    "numpy>=1.24",
+    # Pillow decodes images in the framework-agnostic system-dataset loaders, so
+    # image datasets work from a plain ``pip install dagnam`` (no framework extra).
+    "pillow>=10.0",
     "polars>=1.0",
     "tqdm>=4.60",
     "typing_extensions>=4.12",
@@ -54,12 +61,18 @@ dependencies = [
 
 [project.optional-dependencies]
 streaming = ["sseclient-py>=1.7"]
-pytorch = ["torch>=2.12.1"]
+# torchvision supplies ImageFolder + transforms for the PyTorch image loaders
+# (dagnam.data.loaders.image_folder); it is a real runtime dep of this extra.
+# torchvision>=0.19 pairs with torch>=2.4.
+pytorch = ["torch>=2.4", "torchvision>=0.19"]
 # torchaudio (>=2.x) decodes audio via TorchCodec, so torchcodec is required at
 # runtime to load audio datasets (else "TorchCodec is required for
-# load_with_torchcodec ... No module named 'torchcodec'"). (G083)
+# load_with_torchcodec ... No module named 'torchcodec'"). (G083) This trio is
+# a version-coupled set; kept at the validated floor so the decode chain resolves.
 audio = ["torch>=2.12.1", "torchaudio>=2.0", "torchcodec>=0.1"]
-tensorflow = ["tensorflow>=2.12"]
+# TensorFlow added Python 3.12 support in 2.16 (2.12 tops out at 3.11), so the
+# floor must be >=2.16 to be installable on the supported interpreters.
+tensorflow = ["tensorflow>=2.16"]
 flax = [
     "jax>=0.4",
     "flax>=0.7",
@@ -67,9 +80,10 @@ flax = [
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
 all = [
     "torch>=2.12.1",
+    "torchvision>=0.19",
     "torchaudio>=2.0",
     "torchcodec>=0.1",
-    "tensorflow>=2.12",
+    "tensorflow>=2.16",
     "jax>=0.4",
     "flax>=0.7",
     "httpx>=0.27",

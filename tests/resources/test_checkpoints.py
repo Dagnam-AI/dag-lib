@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import hashlib
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -93,6 +94,26 @@ class TestDownloadCheckpoint:
         path = download_checkpoint("job_1", "ck_1", client=client, cache_dir=ck_cache)
         assert path == cached
         client.download_checkpoint_stream.assert_not_called()
+
+    def test_missing_server_checksum_warns_loudly(
+        self, ck_cache: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # S3/presigned downloads carry no X-Checksum-SHA256 header, so the
+        # stream returns None. The file must still be accepted (S3 works), but
+        # the unverified state must be LOUD, never silent.
+        def side_effect(job_id: str, checkpoint_id: str, dest: Path) -> tuple[Path, None]:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"weights")
+            return dest, None
+
+        client = MagicMock(spec=DagnamClient)
+        client.download_checkpoint_stream.side_effect = side_effect
+
+        with caplog.at_level(logging.WARNING):
+            path = download_checkpoint("job_1", "ck_1", client=client, cache_dir=ck_cache)
+
+        assert path.exists()
+        assert any("checksum" in record.message.lower() for record in caplog.records)
 
     def test_checksum_mismatch_raises_and_removes(self, ck_cache: Path) -> None:
         def side_effect(job_id: str, checkpoint_id: str, dest: Path):

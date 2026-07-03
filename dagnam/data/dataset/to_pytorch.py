@@ -336,8 +336,14 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 )
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
-                x = tensor(np.asarray(x_train[-n_val:]), dtype=torch_long)
-                y = _native_target_tensor(y_train[-n_val:], tensor, torch_long, torch_float32)
+                # n_val may round to 0 for a small train set; an empty val split
+                # must stay empty. x_train[-0:] would return the ENTIRE array,
+                # overlapping train and val (TF/Flax already guard this). Use a
+                # dtype/shape-preserving empty slice.
+                x_val = x_train[-n_val:] if n_val > 0 else x_train[:0]
+                y_val = y_train[-n_val:] if n_val > 0 else y_train[:0]
+                x = tensor(np.asarray(x_val), dtype=torch_long)
+                y = _native_target_tensor(y_val, tensor, torch_long, torch_float32)
             else:
                 x = tensor(
                     np.asarray(x_train[:-n_val] if n_val > 0 else x_train),

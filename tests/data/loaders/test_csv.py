@@ -262,6 +262,20 @@ class TestEncodeLabels:
         assert result[0] == result[2]  # both "a"
         assert len(set(result.tolist())) == 3
 
+    def test_integer_label_column_matches_string_class_names(self) -> None:
+        # Real failing condition: an Int64 label column with string class_names.
+        # Previously raised bare KeyError while to_arrays() succeeded.
+        torch = _torch()
+        series = pl.Series([0, 1, 0, 2])
+        result = cast("TensorLike", encode_labels(series, ["0", "1", "2"]))
+        assert result.dtype == torch.long
+        assert result.tolist() == [0, 1, 0, 2]
+
+    def test_unknown_label_value_raises_valueerror(self) -> None:
+        series = pl.Series(["cat", "unknown"])
+        with pytest.raises(ValueError, match="not in class_names"):
+            encode_labels(series, ["cat", "dog"])
+
 
 # ------------------------------------------------------------------
 # create_pytorch_loader — integration

@@ -13,9 +13,9 @@ from dagnam.data.dataset import DagnamDataset
 from dagnam.data.loaders.media import (
     FolderLayout,
     _safe_extract_tar,
-    _safe_extract_zip,
     discover_class_folders,
     ensure_extracted,
+    safe_extract_zip,
     scan_class_samples,
     select_split_indices,
     split_indices,
@@ -284,7 +284,7 @@ class TestSafeArchiveExtraction:
                 raise AssertionError("unsafe archive should not be extracted")
 
         with pytest.raises(ValueError, match="Archive is too large"):
-            _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
+            safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
 
     def test_tar_decompression_bomb_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
@@ -311,7 +311,7 @@ class TestSafeArchiveExtraction:
                 raise AssertionError("unsafe archive should not be extracted")
 
         with pytest.raises(ValueError, match="Unsafe archive member link"):
-            _safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
+            safe_extract_zip(Archive(), tmp_path)  # type: ignore[arg-type]
 
     def test_tar_special_member_is_rejected(self, tmp_path: Path) -> None:
         class Archive:
@@ -344,9 +344,11 @@ class TestSafeArchiveExtraction:
 class TestPytorchExtra:
     """Packaging metadata must install image loader dependencies."""
 
-    def test_pytorch_extra_does_not_pull_system_loader_dependencies(self) -> None:
+    def test_pytorch_extra_installs_torchvision_for_image_loaders(self) -> None:
+        # The image-folder loader imports torchvision at runtime, so the pytorch
+        # extra must ship it (this loader would otherwise ImportError).
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-        assert 'pytorch = ["torch>=2.12.1"]' in pyproject
+        assert 'pytorch = ["torch>=2.4", "torchvision>=0.19"]' in pyproject
 
 
 # ------------------------------------------------------------------

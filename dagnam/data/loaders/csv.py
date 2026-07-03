@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast
 
 from dagnam._types import JsonObject
-from dagnam.data._polars_utils import factorize, numeric_columns
+from dagnam.data._polars_utils import encode_label_series, numeric_columns
 from dagnam.data.loaders.media import select_split_indices
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
@@ -209,14 +209,7 @@ def _encode_labels(series: pl.Series, class_names: list[str] | None) -> TorchTen
     If *class_names* is provided, maps each value to its index in the list.
     Otherwise falls back to first-seen-order factorization.
     """
-    import numpy as np
-
-    if class_names:
-        mapping: dict[object, int] = {name: idx for idx, name in enumerate(class_names)}
-        encoded = np.array([mapping[v] for v in series.to_list()], dtype=np.int64)
-    else:
-        encoded = factorize(series)
-
+    encoded = encode_label_series(series, class_names)
     torch = _load_torch()
     return torch.tensor(encoded, dtype=torch.long)
 

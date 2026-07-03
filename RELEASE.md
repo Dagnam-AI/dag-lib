@@ -5,8 +5,14 @@ This document is for maintainers publishing `dagnam` to PyPI.
 ## Pre-release Checklist
 
 1. Confirm `pyproject.toml`, `dagnam/__init__.py`, and `CHANGELOG.md` agree on
-   the release version.
-2. Confirm `README.md` examples match the current public API.
+   the release version. The `test_version_string_matches_across_pyproject_and_package`
+   guard fails if `pyproject.toml` and `dagnam/__init__.py` drift.
+2. Confirm the `CHANGELOG.md` `[Unreleased]` section is **empty** — every entry
+   must be folded into the dated release heading (`## [X.Y.Z] - YYYY-MM-DD`)
+   being published. A populated `[Unreleased]` at publish time means changes
+   (often breaking) are shipping undocumented under the version; fold them and,
+   if any are breaking, confirm the version bump reflects it.
+3. Confirm `README.md` examples match the current public API.
 3. Run the verification suite:
 
    ```bash

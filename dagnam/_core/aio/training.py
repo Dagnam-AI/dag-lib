@@ -29,7 +29,12 @@ from dagnam._core.client.common import (
     stream_query_params,
 )
 from dagnam._core.exceptions import APIError, TrainingJobNotFoundError
-from dagnam._core.sse import SSEEvent, parse_raw_event
+from dagnam._core.sse import (
+    TERMINAL_TRAINING_EVENTS,
+    SSEEvent,
+    aiter_with_reconnect,
+    parse_raw_event,
+)
 from dagnam._types import (
     JsonObject,
     JsonValue,
@@ -219,24 +224,23 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         raise_for_job_response(resp, job_id)
         return response_json_object(resp)
 
-    async def stream_training_events(
-        self, job_id: str, last_event_id: str | None = None
+    async def _open_training_stream(
+        self, job_id: str, cursor: str | None
     ) -> AsyncIterator[SSEEvent]:
-        """Yield parsed SSE events for a training job over a single connection.
+        """One connection's worth of training events.
 
-        Async counterpart to the sync ``open_training_stream`` (which returns the
-        raw streaming response for the caller to parse); this decodes events for
-        the caller via the shared :func:`parse_raw_event`. There is no
-        auto-reconnect — reconnection is a future resource-layer concern.
-
-        ``GET /api/v1/streaming/training-jobs/{job_id}/stream?token=...``
+        Mints a fresh stream token, connects, and yields parsed events. A
+        connect-time ConnectError/timeout is translated to ``APIError`` (which
+        the reconnect loop treats as non-transient and surfaces immediately); a
+        mid-stream transport drop propagates as an ``httpx.TransportError`` so
+        :func:`aiter_with_reconnect` reconnects.
         """
         token = await self.mint_training_stream_token(job_id)
         job_path = quote_path_segment(job_id)
         url = f"{self.api_url}/api/v1/streaming/training-jobs/{job_path}/stream"
         headers = {"Accept": "text/event-stream"}
-        if last_event_id:
-            headers["Last-Event-ID"] = last_event_id
+        if cursor:
+            headers["Last-Event-ID"] = cursor
         try:
             async with aconnect_sse(
                 self._client,
@@ -254,5 +258,28 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                     yield parse_raw_event(sse)
         except httpx.ConnectError as exc:
             raise APIError(0, f"Connection failed: {exc}") from exc
-        except httpx.TimeoutException as exc:
+        except httpx.ConnectTimeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
+
+    def stream_training_events(
+        self, job_id: str, last_event_id: str | None = None
+    ) -> AsyncIterator[SSEEvent]:
+        """Yield parsed SSE events for a training job, reconnecting transparently.
+
+        Async counterpart to the sync ``open_training_stream``. A dropped
+        connection (LB idle timeout, network blip, or the server closing when a
+        short-lived stream token expires) is reconnected with a freshly minted
+        token and the preserved ``Last-Event-ID`` cursor, so a multi-hour stream
+        survives; it ends only on a terminal event, or raises ``StreamError``
+        after repeated failures. A dropped stream is therefore never mistaken
+        for normal completion.
+
+        ``GET /api/v1/streaming/training-jobs/{job_id}/stream?token=...``
+        """
+        return aiter_with_reconnect(
+            lambda cursor: self._open_training_stream(job_id, cursor),
+            terminal_events=TERMINAL_TRAINING_EVENTS,
+            transient_errors=(httpx.TransportError, ConnectionError, OSError),
+            resource_label=f"training stream {job_id}",
+            last_event_id=last_event_id,
+        )

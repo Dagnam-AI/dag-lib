@@ -143,6 +143,18 @@ class TestToArrays:
         assert labels is not None
         assert labels.tolist() == [0, 1, 0]
 
+    def test_ragged_features_yield_object_array(self, tmp_path: Path) -> None:
+        # Variable-length per-sample features must build an object array;
+        # numpy >=1.24 refuses to infer object dtype from a ragged list and
+        # raises ValueError instead.
+        ds = DagnamDataset(_meta(), tmp_path)
+        ds.raw_data = [(np.array([1, 2, 3]), 0), (np.array([4, 5]), 1)]
+        feats, labels = ds.to_arrays()
+        assert feats.dtype == object
+        assert feats.shape == (2,)
+        assert labels is not None
+        assert labels.tolist() == [0, 1]
+
     def test_without_labels(self, tmp_path: Path) -> None:
         ds = DagnamDataset(_meta(), tmp_path)
         ds.raw_data = [1, 2, 3]  # bare items (no label)

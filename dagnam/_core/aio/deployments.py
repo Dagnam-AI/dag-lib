@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
+import httpx
+from httpx_sse import aconnect_sse
+
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
     response_json_value,
+    stream_query_params,
+)
+from dagnam._core.exceptions import APIError
+from dagnam._core.sse import (
+    TERMINAL_DEPLOYMENT_EVENTS,
+    SSEEvent,
+    aiter_with_reconnect,
+    parse_raw_event,
 )
 from dagnam._types import (
     JsonArray,
@@ -211,4 +224,66 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/deployments/{quote_path_segment(deployment_id)}/health",
                 deployment_id=deployment_id,
             )
+        )
+
+    async def mint_deployment_stream_token(self, deployment_id: str) -> str:
+        """Mint a short-lived stream-access token for one deployment's SSE stream."""
+        body = ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/stream-access-token",
+                deployment_id=deployment_id,
+            )
+        )
+        return str(body["token"])
+
+    async def _open_deployment_stream(
+        self, deployment_id: str, cursor: str | None
+    ) -> AsyncIterator[SSEEvent]:
+        """One connection's worth of deployment events (see the training twin)."""
+        token = await self.mint_deployment_stream_token(deployment_id)
+        dep_path = quote_path_segment(deployment_id)
+        url = f"{self.api_url}/api/v1/streaming/deployments/{dep_path}/stream"
+        headers = {"Accept": "text/event-stream"}
+        if cursor:
+            headers["Last-Event-ID"] = cursor
+        try:
+            async with aconnect_sse(
+                self._client,
+                "GET",
+                url,
+                params=stream_query_params(token),
+                headers=headers,
+                timeout=self.timeout,
+            ) as event_source:
+                response = event_source.response
+                if not 200 <= response.status_code < 300:
+                    await response.aread()
+                    raise_for_deployment(response, deployment_id)
+                async for sse in event_source.aiter_sse():
+                    yield parse_raw_event(sse)
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.ConnectTimeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
+    def stream_deployment_events(
+        self, deployment_id: str, last_event_id: str | None = None
+    ) -> AsyncIterator[SSEEvent]:
+        """Yield parsed SSE events for a deployment, reconnecting transparently.
+
+        Async counterpart to the sync ``open_deployment_stream``. A dropped
+        connection is reconnected with a freshly minted token and the preserved
+        ``Last-Event-ID`` cursor; the stream ends only on a terminal event, or
+        raises ``StreamError`` after repeated failures — so a drop is never
+        mistaken for the deployment finishing.
+
+        ``GET /api/v1/streaming/deployments/{deployment_id}/stream?token=...``
+        """
+        return aiter_with_reconnect(
+            lambda cursor: self._open_deployment_stream(deployment_id, cursor),
+            terminal_events=TERMINAL_DEPLOYMENT_EVENTS,
+            transient_errors=(httpx.TransportError, ConnectionError, OSError),
+            resource_label=f"deployment stream {deployment_id}",
+            last_event_id=last_event_id,
         )

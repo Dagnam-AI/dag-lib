@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
+
 from dagnam._core.aio.base import BaseAsyncDagnamClient, parse_content_disposition_filename
 from dagnam._core.client.common import (
     quote_path_segment,
@@ -13,6 +15,7 @@ from dagnam._core.client.common import (
     response_json_array,
     response_json_object,
 )
+from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject, QueryParams
 
 
@@ -44,27 +47,47 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)
 
+    async def _download_to_dir(self, path: str, output_dir: Path, dataset_id: str) -> Path:
+        """Stream a dataset download to disk chunk by chunk.
+
+        The whole body is never buffered in memory (``resp.content``) — large
+        datasets would OOM. Chunks are written as they arrive; the destination
+        filename is taken from the ``Content-Disposition`` header, which is
+        available as soon as the response headers land.
+        """
+        url = f"{self.api_url}{path}"
+        try:
+            async with self._client.stream("GET", url, headers=self._headers()) as resp:
+                if not resp.is_success:
+                    await resp.aread()  # populate the body for the error message
+                    raise_for_dataset(resp, dataset_id)
+                filename = parse_content_disposition_filename(
+                    resp.headers.get("content-disposition")
+                )
+                dest = Path(output_dir) / filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest, "wb") as fh:
+                    async for chunk in resp.aiter_bytes():
+                        fh.write(chunk)
+                return dest
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
     async def download_dataset(self, dataset_id: str, output_dir: Path) -> Path:
-        resp = await self._request(
-            "GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/download"
+        return await self._download_to_dir(
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}/download",
+            output_dir,
+            dataset_id,
         )
-        raise_for_dataset(resp, dataset_id)
-        filename = parse_content_disposition_filename(resp.headers.get("content-disposition"))
-        dest = Path(output_dir) / filename
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(resp.content)
-        return dest
 
     async def download_system_dataset(self, dataset_id: str, output_dir: Path) -> Path:
-        resp = await self._request(
-            "GET", f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}/download"
+        return await self._download_to_dir(
+            f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}/download",
+            output_dir,
+            dataset_id,
         )
-        raise_for_dataset(resp, dataset_id)
-        filename = parse_content_disposition_filename(resp.headers.get("content-disposition"))
-        dest = Path(output_dir) / filename
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(resp.content)
-        return dest
 
     async def upload_dataset(
         self,

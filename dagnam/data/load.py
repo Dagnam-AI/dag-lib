@@ -63,15 +63,18 @@ def _optional_meta_str(meta: JsonObject, key: str) -> str | None:
     raise ValueError(f"Dataset metadata field {key!r} must be a string when provided")
 
 
-def _optional_meta_int(meta: JsonObject, key: str) -> int | None:
-    value = meta.get(key)
-    if value is None:
+def _resolve_cache_budget() -> int | None:
+    """Resolve the configured LRU cache budget in bytes.
+
+    ``max_cache_size`` comes from a user-editable config file, so a corrupt
+    value (a hand-typed string, a bool) must NOT crash a just-completed
+    download. A non-int is treated as "unset" (``None``), which lets
+    ``evict_lru`` fall back to its default budget.
+    """
+    configured = get_config_value("max_cache_size", None)
+    if isinstance(configured, bool) or not isinstance(configured, int):
         return None
-    if isinstance(value, bool):
-        raise ValueError(f"Dataset metadata field {key!r} must be an integer when provided")
-    if isinstance(value, int):
-        return value
-    raise ValueError(f"Dataset metadata field {key!r} must be an integer when provided")
+    return configured
 
 
 def load_dataset(
@@ -162,10 +165,7 @@ def load_dataset(
     save_metadata(cache_key, meta, base_dir=cache_dir_path)
     save_checksum(cache_key, checksum, base_dir=cache_dir_path)
     touch_cache(cache_key, base_dir=cache_dir_path)
-    max_cache = _optional_meta_int(
-        {"max_cache_size": get_config_value("max_cache_size", None)}, "max_cache_size"
-    )
-    evict_lru(max_size_bytes=max_cache, base_dir=cache_dir_path)
+    evict_lru(max_size_bytes=_resolve_cache_budget(), base_dir=cache_dir_path)
 
     return DagnamDataset(meta, ds_cache_dir)
 

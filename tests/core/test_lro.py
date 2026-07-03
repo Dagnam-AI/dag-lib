@@ -6,7 +6,7 @@ from typing import Callable
 
 import pytest
 
-from dagnam._core.exceptions import LROFailedError, LROTimeoutError
+from dagnam._core.exceptions import APIError, LROFailedError, LROTimeoutError
 from dagnam._core.lro import LongRunningOperation
 from dagnam._types import JsonMapping
 
@@ -41,6 +41,67 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self._t += float(seconds)
+
+
+class TestTransientPollErrors:
+    """A transient poll failure (network / 429 / 5xx) must not abort wait()."""
+
+    def test_retries_transient_api_error_then_succeeds(self) -> None:
+        calls = {"n": 0}
+
+        def poll() -> JsonMapping:
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise APIError(503, "temporarily unavailable")
+            return {"status": "running"}
+
+        op = LongRunningOperation(
+            poll=poll, success_states={"running"}, poll_min=0.01, poll_max=0.01
+        )
+        clk = FakeClock()
+        op.wait(timeout=60, sleep=clk.sleep, now=clk.now)
+        assert op.result()["status"] == "running"
+        assert calls["n"] == 3
+
+    def test_retries_network_error_status_zero(self) -> None:
+        calls = {"n": 0}
+
+        def poll() -> JsonMapping:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise APIError(0, "Connection failed")
+            return {"status": "running"}
+
+        op = LongRunningOperation(
+            poll=poll, success_states={"running"}, poll_min=0.01, poll_max=0.01
+        )
+        clk = FakeClock()
+        op.wait(timeout=60, sleep=clk.sleep, now=clk.now)
+        assert op.result()["status"] == "running"
+
+    def test_propagates_non_transient_api_error_immediately(self) -> None:
+        calls = {"n": 0}
+
+        def poll() -> JsonMapping:
+            calls["n"] += 1
+            raise APIError(404, "not found")
+
+        op = LongRunningOperation(poll=poll, success_states={"running"})
+        clk = FakeClock()
+        with pytest.raises(APIError) as exc:
+            op.wait(timeout=60, sleep=clk.sleep, now=clk.now)
+        assert exc.value.status_code == 404
+        assert calls["n"] == 1  # not retried
+
+    def test_gives_up_on_persistent_transient_error_at_deadline(self) -> None:
+        def poll() -> JsonMapping:
+            raise APIError(503, "down")
+
+        op = LongRunningOperation(poll=poll, success_states={"running"}, poll_min=0.5, poll_max=0.5)
+        clk = FakeClock()
+        with pytest.raises(APIError) as exc:
+            op.wait(timeout=1.0, sleep=clk.sleep, now=clk.now)
+        assert exc.value.status_code == 503
 
 
 class TestTerminalResolution:

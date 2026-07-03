@@ -35,3 +35,23 @@ def test_array_decoder_maps_keys_to_columns(tmp_path: Path) -> None:
 def test_get_decoder_unknown_format_raises() -> None:
     with pytest.raises(DecodeError, match="unknown format"):
         get_decoder("nope")
+
+
+def test_array_decoder_refuses_object_arrays_no_pickle(tmp_path: Path) -> None:
+    """A server-supplied .npz with an object (pickled) array must be refused,
+    never deserialized through pickle (arbitrary-code-execution vector)."""
+    np.savez(
+        tmp_path / "d.npz",
+        x=np.array([{"payload": "arbitrary"}], dtype=object),
+        y=np.arange(1),
+    )
+    layout = cast(
+        "dict[str, object]",
+        {
+            "image": {"key": "x", "test_key": "x"},
+            "label": {"key": "y", "test_key": "y"},
+        },
+    )
+
+    with pytest.raises(DecodeError, match="object arrays are not supported"):
+        get_decoder("array").decode(tmp_path, layout, "train")

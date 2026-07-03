@@ -5,6 +5,8 @@ from __future__ import annotations
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
+    SSE_READ_TIMEOUT,
+    STREAM_CONNECT_TIMEOUT,
     APIError,
     BaseDagnamClient,
     is_success_response,
@@ -253,7 +255,7 @@ class TrainingClientMixin(BaseDagnamClient):
                 params=params,
                 headers=headers,
                 stream=True,
-                timeout=DEFAULT_TIMEOUT,
+                timeout=(STREAM_CONNECT_TIMEOUT, SSE_READ_TIMEOUT),
                 allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:

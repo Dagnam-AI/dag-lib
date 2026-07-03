@@ -20,7 +20,7 @@ from dagnam._types import (
     TensorflowDataset,
     ensure_json_object,
 )
-from dagnam.data._polars_utils import factorize, numeric_columns
+from dagnam.data._polars_utils import encode_label_series, numeric_columns
 from dagnam.data.dataset.to_flax import FlaxDatasetMixin
 from dagnam.data.dataset.to_polars import PolarsDatasetMixin
 from dagnam.data.dataset.to_pytorch import PytorchDatasetMixin
@@ -30,6 +30,21 @@ if TYPE_CHECKING:
     from dagnam.data.loaders.flax import FlaxBatch
 
 LabelSeries = pl.Series
+
+
+def _as_array(items: list[object]) -> npt.NDArray[np.object_]:
+    """Stack ``items`` into an ndarray, tolerating ragged per-sample shapes.
+
+    numpy >=1.24 refuses to infer an object array from a variable-length list
+    and raises ``ValueError``; on that failure we build the object array
+    explicitly (consumers pad these ragged sequences downstream).
+    """
+    try:
+        return np.asarray(items)
+    except ValueError:
+        arr = np.empty(len(items), dtype=object)
+        arr[:] = items
+        return arr
 
 
 class DagnamDataset(
@@ -323,8 +338,8 @@ class DagnamDataset(
             labels.append(label)
 
         if labels and all(label is not None for label in labels):
-            return np.asarray(features), np.asarray(labels)
-        return np.asarray(features), None
+            return _as_array(features), _as_array(labels)
+        return _as_array(features), None
 
     def _iter_tabular_file_samples(
         self,
@@ -367,10 +382,7 @@ class DagnamDataset(
         return df.columns[-1]
 
     def _encode_label_values(self, series: LabelSeries) -> list[int]:
-        if self.class_names:
-            mapping = {name: idx for idx, name in enumerate(self.class_names)}
-            return [mapping[str(value)] for value in series.to_list()]
-        return [int(value) for value in factorize(series).tolist()]
+        return [int(code) for code in encode_label_series(series, self.class_names).tolist()]
 
     def encode_label_values(self, series: LabelSeries) -> list[int]:
         """Encode a label series to integer codes (public wrapper)."""

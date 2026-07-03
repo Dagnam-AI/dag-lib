@@ -13,10 +13,33 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import shutil
+import sys
 
 Harness = str  # "claude" | "codex"
 
-_GUARD_HOOK_ENTRY: dict[str, object] = {"command": ["python", "-m", "dagnam._agent.guardhook"]}
+# The guard hook must run under the SAME interpreter that has ``dagnam``
+# installed. A bare ``python`` on PATH may resolve to a different interpreter
+# (pipx / uv-tool / venv installs), where ``-m dagnam._agent.guardhook`` raises
+# ModuleNotFoundError and breaks every matched tool call. Pin ``sys.executable``.
+_GUARD_HOOK_MODULE_ARGS = ["-m", "dagnam._agent.guardhook"]
+
+
+def _guard_hook_entry() -> dict[str, object]:
+    """The Codex ``hooks.json`` guard entry, pinned to the current interpreter."""
+    return {"command": [sys.executable, *_GUARD_HOOK_MODULE_ARGS]}
+
+
+def _is_guard_hook_entry(entry: object) -> bool:
+    """True if ``entry`` is our guard hook.
+
+    Matches regardless of which interpreter path it was written with, so
+    re-install stays idempotent and uninstall can find it even if the
+    interpreter moved.
+    """
+    if not isinstance(entry, dict):
+        return False
+    command = entry.get("command")
+    return isinstance(command, list) and command[-2:] == _GUARD_HOOK_MODULE_ARGS
 
 
 @dataclass(frozen=True)
@@ -152,8 +175,8 @@ def _merge_codex_hook(wrote: list[Path]) -> None:
     if not isinstance(pre, list):
         pre = []
         hooks["PreToolUse"] = pre
-    if _GUARD_HOOK_ENTRY not in pre:
-        pre.append(_GUARD_HOOK_ENTRY)
+    if not any(_is_guard_hook_entry(entry) for entry in pre):
+        pre.append(_guard_hook_entry())
     hooks_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     wrote.append(hooks_path)
 
@@ -181,10 +204,58 @@ def install_harness(harness: Harness, *, method: str = "copy") -> InstallResult:
         plugin_dir = _claude_plugin_dir()
         _copy_tree(_assets_root() / "claude", plugin_dir)
         _stamp_version(plugin_dir / "plugin.json")
+        _stamp_claude_guard_interpreter(plugin_dir / "hooks" / "guard.json")
         wrote.append(plugin_dir)
     else:  # codex
         _install_codex_extras(wrote)
     return InstallResult(harness=harness, skill_dest=dest, method=used, wrote=wrote)
+
+
+def _stamp_claude_guard_interpreter(guard_path: Path) -> None:
+    """Rewrite the copied Claude guard hook to invoke the current interpreter.
+
+    The bundled asset ships a bare ``python`` command; pin it to
+    ``sys.executable`` (double-quoted so a path with spaces survives the shell)
+    for the same reason as the Codex entry — a different PATH ``python`` cannot
+    import ``dagnam``.
+    """
+    data = json.loads(guard_path.read_text(encoding="utf-8"))
+    command = f'"{sys.executable}" ' + " ".join(_GUARD_HOOK_MODULE_ARGS)
+    for group in data.get("hooks", {}).get("PreToolUse", []):
+        for hook in group.get("hooks", []):
+            if isinstance(hook, dict) and "-m dagnam._agent.guardhook" in str(hook.get("command")):
+                hook["command"] = command
+    guard_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _unmerge_codex_hook() -> list[Path]:
+    """Remove our guard entry from ``~/.codex/hooks.json``, leaving others intact.
+
+    Mirrors ``_merge_codex_hook`` so a codex uninstall — or a plain
+    ``pip uninstall dagnam`` follow-up — doesn't leave the hook firing against a
+    now-missing module.
+    """
+    hooks_path = _home() / ".codex" / "hooks.json"
+    if not hooks_path.exists():
+        return []
+    try:
+        data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return []
+    pre = hooks.get("PreToolUse")
+    if not isinstance(pre, list):
+        return []
+    kept = [entry for entry in pre if not _is_guard_hook_entry(entry)]
+    if len(kept) == len(pre):
+        return []
+    hooks["PreToolUse"] = kept
+    hooks_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return [hooks_path]
 
 
 def uninstall_harness(harness: Harness) -> list[Path]:
@@ -198,4 +269,6 @@ def uninstall_harness(harness: Harness) -> list[Path]:
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir)
             removed.append(plugin_dir)
+    else:  # codex
+        removed.extend(_unmerge_codex_hook())
     return removed

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from dagnam._core.auth import configure, get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
-from dagnam._core.exceptions import ArchitectureValidationError, ChecksumError
 from dagnam._core.lro import LongRunningOperation
 from dagnam.data.cache import (
     compute_file_checksum,
@@ -18,6 +17,32 @@ from dagnam.data.cache import (
     save_checksum,
     save_metadata,
     touch_cache,
+)
+from dagnam.exceptions import (
+    APIError,
+    ArchitectureValidationError,
+    ArchitectureVersionNotFoundError,
+    AuthError,
+    CheckpointError,
+    CheckpointNotFoundError,
+    ChecksumError,
+    CodegenError,
+    CodegenValidationError,
+    DagnamError,
+    DatasetNotFoundError,
+    DeploymentNotFoundError,
+    DeploymentStateError,
+    DeploymentValidationError,
+    HubError,
+    HubModelNotFoundError,
+    LROFailedError,
+    LROTimeoutError,
+    ProjectNotFoundError,
+    QuotaExceededError,
+    StreamError,
+    TaskNotFoundError,
+    TrainingJobNotFoundError,
+    UploadError,
 )
 from dagnam.resources import account, codegen, datasets, deployments, hub, projects, studio
 from dagnam.resources.checkpoints import download_checkpoint
@@ -49,7 +74,7 @@ from dagnam.training import (
     write_training_state,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 if TYPE_CHECKING:
     # Declared for type checkers and ``__all__``; loaded lazily at runtime via
@@ -65,13 +90,35 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "APIError",
     "ArchitectureValidationError",
+    "ArchitectureVersionNotFoundError",
     "AsyncDagnamClient",
+    "AuthError",
+    "CheckpointError",
+    "CheckpointNotFoundError",
     "ChecksumError",
+    "CodegenError",
+    "CodegenValidationError",
     "DagnamClient",
     "DagnamDataset",
+    "DagnamError",
+    "DatasetNotFoundError",
+    "DeploymentNotFoundError",
+    "DeploymentStateError",
+    "DeploymentValidationError",
+    "HubError",
+    "HubModelNotFoundError",
+    "LROFailedError",
+    "LROTimeoutError",
     "LongRunningOperation",
+    "ProjectNotFoundError",
+    "QuotaExceededError",
+    "StreamError",
+    "TaskNotFoundError",
     "TrainingEvent",
+    "TrainingJobNotFoundError",
+    "UploadError",
     "__version__",
     "account",
     "cancel_training_job",

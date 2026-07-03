@@ -131,6 +131,23 @@ class TestDownload:
         with pytest.raises(TypeError, match="Expected a download path for the temporary archive"):
             codegen.download("p1", dest=dest, client=c)
 
+    def test_download_to_directory_rejects_zip_slip(self, tmp_path: Path) -> None:
+        # A malicious/tampered archive with a path-traversal member must be
+        # refused, not written outside dest (zip-slip).
+        dest = tmp_path / "pytorch"
+        dest.mkdir()
+        escape_target = tmp_path / "escaped.py"
+
+        def _fake_download(*_args: object, dest_path: Path, **_kwargs: object) -> Path:
+            with zipfile.ZipFile(dest_path, "w") as zf:
+                zf.writestr("../escaped.py", "import os\n")
+            return dest_path
+
+        c = _client(download_code=MagicMock(side_effect=_fake_download))
+        with pytest.raises(ValueError, match="Unsafe archive member path"):
+            codegen.download("p1", framework="pytorch", dest=dest, client=c)
+        assert not escape_target.exists()
+
 
 class TestStatus:
     def test_status_delegates(self) -> None:

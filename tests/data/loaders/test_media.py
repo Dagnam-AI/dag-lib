@@ -12,11 +12,11 @@ import pytest
 from dagnam.data.loaders.media import (
     _MAX_ARCHIVE_MEMBERS,
     _safe_extract_tar,
-    _safe_extract_zip,
     _validate_archive_size,
     discover_class_folders,
     ensure_extracted,
     resolve_split_dir,
+    safe_extract_zip,
     select_split_indices,
     split_indices,
 )
@@ -147,7 +147,7 @@ def test_safe_extract_zip_rejects_path_traversal(tmp_path: Path) -> None:
         zf.writestr("../escape.txt", "evil")
     with zipfile.ZipFile(archive_path, "r") as zf:
         with pytest.raises(ValueError, match="Unsafe archive member path"):
-            _safe_extract_zip(zf, tmp_path / "out")
+            safe_extract_zip(zf, tmp_path / "out")
 
 
 def test_safe_extract_tar_rejects_symlink_member(tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ def test_safe_extract_zip_creates_directory_members(tmp_path: Path) -> None:
         zf.writestr("sub/file.txt", "hi")
     out = tmp_path / "out"
     with zipfile.ZipFile(archive_path, "r") as zf:
-        _safe_extract_zip(zf, out)
+        safe_extract_zip(zf, out)
     assert (out / "sub").is_dir()
     assert (out / "sub" / "file.txt").read_text() == "hi"
 
@@ -244,7 +244,7 @@ def test_safe_extract_zip_rejects_symlink_member(tmp_path: Path) -> None:
     out = tmp_path / "out"
     with zipfile.ZipFile(archive_path, "r") as zf:
         with pytest.raises(ValueError, match="Unsafe archive member link"):
-            _safe_extract_zip(zf, out)
+            safe_extract_zip(zf, out)
 
 
 # ---------------------------------------------------------------- resolve_split_dir

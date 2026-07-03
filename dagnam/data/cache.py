@@ -69,12 +69,29 @@ def touch_cache(dataset_id: str, base_dir: Path | None = None) -> None:
     access_file.write_text(str(time.time()), encoding="utf-8")
 
 
+def _dir_size(root: Path) -> int:
+    """Total size in bytes of the regular files under ``root``.
+
+    A file may be evicted by a concurrent process between enumeration and the
+    ``stat`` read (a TOCTOU race); such a vanished file is skipped rather than
+    aborting the whole scan with ``FileNotFoundError``/``PermissionError``.
+    """
+    total = 0
+    for f in root.rglob("*"):
+        try:
+            if f.is_file():
+                total += f.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
 def get_cache_size(base_dir: Path | None = None) -> int:
     """Calculate total size of the cache directory in bytes."""
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
     if not base.exists():
         return 0
-    return sum(f.stat().st_size for f in base.rglob("*") if f.is_file())
+    return _dir_size(base)
 
 
 def get_cache_info(base_dir: Path | None = None) -> list[CacheInfo]:
@@ -87,7 +104,7 @@ def get_cache_info(base_dir: Path | None = None) -> list[CacheInfo]:
     for child in base.iterdir():
         if not child.is_dir():
             continue
-        size = sum(f.stat().st_size for f in child.rglob("*") if f.is_file())
+        size = _dir_size(child)
         access_file = child / ".last_access"
         last_access: float | None = None
         if access_file.exists():

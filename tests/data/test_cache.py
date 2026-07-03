@@ -191,6 +191,29 @@ class TestGetCacheSize:
             (d / "data.bin").write_bytes(b"z" * size)
         assert get_cache_size(base_dir=cache_dir) == 500
 
+    def test_skips_file_removed_mid_scan(
+        self, cache_dir: Path, monkeypatch: PytestMonkeyPatch
+    ) -> None:
+        # Concurrent eviction can delete a file after it passes is_file() but
+        # before its size is read. That TOCTOU must not crash the size scan.
+        ds_dir = cache_dir / "ds-1"
+        ds_dir.mkdir()
+        (ds_dir / "vanishing.bin").write_bytes(b"x" * 100)
+        (ds_dir / "stable.bin").write_bytes(b"y" * 40)
+
+        real_is_file = Path.is_file
+
+        def deleting_is_file(self: Path) -> bool:
+            present = real_is_file(self)
+            if self.name == "vanishing.bin" and present:
+                self.unlink()  # vanish immediately after passing the is_file() check
+            return present
+
+        monkeypatch.setattr(Path, "is_file", deleting_is_file)
+
+        # Must not raise; the vanished file is simply skipped.
+        assert get_cache_size(base_dir=cache_dir) == 40
+
 
 class TestGetCacheInfo:
     def test_empty_cache(self, cache_dir: Path) -> None:

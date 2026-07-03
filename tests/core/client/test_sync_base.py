@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
+from tests.typing_helpers import PytestMonkeyPatch
 
-from dagnam._core.client import DagnamClient
+from dagnam._core.client import DagnamClient, base as base_mod
 from dagnam._core.client.base import (
     BaseDagnamClient,
+    _progress_disabled,
     _sanitize_filename,
     is_redirect_response,
     is_success_response,
@@ -18,6 +23,75 @@ from dagnam._core.client.base import (
 from dagnam._core.exceptions import APIError, AuthError
 
 API = "https://api.test"
+
+
+def _tty(monkeypatch: PytestMonkeyPatch, *, is_tty: bool) -> None:
+    monkeypatch.setattr(base_mod.sys, "stderr", SimpleNamespace(isatty=lambda: is_tty))
+
+
+# ---------------------------------------------------------------- progress bar gating
+
+
+def test_progress_disabled_without_total(monkeypatch: PytestMonkeyPatch) -> None:
+    _tty(monkeypatch, is_tty=True)
+    assert _progress_disabled(None, show_progress=True) is True
+
+
+def test_progress_disabled_when_opted_out(monkeypatch: PytestMonkeyPatch) -> None:
+    _tty(monkeypatch, is_tty=True)
+    assert _progress_disabled(10, show_progress=False) is True
+
+
+def test_progress_disabled_in_non_tty(monkeypatch: PytestMonkeyPatch) -> None:
+    # A carriage-return progress bar in CI logs / notebooks / a pipe is just spam.
+    _tty(monkeypatch, is_tty=False)
+    assert _progress_disabled(10, show_progress=True) is True
+
+
+def test_progress_enabled_in_tty(monkeypatch: PytestMonkeyPatch) -> None:
+    _tty(monkeypatch, is_tty=True)
+    assert _progress_disabled(10, show_progress=True) is False
+
+
+# ---------------------------------------------------------------- streaming download cleanup
+
+
+def test_stream_response_to_file_closes_response_on_write_error(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    # If a chunk write fails mid-body (e.g. disk full), the streaming response
+    # must still be closed so the underlying connection is released.
+    _tty(monkeypatch, is_tty=False)
+    resp = MagicMock()
+    resp.headers = {"Content-Length": "10"}
+
+    def chunks() -> object:
+        yield b"partial"
+        raise OSError("disk full")
+
+    resp.iter_content = MagicMock(return_value=chunks())
+    with pytest.raises(OSError, match="disk full"):
+        BaseDagnamClient._stream_response_to_file(resp, tmp_path / "o.bin", show_progress=False)
+    resp.close.assert_called_once()
+
+
+def test_append_stream_to_file_closes_response_on_write_error(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    _tty(monkeypatch, is_tty=False)
+    dest = tmp_path / "o.bin"
+    dest.write_bytes(b"existing")
+    resp = MagicMock()
+    resp.headers = {"Content-Length": "10"}
+
+    def chunks() -> object:
+        yield b"more"
+        raise OSError("disk full")
+
+    resp.iter_content = MagicMock(return_value=chunks())
+    with pytest.raises(OSError, match="disk full"):
+        BaseDagnamClient._append_stream_to_file(resp, dest, show_progress=False)
+    resp.close.assert_called_once()
 
 
 class _ErrorResponse:
