@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def run_cli(monkeypatch: PytestMonkeyPatch):
-    """Set sys.argv and invoke main(); returns nothing - use capsys for output."""
+    """Set sys.argv and invoke main(); returns its exit code - use capsys for output."""
 
-    def _run(argv: list[str]) -> None:
+    def _run(argv: list[str]) -> int:
         monkeypatch.setattr("sys.argv", ["dagnam", *argv])
-        cli_main()
+        return cli_main()
 
     return _run

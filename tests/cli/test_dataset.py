@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import pytest
-
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
@@ -74,18 +72,22 @@ def test_dataset_list_json_forwards_filters_and_overrides(
 
 
 def test_dataset_list_autherror_exits(
-    run_cli: CliRunner, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch, tmp_path: Path
 ) -> None:
     from pathlib import Path
 
     monkeypatch.delenv("DAGNAM_API_KEY", raising=False)
     # Redirect config to an empty location so auth resolution fails.
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", Path(tmp_path) / "missing.json")
-    with pytest.raises(SystemExit):
-        run_cli(["dataset", "list"])
+    assert run_cli(["dataset", "list"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: authentication failed" in err
+    assert "dagnam login" in err
 
 
-def test_dataset_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
+def test_dataset_list_apierror_exits(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -93,8 +95,10 @@ def test_dataset_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonk
         "dagnam._core.client.DagnamClient.list_datasets",
         side_effect=APIError(500, "boom"),
     ):
-        with pytest.raises(SystemExit):
-            run_cli(["dataset", "list"])
+        assert run_cli(["dataset", "list"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_dataset_info(
@@ -134,7 +138,9 @@ def test_dataset_info_redacts_signed_download_url_by_default(
     assert "token=secret" not in out
 
 
-def test_dataset_info_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
+def test_dataset_info_apierror_exits(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -142,8 +148,10 @@ def test_dataset_info_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonk
         "dagnam._core.client.DagnamClient.get_dataset_meta",
         side_effect=APIError(500, "boom"),
     ):
-        with pytest.raises(SystemExit):
-            run_cli(["dataset", "info", "ds-1"])
+        assert run_cli(["dataset", "info", "ds-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_dataset_download(
@@ -179,14 +187,16 @@ def test_dataset_download_no_progress_passes_loader_flag(
 
 
 def test_dataset_download_apierror_exits(
-    run_cli: CliRunner, monkeypatch: PytestMonkeyPatch
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.load_dataset", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["dataset", "download", "ds-1"])
+        assert run_cli(["dataset", "download", "ds-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_dataset_info_writes_output_file(

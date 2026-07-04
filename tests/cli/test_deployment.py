@@ -207,7 +207,9 @@ def test_deployments_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
         ],
     ],
 )
-def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> None:
+def test_deployments_apierrors_exit(
+    run_cli: CliRunner, capsys: StrCapture, cmd_args: list[str]
+) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(
@@ -225,8 +227,10 @@ def test_deployments_apierrors_exit(run_cli: CliRunner, cmd_args: list[str]) -> 
         validate=mock.Mock(side_effect=APIError(500, "boom")),
     )
     with mock.patch("dagnam.deployments", fake):
-        with pytest.raises(SystemExit):
-            run_cli(cmd_args)
+        assert run_cli(cmd_args) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_deployments_list_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:

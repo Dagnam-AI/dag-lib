@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, error, print_json
+from dagnam.cli.common import add_collection_output_args, print_json
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 if TYPE_CHECKING:
@@ -57,96 +57,64 @@ def _emit_collection(args: argparse.Namespace, result: object) -> None:
 
 def cmd_hub_search(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.search(
-            search=args.search,
-            framework=args.framework,
-            task_type=args.task_type,
-            sort_by=args.sort_by,
-            page=args.page,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.search(
+        search=args.search,
+        framework=args.framework,
+        task_type=args.task_type,
+        sort_by=args.sort_by,
+        page=args.page,
+        limit=args.limit,
+    )
     _emit_collection(args, result)
 
 
 def cmd_hub_get(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.get(args.model_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.get(args.model_id)
     print_json(result)
 
 
 def cmd_hub_star(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.star(args.model_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.star(args.model_id)
     print_json(result)
 
 
 def cmd_hub_unstar(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.unstar(args.model_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.unstar(args.model_id)
     print_json(result)
 
 
 def cmd_hub_fork(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.fork(args.model_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.fork(args.model_id)
     print_json(result)
 
 
 def cmd_hub_featured(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.featured()
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.featured()
     _emit_collection(args, result)
 
 
 def cmd_hub_trending(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.trending(days=args.days)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.trending(days=args.days)
     _emit_collection(args, result)
 
 
 def cmd_hub_upload_file(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.hub.upload_file(args.model_id, args.file_path)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.hub.upload_file(args.model_id, args.file_path)
     print_json(result)
 
 

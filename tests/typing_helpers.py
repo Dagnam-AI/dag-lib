@@ -15,7 +15,7 @@ type JsonObject = dict[str, JsonValue]
 type JsonArray = list[JsonValue]
 type JsonValue = JsonScalar | JsonObject | JsonArray
 
-type CliRunner = Callable[[list[str]], None]
+type CliRunner = Callable[[list[str]], int]
 type PytestMonkeyPatch = pytest.MonkeyPatch
 type StrCapture = pytest.CaptureFixture[str]
 type LogCapture = pytest.LogCaptureFixture

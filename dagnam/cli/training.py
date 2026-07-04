@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 def cmd_stream(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     try:
         for ev in dagnam.stream_training(
@@ -36,15 +35,12 @@ def cmd_stream(args: argparse.Namespace) -> None:
                 print(json.dumps(asdict(ev)))
             else:
                 print(f"[{ev.event}] {ev.data}")
-    except DagnamError as exc:
-        error(str(exc))
     except KeyboardInterrupt:
         sys.exit(130)
 
 
 def cmd_training_attach(args: argparse.Namespace) -> None:
     """Attach a local metrics JSONL file or child process to a Dagnam job."""
-    from dagnam._core.exceptions import AuthError, DagnamError
     from dagnam.training_attach import run_training_attach
 
     try:
@@ -54,12 +50,8 @@ def cmd_training_attach(args: argparse.Namespace) -> None:
             command=args.command,
             replay=args.replay,
         )
-    except AuthError:
-        error("Not logged in. Run 'dagnam login'.")
     except FileNotFoundError as exc:
-        error(str(exc))
-    except DagnamError as exc:
-        error(str(exc))
+        error(str(exc), hint="Check the path and retry.")
     sys.exit(code)
 
 
@@ -77,29 +69,25 @@ def _job_overrides(args: argparse.Namespace) -> dict | None:
 
 def cmd_training_create(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.create_training_job(
-            args.project_id,
-            framework=args.framework,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            optimizer=args.optimizer,
-            loss_function=args.loss_function,
-            training_dataset_id=args.dataset_id,
-            validation_dataset_id=args.val_dataset_id,
-            test_dataset_id=args.test_dataset_id,
-            train_split=args.train_split,
-            val_split=args.val_split,
-            test_split=args.test_split,
-            config_overrides=_job_overrides(args),
-            max_duration_seconds=args.max_duration_seconds,
-            confirm_resource_warning=args.confirm_resource_warning,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.create_training_job(
+        args.project_id,
+        framework=args.framework,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        optimizer=args.optimizer,
+        loss_function=args.loss_function,
+        training_dataset_id=args.dataset_id,
+        validation_dataset_id=args.val_dataset_id,
+        test_dataset_id=args.test_dataset_id,
+        train_split=args.train_split,
+        val_split=args.val_split,
+        test_split=args.test_split,
+        config_overrides=_job_overrides(args),
+        max_duration_seconds=args.max_duration_seconds,
+        confirm_resource_warning=args.confirm_resource_warning,
+    )
     print_json(result)
     job_id = result.get("id")
     print_next_step(f"dagnam stream {job_id or '<job-id>'}")
@@ -107,12 +95,8 @@ def cmd_training_create(args: argparse.Namespace) -> None:
 
 def cmd_training_get(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.get_training_job(args.job_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.get_training_job(args.job_id)
     if args.output:
         write_json_file(args.output, result)
     if args.json or args.verbose:
@@ -157,17 +141,13 @@ def _render_jobs(result: object) -> str:
 
 def cmd_training_list(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.list_training_jobs(
-            page=args.page,
-            limit=args.limit,
-            status=args.status,
-            project_id=args.project_id,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.list_training_jobs(
+        page=args.page,
+        limit=args.limit,
+        status=args.status,
+        project_id=args.project_id,
+    )
     emit_result(
         result,
         output=args.output,
@@ -178,41 +158,29 @@ def cmd_training_list(args: argparse.Namespace) -> None:
 
 def cmd_training_cancel(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.cancel_training_job(args.job_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.cancel_training_job(args.job_id)
     message = result.get("message")
     print(message or f"Training job {args.job_id} cancelled.")
 
 
 def cmd_training_delete(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.delete_training_jobs(args.job_ids)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.delete_training_jobs(args.job_ids)
     print_json(result)
 
 
 def cmd_training_logs(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.training_logs(
-            args.job_id,
-            log_level=args.log_level,
-            source=args.source,
-            page=args.page,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.training_logs(
+        args.job_id,
+        log_level=args.log_level,
+        source=args.source,
+        page=args.page,
+        limit=args.limit,
+    )
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -220,20 +188,16 @@ def cmd_training_logs(args: argparse.Namespace) -> None:
 
 def cmd_training_metrics(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.training_metrics(
-            args.job_id,
-            metric_type=args.metric_type,
-            epoch_start=args.epoch_start,
-            epoch_end=args.epoch_end,
-            epoch_summary=args.epoch_summary,
-            page=args.page,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.training_metrics(
+        args.job_id,
+        metric_type=args.metric_type,
+        epoch_start=args.epoch_start,
+        epoch_end=args.epoch_end,
+        epoch_summary=args.epoch_summary,
+        page=args.page,
+        limit=args.limit,
+    )
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -241,12 +205,8 @@ def cmd_training_metrics(args: argparse.Namespace) -> None:
 
 def cmd_training_metrics_summary(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.training_metrics_summary(args.job_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.training_metrics_summary(args.job_id)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)

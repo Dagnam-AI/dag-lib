@@ -28,12 +28,14 @@ def test_inference_run_bad_json(run_cli: CliRunner, monkeypatch: PytestMonkeyPat
         run_cli(["inference", "run", "dep-1", "--input", "not-json"])
 
 
-def test_inference_run_apierror_exits(run_cli: CliRunner) -> None:
+def test_inference_run_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.inference", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["inference", "run", "dep-1", "--input", '{"x":1}'])
+        assert run_cli(["inference", "run", "dep-1", "--input", '{"x":1}']) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_inference_batch(run_cli: CliRunner, capsys: StrCapture) -> None:
@@ -52,12 +54,14 @@ def test_inference_batch_bad_json(run_cli: CliRunner) -> None:
         run_cli(["inference", "batch", "dep-1", "--inputs", "garbage"])
 
 
-def test_inference_batch_apierror_exits(run_cli: CliRunner) -> None:
+def test_inference_batch_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.inference_batch", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["inference", "batch", "dep-1", "--inputs", "[1,2]"])
+        assert run_cli(["inference", "batch", "dep-1", "--inputs", "[1,2]"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_inference_batch_loads_from_file(
@@ -132,13 +136,15 @@ def test_inference_health_writes_output_file(run_cli: CliRunner, tmp_path: Path)
     assert json.loads(output.read_text(encoding="utf-8")) == {"status": "healthy"}
 
 
-def test_inference_health_apierror_exits(run_cli: CliRunner) -> None:
+def test_inference_health_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     deployments = SimpleNamespace(health=mock.Mock(side_effect=APIError(500, "boom")))
     with mock.patch("dagnam.deployments", deployments):
-        with pytest.raises(SystemExit):
-            run_cli(["inference", "health", "dep-1"])
+        assert run_cli(["inference", "health", "dep-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_inference_run_writes_output_file(run_cli: CliRunner, tmp_path: Path) -> None:
@@ -176,9 +182,11 @@ def test_inference_schema_writes_output_file(run_cli: CliRunner, tmp_path: Path)
     }
 
 
-def test_inference_schema_apierror_exits(run_cli: CliRunner) -> None:
+def test_inference_schema_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.inference_schema", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["inference", "schema", "dep-1"])
+        assert run_cli(["inference", "schema", "dep-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err

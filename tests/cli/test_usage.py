@@ -7,8 +7,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import pytest
-
 from dagnam.cli import account as account_mod
 
 if TYPE_CHECKING:
@@ -25,6 +23,13 @@ def test_usage_format_helpers_cover_units_and_edge_cases() -> None:
     assert account_mod._format_usage_value("records", 2_500_000) == "2.5M"
     assert account_mod._format_usage_value(123, 5) == "5"
     assert account_mod._format_usage_value("bad", "unknown") == "-"
+    # Known non-byte metrics carry a short unit suffix; unknown keys stay bare.
+    assert account_mod._format_usage_value("projects.count", 37) == "37 projects"
+    assert account_mod._format_usage_value("training.concurrent_jobs", 3) == "3 jobs"
+    assert account_mod._format_usage_value("models.max_parameters", 1_000_000_000) == "1B params"
+    assert account_mod._limit_unit("deployments.count") == "deploys"
+    assert account_mod._limit_unit("unknown.key") == ""
+    assert account_mod._limit_unit(123) == ""
     assert account_mod._limit_label("training.concurrent_jobs") == "concurrent training jobs"
     assert account_mod._limit_label("custom.quota_name") == "custom quota name"
     assert account_mod._limit_label(None) == "-"
@@ -62,8 +67,10 @@ def test_usage_table(run_cli: CliRunner, capsys: StrCapture) -> None:
     assert "10.0 GB" in out
     assert "max model parameters" in out
     assert "1B" in out
+    assert "1B params" in out
     assert "project versions retained" in out
     assert "37" in out
+    assert "37 versions" in out
     assert "training minutes" in out
     assert "Remaining" in out
     assert "##########" in out
@@ -85,13 +92,15 @@ def test_usage_json(run_cli: CliRunner, capsys: StrCapture) -> None:
     assert json.loads(capsys.readouterr().out) == snapshot
 
 
-def test_usage_apierror_exits(run_cli: CliRunner) -> None:
+def test_usage_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(entitlements=mock.Mock(side_effect=APIError(500, "boom")))
     with mock.patch("dagnam.account", fake):
-        with pytest.raises(SystemExit):
-            run_cli(["usage"])
+        assert run_cli(["usage"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_usage_read_only_grace_and_pending_plan(run_cli: CliRunner, capsys: StrCapture) -> None:

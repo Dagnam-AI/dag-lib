@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 def cmd_inference_run(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     try:
         source = f"@{args.input_file}" if args.input_file else args.input
@@ -23,10 +22,7 @@ def cmd_inference_run(args: argparse.Namespace) -> None:
     except (json.JSONDecodeError, OSError, TypeError) as exc:
         error(f"Failed to parse --input: {exc}")
 
-    try:
-        result = dagnam.inference(args.deployment_id, payload)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.inference(args.deployment_id, payload)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -34,7 +30,6 @@ def cmd_inference_run(args: argparse.Namespace) -> None:
 
 def cmd_inference_batch(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     try:
         source = f"@{args.inputs_file}" if args.inputs_file else args.inputs
@@ -42,10 +37,7 @@ def cmd_inference_batch(args: argparse.Namespace) -> None:
     except (json.JSONDecodeError, OSError, TypeError) as exc:
         error(f"Failed to parse --inputs: {exc}")
 
-    try:
-        result = dagnam.inference_batch(args.deployment_id, payload)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.inference_batch(args.deployment_id, payload)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -53,12 +45,8 @@ def cmd_inference_batch(args: argparse.Namespace) -> None:
 
 def cmd_inference_health(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.deployments.health(args.deployment_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.deployments.health(args.deployment_id)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -66,12 +54,8 @@ def cmd_inference_health(args: argparse.Namespace) -> None:
 
 def cmd_inference_schema(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.inference_schema(args.deployment_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.inference_schema(args.deployment_id)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)

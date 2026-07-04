@@ -94,13 +94,17 @@ def test_hub_featured_output_saves_full_json(
         (["hub", "upload-file", "m1", "/tmp/w.bin"], "upload_file"),
     ],
 )
-def test_hub_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
+def test_hub_apierrors_exit(
+    run_cli: CliRunner, capsys: StrCapture, cmd_args: list[str], attr: str
+) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(**{attr: mock.Mock(side_effect=APIError(500, "boom"))})
     with mock.patch("dagnam.hub", fake):
-        with pytest.raises(SystemExit):
-            run_cli(cmd_args)
+        assert run_cli(cmd_args) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_hub_search_empty_message(run_cli: CliRunner, capsys: StrCapture) -> None:

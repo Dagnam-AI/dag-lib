@@ -243,12 +243,16 @@ def test_training_delete_bulk(run_cli: CliRunner, capsys: StrCapture) -> None:
         (["training", "list"], "list_training_jobs"),
     ],
 )
-def test_training_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
+def test_training_apierrors_exit(
+    run_cli: CliRunner, capsys: StrCapture, cmd_args: list[str], attr: str
+) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch(f"dagnam.{attr}", mock.Mock(side_effect=APIError(500, "boom"))):
-        with pytest.raises(SystemExit):
-            run_cli(cmd_args)
+        assert run_cli(cmd_args) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 # ---------------------------------------------------------------- training attach handler
@@ -272,10 +276,10 @@ def test_training_attach_not_logged_in_exits_1(run_cli: CliRunner, capsys: StrCa
     with mock.patch(
         "dagnam.training_attach.run_training_attach", mock.Mock(side_effect=AuthError("nope"))
     ):
-        with pytest.raises(SystemExit) as exc:
-            run_cli(["training", "attach", "job-1"])
-    assert exc.value.code == 1
-    assert "Not logged in" in capsys.readouterr().err
+        assert run_cli(["training", "attach", "job-1"]) == 1
+    err = capsys.readouterr().err
+    assert "authentication failed" in err
+    assert "dagnam login" in err
 
 
 def test_training_attach_file_not_found_exits_1(run_cli: CliRunner, capsys: StrCapture) -> None:
@@ -286,7 +290,9 @@ def test_training_attach_file_not_found_exits_1(run_cli: CliRunner, capsys: StrC
         with pytest.raises(SystemExit) as exc:
             run_cli(["training", "attach", "job-1"])
     assert exc.value.code == 1
-    assert "no metrics file" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no metrics file" in err
+    assert "Check the path and retry." in err
 
 
 def test_training_attach_dagnam_error_exits_1(run_cli: CliRunner, capsys: StrCapture) -> None:
@@ -296,10 +302,10 @@ def test_training_attach_dagnam_error_exits_1(run_cli: CliRunner, capsys: StrCap
         "dagnam.training_attach.run_training_attach",
         mock.Mock(side_effect=APIError(500, "boom")),
     ):
-        with pytest.raises(SystemExit) as exc:
-            run_cli(["training", "attach", "job-1"])
-    assert exc.value.code == 1
-    assert "boom" in capsys.readouterr().err
+        assert run_cli(["training", "attach", "job-1"]) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 # ---------------------------------------------------------------- training create config overrides
@@ -384,12 +390,16 @@ def test_training_metrics_summary_writes_output_file(run_cli: CliRunner, tmp_pat
         ),
     ],
 )
-def test_training_more_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
+def test_training_more_apierrors_exit(
+    run_cli: CliRunner, capsys: StrCapture, cmd_args: list[str], attr: str
+) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch(f"dagnam.{attr}", mock.Mock(side_effect=APIError(500, "boom"))):
-        with pytest.raises(SystemExit):
-            run_cli(cmd_args)
+        assert run_cli(cmd_args) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_training_cancel_default_message_when_absent(

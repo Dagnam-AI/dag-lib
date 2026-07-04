@@ -9,7 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from dagnam._types import JsonObject
-from dagnam.cli.common import add_collection_output_args, error
+from dagnam.cli.common import add_collection_output_args
 from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
@@ -43,19 +43,12 @@ def _redact_dataset_meta(meta: JsonObject, *, show_download_url: bool) -> JsonOb
 def cmd_dataset_list(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        api_key = args.api_key or get_api_key()
-        api_url = args.api_url or get_api_url()
-    except DagnamError as exc:
-        error(str(exc))
+    api_key = args.api_key or get_api_key()
+    api_url = args.api_url or get_api_url()
 
     client = DagnamClient(api_url, api_key)
-    try:
-        datasets = client.list_datasets(type=args.type, search=args.search)
-    except DagnamError as exc:
-        error(str(exc))
+    datasets = client.list_datasets(type=args.type, search=args.search)
 
     emit_result(
         datasets,
@@ -67,15 +60,11 @@ def cmd_dataset_list(args: argparse.Namespace) -> None:
 
 def cmd_dataset_download(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     dataset_id: str = args.dataset_id
     output_dir = Path(args.output_dir)
     show_progress = not (args.no_progress or not sys.stderr.isatty())
-    try:
-        dagnam.load_dataset(dataset_id, cache_dir=str(output_dir), show_progress=show_progress)
-    except DagnamError as exc:
-        error(str(exc))
+    dagnam.load_dataset(dataset_id, cache_dir=str(output_dir), show_progress=show_progress)
 
     print(f"Dataset '{dataset_id}' downloaded to {output_dir / dataset_id}")
 
@@ -83,21 +72,14 @@ def cmd_dataset_download(args: argparse.Namespace) -> None:
 def cmd_dataset_info(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
-    from dagnam._core.exceptions import DagnamError
 
     dataset_id: str = args.dataset_id
 
-    try:
-        api_key = get_api_key()
-        api_url = get_api_url()
-    except DagnamError as exc:
-        error(str(exc))
+    api_key = get_api_key()
+    api_url = get_api_url()
 
     client = DagnamClient(api_url, api_key)
-    try:
-        meta = client.get_dataset_meta(dataset_id)
-    except DagnamError as exc:
-        error(str(exc))
+    meta = client.get_dataset_meta(dataset_id)
 
     safe_meta = _redact_dataset_meta(meta, show_download_url=args.show_download_url)
     if args.output:

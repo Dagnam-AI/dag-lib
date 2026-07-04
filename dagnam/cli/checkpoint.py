@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, error, human_size
+from dagnam.cli.common import add_collection_output_args, human_size
 from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
@@ -24,13 +24,9 @@ def _numeric_json_value(value: object, default: int = 0) -> int | float:
 def cmd_checkpoint_list(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        client = DagnamClient(get_api_url(), get_api_key())
-        checkpoints = client.list_checkpoints(args.job_id)
-    except DagnamError as exc:
-        error(str(exc))
+    client = DagnamClient(get_api_url(), get_api_key())
+    checkpoints = client.list_checkpoints(args.job_id)
 
     emit_result(
         checkpoints,
@@ -67,25 +63,21 @@ def _render_checkpoints(result: object) -> str:
 
 def cmd_checkpoint_download(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     checkpoint_id = None if args.checkpoint_id in (None, "latest", "best") else args.checkpoint_id
     prefer_best = args.checkpoint_id == "best"
-    try:
-        if args.output_dir:
-            cache_dir = Path(args.output_dir)
-            if prefer_best:
-                path = dagnam.download_checkpoint(
-                    args.job_id, checkpoint_id, cache_dir=cache_dir, prefer_best=True
-                )
-            else:
-                path = dagnam.download_checkpoint(args.job_id, checkpoint_id, cache_dir=cache_dir)
-        elif prefer_best:
-            path = dagnam.download_checkpoint(args.job_id, checkpoint_id, prefer_best=True)
+    if args.output_dir:
+        cache_dir = Path(args.output_dir)
+        if prefer_best:
+            path = dagnam.download_checkpoint(
+                args.job_id, checkpoint_id, cache_dir=cache_dir, prefer_best=True
+            )
         else:
-            path = dagnam.download_checkpoint(args.job_id, checkpoint_id)
-    except DagnamError as exc:
-        error(str(exc))
+            path = dagnam.download_checkpoint(args.job_id, checkpoint_id, cache_dir=cache_dir)
+    elif prefer_best:
+        path = dagnam.download_checkpoint(args.job_id, checkpoint_id, prefer_best=True)
+    else:
+        path = dagnam.download_checkpoint(args.job_id, checkpoint_id)
     print(str(path))
 
 

@@ -1,8 +1,9 @@
 """Branded argparse layer: grouped help and nearest-match suggestions.
 
-Pure stdlib (argparse/difflib/re). Imports only from ``dagnam.cli.common`` to
-respect the SDK layer contract, and never imports ``dagnam._core`` at module
-scope so the CLI stays import-light (tests/cli/test_lightweight_import.py).
+Pure stdlib (argparse/difflib/re). Imports only from ``dagnam.cli.common`` and
+``dagnam.cli.errors`` (both stdlib-light) to respect the SDK layer contract,
+and never imports ``dagnam._core`` at module scope so the CLI stays
+import-light (tests/cli/test_lightweight_import.py).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 from typing import TYPE_CHECKING, NoReturn, override
 
 from dagnam.cli.common import DOCS_URL, format_ascii_art, resolve_version
+from dagnam.cli.errors import styled_error_label
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -190,11 +192,12 @@ class DagnamArgumentParser(argparse.ArgumentParser):
             bad = unrecognized.group("args").split()[0]
             candidates = list(self._option_string_actions)
             return self._suggestion_block(bad, "option", candidates)
-        return f"Error: {message}\n\nRun '{self.prog} --help' for usage.\nDocs: {DOCS_URL}\n"
+        label = styled_error_label()
+        return f"{label} {message}\n\nRun '{self.prog} --help' for usage.\nDocs: {DOCS_URL}\n"
 
     def _suggestion_block(self, bad: str, kind: str, candidates: list[str]) -> str:
         match = suggest(bad, candidates)
-        lines = [f"Error: unknown {kind} '{bad}'", ""]
+        lines = [f"{styled_error_label()} unknown {kind} '{bad}'", ""]
         if match is not None:
             lines += [f"  Did you mean '{match}'?", ""]
         lines += [f"Run '{self.prog} --help' to see all {kind}s.", f"Docs: {DOCS_URL}"]

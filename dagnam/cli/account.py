@@ -31,6 +31,21 @@ _LIMIT_LABELS = {
     "api_keys.count": "API keys",
     "projects.version_retention": "project versions retained",
 }
+# Short unit suffix per non-byte metric so every usage row carries a unit (byte
+# rows already render B/KB/MB/GB via _format_bytes). Kept terse to fit the
+# numeric columns; unknown keys fall back to no suffix.
+_LIMIT_UNITS = {
+    "training.minutes_per_period": "min",
+    "training.max_duration_minutes": "min",
+    "training.concurrent_jobs": "jobs",
+    "models.max_parameters": "params",
+    "projects.count": "projects",
+    "projects.private_count": "projects",
+    "hub.private_model_count": "models",
+    "deployments.count": "deploys",
+    "api_keys.count": "keys",
+    "projects.version_retention": "versions",
+}
 
 
 def cmd_version(args: argparse.Namespace) -> None:
@@ -51,13 +66,8 @@ def cmd_version(args: argparse.Namespace) -> None:
 def cmd_whoami(args: argparse.Namespace) -> None:
     """Print the resolved API URL, masked key, and credential source."""
     from dagnam._core.auth import get_api_key, get_api_url
-    from dagnam._core.exceptions import AuthError
 
-    try:
-        api_key = get_api_key()
-    except AuthError:
-        print("Not logged in. Run 'dagnam login'.", file=sys.stderr)
-        sys.exit(1)
+    api_key = get_api_key()
 
     source = "DAGNAM_API_KEY environment variable"
     if os.environ.get("DAGNAM_API_KEY") is None:
@@ -214,12 +224,22 @@ def _format_count(value: int | float) -> str:
     return str(int(amount)) if amount.is_integer() else _trim_decimal(amount)
 
 
+def _limit_unit(key: object) -> str:
+    if not isinstance(key, str):
+        return ""
+    return _LIMIT_UNITS.get(key, "")
+
+
 def _format_usage_value(limit_key: object, value: object) -> str:
     if value is None:
         return "unlimited"
     if not _is_number(value):
         return "-"
-    return _format_bytes(value) if _is_byte_limit(limit_key) else _format_count(value)
+    if _is_byte_limit(limit_key):
+        return _format_bytes(value)
+    count = _format_count(value)
+    unit = _limit_unit(limit_key)
+    return f"{count} {unit}" if unit else count
 
 
 def _limit_label(key: object) -> str:
@@ -302,12 +322,8 @@ def _render_usage(snapshot: object) -> str:
 def cmd_usage(args: argparse.Namespace) -> None:
     """Print the caller's plan and real-time usage against plan limits."""
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        snapshot = dagnam.account.entitlements()
-    except DagnamError as exc:
-        error(str(exc))
+    snapshot = dagnam.account.entitlements()
 
     emit_result(
         snapshot,

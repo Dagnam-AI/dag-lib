@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 from datetime import UTC, datetime
 import json
 import os
@@ -183,9 +184,15 @@ def dir_size(path: Path) -> int:
     return total
 
 
-def error(msg: str) -> NoReturn:
-    """Print an error message to stderr and exit."""
-    print(f"Error: {msg}", file=sys.stderr)
+def error(msg: str, *, hint: str | None = None) -> NoReturn:
+    """Print a contextual error in the unified error frame and exit.
+
+    ``hint`` renders as a ``Try:`` suggestion under the message. Uses the same
+    renderer as the ``run_command`` backstop so every CLI failure looks alike.
+    """
+    from dagnam.cli.errors import render_message
+
+    print(render_message(msg, hint=hint), file=sys.stderr)
     sys.exit(1)
 
 
@@ -201,28 +208,30 @@ def print_next_step(command: str) -> None:
 def run_command(args: argparse.Namespace) -> int:
     """Dispatch ``args.func(args)`` with a clean top-level error backstop.
 
-    Handlers that catch ``DagnamError`` themselves (via ``error()``) exit
-    directly; this is the net for anything that escapes, for unexpected
-    exceptions, and for Ctrl-C. ``--debug`` or ``DAGNAM_DEBUG`` re-raises the
-    real traceback.
+    The single funnel for CLI failures: every exception that escapes a handler
+    is rendered by ``dagnam.cli.errors.render_error`` into the unified error
+    block (title, details, ``Try:`` suggestions, docs link). ``--debug`` or
+    ``DAGNAM_DEBUG`` re-raises the real traceback instead.
     """
     debug = bool(getattr(args, "debug", False)) or bool(os.environ.get("DAGNAM_DEBUG"))
     try:
         args.func(args)
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # Downstream pipe closed (e.g. `dagnam ... | head`): exit quietly, and
+        # point stdout at devnull so interpreter shutdown does not spew a
+        # second BrokenPipeError while flushing the dead pipe.
+        with suppress(OSError):
+            stdout_fd = sys.stdout.fileno()
+            os.dup2(os.open(os.devnull, os.O_WRONLY), stdout_fd)
+        return 1
     except Exception as exc:  # BLE001 - intentional top-level CLI backstop
         if debug:
             raise
-        from dagnam._core.exceptions import DagnamError
+        from dagnam.cli.errors import render_error
 
-        if isinstance(exc, DagnamError):
-            print(f"Error: {exc}\n\nDocs: {DOCS_URL}", file=sys.stderr)
-        else:
-            print(
-                "Error: an unexpected error occurred. Run with --debug for details.",
-                file=sys.stderr,
-            )
+        print(render_error(exc), file=sys.stderr)
         return 1
     return 0
 

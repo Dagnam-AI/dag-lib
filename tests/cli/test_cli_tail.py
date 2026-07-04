@@ -58,14 +58,18 @@ def test_cache_clear_when_already_empty(
 # ---------------------------------------------------------------- cli/dataset auth error in info
 
 
-def test_dataset_info_autherror_exits(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+def test_dataset_info_autherror_exits(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
     from pathlib import Path
 
     monkeypatch.delenv("DAGNAM_API_KEY", raising=False)
     monkeypatch.setattr("dagnam._core.config.CONFIG_FILE", Path(tmp_path) / "missing.json")
     monkeypatch.setattr("sys.argv", ["dagnam", "dataset", "info", "ds-1"])
-    with pytest.raises(SystemExit):
-        cli_main()
+    assert cli_main() == 1
+    err = capsys.readouterr().err
+    assert "authentication failed" in err
+    assert "dagnam login" in err
 
 
 # ---------------------------------------------------------------- csv loader role branches

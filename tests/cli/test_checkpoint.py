@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import pytest
-
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
@@ -47,7 +45,9 @@ def test_checkpoint_list_with_rows(
     assert "True" in out
 
 
-def test_checkpoint_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestMonkeyPatch) -> None:
+def test_checkpoint_list_apierror_exits(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     from dagnam._core.exceptions import APIError
 
@@ -55,8 +55,10 @@ def test_checkpoint_list_apierror_exits(run_cli: CliRunner, monkeypatch: PytestM
         "dagnam._core.client.DagnamClient.list_checkpoints",
         side_effect=APIError(500, "boom"),
     ):
-        with pytest.raises(SystemExit):
-            run_cli(["checkpoint", "list", "job-1"])
+        assert run_cli(["checkpoint", "list", "job-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_checkpoint_download(
@@ -88,12 +90,14 @@ def test_checkpoint_download_passes_output_dir(run_cli: CliRunner, tmp_path: Pat
     download.assert_called_once_with("job-1", "cp-1", cache_dir=tmp_path)
 
 
-def test_checkpoint_download_apierror_exits(run_cli: CliRunner) -> None:
+def test_checkpoint_download_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.download_checkpoint", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["checkpoint", "download", "job-1"])
+        assert run_cli(["checkpoint", "download", "job-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_checkpoint_download_best_with_output_dir(run_cli: CliRunner, tmp_path: Path) -> None:

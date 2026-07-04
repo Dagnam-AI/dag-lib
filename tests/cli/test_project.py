@@ -122,13 +122,17 @@ def test_projects_list_output_saves_full_json(
         (["projects", "versions", "latest", "p1"], "latest_version"),
     ],
 )
-def test_projects_apierrors_exit(run_cli: CliRunner, cmd_args: list[str], attr: str) -> None:
+def test_projects_apierrors_exit(
+    run_cli: CliRunner, capsys: StrCapture, cmd_args: list[str], attr: str
+) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(**{attr: mock.Mock(side_effect=APIError(500, "boom"))})
     with mock.patch("dagnam.projects", fake):
-        with pytest.raises(SystemExit):
-            run_cli(cmd_args)
+        assert run_cli(cmd_args) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 # ---------------------------------------------------------------- projects architecture
@@ -317,13 +321,15 @@ def test_projects_architecture_bad_json_exits_1(run_cli: CliRunner, capsys: StrC
     assert "Could not read JSON input" in capsys.readouterr().err
 
 
-def test_projects_architecture_apierror_exits(run_cli: CliRunner) -> None:
+def test_projects_architecture_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     fake = SimpleNamespace(save_architecture=mock.Mock(side_effect=APIError(500, "boom")))
     with mock.patch("dagnam.projects", fake):
-        with pytest.raises(SystemExit):
-            run_cli(["projects", "architecture", "p1", "--diagram", "{}", "--config", "{}"])
+        assert run_cli(["projects", "architecture", "p1", "--diagram", "{}", "--config", "{}"]) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
 
 
 def test_projects_list_dict_with_non_list_items(run_cli: CliRunner, capsys: StrCapture) -> None:

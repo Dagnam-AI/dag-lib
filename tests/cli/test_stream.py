@@ -45,9 +45,11 @@ def test_stream_keyboard_interrupt_exits_130(run_cli: CliRunner) -> None:
     assert exc_info.value.code == 130
 
 
-def test_stream_apierror_exits(run_cli: CliRunner) -> None:
+def test_stream_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
     with mock.patch("dagnam.stream_training", side_effect=APIError(500, "boom")):
-        with pytest.raises(SystemExit):
-            run_cli(["stream", "job-1"])
+        assert run_cli(["stream", "job-1"]) == 1
+    err = capsys.readouterr().err
+    assert "the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err

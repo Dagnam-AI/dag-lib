@@ -195,6 +195,53 @@ class TestRunCommand:
         args = argparse.Namespace(func=boom, debug=False)
         assert common.run_command(args) == 130
 
+    def test_broken_pipe_exits_quietly(self, capsys: StrCapture) -> None:
+        # Under pytest capture, stdout has no real fileno; the suppress() arm
+        # swallows that and the command still exits 1 with no error spew.
+        def boom(_a: argparse.Namespace) -> None:
+            raise BrokenPipeError
+
+        args = argparse.Namespace(func=boom, debug=False)
+        assert common.run_command(args) == 1
+        assert capsys.readouterr().err == ""
+
+    def test_broken_pipe_redirects_stdout_to_devnull(self, monkeypatch: PytestMonkeyPatch) -> None:
+        # With a fileno-capable stdout, the dead pipe's fd is re-pointed at
+        # devnull so interpreter shutdown does not raise while flushing.
+        sink_fd = os.open(os.devnull, os.O_WRONLY)
+
+        class _FakeStdout:
+            def fileno(self) -> int:
+                return sink_fd
+
+        monkeypatch.setattr("sys.stdout", _FakeStdout())
+
+        def boom(_a: argparse.Namespace) -> None:
+            raise BrokenPipeError
+
+        args = argparse.Namespace(func=boom, debug=False)
+        try:
+            assert common.run_command(args) == 1
+        finally:
+            os.close(sink_fd)
+
+
+class TestErrorHelper:
+    def test_prints_unified_frame_and_exits(self, capsys: StrCapture) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            common.error("bad thing happened")
+        assert excinfo.value.code == 1
+        err = capsys.readouterr().err
+        assert "Error: bad thing happened" in err
+        assert common.DOCS_URL in err
+
+    def test_hint_renders_try_section(self, capsys: StrCapture) -> None:
+        with pytest.raises(SystemExit):
+            common.error("bad thing happened", hint="Fix the input and retry.")
+        err = capsys.readouterr().err
+        assert "Try:" in err
+        assert "Fix the input and retry." in err
+
 
 class TestParseApiDatetime:
     def test_naive_string_is_assumed_utc(self) -> None:

@@ -85,17 +85,13 @@ def _render_architecture(result: object) -> str:
 
 def cmd_projects_list(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.list(
-            framework=args.framework,
-            search=args.search,
-            page=args.page,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.list(
+        framework=args.framework,
+        search=args.search,
+        page=args.page,
+        limit=args.limit,
+    )
     emit_result(
         result,
         output=args.output,
@@ -106,12 +102,8 @@ def cmd_projects_list(args: argparse.Namespace) -> None:
 
 def cmd_projects_get(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.get(args.project_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.get(args.project_id)
     if args.output:
         write_json_file(args.output, result)
     if args.json or args.verbose:
@@ -122,17 +114,13 @@ def cmd_projects_get(args: argparse.Namespace) -> None:
 
 def cmd_projects_create(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.create(
-            title=args.title,
-            framework=args.framework,
-            description=args.description,
-            visibility=args.visibility,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.create(
+        title=args.title,
+        framework=args.framework,
+        description=args.description,
+        visibility=args.visibility,
+    )
     emit_result(
         result,
         output=args.output,
@@ -145,23 +133,15 @@ def cmd_projects_create(args: argparse.Namespace) -> None:
 
 def cmd_projects_delete(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        dagnam.projects.delete(args.project_id)
-    except DagnamError as exc:
-        error(str(exc))
+    dagnam.projects.delete(args.project_id)
     print(f"Project {args.project_id} deleted.")
 
 
 def cmd_projects_duplicate(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.duplicate(args.project_id, title=args.title)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.duplicate(args.project_id, title=args.title)
     emit_result(
         result,
         output=args.output,
@@ -173,7 +153,6 @@ def cmd_projects_duplicate(args: argparse.Namespace) -> None:
 def cmd_projects_architecture(args: argparse.Namespace) -> None:
     """Save a project's architecture (diagram state + config) from JSON inputs."""
     import dagnam
-    from dagnam._core.exceptions import DagnamError
     from dagnam._types import ensure_json_value
 
     try:
@@ -182,15 +161,12 @@ def cmd_projects_architecture(args: argparse.Namespace) -> None:
     except (OSError, ValueError) as exc:
         error(f"Could not read JSON input: {exc}")
 
-    try:
-        result = dagnam.projects.save_architecture(
-            args.project_id,
-            diagram_state,
-            architecture_config,
-            commit_message=args.message,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.save_architecture(
+        args.project_id,
+        diagram_state,
+        architecture_config,
+        commit_message=args.message,
+    )
     emit_result(
         result,
         output=args.output,
@@ -201,67 +177,43 @@ def cmd_projects_architecture(args: argparse.Namespace) -> None:
 
 def cmd_projects_versions_list(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.list_versions(args.project_id, page=args.page, limit=args.limit)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.list_versions(args.project_id, page=args.page, limit=args.limit)
     print_json(result)
 
 
 def cmd_projects_versions_get(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.get_version(args.project_id, args.version_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.get_version(args.project_id, args.version_id)
     print_json(result)
 
 
 def cmd_projects_versions_compare(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.compare_versions(args.project_id, args.version_a, args.version_b)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.compare_versions(args.project_id, args.version_a, args.version_b)
     print_json(result)
 
 
 def cmd_projects_versions_restore(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.restore_version(args.project_id, args.version_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.restore_version(args.project_id, args.version_id)
     print_json(result)
 
 
 def cmd_projects_versions_delete(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        dagnam.projects.delete_version(args.project_id, args.version_id)
-    except DagnamError as exc:
-        error(str(exc))
+    dagnam.projects.delete_version(args.project_id, args.version_id)
     print(f"Deleted version {args.version_id}")
 
 
 def cmd_projects_versions_latest(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.projects.latest_version(args.project_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.projects.latest_version(args.project_id)
     print_json(result)
 
 

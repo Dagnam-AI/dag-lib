@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from dagnam.cli.common import (
     add_collection_output_args,
-    error,
     format_local,
     print_json,
     print_next_step,
@@ -75,19 +74,15 @@ def _render_deployments(result: object) -> str:
 
 def cmd_deployments_list(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.deployments.list(
-            status=args.status,
-            platform=args.platform,
-            project_id=args.project_id,
-            search=args.search,
-            page=args.page,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.deployments.list(
+        status=args.status,
+        platform=args.platform,
+        project_id=args.project_id,
+        search=args.search,
+        page=args.page,
+        limit=args.limit,
+    )
     result = _redact_deployment_collection(result)
     emit_result(
         result,
@@ -99,147 +94,16 @@ def cmd_deployments_list(args: argparse.Namespace) -> None:
 
 def cmd_deployments_get(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.deployments.get(args.deployment_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.deployments.get(args.deployment_id)
     print_json(_redact_deployment_secrets(result))
 
 
 def cmd_deployments_create(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = (
-            dagnam.deployments.create(
-                name=args.name,
-                project_id=args.project_id,
-                checkpoint_path=args.checkpoint_path,
-                platform=args.platform,
-                deployment_type=args.deployment_type,
-                instance_type=args.instance_type,
-                num_instances=args.num_instances,
-            )
-            .wait()
-            .result()
-        )
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-    deployment_id = result.get("id") if isinstance(result, dict) else None
-    print_next_step(f"dagnam inference {deployment_id or '<deployment-id>'} run ...")
-
-
-def cmd_deployments_pause(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        dagnam.deployments.pause(args.deployment_id).wait()
-    except DagnamError as exc:
-        error(str(exc))
-    print(f"Deployment {args.deployment_id} paused.")
-
-
-def cmd_deployments_resume(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        dagnam.deployments.resume(args.deployment_id).wait()
-    except DagnamError as exc:
-        error(str(exc))
-    print(f"Deployment {args.deployment_id} resumed.")
-
-
-def cmd_deployments_delete(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        dagnam.deployments.delete(args.deployment_id)
-    except DagnamError as exc:
-        error(str(exc))
-    print(f"Deployment {args.deployment_id} deleted.")
-
-
-def cmd_deployments_logs(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.logs(
-            args.deployment_id,
-            level=args.level,
-            search=args.search,
-            limit=args.limit,
-        )
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-
-
-def cmd_deployments_metrics(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.metrics(args.deployment_id, time_range=args.time_range)
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-
-
-def cmd_deployments_platforms(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.platforms()
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-
-
-def cmd_deployments_retry(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.retry(args.deployment_id)
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-
-
-def cmd_deployments_estimate_cost(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.estimate_cost(
-            platform=args.platform,
-            instance_type=args.instance_type,
-            num_instances=args.num_instances,
-            auto_scaling_enabled=args.auto_scaling,
-            min_instances=args.min_instances,
-            max_instances=args.max_instances,
-            region=args.region,
-        )
-    except DagnamError as exc:
-        error(str(exc))
-    print_json(result)
-
-
-def cmd_deployments_validate(args: argparse.Namespace) -> None:
-    import dagnam
-    from dagnam._core.exceptions import DagnamError
-
-    try:
-        result = dagnam.deployments.validate(
+    result = (
+        dagnam.deployments.create(
             name=args.name,
             project_id=args.project_id,
             checkpoint_path=args.checkpoint_path,
@@ -247,13 +111,100 @@ def cmd_deployments_validate(args: argparse.Namespace) -> None:
             deployment_type=args.deployment_type,
             instance_type=args.instance_type,
             num_instances=args.num_instances,
-            auto_scaling_enabled=args.auto_scaling,
-            min_instances=args.min_instances,
-            max_instances=args.max_instances,
-            region=args.region,
         )
-    except DagnamError as exc:
-        error(str(exc))
+        .wait()
+        .result()
+    )
+    print_json(result)
+    deployment_id = result.get("id") if isinstance(result, dict) else None
+    print_next_step(f"dagnam inference {deployment_id or '<deployment-id>'} run ...")
+
+
+def cmd_deployments_pause(args: argparse.Namespace) -> None:
+    import dagnam
+
+    dagnam.deployments.pause(args.deployment_id).wait()
+    print(f"Deployment {args.deployment_id} paused.")
+
+
+def cmd_deployments_resume(args: argparse.Namespace) -> None:
+    import dagnam
+
+    dagnam.deployments.resume(args.deployment_id).wait()
+    print(f"Deployment {args.deployment_id} resumed.")
+
+
+def cmd_deployments_delete(args: argparse.Namespace) -> None:
+    import dagnam
+
+    dagnam.deployments.delete(args.deployment_id)
+    print(f"Deployment {args.deployment_id} deleted.")
+
+
+def cmd_deployments_logs(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.logs(
+        args.deployment_id,
+        level=args.level,
+        search=args.search,
+        limit=args.limit,
+    )
+    print_json(result)
+
+
+def cmd_deployments_metrics(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.metrics(args.deployment_id, time_range=args.time_range)
+    print_json(result)
+
+
+def cmd_deployments_platforms(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.platforms()
+    print_json(result)
+
+
+def cmd_deployments_retry(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.retry(args.deployment_id)
+    print_json(result)
+
+
+def cmd_deployments_estimate_cost(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.estimate_cost(
+        platform=args.platform,
+        instance_type=args.instance_type,
+        num_instances=args.num_instances,
+        auto_scaling_enabled=args.auto_scaling,
+        min_instances=args.min_instances,
+        max_instances=args.max_instances,
+        region=args.region,
+    )
+    print_json(result)
+
+
+def cmd_deployments_validate(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.validate(
+        name=args.name,
+        project_id=args.project_id,
+        checkpoint_path=args.checkpoint_path,
+        platform=args.platform,
+        deployment_type=args.deployment_type,
+        instance_type=args.instance_type,
+        num_instances=args.num_instances,
+        auto_scaling_enabled=args.auto_scaling,
+        min_instances=args.min_instances,
+        max_instances=args.max_instances,
+        region=args.region,
+    )
     print_json(result)
 
 

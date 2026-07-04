@@ -74,10 +74,10 @@ class TestWhoami:
         monkeypatch.setattr("dagnam._core.auth._api_key", None)
         monkeypatch.setattr("sys.argv", ["dagnam", "whoami"])
 
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-        assert exc_info.value.code == 1
-        assert "not logged in" in capsys.readouterr().err.lower()
+        assert main() == 1
+        err = capsys.readouterr().err
+        assert "authentication failed" in err
+        assert "dagnam login" in err
 
 
 class TestLogout:

@@ -6,7 +6,7 @@ import argparse
 import sys
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, error
+from dagnam.cli.common import add_collection_output_args
 from dagnam.cli.presentation import emit_result
 
 if TYPE_CHECKING:
@@ -46,17 +46,13 @@ def _render_generate(result: object) -> str:
 
 def cmd_codegen_generate(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.codegen.generate(
-            args.project_id,
-            framework=args.framework,
-            version_id=args.version_id,
-            async_mode=getattr(args, "async"),
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.codegen.generate(
+        args.project_id,
+        framework=args.framework,
+        version_id=args.version_id,
+        async_mode=getattr(args, "async"),
+    )
     emit_result(
         result,
         output=args.output,
@@ -67,16 +63,12 @@ def cmd_codegen_generate(args: argparse.Namespace) -> None:
 
 def cmd_codegen_preview(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.codegen.preview(
-            args.project_id,
-            framework=args.framework,
-            version_id=args.version_id,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.codegen.preview(
+        args.project_id,
+        framework=args.framework,
+        version_id=args.version_id,
+    )
     emit_result(
         result,
         output=args.output,
@@ -87,12 +79,8 @@ def cmd_codegen_preview(args: argparse.Namespace) -> None:
 
 def cmd_codegen_validate(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
-    try:
-        result = dagnam.codegen.validate(args.project_id, version_id=args.version_id)
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.codegen.validate(args.project_id, version_id=args.version_id)
     emit_result(
         result,
         output=args.output,
@@ -103,19 +91,15 @@ def cmd_codegen_validate(args: argparse.Namespace) -> None:
 
 def cmd_codegen_download(args: argparse.Namespace) -> None:
     import dagnam
-    from dagnam._core.exceptions import DagnamError
 
     show_progress = not (getattr(args, "no_progress", False) or not sys.stderr.isatty())
-    try:
-        result = dagnam.codegen.download(
-            args.project_id,
-            framework=args.framework,
-            version_id=args.version_id,
-            dest=args.dest,
-            show_progress=show_progress,
-        )
-    except DagnamError as exc:
-        error(str(exc))
+    result = dagnam.codegen.download(
+        args.project_id,
+        framework=args.framework,
+        version_id=args.version_id,
+        dest=args.dest,
+        show_progress=show_progress,
+    )
     print(str(result))
 
 
