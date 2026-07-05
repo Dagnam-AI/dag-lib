@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
-from typing import TYPE_CHECKING
+import sys
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -96,6 +98,109 @@ class TestResolveVersion:
             assert common_mod.resolve_version() == __version__
         finally:
             md.version = original  # type: ignore[assignment]
+
+
+def test_ascii_art_color_paints_body_and_shade_runs() -> None:
+    art = format_ascii_art(columns=200, color=True)
+    # Letter bodies use the light-mode brand red, shading the dark-mode red.
+    assert "\x1b[38;2;255;79;79m█" in art
+    assert "\x1b[38;2;202;3;3m░" in art
+    for line in art.splitlines():
+        assert line.endswith("\x1b[0m")
+
+
+def test_ascii_art_color_defaults_off_without_a_tty(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    art = format_ascii_art(columns=200)
+    assert "\x1b[" not in art
+
+
+def test_ascii_art_color_defaults_on_when_forced(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    art = format_ascii_art(columns=200)
+    assert "\x1b[38;2;255;79;79m" in art
+
+
+def test_colorize_banner_paints_fallback_glyphs_in_body_red() -> None:
+    # The cp1252 fallback banner is plain ASCII; its glyphs get the body red.
+    painted = common._colorize_banner(common.DAGNAM_ASCII_FALLBACK_ART)  # pyright: ignore[reportPrivateUsage]
+    assert "\x1b[38;2;255;79;79m" in painted
+    assert "\x1b[38;2;202;3;3m" not in painted  # no shade blocks in the fallback
+    assert "█" not in painted  # stays pure ASCII apart from the escapes
+
+
+def test_blend_color_reaches_target_at_the_band_center() -> None:
+    blend = common._blend_color  # pyright: ignore[reportPrivateUsage]
+    far = blend((202, 3, 3), (255, 79, 79), 0, band=60.0)
+    near = blend((202, 3, 3), (255, 79, 79), 60, band=60.0)
+    static = blend((202, 3, 3), (255, 79, 79), 0, band=None)
+    assert far == "\x1b[38;2;202;3;3m"  # beyond the falloff: flat base color
+    assert near == "\x1b[38;2;255;79;79m"  # at the center: full target color
+    assert static == far  # no band means the flat base color
+
+
+class TestPrintVersionBanner:
+    def test_static_when_animation_disabled(self, capsys: StrCapture) -> None:
+        common.print_version_banner(animate=False)
+        out = capsys.readouterr().out
+        assert format_ascii_art() in out
+        assert f"dagnam {resolve_version()}" in out
+        assert "\x1b[?25l" not in out
+
+    def test_default_gate_is_static_without_a_tty(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        common.print_version_banner()
+        assert "\x1b[?25l" not in capsys.readouterr().out
+
+    def test_forced_color_without_a_tty_stays_static_but_colored(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        # FORCE_COLOR turns styling on, but in-place redraw still needs a TTY.
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        common.print_version_banner()
+        out = capsys.readouterr().out
+        assert "\x1b[?25l" not in out
+        assert "\x1b[38;2;255;79;79m" in out
+
+    def test_default_gate_animates_on_a_color_tty(self, monkeypatch: PytestMonkeyPatch) -> None:
+        class _Tty(io.StringIO):
+            encoding = "utf-8"  # keep the glyph banner (StringIO declares none)
+
+            @override
+            def isatty(self) -> bool:
+                return True
+
+        stream = _Tty()
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        monkeypatch.setattr(sys, "stdout", stream)
+        common.print_version_banner(sleep=lambda _: None)
+        assert "\x1b[?25l" in stream.getvalue()
+
+    def test_sweep_loops_redraw_in_place_then_settle_static(self, capsys: StrCapture) -> None:
+        delays: list[float] = []
+        common.print_version_banner(animate=True, sleep=delays.append)
+        out = capsys.readouterr().out
+        frames = common._BANNER_SWEEP_LOOPS * common._BANNER_SWEEP_FRAMES  # pyright: ignore[reportPrivateUsage]
+        lines = format_ascii_art(color=False).count("\n") + 1
+        assert out.count("\x1b[?25l") == 1  # cursor hidden once...
+        assert out.count("\x1b[?25h") == 1  # ...and restored once
+        assert len(delays) == frames
+        assert out.count(f"\x1b[{lines}F") == frames  # every frame redraws in place
+        assert format_ascii_art(color=True) in out  # ends settled on the static banner
+        assert out.rstrip().endswith(f"dagnam {resolve_version()}")
+
+    def test_fallback_banner_animates_in_brand_color_too(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        # A legacy console gets the plain-ASCII art; it sweeps the same way.
+        monkeypatch.setattr(common, "_stream_can_encode", lambda *_: False)
+        common.print_version_banner(animate=True, sleep=lambda _: None)
+        out = capsys.readouterr().out
+        assert "\x1b[?25l" in out
+        assert "\x1b[38;2;255;79;79m" in out
+        assert "█" not in out
 
 
 def test_ascii_art_skips_stream_that_raises_then_uses_next(monkeypatch: MonkeyPatch) -> None:

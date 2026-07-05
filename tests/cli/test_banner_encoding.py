@@ -129,7 +129,7 @@ def test_format_ascii_art_falls_back_to_ascii_when_not_encodable(
     monkeypatch.setattr(sys, "stdout", _Stream("cp1252"))
     art = format_ascii_art(columns=200)
     assert "█" not in art
-    assert "DAGNAM.AI" in art
+    assert "|__/" in art  # the stick-letters fallback wordmark
     art.encode("cp1252")  # must not raise on a legacy code page
 
 
@@ -188,10 +188,10 @@ def test_cli_flag_does_not_crash_on_cp1252_console(flag: str, monkeypatch: Monke
 
     assert exc.value.code == 0
     output = "".join(console.written)
-    # -v/--version show the ASCII-art banner (DAGNAM.AI in fallback art);
+    # -v/--version show the banner (stick-letters wordmark in fallback art);
     # -h/--help show compact help which mentions Dagnam.AI in the description.
     if flag in ("-v", "--version"):
-        assert "DAGNAM.AI" in output
+        assert "|__/" in output
     else:
         assert "Dagnam.AI" in output
     output.encode("cp1252")  # the whole emitted output must survive a cp1252 write

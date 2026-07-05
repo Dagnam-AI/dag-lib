@@ -5,12 +5,33 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, NoReturn, override
 
 from dagnam.cli._parser import DagnamArgumentParser
 
 if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
+
+
+class _VersionAction(argparse.Action):
+    """``-v``/``--version``: print the brand banner (animated on a TTY) and exit.
+
+    A custom action instead of ``action="version"`` because the banner is a
+    live in-place sweep on interactive terminals, not a precomputed string.
+    """
+
+    @override
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> NoReturn:
+        from dagnam.cli.common import print_version_banner
+
+        print_version_banner()
+        parser.exit(0)
 
 
 def build_parser() -> DagnamArgumentParser:
@@ -26,7 +47,6 @@ def build_parser() -> DagnamArgumentParser:
     from dagnam.cli.cache import register_cache
     from dagnam.cli.checkpoint import register_checkpoint
     from dagnam.cli.codegen import register_codegen
-    from dagnam.cli.common import format_version_banner
     from dagnam.cli.dataset import register_dataset
     from dagnam.cli.deployment import register_deployments
     from dagnam.cli.hub import register_hub
@@ -43,8 +63,8 @@ def build_parser() -> DagnamArgumentParser:
     parser.add_argument(
         "--version",
         "-v",
-        action="version",
-        version=format_version_banner(),
+        action=_VersionAction,
+        nargs=0,
         help="Show the dagnam version and exit.",
     )
     parser.add_argument(

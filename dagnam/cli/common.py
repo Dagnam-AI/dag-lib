@@ -10,9 +10,12 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 from typing import TYPE_CHECKING, NoReturn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     # argparse exposes no public type for the object returned by
     # ``ArgumentParser.add_subparsers()``; ``_SubParsersAction`` is the canonical
     # (underscore-prefixed) type. Alias it once here so every command module
@@ -23,14 +26,14 @@ DOCS_URL = "https://dagnam.ai/docs"
 
 # dos rebel font: <https://patorjk.com/software/taag/#p=display&f=DOS+Rebel&t=DAGNAM.AI&x=none&v=4&h=3&w=80&we=false>
 DAGNAM_ASCII_ART = r"""
- ██████████   █████████   █████████ ██████   █████ █████████ ██████   ██████      █████████ █████
-░░███░░░░███ ███░░░░░███ ███░░░░░██░░██████ ░░███ ███░░░░░██░░██████ ██████      ███░░░░░██░░███
- ░███   ░░██░███    ░██████     ░░░ ░███░███ ░███░███    ░███░███░█████░███     ░███    ░███░███
- ░███    ░██░██████████░███         ░███░░███░███░███████████░███░░███ ░███     ░███████████░███
- ░███    ░██░███░░░░░██░███    █████░███ ░░██████░███░░░░░███░███ ░░░  ░███     ░███░░░░░███░███
- ░███    ███░███    ░██░░███  ░░███ ░███  ░░█████░███    ░███░███      ░███     ░███    ░███░███
- ██████████ █████   ████░░█████████ █████  ░░█████████   █████████     █████ ██ █████   █████████
-░░░░░░░░░░ ░░░░░   ░░░░░ ░░░░░░░░░ ░░░░░    ░░░░░░░░░   ░░░░░░░░░     ░░░░░ ░░ ░░░░░   ░░░░░░░░░
+ ██████████   █████████    █████████ ██████   █████ █████████ ██████   ██████      █████████ █████
+░░███░░░░███ ███░░░░░███  ███░░░░░██░░██████ ░░███ ███░░░░░██░░██████ ██████      ███░░░░░██░░███
+ ░███   ░░██░███    ░███░███    ░░░  ░███░███ ░███░███    ░███░███░█████░███     ░███    ░███░███
+ ░███    ░██░███████████░███         ░███░░███░███░███████████░███░░███ ░███     ░███████████░███
+ ░███    ░██░███░░░░░███░███    █████░███ ░░██████░███░░░░░███░███ ░░░  ░███     ░███░░░░░███░███
+ ░███    ███░███    ░███░░███  ░░███ ░███  ░░█████░███    ░███░███      ░███     ░███    ░███░███
+ ██████████ █████   █████░░█████████ █████  ░░█████████   █████████     █████ ██ █████   █████████
+░░░░░░░░░░ ░░░░░   ░░░░░  ░░░░░░░░ ░░░░░    ░░░░░░░░░   ░░░░░░░░░     ░░░░░ ░░ ░░░░░   ░░░░░░░░░
 """
 
 # Plain-ASCII fallback banner for consoles whose encoding cannot represent the
@@ -39,11 +42,80 @@ DAGNAM_ASCII_ART = r"""
 # console, many CI shells, Git Bash) writing those glyphs raises
 # ``UnicodeEncodeError`` and crashes a command that must never fail. When stdout
 # cannot be upgraded to UTF-8, the banner degrades to this ASCII form (G019).
+# JS Stick Letters font
 DAGNAM_ASCII_FALLBACK_ART = r"""
-==================================================
-                    DAGNAM.AI
-==================================================
+ __        __
+|  \  /\  / _` |\ |  /\   |\/|   /\  |
+|__/ /~~\ \__> | \| /~~\  |  | ./~~\ |
 """
+
+# Brand palette from the frontend theme (mvp-frontend src/index.css --primary):
+# letter bodies use the light-mode brand red and the shading uses the dark-mode
+# brand red, so the terminal wordmark matches the product logo.
+_BANNER_BODY_RGB = (255, 79, 79)  # oklch(67.517% 0.21256 24.87)
+_BANNER_SHADE_RGB = (202, 3, 3)  # oklch(52.768% 0.21534 29.097)
+_BANNER_BODY_COLOR = "\x1b[38;2;{};{};{}m".format(*_BANNER_BODY_RGB)
+_BANNER_RESET = "\x1b[0m"
+
+# The ``dagnam -v`` banner animation: a highlight band sweeps left-to-right
+# through the artwork in a seamless loop, redrawing the banner in place.
+# 28 frames at 25 ms per cycle (~0.7 s), 3 cycles, then it settles static.
+_BANNER_SWEEP_FRAMES = 28
+_BANNER_SWEEP_SECONDS_PER_FRAME = 0.025
+_BANNER_SWEEP_HALF_WIDTH = 18.0
+_BANNER_SWEEP_LOOPS = 3
+
+
+def _blend_color(
+    base: tuple[int, int, int],
+    target: tuple[int, int, int],
+    col: int,
+    band: float | None,
+) -> str:
+    """Truecolor escape for a glyph at ``col``, blended toward the sweep band.
+
+    Without a band the glyph keeps its flat ``base`` color. With one, the
+    color blends linearly toward ``target`` as the band center approaches,
+    reaching the full ``target`` color at the center.
+    """
+    weight = 0.0 if band is None else max(0.0, 1.0 - abs(col - band) / _BANNER_SWEEP_HALF_WIDTH)
+    channels = (round(b + (t - b) * weight) for b, t in zip(base, target, strict=True))
+    return "\x1b[38;2;{};{};{}m".format(*channels)
+
+
+def _colorize_banner(art: str, band: float | None = None) -> str:
+    """Paint runs of banner glyphs in the brand palette.
+
+    Escape codes wrap each run of same-colored glyphs, applied after width
+    trimming so line-length math always happens on plain text. Solid blocks
+    stay body red; shade blocks sit in the dark red and brighten toward the
+    body red as the sweep ``band`` passes; the plain-ASCII fallback glyphs get
+    the inverse treatment (body red, dipping toward the dark red at the band).
+    """
+    lines: list[str] = []
+    for line in art.splitlines():
+        pieces: list[str] = []
+        active: str | None = None
+        for col, char in enumerate(line):
+            if char == "█":
+                color: str | None = _BANNER_BODY_COLOR
+            elif char == "░":
+                color = _blend_color(_BANNER_SHADE_RGB, _BANNER_BODY_RGB, col, band)
+            elif not char.isspace():
+                color = _blend_color(_BANNER_BODY_RGB, _BANNER_SHADE_RGB, col, band)
+            else:
+                color = None
+            if color != active:
+                if active is not None:
+                    pieces.append(_BANNER_RESET)
+                if color is not None:
+                    pieces.append(color)
+                active = color
+            pieces.append(char)
+        if active is not None:
+            pieces.append(_BANNER_RESET)
+        lines.append("".join(pieces))
+    return "\n".join(lines)
 
 
 def parse_api_datetime(value: str) -> datetime:
@@ -133,14 +205,15 @@ def _terminal_width(fallback: int = 80) -> int:
     return shutil.get_terminal_size(fallback=(fallback, 24)).columns
 
 
-def format_ascii_art(columns: int | None = None) -> str:
+def format_ascii_art(columns: int | None = None, *, color: bool | None = None) -> str:
     """Stem banner lines to the available terminal width so they do not wrap.
 
     Recomputes the width on every call so the banner stays responsive to live
     terminal resizes rather than freezing at the width seen on first render.
     Degrades to a plain-ASCII banner when stdout's encoding cannot represent the
     box-drawing glyphs, so ``dagnam -v``/``-h`` never crash on a cp1252 console
-    (G019).
+    (G019). When ``color`` is ``None`` the banner is painted in the brand
+    palette only if stdout supports ANSI styling (same gate as error output).
     """
     width = columns if columns is not None else _terminal_width()
     art = (
@@ -148,7 +221,13 @@ def format_ascii_art(columns: int | None = None) -> str:
         if _stream_can_encode(DAGNAM_ASCII_ART, sys.stdout)
         else DAGNAM_ASCII_FALLBACK_ART
     )
-    return "\n".join(line[:width].rstrip() for line in art.strip("\n").splitlines())
+    plain = "\n".join(line[:width].rstrip() for line in art.strip("\n").splitlines())
+    if color is None:
+        # Lazy import: errors.py imports DOCS_URL from this module at load time.
+        from dagnam.cli.errors import color_enabled
+
+        color = color_enabled(sys.stdout)
+    return _colorize_banner(plain) if color else plain
 
 
 def add_collection_output_args(command: argparse.ArgumentParser) -> None:
@@ -274,6 +353,51 @@ def resolve_version() -> str:
 def format_version_banner() -> str:
     """Return the branded human-readable CLI version string."""
     return f"{format_ascii_art()}\n\ndagnam {resolve_version()}"
+
+
+def print_version_banner(
+    *,
+    animate: bool | None = None,
+    sleep: Callable[[float], object] = time.sleep,
+) -> None:
+    """Print the branded version banner, animated on interactive terminals.
+
+    A highlight band sweeps left-to-right through the artwork in a seamless
+    loop (``_BANNER_SWEEP_LOOPS`` cycles), then settles on the static banner.
+    Frames redraw in place with cursor-movement escapes, so the animation only
+    runs when stdout is a real TTY that passes the ANSI color gate; anywhere
+    else (pipes, redirects, ``NO_COLOR``, dumb or legacy consoles) the static
+    banner from ``format_version_banner`` is printed instead. ``animate`` and
+    ``sleep`` are injectable for tests.
+    """
+    if animate is None:
+        # Lazy import: errors.py imports DOCS_URL from this module at load time.
+        from dagnam.cli.errors import color_enabled
+
+        isatty = getattr(sys.stdout, "isatty", None)
+        animate = color_enabled(sys.stdout) and callable(isatty) and bool(isatty())
+    if not animate:
+        print(format_version_banner())
+        return
+    art = format_ascii_art(color=False)
+    line_count = art.count("\n") + 1
+    width = max(len(line) for line in art.splitlines())
+    start = -_BANNER_SWEEP_HALF_WIDTH
+    span = width + 2 * _BANNER_SWEEP_HALF_WIDTH
+    out = sys.stdout
+    out.write("\x1b[?25l")  # hide the cursor while frames overwrite each other
+    try:
+        for frame in range(_BANNER_SWEEP_LOOPS * _BANNER_SWEEP_FRAMES):
+            band = start + span * (frame % _BANNER_SWEEP_FRAMES) / _BANNER_SWEEP_FRAMES
+            out.write(_colorize_banner(art, band=band) + "\n")
+            out.flush()
+            sleep(_BANNER_SWEEP_SECONDS_PER_FRAME)
+            out.write(f"\x1b[{line_count}F")  # back to the banner's first line
+        out.write(_colorize_banner(art) + "\n")  # settle on the static banner
+        out.flush()
+    finally:
+        out.write("\x1b[?25h")
+    print(f"\ndagnam {resolve_version()}")
 
 
 def mask_key(key: str) -> str:
