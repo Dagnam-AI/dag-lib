@@ -46,7 +46,7 @@ DAGNAM_ASCII_ART = r"""
 DAGNAM_ASCII_FALLBACK_ART = r"""
  __        __
 |  \  /\  / _` |\ |  /\   |\/|   /\  |
-|__/ /~~\ \__> | \| /~~\  |  | ./~~\ |
+|__/ /--\ \__> | \| /--\  |  | ./--\ |
 """
 
 # Brand palette matching the product's brand theme (light/dark brand red):
