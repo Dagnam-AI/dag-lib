@@ -12,6 +12,7 @@ import pytest
 
 from dagnam.cli import common
 from dagnam.cli.common import (
+    confirm_or_abort,
     format_ascii_art,
     format_local,
     mask_key,
@@ -346,6 +347,35 @@ class TestErrorHelper:
         err = capsys.readouterr().err
         assert "Try:" in err
         assert "Fix the input and retry." in err
+
+
+class TestConfirmOrAbort:
+    def test_assume_yes_skips_prompt_entirely(self, monkeypatch: PytestMonkeyPatch) -> None:
+        def _boom(_prompt: str = "") -> str:
+            raise AssertionError("input() must not be called when assume_yes is set")
+
+        monkeypatch.setattr("builtins.input", _boom)
+        confirm_or_abort("Delete everything?", assume_yes=True)  # must not raise
+
+    def test_typed_yes_confirms(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+        monkeypatch.setattr("builtins.input", lambda _prompt="": "yes")
+        confirm_or_abort("Delete everything?", assume_yes=False)  # must not raise
+        assert "Delete everything?" in capsys.readouterr().out
+
+    def test_anything_else_aborts_with_exit_1(
+        self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+    ) -> None:
+        monkeypatch.setattr("builtins.input", lambda _prompt="": "no")
+        with pytest.raises(SystemExit) as exc_info:
+            confirm_or_abort("Delete everything?", assume_yes=False)
+        assert exc_info.value.code == 1
+        assert "confirmation not received" in capsys.readouterr().err
+
+    def test_blank_input_aborts(self, monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+        monkeypatch.setattr("builtins.input", lambda _prompt="": "")
+        with pytest.raises(SystemExit) as exc_info:
+            confirm_or_abort("Delete everything?", assume_yes=False)
+        assert exc_info.value.code == 1
 
 
 class TestParseApiDatetime:

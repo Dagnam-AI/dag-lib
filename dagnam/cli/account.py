@@ -10,6 +10,10 @@ import platform
 import sys
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from dagnam.cli.account_data import register_account_data
+from dagnam.cli.account_profile import register_account_profile
+from dagnam.cli.account_security import register_account_security
+from dagnam.cli.account_settings import register_notifications, register_settings
 from dagnam.cli.common import error, mask_key, resolve_version
 from dagnam.cli.presentation import Column, emit_result, render_table
 
@@ -90,20 +94,6 @@ def _read_config_file(path: Path) -> dict[str, Any] | None:
     return data
 
 
-def _write_config_securely(path: Path, config: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(config, indent=2))
-        fh.write("\n")
-    if sys.platform != "win32":
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-
-
 def cmd_logout(args: argparse.Namespace) -> None:
     """Remove the stored API key while preserving other config values."""
     from dagnam._core import config as _cfg
@@ -114,7 +104,7 @@ def cmd_logout(args: argparse.Namespace) -> None:
         return
 
     del config["api_key"]
-    _write_config_securely(_cfg.CONFIG_FILE, config)
+    _cfg.save_config(config)
     print("Logged out.")
 
     if os.environ.get("DAGNAM_API_KEY") is not None:
@@ -167,7 +157,7 @@ def cmd_config_set(args: argparse.Namespace) -> None:
 
     config = _read_config_file(_cfg.CONFIG_FILE) or {}
     config[args.key] = args.value
-    _write_config_securely(_cfg.CONFIG_FILE, config)
+    _cfg.save_config(config)
     print(f"Set {args.key} = {args.value}")
 
 
@@ -180,7 +170,7 @@ def cmd_config_unset(args: argparse.Namespace) -> None:
 
     config = _read_config_file(_cfg.CONFIG_FILE) or {}
     config.pop(args.key, None)
-    _write_config_securely(_cfg.CONFIG_FILE, config)
+    _cfg.save_config(config)
     print(f"Unset {args.key}")
 
 
@@ -396,3 +386,15 @@ def register_account(subparsers: SubParsersAction) -> None:
     )
     config_unset.add_argument("key", help="Config key to unset, e.g. training_metrics_path.")
     config_unset.set_defaults(func=cmd_config_unset)
+
+    account_cmd = subparsers.add_parser(
+        "account",
+        help="Manage settings and notification preferences.",
+        description="Get, update, or reset the caller's settings and notification preferences.",
+    )
+    account_sub = account_cmd.add_subparsers(dest="account_command", required=True)
+    register_settings(account_sub)
+    register_notifications(account_sub)
+    register_account_profile(account_sub)
+    register_account_security(account_sub)
+    register_account_data(account_sub)
