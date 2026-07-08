@@ -49,7 +49,7 @@ DAGNAM_ASCII_FALLBACK_ART = r"""
 |__/ /~~\ \__> | \| /~~\  |  | ./~~\ |
 """
 
-# Brand palette from the frontend theme (mvp-frontend src/index.css --primary):
+# Brand palette matching the product's brand theme (light/dark brand red):
 # letter bodies use the light-mode brand red and the shading uses the dark-mode
 # brand red, so the terminal wordmark matches the product logo.
 _BANNER_BODY_RGB = (255, 79, 79)  # oklch(67.517% 0.21256 24.87)
@@ -273,6 +273,26 @@ def error(msg: str, *, hint: str | None = None) -> NoReturn:
 
     print(render_message(msg, hint=hint), file=sys.stderr)
     sys.exit(1)
+
+
+def confirm_or_abort(prompt: str, *, assume_yes: bool) -> None:
+    """Gate a destructive CLI action behind a typed ``yes`` confirmation.
+
+    Prints ``prompt`` followed by an instruction to type ``yes``, then reads a
+    line from stdin. Anything other than an exact (case-sensitive) ``yes``
+    aborts with exit code 1 and a clear message, so a stray keypress or blank
+    Enter can never confirm a destructive action by accident. Passing
+    ``assume_yes=True`` (typically a CLI ``--yes`` flag) skips the prompt
+    entirely for scripted/non-interactive use. Generic and reusable across any
+    destructive command (e.g. revoking every session at once, deleting the
+    account) that needs the same confirm-or-abort behavior.
+    """
+    if assume_yes:
+        return
+    print(prompt)
+    typed = input("Type 'yes' to confirm: ").strip()
+    if typed != "yes":
+        error("Aborted: confirmation not received.")
 
 
 def print_next_step(command: str) -> None:

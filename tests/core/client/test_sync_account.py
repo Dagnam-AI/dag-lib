@@ -1,7 +1,8 @@
 """Wire-level coverage for the sync account / usage client mixin.
 
-Covers the shared ``_account_get`` transport helper (connection + timeout
-wrapping, empty-body and non-JSON fallbacks) and the three public read methods.
+Covers the shared ``_account_get`` transport helper (a thin delegator to
+``_account_write("GET", path)``: connection + timeout wrapping, empty-body and
+non-JSON fallbacks) and the three public read methods.
 """
 
 from __future__ import annotations
@@ -74,7 +75,9 @@ def test_account_connectionerror_wrapped(
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.ConnectionError("nope")
 
-    monkeypatch.setattr(requests, "get", _boom)
+    # _account_get delegates to _account_write, which calls requests.request
+    # (not requests.get) so the GET and write paths share one transport call.
+    monkeypatch.setattr(requests, "request", _boom)
     with pytest.raises(APIError, match="Connection failed"):
         client.get_entitlements()
 
@@ -83,6 +86,6 @@ def test_account_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonkey
     def _boom(*_a: object, **_kw: object) -> None:
         raise requests.Timeout("slow")
 
-    monkeypatch.setattr(requests, "get", _boom)
+    monkeypatch.setattr(requests, "request", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.get_storage_quota()

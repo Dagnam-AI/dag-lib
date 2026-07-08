@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sys
 
@@ -18,7 +18,7 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     TrainingJobNotFoundError,
 )
-from dagnam._types import JsonObject, JsonValue, ResponseLike, StatusResponseLike
+from dagnam._types import JsonArray, JsonObject, JsonValue, ResponseLike, StatusResponseLike
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
@@ -98,6 +98,17 @@ class BaseDagnamClient:
         if isinstance(value, dict):
             return value
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
+
+    @staticmethod
+    def _expect_array(value: JsonValue | str | None) -> JsonArray:
+        """Narrow a decoded response body to a JSON array or raise.
+
+        Mirrors ``_expect_object`` for endpoints that return a bare JSON array
+        (e.g. the sessions list) rather than an object.
+        """
+        if isinstance(value, list):
+            return value
+        raise TypeError(f"Expected JSON array, got {type(value).__name__}")
 
     @staticmethod
     def _raise_for_status(response: requests.Response, dataset_id: str) -> None:
@@ -229,23 +240,70 @@ class BaseDagnamClient:
         raise APIError(code, safe_error_body_from_response(response))
 
 
+def _extract_content_disposition_raw(header: str | None) -> str | None:
+    """Extract the raw (unsanitized) filename value from a Content-Disposition header.
+
+    Supports both ``filename="name"`` and ``filename=name`` forms. Returns
+    ``None`` when the header is absent or carries no filename parameter.
+    """
+    if not header:
+        return None
+    # Try quoted form first: filename="..."
+    match = re.search(r'filename="([^"]*)"', header)
+    if match:
+        return match.group(1)
+    # Try unquoted form: filename=...
+    match = re.search(r"filename=([^\s;]+)", header)
+    if match:
+        return match.group(1)
+    return None
+
+
 def parse_content_disposition_filename(header: str | None) -> str:
     """Extract filename from a Content-Disposition header value.
 
     Supports both ``filename="name"`` and ``filename=name`` forms.
     Returns ``"data"`` when the header is absent or contains no filename.
+    Rejects (raises ``ValueError``) any separator, drive letter, ``..``, or
+    Windows-reserved name via ``_sanitize_filename`` - the right contract for
+    a dataset download, where an unsafe name should abort rather than silently
+    land somewhere unexpected.
     """
-    if not header:
+    raw = _extract_content_disposition_raw(header)
+    if raw is None:
         return "data"
-    # Try quoted form first: filename="..."
-    match = re.search(r'filename="([^"]*)"', header)
-    if match:
-        return _sanitize_filename(match.group(1))
-    # Try unquoted form: filename=...
-    match = re.search(r"filename=([^\s;]+)", header)
-    if match:
-        return _sanitize_filename(match.group(1))
-    return "data"
+    return _sanitize_filename(raw)
+
+
+def content_disposition_safe_name(header: str | None, *, default: str) -> str:
+    """Extract a Content-Disposition filename that is always safe to join under a directory.
+
+    Unlike :func:`parse_content_disposition_filename` (which *rejects* any
+    separator/``..``/reserved name by raising - the right contract for
+    dataset downloads), this reduces a hostile or malformed filename to its
+    bare basename instead of aborting. The basename is stripped of every path
+    separator, drive letter, and colon prefix, and reserved device stems fall
+    back to ``default``, so the returned name provably joins strictly inside
+    ``dest_dir`` on both POSIX and Windows - which is why no ``is_relative_to``
+    runtime assertion is needed (it would be an unreachable/uncoverable
+    branch given these guarantees).
+    """
+    raw = _extract_content_disposition_raw(header)
+    if raw is None:
+        return default
+    # Reduce to a bare basename with NO path separator, drive letter, or NTFS
+    # alternate-data-stream prefix: PurePosixPath(...).name strips "/" and "\\"
+    # components, then rsplit(":", 1)[-1] drops any leading "<drive>:" / "name:stream"
+    # prefix (colon is a path-defining char on Windows, a supported platform).
+    # The result therefore contains no "/", "\\", or ":" and always joins
+    # strictly inside dest_dir on POSIX and Windows alike. A Windows reserved
+    # device stem (CON, NUL, COM1, ...) is rejected to "default" so the write
+    # can never be redirected to a console/device instead of a file in dest_dir.
+    candidate = PurePosixPath(raw.replace("\\", "/")).name.rsplit(":", 1)[-1]
+    reserved_stem = candidate.rstrip(" .").split(".", 1)[0].lower()
+    if candidate in {"", ".", ".."} or reserved_stem in _WINDOWS_RESERVED_FILENAMES:
+        return default
+    return candidate
 
 
 def _sanitize_filename(filename: str) -> str:

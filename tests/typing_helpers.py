@@ -27,6 +27,7 @@ type StreamOpener = Callable[[str | None], object]
 
 class RequestsRecord(Protocol):
     headers: Mapping[str, str]
+    method: str
     path: str
     qs: dict[str, list[str]]
     text: str | None
@@ -50,6 +51,7 @@ class RespxCall(Protocol):
 
 class RespxRoute(Protocol):
     calls: Sequence[RespxCall]
+    called: bool
 
     def mock(self, **kwargs: object) -> RespxRoute: ...
 

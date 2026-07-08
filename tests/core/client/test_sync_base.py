@@ -15,6 +15,7 @@ from dagnam._core.client.base import (
     BaseDagnamClient,
     _progress_disabled,
     _sanitize_filename,
+    content_disposition_safe_name,
     is_redirect_response,
     is_success_response,
     parse_content_disposition_filename,
@@ -143,6 +144,97 @@ def test_sanitize_filename_rejects_empty_and_dots() -> None:
     for bad in ("", ".", ".."):
         with pytest.raises(ValueError):
             _sanitize_filename(bad)
+
+
+# ------------------------------------------------------ content_disposition_safe_name
+
+
+def test_content_disposition_safe_name_quoted() -> None:
+    header = 'attachment; filename="dagnam_export_u1.zip"'
+    assert content_disposition_safe_name(header, default="export.zip") == "dagnam_export_u1.zip"
+
+
+def test_content_disposition_safe_name_unquoted() -> None:
+    header = "attachment; filename=dagnam_export_u1.zip"
+    assert content_disposition_safe_name(header, default="export.zip") == "dagnam_export_u1.zip"
+
+
+def test_content_disposition_safe_name_absent_header_uses_default() -> None:
+    assert content_disposition_safe_name(None, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_no_filename_param_uses_default() -> None:
+    assert content_disposition_safe_name("inline", default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_strips_traversal_to_basename() -> None:
+    header = 'attachment; filename="../../etc/passwd"'
+    assert content_disposition_safe_name(header, default="export.zip") == "passwd"
+
+
+def test_content_disposition_safe_name_strips_windows_separators() -> None:
+    header = r'attachment; filename="..\..\windows\system32\evil.dll"'
+    assert content_disposition_safe_name(header, default="export.zip") == "evil.dll"
+
+
+def test_content_disposition_safe_name_empty_quoted_uses_default() -> None:
+    header = 'attachment; filename=""'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_dot_uses_default() -> None:
+    header = 'attachment; filename="."'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_dotdot_uses_default() -> None:
+    header = 'attachment; filename=".."'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_strips_drive_letter() -> None:
+    # Critical regression: a bare drive-letter prefix has no "/" or "\\" for
+    # PurePosixPath(...).name to strip, so it must be stripped separately.
+    header = 'attachment; filename="D:evil.dll"'
+    result = content_disposition_safe_name(header, default="export.zip")
+    assert result == "evil.dll"
+    assert ":" not in result and "/" not in result and "\\" not in result
+
+
+def test_content_disposition_safe_name_strips_multi_colon() -> None:
+    header = 'attachment; filename="a:b:c.txt"'
+    result = content_disposition_safe_name(header, default="export.zip")
+    assert result == "c.txt"
+    assert ":" not in result and "/" not in result and "\\" not in result
+
+
+def test_content_disposition_safe_name_strips_non_drive_colon_prefix() -> None:
+    header = 'attachment; filename="my:file.txt"'
+    result = content_disposition_safe_name(header, default="export.zip")
+    assert result == "file.txt"
+    assert ":" not in result and "/" not in result and "\\" not in result
+
+
+def test_content_disposition_safe_name_strips_drive_and_backslashes() -> None:
+    header = 'attachment; filename="C:\\Windows\\system32\\evil.dll"'
+    result = content_disposition_safe_name(header, default="export.zip")
+    assert result == "evil.dll"
+    assert ":" not in result and "/" not in result and "\\" not in result
+
+
+def test_content_disposition_safe_name_reserved_device_stem_uses_default() -> None:
+    header = 'attachment; filename="con.txt"'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_bare_reserved_device_name_uses_default() -> None:
+    header = 'attachment; filename="NUL"'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
+
+
+def test_content_disposition_safe_name_bare_drive_letter_uses_default() -> None:
+    header = 'attachment; filename="D:"'
+    assert content_disposition_safe_name(header, default="export.zip") == "export.zip"
 
 
 def testis_success_response_from_status_code() -> None:
