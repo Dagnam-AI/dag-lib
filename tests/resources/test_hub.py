@@ -364,3 +364,190 @@ class TestFileUpload:
         out = hub.upload_file("m1", "/tmp/w.bin", client=c)
         c.upload_model_file.assert_called_once_with("m1", "/tmp/w.bin")
         assert out["id"] == "f1"
+
+
+class TestPublish:
+    def _client(self, tmp_path):
+        client = MagicMock(spec=DagnamClient)
+        client.create_hub_model.return_value = {"id": "m1", "name": "n"}
+        client.upload_model_file.return_value = {"id": "f1"}
+        client.create_hub_model_version.return_value = {"id": "v1", "version": "1.0.0"}
+        client.finalize_hub_model.return_value = {"id": "m1", "status": "published"}
+        f1 = tmp_path / "weights.bin"
+        f1.write_bytes(b"x")
+        f2 = tmp_path / "config.json"
+        f2.write_text("{}")
+        return client, [str(f1), str(f2)]
+
+    def test_publish_happy_path_create_upload_finalize(self, tmp_path) -> None:
+        client, files = self._client(tmp_path)
+        progress: list[tuple[str, int, int, str]] = []
+        result = hub.publish(
+            name="n",
+            description="d",
+            task_type="t",
+            framework="pytorch",
+            files=files,
+            version="1.0.0",
+            changelog="first",
+            on_file_progress=lambda p, i, t, s: progress.append((p, i, t, s)),
+            client=client,
+        )
+        client.create_hub_model.assert_called_once()
+        assert client.upload_model_file.call_count == 2
+        client.create_hub_model_version.assert_called_once_with(
+            "m1", {"version": "1.0.0", "changelog": "first"}
+        )
+        client.finalize_hub_model.assert_called_once_with("m1")
+        assert result["finalized"] is True
+        model = result["model"]
+        assert isinstance(model, dict)
+        assert model["id"] == "m1"
+        files = result["files"]
+        assert isinstance(files, list)
+        assert len(files) == 2
+        states = [s for (_, _, _, s) in progress]
+        assert states == ["uploading", "uploaded", "uploading", "uploaded"]
+
+    def test_publish_retries_then_succeeds(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError
+
+        client, files = self._client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(500, "blip"), {"id": "f1"}, {"id": "f2"}]
+        progress: list[str] = []
+        result = hub.publish(
+            name="n",
+            description="d",
+            task_type="t",
+            framework="pytorch",
+            files=files,
+            on_file_progress=lambda p, i, t, s: progress.append(s),
+            client=client,
+        )
+        assert client.upload_model_file.call_count == 3
+        assert result["finalized"] is True
+        assert progress == ["uploading", "retrying", "uploaded", "uploading", "uploaded"]
+
+    def test_publish_exhausted_retries_raises_uploaderror(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError, UploadError
+
+        client, files = self._client(tmp_path)
+        client.upload_model_file.side_effect = APIError(500, "down")
+        progress: list[str] = []
+        with pytest.raises(UploadError) as exc_info:
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=files,
+                max_retries_per_file=1,
+                on_file_progress=lambda p, i, t, s: progress.append(s),
+                client=client,
+            )
+        message = str(exc_info.value)
+        assert "m1" in message
+        assert "weights.bin" in message
+        assert "failed" in progress
+        client.finalize_hub_model.assert_not_called()
+
+    def test_publish_retries_then_succeeds_without_callback(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError
+
+        client, files = self._client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(500, "blip"), {"id": "f1"}, {"id": "f2"}]
+        result = hub.publish(
+            name="n",
+            description="d",
+            task_type="t",
+            framework="pytorch",
+            files=files,
+            client=client,
+        )
+        assert client.upload_model_file.call_count == 3
+        assert result["finalized"] is True
+
+    def test_publish_exhausted_retries_without_callback_raises(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError, UploadError
+
+        client, files = self._client(tmp_path)
+        client.upload_model_file.side_effect = APIError(500, "down")
+        with pytest.raises(UploadError):
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=files,
+                max_retries_per_file=1,
+                client=client,
+            )
+        client.finalize_hub_model.assert_not_called()
+
+    def test_publish_finalize_route_missing_falls_back(self, tmp_path) -> None:
+        from dagnam._core.exceptions import HubModelNotFoundError
+
+        client, files = self._client(tmp_path)
+        client.finalize_hub_model.side_effect = HubModelNotFoundError("no such route")
+        result = hub.publish(
+            name="n",
+            description="d",
+            task_type="t",
+            framework="pytorch",
+            files=files,
+            client=client,
+        )
+        assert result["finalized"] is False
+
+    def test_publish_finalize_apierror_405_falls_back_but_500_raises(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError
+
+        client, files = self._client(tmp_path)
+        client.finalize_hub_model.side_effect = APIError(405, "method not allowed")
+        assert (
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=files,
+                client=client,
+            )["finalized"]
+            is False
+        )
+        client.finalize_hub_model.side_effect = APIError(500, "boom")
+        with pytest.raises(APIError):
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=files,
+                client=client,
+            )
+
+    def test_publish_missing_local_file_fails_before_create(self, tmp_path) -> None:
+        client, _ = self._client(tmp_path)
+        with pytest.raises(FileNotFoundError):
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=[str(tmp_path / "missing.bin")],
+                client=client,
+            )
+        client.create_hub_model.assert_not_called()
+
+    def test_publish_no_version_skips_create_version(self, tmp_path) -> None:
+        client, files = self._client(tmp_path)
+        result = hub.publish(
+            name="n",
+            description="d",
+            task_type="t",
+            framework="pytorch",
+            files=files,
+            client=client,
+        )
+        client.create_hub_model_version.assert_not_called()
+        assert result["version"] is None

@@ -15,12 +15,17 @@ counterpart to the sync ``sseclient`` path) and decodes events through the share
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import cast
 
 import httpx
 from httpx_sse import aconnect_sse
 
-from dagnam._core.aio.base import BaseAsyncDagnamClient, raise_for_job_response
+from dagnam._core.aio.base import (
+    BaseAsyncDagnamClient,
+    content_disposition_safe_name,
+    raise_for_job_response,
+)
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
@@ -144,6 +149,103 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 f"/api/v1/training/jobs/{quote_path_segment(job_id)}/cancel",
                 job_id=job_id,
             )
+        )
+
+    async def restart_training_job(self, job_id: str) -> JsonObject:
+        """Restart a terminal job. ``POST /api/v1/training/jobs/{id}/restart``."""
+        return ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/restart",
+                job_id=job_id,
+            )
+        )
+
+    async def restore_from_checkpoint(self, job_id: str, checkpoint_id: str) -> JsonObject:
+        """Restart a job from one of its checkpoints.
+
+        ``POST /api/v1/training/jobs/{job_id}/checkpoints/{checkpoint_id}/restore``.
+        """
+        return ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}"
+                f"/checkpoints/{quote_path_segment(checkpoint_id)}/restore",
+                job_id=job_id,
+            )
+        )
+
+    async def estimate_training_resources(self, config: JsonObject) -> JsonObject:
+        """Estimate compute cost for a training config.
+
+        ``POST /api/v1/training/estimate-resources`` (a collection route: the
+        body is a ``TrainingConfig`` dict and there is no job to miss).
+        """
+        return ensure_json_object(
+            await self._training_req(
+                "POST", "/api/v1/training/estimate-resources", json_body=config
+            )
+        )
+
+    async def get_allowed_strategies(self) -> JsonObject:
+        """List distribution strategies available to the credential.
+
+        ``GET /api/v1/training/allowed-strategies`` returns a flat
+        ``dict[str, bool]`` mapping each strategy label to its availability.
+        """
+        return ensure_json_object(
+            await self._training_req("GET", "/api/v1/training/allowed-strategies")
+        )
+
+    async def _stream_training_download(
+        self, url: str, dest_dir: str | Path, *, job_id: str, default: str
+    ) -> Path:
+        """Stream a job download to a basename-only file inside ``dest_dir``.
+
+        Shared by :meth:`download_training_code` and :meth:`download_dag`: maps a
+        404 to :class:`TrainingJobNotFoundError`, reduces the
+        ``Content-Disposition`` filename to a bare basename so a hostile header
+        can never escape ``dest_dir``, and streams the body chunk by chunk.
+        """
+        try:
+            async with self._client.stream("GET", url, headers=self._headers()) as resp:
+                if not resp.is_success:
+                    await resp.aread()  # populate the body for the error message
+                    raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+                name = content_disposition_safe_name(
+                    resp.headers.get("content-disposition"), default=default
+                )
+                dest = Path(dest_dir) / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest, "wb") as fh:
+                    async for chunk in resp.aiter_bytes():
+                        fh.write(chunk)
+                return dest
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+
+    async def download_training_code(self, job_id: str, dest_dir: str | Path) -> Path:
+        """Stream the generated training-code ZIP to a file inside ``dest_dir``.
+
+        ``GET /api/v1/training/jobs/{id}/download-code``. Async mirror of the
+        sync ``download_training_code``.
+        """
+        url = f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/download-code"
+        return await self._stream_training_download(
+            url, dest_dir, job_id=job_id, default=f"{job_id}-code.zip"
+        )
+
+    async def download_dag(self, job_id: str, dest_dir: str | Path) -> Path:
+        """Stream a job's DAG JSON to a file inside ``dest_dir``.
+
+        ``GET /api/v1/training/jobs/{id}/dag``. Async mirror of the sync
+        ``download_dag``.
+        """
+        url = f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/dag"
+        return await self._stream_training_download(
+            url, dest_dir, job_id=job_id, default=f"{job_id}-dag.json"
         )
 
     async def bulk_delete_training_jobs(self, job_ids: list[str]) -> JsonObject:

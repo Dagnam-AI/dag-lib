@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import CliRunner, StrCapture
+    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
 
 # ---------------------------------------------------------------- projects
@@ -405,3 +405,76 @@ def test_projects_versions_latest(run_cli: CliRunner, capsys: StrCapture) -> Non
         run_cli(["projects", "versions", "latest", "p1"])
     assert "v2" in capsys.readouterr().out
     fake.latest_version.assert_called_once_with("p1")
+
+
+# ------------------------------------------------------------- W6 write commands
+
+
+def test_projects_update(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.projects.update", return_value={"id": "p1", "title": "New"}) as m:
+        assert (
+            run_cli(["projects", "update", "p1", "--title", "New", "--visibility", "public"]) == 0
+        )
+    m.assert_called_once_with("p1", title="New", visibility="public")
+    assert json.loads(capsys.readouterr().out)["title"] == "New"
+
+
+def test_projects_update_requires_at_least_one_field(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    with mock.patch("dagnam.projects.update") as m, pytest.raises(SystemExit) as exc_info:
+        run_cli(["projects", "update", "p1"])
+    assert exc_info.value.code == 1
+    m.assert_not_called()
+    assert "Nothing to update" in capsys.readouterr().err
+
+
+def test_projects_update_parses_tags_csv(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.projects.update", return_value={}) as m:
+        run_cli(["projects", "update", "p1", "--tags", "a,b"])
+    m.assert_called_once_with("p1", tags=["a", "b"])
+
+
+def test_projects_update_description_and_framework(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.projects.update", return_value={}) as m:
+        run_cli(["projects", "update", "p1", "--description", "d2", "--framework", "jax"])
+    m.assert_called_once_with("p1", description="d2", framework="jax")
+
+
+def test_projects_bulk_delete_with_yes(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.projects.bulk_delete", return_value={"deleted": 2}) as m:
+        assert run_cli(["projects", "bulk-delete", "p1", "p2", "--yes"]) == 0
+    m.assert_called_once_with(["p1", "p2"])
+    assert "2" in capsys.readouterr().out
+
+
+def test_projects_bulk_delete_typed_confirmation(
+    run_cli: CliRunner, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr("builtins.input", lambda *a: "delete 2")
+    with mock.patch("dagnam.projects.bulk_delete", return_value={"deleted": 2}) as m:
+        assert run_cli(["projects", "bulk-delete", "p1", "p2"]) == 0
+    m.assert_called_once()
+
+
+def test_projects_bulk_delete_wrong_confirmation_aborts(
+    run_cli: CliRunner, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr("builtins.input", lambda *a: "delete everything")
+    with mock.patch("dagnam.projects.bulk_delete") as m, pytest.raises(SystemExit) as exc_info:
+        run_cli(["projects", "bulk-delete", "p1", "p2"])
+    assert exc_info.value.code == 1
+    m.assert_not_called()
+
+
+def test_projects_link_dataset(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.projects.link_dataset", return_value={"linked": True}) as m:
+        assert run_cli(["projects", "link-dataset", "p1", "ds1", "--role", "train"]) == 0
+    m.assert_called_once_with("p1", "ds1", "train")
+
+
+def test_projects_unlink_dataset(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.projects.unlink_dataset", return_value=None) as m:
+        assert run_cli(["projects", "unlink-dataset", "p1", "ds1"]) == 0
+    m.assert_called_once_with("p1", "ds1")
+    assert "unlinked" in capsys.readouterr().out.lower()

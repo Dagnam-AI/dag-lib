@@ -100,7 +100,78 @@ def upload_from_url(
     )
 
 
+def preview_dataset(
+    dataset_id: str,
+    rows: int = 10,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Preview a dataset's samples and statistics.
+
+    >>> dagnam.preview_dataset("ds-1", rows=5)["samples"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.preview_dataset(dataset_id, rows=rows)
+
+
+def update_dataset(
+    dataset_id: str,
+    *,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    visibility: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Update a dataset's name, description, and/or visibility.
+
+    At least one of ``name``/``description``/``visibility`` must be provided.
+
+    >>> dagnam.update_dataset("ds-1", name="renamed")
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.update_dataset(
+        dataset_id, name=name, description=description, visibility=visibility
+    )
+
+
+def delete_dataset(
+    dataset_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> None:
+    """Delete a dataset permanently."""
+    resolved = resolve_client(client, api_key, api_url)
+    resolved.delete_dataset(dataset_id)
+
+
+def update_dataset_roles(
+    dataset_id: str,
+    column_roles: dict[str, str],
+    task_type_hint: Optional[str] = None,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Set a dataset's per-column roles (and an optional task-type hint).
+
+    >>> dagnam.update_dataset_roles("ds-1", {"species": "target"})
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.update_dataset_roles(dataset_id, column_roles, task_type_hint=task_type_hint)
+
+
 __all__ = [
+    "delete_dataset",
+    "preview_dataset",
+    "update_dataset",
+    "update_dataset_roles",
     "upload",
     "upload_from_url",
 ]

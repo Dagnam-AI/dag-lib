@@ -124,10 +124,12 @@ async def test_download_export_traversal_filename_lands_inside_dest_dir(
         )
     )
     out = await client.download_export("exp-1", tmp_path)
+    # Hostile filename is reduced to its basename and confined to dest_dir; the
+    # containment assertions below prove no escape (the sync mirror additionally
+    # probes /etc/passwd - avoided here to keep the async test off blocking I/O).
     assert out.parent == tmp_path
     assert out == tmp_path / "passwd"
     assert out.read_bytes() == b"zip-bytes"
-    assert not Path("/etc/passwd").exists() or Path("/etc/passwd").read_bytes() != b"zip-bytes"
 
 
 # ------------------------------------------------------------------- delete_account

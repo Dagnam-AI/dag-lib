@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -9,6 +11,7 @@ from dagnam._core.client.base import (
     STREAM_CONNECT_TIMEOUT,
     APIError,
     BaseDagnamClient,
+    content_disposition_safe_name,
     is_success_response,
     requests,
     safe_error_body_from_response,
@@ -143,6 +146,82 @@ class TrainingClientMixin(BaseDagnamClient):
                 job_id=job_id,
             )
         )
+
+    def restart_training_job(self, job_id: str) -> JsonObject:
+        """Restart a terminal job. ``POST /api/v1/training/jobs/{id}/restart``."""
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/restart",
+                job_id=job_id,
+            )
+        )
+
+    def restore_from_checkpoint(self, job_id: str, checkpoint_id: str) -> JsonObject:
+        """Restart a job from one of its checkpoints.
+
+        ``POST /api/v1/training/jobs/{job_id}/checkpoints/{checkpoint_id}/restore``.
+        """
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}"
+                f"/checkpoints/{quote_path_segment(checkpoint_id)}/restore",
+                job_id=job_id,
+            )
+        )
+
+    def estimate_training_resources(self, config: JsonObject) -> JsonObject:
+        """Estimate compute cost for a training config.
+
+        ``POST /api/v1/training/estimate-resources`` (a collection route: the
+        body is a ``TrainingConfig`` dict and there is no job to miss).
+        """
+        return self._expect_object(
+            self._training_request("POST", "/api/v1/training/estimate-resources", json_body=config)
+        )
+
+    def get_allowed_strategies(self) -> JsonObject:
+        """List distribution strategies available to the credential.
+
+        ``GET /api/v1/training/allowed-strategies`` returns a flat
+        ``dict[str, bool]`` mapping each strategy label to its availability.
+        """
+        return self._expect_object(
+            self._training_request("GET", "/api/v1/training/allowed-strategies")
+        )
+
+    def download_training_code(self, job_id: str, dest_dir: str | Path) -> Path:
+        """Stream the generated training-code ZIP to a file inside ``dest_dir``.
+
+        ``GET /api/v1/training/jobs/{id}/download-code``. The saved filename is
+        taken from the response's ``Content-Disposition`` header and reduced to
+        a bare basename (see ``content_disposition_safe_name``), so a hostile or
+        malformed header can never write outside ``dest_dir``. The body is
+        streamed straight to disk, never buffered in memory.
+        """
+        url = f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/download-code"
+        resp = self._get_stream(url)
+        raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+        name = content_disposition_safe_name(
+            resp.headers.get("Content-Disposition"), default=f"{job_id}-code.zip"
+        )
+        return self._stream_response_to_file(resp, Path(dest_dir) / name)
+
+    def download_dag(self, job_id: str, dest_dir: str | Path) -> Path:
+        """Stream a job's DAG JSON to a file inside ``dest_dir``.
+
+        ``GET /api/v1/training/jobs/{id}/dag``. Mirrors
+        :meth:`download_training_code`: the filename comes from the
+        ``Content-Disposition`` header, reduced to a bare basename.
+        """
+        url = f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/dag"
+        resp = self._get_stream(url)
+        raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+        name = content_disposition_safe_name(
+            resp.headers.get("Content-Disposition"), default=f"{job_id}-dag.json"
+        )
+        return self._stream_response_to_file(resp, Path(dest_dir) / name)
 
     def bulk_delete_training_jobs(self, job_ids: list[str]) -> JsonObject:
         """Delete multiple jobs. ``POST /api/v1/training/jobs/bulk-delete``."""

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from builtins import list as builtin_list
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -411,12 +412,47 @@ def latest_version(
     return resolved.get_latest_project_version(_stringify_id(project_id))
 
 
+# ---------------------------------------------------------------------------
+# Thumbnail
+# ---------------------------------------------------------------------------
+
+
+def upload_project_thumbnail(
+    project_id: str,
+    path: str | Path,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Upload a project thumbnail image, returning ``{"thumbnail_url": ...}``.
+
+    >>> dagnam.upload_project_thumbnail("proj_abc", "thumb.png")["thumbnail_url"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.upload_project_thumbnail(_stringify_id(project_id), path)
+
+
+def download_project_thumbnail(
+    project_id: str,
+    out: str | Path | None = None,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> Path:
+    """Download a project's thumbnail image into ``out`` (default: current dir)."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.download_project_thumbnail(_stringify_id(project_id), out or ".")
+
+
 __all__ = [
     "bulk_delete",
     "compare_versions",
     "create",
     "delete",
     "delete_version",
+    "download_project_thumbnail",
     "duplicate",
     "get",
     "get_datasets",
@@ -431,4 +467,5 @@ __all__ = [
     "save_architecture",
     "unlink_dataset",
     "update",
+    "upload_project_thumbnail",
 ]

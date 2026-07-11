@@ -7,11 +7,16 @@ config file, ``dagnam.configure()``, or explicit override).
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Optional
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.resolver import resolve_client
+from dagnam._core.sse import TERMINAL_INFERENCE_EVENTS, SSEEvent, iter_sse_once
 from dagnam._types import JsonArray, JsonObject
+
+if TYPE_CHECKING:
+    import requests
 
 
 def inference(
@@ -79,3 +84,37 @@ def inference_schema(
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.schema(deployment_id)
+
+
+def inference_stream(
+    deployment_id: str,
+    inputs: JsonObject,
+    *,
+    include_heartbeats: bool = False,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> Iterator[SSEEvent]:
+    """Stream a prediction token-by-token from a text/LLM deployment.
+
+    Yields ``SSEEvent``s: ``token`` frames, then a terminal ``complete`` (or
+    ``error``). Single-shot: a dropped connection raises ``StreamError``
+    rather than reconnecting, because replaying generation would duplicate
+    output. Auth uses a short-lived scoped stream token minted per
+    connection — the API key never appears in a URL.
+
+    >>> for ev in dagnam.inference_stream("dep_abc123", {"text": "hello"}):
+    ...     if ev.event == "token":
+    ...         print(ev.data["token"], end="", flush=True)
+    """
+    resolved = resolve_client(client, api_key, api_url)
+
+    def _open() -> requests.Response:
+        return resolved.open_inference_stream(deployment_id, inputs)
+
+    return iter_sse_once(
+        _open,
+        terminal_events=TERMINAL_INFERENCE_EVENTS,
+        include_heartbeats=include_heartbeats,
+        resource_label=f"Inference stream for {deployment_id}",
+    )

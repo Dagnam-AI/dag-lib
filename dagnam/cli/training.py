@@ -212,6 +212,109 @@ def cmd_training_metrics_summary(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_training_restart(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.restart(args.job_id)
+    print_json(result)
+    print_next_step(f"dagnam stream {result.get('id') or '<job-id>'}")
+
+
+def cmd_training_restore(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.restore_checkpoint(args.job_id, args.checkpoint_id)
+    print_json(result)
+    print_next_step(f"dagnam stream {result.get('id') or '<job-id>'}")
+
+
+def _render_estimate(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    lines = [
+        f"Estimated memory:   {data.get('estimated_memory_mb', '-')} MB",
+        f"Estimated time:     {data.get('estimated_training_time_seconds', '-')} s",
+        f"Estimated disk:     {data.get('estimated_disk_space_mb', '-')} MB",
+        f"Estimated cost:     {data.get('estimated_cost_usd', '-')}",
+    ]
+    warnings = data.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        lines.append("Warnings:")
+        lines.extend(f"  - {w}" for w in warnings)
+    recommendations = data.get("recommendations")
+    if isinstance(recommendations, list) and recommendations:
+        lines.append("Recommendations:")
+        lines.extend(f"  - {r}" for r in recommendations)
+    return "\n".join(lines)
+
+
+def cmd_training_estimate(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.estimate_resources(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        optimizer=args.optimizer,
+        loss_function=args.loss_function,
+        training_dataset_id=args.dataset_id,
+        validation_dataset_id=args.val_dataset_id,
+        test_dataset_id=args.test_dataset_id,
+        train_split=args.train_split,
+        val_split=args.val_split,
+        test_split=args.test_split,
+        config_overrides=_job_overrides(args),
+    )
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_estimate,
+    )
+
+
+def _render_strategies(result: object) -> str:
+    data = result if isinstance(result, dict) else {}
+    rows: list[dict[str, object]] = [
+        {"strategy": label, "available": "Yes" if available else "No"}
+        for label, available in sorted(data.items())
+    ]
+    if not rows:
+        return "No strategies available."
+    return render_table(
+        (
+            Column("Strategy", "strategy", 24),
+            Column("Available", "available", 9),
+        ),
+        rows,
+    )
+
+
+def cmd_training_allowed_strategies(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.allowed_strategies()
+    emit_result(
+        result,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_strategies,
+    )
+
+
+def cmd_training_download_code(args: argparse.Namespace) -> None:
+    import dagnam
+
+    path = dagnam.download_code(args.job_id, out=args.out)
+    print(f"Saved training code to {path}")
+
+
+def cmd_training_dag(args: argparse.Namespace) -> None:
+    import dagnam
+
+    path = dagnam.download_dag(args.job_id, out=args.out)
+    print(f"Saved DAG to {path}")
+
+
 def register_training(subparsers: SubParsersAction) -> None:
     """Register the ``stream`` and ``training`` commands on the top-level subparsers."""
     stream = subparsers.add_parser(
@@ -309,6 +412,94 @@ def register_training(subparsers: SubParsersAction) -> None:
     )
     training_cancel.add_argument("job_id", help="ID of the training job.")
     training_cancel.set_defaults(func=cmd_training_cancel)
+
+    training_restart = training_sub.add_parser(
+        "restart",
+        help="Restart a training job.",
+        description="Restart a terminal training job as a fresh run.",
+    )
+    training_restart.add_argument("job_id", help="ID of the training job.")
+    training_restart.set_defaults(func=cmd_training_restart)
+
+    training_restore = training_sub.add_parser(
+        "restore",
+        help="Restart a job from a checkpoint.",
+        description="Restart a training job from one of its checkpoints.",
+    )
+    training_restore.add_argument("job_id", help="ID of the training job.")
+    training_restore.add_argument("checkpoint_id", help="ID of the checkpoint to restore from.")
+    training_restore.set_defaults(func=cmd_training_restore)
+
+    training_estimate = training_sub.add_parser(
+        "estimate",
+        help="Estimate training resources.",
+        description="Estimate compute cost for a training config without creating a job.",
+    )
+    training_estimate.add_argument(
+        "--epochs", type=int, required=True, help="Number of training epochs (required)."
+    )
+    training_estimate.add_argument(
+        "--batch-size", type=int, required=True, help="Training batch size (required)."
+    )
+    training_estimate.add_argument(
+        "--learning-rate", type=float, required=True, help="Initial learning rate (required)."
+    )
+    training_estimate.add_argument(
+        "--optimizer", required=True, help="adam, adamw, sgd, rmsprop, or adagrad (required)."
+    )
+    training_estimate.add_argument(
+        "--loss-function", required=True, help="Loss function name (required)."
+    )
+    training_estimate.add_argument(
+        "--dataset-id", required=True, help="Training dataset ID (required)."
+    )
+    training_estimate.add_argument("--val-dataset-id", help="Validation dataset ID (optional).")
+    training_estimate.add_argument("--test-dataset-id", help="Test dataset ID (optional).")
+    training_estimate.add_argument(
+        "--train-split", type=float, default=0.8, help="Train split ratio (default: 0.8)."
+    )
+    training_estimate.add_argument(
+        "--val-split", type=float, default=0.1, help="Validation split ratio (default: 0.1)."
+    )
+    training_estimate.add_argument(
+        "--test-split", type=float, default=0.1, help="Test split ratio (default: 0.1)."
+    )
+    training_estimate.add_argument(
+        "--config",
+        help="Advanced TrainingConfig overrides as a JSON literal or @path/to/file.json.",
+    )
+    add_collection_output_args(training_estimate)
+    training_estimate.set_defaults(func=cmd_training_estimate)
+
+    training_strategies = training_sub.add_parser(
+        "allowed-strategies",
+        help="List available distribution strategies.",
+        description="List the distribution strategies available to your credential.",
+    )
+    add_collection_output_args(training_strategies)
+    training_strategies.set_defaults(func=cmd_training_allowed_strategies)
+
+    training_download_code = training_sub.add_parser(
+        "download-code",
+        help="Download generated training code.",
+        description="Download a job's generated training-code ZIP.",
+    )
+    training_download_code.add_argument("job_id", help="ID of the training job.")
+    training_download_code.add_argument(
+        "--out", help="Directory to save the ZIP into (default: current directory)."
+    )
+    training_download_code.set_defaults(func=cmd_training_download_code)
+
+    training_dag = training_sub.add_parser(
+        "dag",
+        help="Download a job's DAG JSON.",
+        description="Download a job's DAG JSON.",
+    )
+    training_dag.add_argument("job_id", help="ID of the training job.")
+    training_dag.add_argument(
+        "--out", help="Directory to save the DAG JSON into (default: current directory)."
+    )
+    training_dag.set_defaults(func=cmd_training_dag)
 
     training_delete = training_sub.add_parser(
         "delete",

@@ -123,6 +123,14 @@ class HubClientMixin(BaseDagnamClient):
             "DELETE", f"/api/v1/hub/models/{quote_path_segment(model_id)}", model_id=model_id
         )
 
+    def finalize_hub_model(self, model_id: str) -> JsonObject:
+        """Flip a draft model live. ``POST /api/v1/hub/models/{model_id}/finalize``."""
+        return self._hub_object(
+            "POST",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/finalize",
+            model_id=model_id,
+        )
+
     def list_hub_model_files(self, model_id: str) -> JsonObject:
         return self._hub_object(
             "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id

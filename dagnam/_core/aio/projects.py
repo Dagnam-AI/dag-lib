@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from dagnam._core.aio.base import BaseAsyncDagnamClient
+from pathlib import Path
+
+import httpx
+
+from dagnam._core.aio.base import BaseAsyncDagnamClient, content_disposition_safe_name
 from dagnam._core.client.common import quote_path_segment, raise_for_project, response_json_value
+from dagnam._core.exceptions import APIError
 from dagnam._types import (
     FormData,
     JsonObject,
@@ -215,3 +220,49 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
                 project_id=project_id,
             )
         )
+
+    # --------------------------------------------------------------- thumbnail
+
+    async def upload_project_thumbnail(self, project_id: str, file_path: str | Path) -> JsonObject:
+        """Upload a project thumbnail image. ``POST /api/v1/projects/{id}/thumbnail`` (multipart)."""
+        path = Path(file_path)
+        if not path.is_file():  # noqa: ASYNC240 - one-shot local stat before opening, not I/O-bound
+            raise FileNotFoundError(f"No such file: {path}")
+        with open(path, "rb") as fh:
+            files = {"file": (path.name, fh, "application/octet-stream")}
+            return ensure_json_object(
+                await self._project_req(
+                    "POST",
+                    f"/api/v1/projects/{quote_path_segment(project_id)}/thumbnail",
+                    project_id=project_id,
+                    files=files,
+                )
+            )
+
+    async def download_project_thumbnail(self, project_id: str, dest_dir: str | Path) -> Path:
+        """Stream-download a project's thumbnail image into ``dest_dir``.
+
+        ``GET /api/v1/projects/{id}/thumbnail`` returns the raw image bytes. The
+        saved filename is taken from the ``Content-Disposition`` header and
+        reduced to a bare basename, so a hostile header cannot escape ``dest_dir``.
+        """
+        url = f"{self.api_url}/api/v1/projects/{quote_path_segment(project_id)}/thumbnail"
+        try:
+            async with self._client.stream("GET", url, headers=self._headers()) as resp:
+                if not resp.is_success:
+                    await resp.aread()  # populate the body for the error message
+                    raise_for_project(resp, project_id)
+                name = content_disposition_safe_name(
+                    resp.headers.get("content-disposition"),
+                    default=f"{project_id}-thumbnail.png",
+                )
+                dest = Path(dest_dir) / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest, "wb") as fh:
+                    async for chunk in resp.aiter_bytes():
+                        fh.write(chunk)
+                return dest
+        except httpx.ConnectError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc

@@ -295,6 +295,19 @@ def confirm_or_abort(prompt: str, *, assume_yes: bool) -> None:
         error("Aborted: confirmation not received.")
 
 
+def confirm_destructive(expected: str, *, yes: bool, prompt: str) -> None:
+    """Gate a destructive command behind a typed confirmation (or ``--yes``).
+
+    Prints ``prompt``, reads one line, and aborts with exit code 1 unless the
+    reply matches ``expected`` exactly. Never default-destructive.
+    """
+    if yes:
+        return
+    reply = input(prompt)
+    if reply != expected:
+        error("Confirmation did not match; aborting.")
+
+
 def print_next_step(command: str) -> None:
     """Print a suggested follow-up command to stderr.
 

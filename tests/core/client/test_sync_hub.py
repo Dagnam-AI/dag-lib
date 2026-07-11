@@ -217,3 +217,17 @@ def test_upload_model_file_timeout(
     monkeypatch.setattr(requests, "post", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.upload_model_file("m1", str(f))
+
+
+# ---------------------------------------------------------------- finalize
+
+
+def test_finalize_hub_model(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/finalize", json={"id": "m1", "status": "published"})
+    assert client.finalize_hub_model("m1")["status"] == "published"
+
+
+def test_finalize_hub_model_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/finalize", status_code=404)
+    with pytest.raises(HubModelNotFoundError):
+        client.finalize_hub_model("m1")

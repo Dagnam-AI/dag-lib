@@ -121,3 +121,22 @@ async def test_async_hub_upload_model_file_404(
     mock.post("/api/v1/hub/models/missing/files").mock(return_value=httpx.Response(404))
     with pytest.raises(HubModelNotFoundError):
         await client.upload_model_file("missing", str(f))
+
+
+# ---------------------------------------------------------------- finalize
+
+
+async def test_async_finalize_hub_model(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.post("/api/v1/hub/models/m1/finalize").mock(
+        return_value=httpx.Response(200, json={"id": "m1", "status": "published"})
+    )
+    out = await client.finalize_hub_model("m1")
+    assert out["status"] == "published"
+
+
+async def test_async_finalize_hub_model_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/hub/models/m1/finalize").mock(return_value=httpx.Response(404))
+    with pytest.raises(HubModelNotFoundError):
+        await client.finalize_hub_model("m1")

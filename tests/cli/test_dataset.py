@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
+
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
@@ -222,3 +224,123 @@ def test_dataset_info_json_mode(
     ):
         run_cli(["dataset", "info", "ds-1", "--json"])
     assert json.loads(capsys.readouterr().out) == {"id": "ds-1", "name": "Iris"}
+
+
+# ---------------------------------------------------------------- upload / import-url
+
+
+def test_dataset_upload(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path) -> None:
+    data_file = tmp_path / "data.csv"
+    data_file.write_text("a,b\n1,2\n")
+    with mock.patch("dagnam.datasets.upload", return_value={"id": "ds1", "name": "my-ds"}) as m:
+        assert (
+            run_cli(
+                [
+                    "dataset",
+                    "upload",
+                    str(data_file),
+                    "--name",
+                    "my-ds",
+                    "--type",
+                    "tabular",
+                    "--format",
+                    "csv",
+                ]
+            )
+            == 0
+        )
+    m.assert_called_once_with(
+        str(data_file),
+        "my-ds",
+        "tabular",
+        "csv",
+        description=None,
+        visibility="private",
+        license=None,
+    )
+    assert json.loads(capsys.readouterr().out)["id"] == "ds1"
+
+
+def test_dataset_upload_name_defaults_to_stem(run_cli: CliRunner, tmp_path: Path) -> None:
+    data_file = tmp_path / "iris.csv"
+    data_file.write_text("x\n")
+    with mock.patch("dagnam.datasets.upload", return_value={}) as m:
+        run_cli(["dataset", "upload", str(data_file), "--type", "tabular", "--format", "csv"])
+    assert m.call_args.args[1] == "iris"
+
+
+def test_dataset_upload_missing_file_exits_1(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    with mock.patch("dagnam.datasets.upload") as m, pytest.raises(SystemExit) as exc_info:
+        run_cli(
+            [
+                "dataset",
+                "upload",
+                str(tmp_path / "nope.csv"),
+                "--type",
+                "tabular",
+                "--format",
+                "csv",
+            ]
+        )
+    assert exc_info.value.code == 1
+    m.assert_not_called()
+    assert "No such file" in capsys.readouterr().err
+
+
+def test_dataset_import_url_waits_for_task(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.wait.return_value.result.return_value = {"id": "ds9", "status": "completed"}
+    with mock.patch("dagnam.datasets.upload_from_url", return_value=op) as m:
+        assert (
+            run_cli(
+                [
+                    "dataset",
+                    "import-url",
+                    "https://x.test/d.parquet",
+                    "--name",
+                    "remote",
+                    "--type",
+                    "tabular",
+                    "--format",
+                    "parquet",
+                ]
+            )
+            == 0
+        )
+    m.assert_called_once_with(
+        "https://x.test/d.parquet",
+        "remote",
+        "tabular",
+        "parquet",
+        description=None,
+        visibility="private",
+    )
+    op.wait.assert_called_once()
+    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+
+
+def test_dataset_import_url_no_wait_prints_task(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.initial.return_value = {"task_id": "t1", "status": "pending"}
+    with mock.patch("dagnam.datasets.upload_from_url", return_value=op):
+        assert (
+            run_cli(
+                [
+                    "dataset",
+                    "import-url",
+                    "https://x.test/d.csv",
+                    "--name",
+                    "remote",
+                    "--type",
+                    "tabular",
+                    "--format",
+                    "csv",
+                    "--no-wait",
+                ]
+            )
+            == 0
+        )
+    op.wait.assert_not_called()
+    assert json.loads(capsys.readouterr().out)["task_id"] == "t1"

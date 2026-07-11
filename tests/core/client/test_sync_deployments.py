@@ -269,3 +269,25 @@ def test_retry_deployment_404(client: DagnamClient, rmock: RequestsMocker) -> No
     rmock.post(f"{API}/api/v1/deployments/d1/retry", status_code=404)
     with pytest.raises(DeploymentNotFoundError):
         client.retry_deployment("d1")
+
+
+def test_collect_deployment_metrics(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/dep1/metrics/collect",
+        json={"deployment_id": "dep1", "points_created": 60, "backfilled": True},
+    )
+    result = client.collect_deployment_metrics("dep1", backfill_minutes=120)
+    assert result["points_created"] == 60
+    assert rmock.last_request.qs["backfill_minutes"] == ["120"]
+
+
+def test_collect_deployment_metrics_409_maps_state_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    from dagnam._core.exceptions import DeploymentStateError
+
+    rmock.post(
+        f"{API}/api/v1/deployments/dep1/metrics/collect", status_code=409, text="not running"
+    )
+    with pytest.raises(DeploymentStateError):
+        client.collect_deployment_metrics("dep1")

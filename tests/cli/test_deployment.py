@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -344,3 +345,106 @@ def test_deployments_validate(run_cli: CliRunner, capsys: StrCapture) -> None:
     kwargs = fake.validate.call_args.kwargs
     assert kwargs["name"] == "x"
     assert kwargs["deployment_type"] == "text"
+
+
+def test_deployments_collect_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch(
+        "dagnam.deployments.collect_metrics",
+        return_value={"deployment_id": "dep-1", "points_created": 60, "backfilled": True},
+    ) as m:
+        assert run_cli(["deployments", "collect-metrics", "dep-1", "--backfill-minutes", "90"]) == 0
+    m.assert_called_once_with("dep-1", backfill_minutes=90)
+    assert json.loads(capsys.readouterr().out)["points_created"] == 60
+
+
+# ---------------------------------------------------------------- update / scale / rollback
+
+
+def test_deployments_update(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.deployments.update", return_value={"id": "dep-1"}) as m:
+        assert run_cli(["deployments", "update", "dep-1", "--name", "n2", "--auto-scaling"]) == 0
+    m.assert_called_once_with("dep-1", name="n2", auto_scaling_enabled=True)
+
+
+def test_deployments_update_no_auto_scaling_flag(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.deployments.update", return_value={}) as m:
+        run_cli(["deployments", "update", "dep-1", "--no-auto-scaling"])
+    m.assert_called_once_with("dep-1", auto_scaling_enabled=False)
+
+
+def test_deployments_update_all_fields(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.deployments.update", return_value={}) as m:
+        run_cli(
+            [
+                "deployments",
+                "update",
+                "dep-1",
+                "--instance-type",
+                "t3.large",
+                "--num-instances",
+                "4",
+                "--min-instances",
+                "2",
+                "--max-instances",
+                "8",
+            ]
+        )
+    m.assert_called_once_with(
+        "dep-1",
+        instance_type="t3.large",
+        num_instances=4,
+        min_instances=2,
+        max_instances=8,
+    )
+
+
+def test_deployments_update_requires_a_field(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.deployments.update") as m, pytest.raises(SystemExit) as exc_info:
+        run_cli(["deployments", "update", "dep-1"])
+    assert exc_info.value.code == 1
+    m.assert_not_called()
+    assert "Nothing to update" in capsys.readouterr().err
+
+
+def test_deployments_scale_waits(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.wait.return_value.result.return_value = {"id": "dep-1", "num_instances": 3}
+    with mock.patch("dagnam.deployments.scale", return_value=op) as m:
+        assert run_cli(["deployments", "scale", "dep-1", "--num-instances", "3"]) == 0
+    m.assert_called_once_with("dep-1", 3)
+    op.wait.assert_called_once()
+    assert json.loads(capsys.readouterr().out)["num_instances"] == 3
+
+
+def test_deployments_scale_no_wait(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.initial.return_value = {"id": "dep-1", "status": "scaling"}
+    with mock.patch("dagnam.deployments.scale", return_value=op):
+        assert run_cli(["deployments", "scale", "dep-1", "--num-instances", "2", "--no-wait"]) == 0
+    op.wait.assert_not_called()
+    assert json.loads(capsys.readouterr().out)["status"] == "scaling"
+
+
+def test_deployments_rollback_waits(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.wait.return_value.result.return_value = {"id": "dep-1", "status": "running"}
+    with mock.patch("dagnam.deployments.rollback", return_value=op) as m:
+        assert (
+            run_cli(["deployments", "rollback", "dep-1", "--checkpoint-path", "/ckpt/best.pt"]) == 0
+        )
+    m.assert_called_once_with("dep-1", "/ckpt/best.pt")
+    assert json.loads(capsys.readouterr().out)["status"] == "running"
+
+
+def test_deployments_rollback_no_wait(run_cli: CliRunner, capsys: StrCapture) -> None:
+    op = mock.MagicMock()
+    op.initial.return_value = {"id": "dep-1", "status": "rolling_back"}
+    with mock.patch("dagnam.deployments.rollback", return_value=op):
+        assert (
+            run_cli(
+                ["deployments", "rollback", "dep-1", "--checkpoint-path", "/ckpt/x", "--no-wait"]
+            )
+            == 0
+        )
+    op.wait.assert_not_called()
+    assert json.loads(capsys.readouterr().out)["status"] == "rolling_back"

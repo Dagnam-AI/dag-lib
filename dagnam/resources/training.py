@@ -7,6 +7,7 @@ callers can iterate training events just like the frontend EventSource.
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -59,6 +60,50 @@ def _stringify_id(value: object) -> str:
     return str(value)
 
 
+def _build_training_config(
+    *,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    optimizer: str,
+    loss_function: str,
+    training_dataset_id: str | UUID,
+    validation_dataset_id: Optional[str | UUID],
+    test_dataset_id: Optional[str | UUID],
+    train_split: float,
+    val_split: float,
+    test_split: float,
+    config_overrides: Optional[JsonObject],
+) -> JsonObject:
+    """Assemble the backend ``TrainingConfig`` body from hyperparameters + splits.
+
+    Shared by :func:`create_training_job` and :func:`estimate_resources` so the
+    two never drift; ``config_overrides`` is merged on top of the built config.
+    """
+    dataset_config: JsonObject = {
+        "training_dataset_id": _stringify_id(training_dataset_id),
+        "train_split": train_split,
+        "val_split": val_split,
+        "test_split": test_split,
+    }
+    if validation_dataset_id is not None:
+        dataset_config["validation_dataset_id"] = _stringify_id(validation_dataset_id)
+    if test_dataset_id is not None:
+        dataset_config["test_dataset_id"] = _stringify_id(test_dataset_id)
+
+    config: JsonObject = {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "optimizer": optimizer,
+        "loss_function": loss_function,
+        "dataset_config": dataset_config,
+    }
+    if config_overrides:
+        config.update(config_overrides)
+    return config
+
+
 def create_training_job(
     project_id: str | UUID,
     *,
@@ -102,27 +147,20 @@ def create_training_job(
     """
     resolved = resolve_client(client, api_key, api_url)
 
-    dataset_config: JsonObject = {
-        "training_dataset_id": _stringify_id(training_dataset_id),
-        "train_split": train_split,
-        "val_split": val_split,
-        "test_split": test_split,
-    }
-    if validation_dataset_id is not None:
-        dataset_config["validation_dataset_id"] = _stringify_id(validation_dataset_id)
-    if test_dataset_id is not None:
-        dataset_config["test_dataset_id"] = _stringify_id(test_dataset_id)
-
-    config: JsonObject = {
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "optimizer": optimizer,
-        "loss_function": loss_function,
-        "dataset_config": dataset_config,
-    }
-    if config_overrides:
-        config.update(config_overrides)
+    config = _build_training_config(
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        optimizer=optimizer,
+        loss_function=loss_function,
+        training_dataset_id=training_dataset_id,
+        validation_dataset_id=validation_dataset_id,
+        test_dataset_id=test_dataset_id,
+        train_split=train_split,
+        val_split=val_split,
+        test_split=test_split,
+        config_overrides=config_overrides,
+    )
 
     payload: JsonObject = {
         "project_id": _stringify_id(project_id),
@@ -265,13 +303,130 @@ def training_metrics_summary(
     return resolved.get_training_metrics_summary(_stringify_id(job_id))
 
 
+def restart(
+    job_id: str | UUID,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Restart a terminal training job and return the new job record."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.restart_training_job(_stringify_id(job_id))
+
+
+def restore_checkpoint(
+    job_id: str | UUID,
+    checkpoint_id: str | UUID,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Restart a job from one of its checkpoints and return the new job record."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.restore_from_checkpoint(_stringify_id(job_id), _stringify_id(checkpoint_id))
+
+
+def estimate_resources(
+    *,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    optimizer: str,
+    loss_function: str,
+    training_dataset_id: str | UUID,
+    validation_dataset_id: Optional[str | UUID] = None,
+    test_dataset_id: Optional[str | UUID] = None,
+    train_split: float = 0.8,
+    val_split: float = 0.1,
+    test_split: float = 0.1,
+    config_overrides: Optional[JsonObject] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Estimate compute cost for a training config without creating a job.
+
+    Accepts the same hyperparameters and dataset split as
+    :func:`create_training_job` (minus the project and run-level flags), builds
+    the backend ``TrainingConfig``, and returns a ``ResourceEstimate``
+    (``estimated_memory_mb``, ``estimated_training_time_seconds``,
+    ``estimated_disk_space_mb``, ``estimated_cost_usd``, ``warnings``,
+    ``recommendations``).
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    config = _build_training_config(
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        optimizer=optimizer,
+        loss_function=loss_function,
+        training_dataset_id=training_dataset_id,
+        validation_dataset_id=validation_dataset_id,
+        test_dataset_id=test_dataset_id,
+        train_split=train_split,
+        val_split=val_split,
+        test_split=test_split,
+        config_overrides=config_overrides,
+    )
+    return resolved.estimate_training_resources(config)
+
+
+def allowed_strategies(
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Return the distribution strategies available to the current credential.
+
+    A flat ``dict[str, bool]`` mapping each strategy label (e.g. ``"cpu"``,
+    ``"single_gpu"``, ``"multi_gpu_ddp"``) to whether it is available.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_allowed_strategies()
+
+
+def download_code(
+    job_id: str | UUID,
+    out: Optional[str | Path] = None,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> Path:
+    """Download a job's generated training-code ZIP into ``out`` (default: cwd)."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.download_training_code(_stringify_id(job_id), out or ".")
+
+
+def download_dag(
+    job_id: str | UUID,
+    out: Optional[str | Path] = None,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> Path:
+    """Download a job's DAG JSON into ``out`` (default: cwd)."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.download_dag(_stringify_id(job_id), out or ".")
+
+
 __all__ = [
     "TrainingEvent",
+    "allowed_strategies",
     "cancel_training_job",
     "create_training_job",
     "delete_training_jobs",
+    "download_code",
+    "download_dag",
+    "estimate_resources",
     "get_training_job",
     "list_training_jobs",
+    "restart",
+    "restore_checkpoint",
     "stream_training",
     "training_logs",
     "training_metrics",

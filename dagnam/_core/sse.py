@@ -24,6 +24,7 @@ DEFAULT_BACKOFF_BASE = 1.0
 
 TERMINAL_TRAINING_EVENTS = frozenset({"complete", "failed", "cancelled", "stream_end"})
 TERMINAL_DEPLOYMENT_EVENTS = frozenset({"deployment_ready", "deployment_failed", "stream_end"})
+TERMINAL_INFERENCE_EVENTS = frozenset({"complete", "error"})
 
 
 @dataclass
@@ -207,3 +208,65 @@ async def aiter_with_reconnect(
         delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
         if delay:
             await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
+
+
+def iter_sse_once(
+    open_stream: Callable[[], ClosableResponse],
+    *,
+    terminal_events: frozenset[str],
+    include_heartbeats: bool = False,
+    resource_label: str = "SSE stream",
+) -> Iterator[SSEEvent]:
+    """Yield parsed SSE events from a single connection — never reconnects.
+
+    For non-resumable streams (streaming inference): a reconnect would replay
+    generation from scratch, so a mid-stream drop or an end-of-body without a
+    terminal event raises :class:`StreamError` instead.
+    """
+    try:
+        sseclient = cast("SSEClientModule", import_module("sseclient"))
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "sseclient-py is required for SSE streams. "
+            "Install with: pip install 'dagnam[streaming]' or pip install sseclient-py"
+        ) from exc
+
+    response = open_stream()
+    try:
+        sse = sseclient.SSEClient(response)
+        for raw in sse.events():
+            ev = parse_raw_event(raw)
+            if ev.event == "heartbeat" and not include_heartbeats:
+                continue
+            yield ev
+            if ev.event in terminal_events:
+                return
+    except (requests.exceptions.RequestException, ConnectionError, OSError) as exc:
+        raise StreamError(f"{resource_label} dropped mid-stream: {exc}") from exc
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+    raise StreamError(f"{resource_label} ended without a terminal event")
+
+
+async def aiter_sse_once(
+    open_stream: Callable[[], AsyncIterator[SSEEvent]],
+    *,
+    terminal_events: frozenset[str],
+    transient_errors: tuple[type[BaseException], ...] = (ConnectionError, OSError),
+    include_heartbeats: bool = False,
+    resource_label: str = "SSE stream",
+) -> AsyncIterator[SSEEvent]:
+    """Async counterpart of :func:`iter_sse_once` (single connection, no retry)."""
+    try:
+        async for ev in open_stream():
+            if ev.event == "heartbeat" and not include_heartbeats:
+                continue
+            yield ev
+            if ev.event in terminal_events:
+                return
+    except transient_errors as exc:
+        raise StreamError(f"{resource_label} dropped mid-stream: {exc}") from exc
+    raise StreamError(f"{resource_label} ended without a terminal event")

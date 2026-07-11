@@ -57,9 +57,9 @@ class TestHelpText:
         assert "Usage: dagnam projects [-h] <command> ..." in out
         assert "Create, list, inspect, and delete projects." in out
         assert "Commands:" in out
-        assert "  list          List projects." in out
-        assert "  create        Create a project." in out
-        assert "  architecture  Save a project's architecture." in out
+        assert "  list            List projects." in out
+        assert "  create          Create a project." in out
+        assert "  architecture    Save a project's architecture." in out
         assert "Options:" in out
         assert "  -h, --help    Show this help and exit." in out
         assert "Docs: https://dagnam.ai/docs" in out

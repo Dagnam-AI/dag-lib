@@ -428,3 +428,36 @@ class TestFormatLocal:
         assert offset is not None
         assert offset.total_seconds() == 0
         assert format_local(raw) == as_utc.astimezone().strftime("%Y-%m-%d")
+
+
+# ------------------------------------------------------------- confirm_destructive
+
+
+def test_confirm_destructive_yes_skips_prompt(monkeypatch: PytestMonkeyPatch) -> None:
+    from dagnam.cli.common import confirm_destructive
+
+    monkeypatch.setattr(
+        "builtins.input", lambda *a: (_ for _ in ()).throw(AssertionError("prompted"))
+    )
+    confirm_destructive("delete 2", yes=True, prompt="unused")
+
+
+def test_confirm_destructive_match_passes(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    from dagnam.cli.common import confirm_destructive
+
+    monkeypatch.setattr("builtins.input", lambda *a: "delete 2")
+    confirm_destructive("delete 2", yes=False, prompt="Type 'delete 2' to continue: ")
+
+
+def test_confirm_destructive_mismatch_exits_1(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    from dagnam.cli.common import confirm_destructive
+
+    monkeypatch.setattr("builtins.input", lambda *a: "nope")
+    with pytest.raises(SystemExit) as exc_info:
+        confirm_destructive("delete 2", yes=False, prompt="Type 'delete 2' to continue: ")
+    assert exc_info.value.code == 1
+    assert "did not match" in capsys.readouterr().err

@@ -234,3 +234,28 @@ async def test_async_retry_deployment_404(client: AsyncDagnamClient, mock: Respx
     mock.post("/api/v1/deployments/missing/retry").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         await client.retry_deployment("missing")
+
+
+async def test_async_collect_deployment_metrics(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments/dep1/metrics/collect").mock(
+        return_value=httpx.Response(
+            200, json={"deployment_id": "dep1", "points_created": 60, "backfilled": True}
+        )
+    )
+    result = await client.collect_deployment_metrics("dep1", backfill_minutes=120)
+    assert result["points_created"] == 60
+    assert "backfill_minutes=120" in str(route.calls[0].request.url)
+
+
+async def test_async_collect_deployment_metrics_409(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    from dagnam._core.exceptions import DeploymentStateError
+
+    mock.post("/api/v1/deployments/dep1/metrics/collect").mock(
+        return_value=httpx.Response(409, text="no")
+    )
+    with pytest.raises(DeploymentStateError):
+        await client.collect_deployment_metrics("dep1")

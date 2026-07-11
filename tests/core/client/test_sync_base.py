@@ -198,28 +198,28 @@ def test_content_disposition_safe_name_strips_drive_letter() -> None:
     header = 'attachment; filename="D:evil.dll"'
     result = content_disposition_safe_name(header, default="export.zip")
     assert result == "evil.dll"
-    assert ":" not in result and "/" not in result and "\\" not in result
+    assert not any(sep in result for sep in (":", "/", "\\"))
 
 
 def test_content_disposition_safe_name_strips_multi_colon() -> None:
     header = 'attachment; filename="a:b:c.txt"'
     result = content_disposition_safe_name(header, default="export.zip")
     assert result == "c.txt"
-    assert ":" not in result and "/" not in result and "\\" not in result
+    assert not any(sep in result for sep in (":", "/", "\\"))
 
 
 def test_content_disposition_safe_name_strips_non_drive_colon_prefix() -> None:
     header = 'attachment; filename="my:file.txt"'
     result = content_disposition_safe_name(header, default="export.zip")
     assert result == "file.txt"
-    assert ":" not in result and "/" not in result and "\\" not in result
+    assert not any(sep in result for sep in (":", "/", "\\"))
 
 
 def test_content_disposition_safe_name_strips_drive_and_backslashes() -> None:
     header = 'attachment; filename="C:\\Windows\\system32\\evil.dll"'
     result = content_disposition_safe_name(header, default="export.zip")
     assert result == "evil.dll"
-    assert ":" not in result and "/" not in result and "\\" not in result
+    assert not any(sep in result for sep in (":", "/", "\\"))
 
 
 def test_content_disposition_safe_name_reserved_device_stem_uses_default() -> None:

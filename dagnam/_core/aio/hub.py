@@ -70,6 +70,16 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
             "DELETE", f"/api/v1/hub/models/{quote_path_segment(model_id)}", model_id=model_id
         )
 
+    async def finalize_hub_model(self, model_id: str) -> JsonObject:
+        """Flip a draft model live. ``POST /api/v1/hub/models/{model_id}/finalize``."""
+        return ensure_json_object(
+            await self._hub_req(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/finalize",
+                model_id=model_id,
+            )
+        )
+
     async def list_hub_model_files(self, model_id: str) -> JsonObject:
         return ensure_json_object(
             await self._hub_req(

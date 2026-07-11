@@ -215,6 +215,20 @@ class DeploymentsClientMixin(BaseDagnamClient):
             params={"time_range": time_range},
         )
 
+    def collect_deployment_metrics(
+        self, deployment_id: str, backfill_minutes: int = 60
+    ) -> JsonObject:
+        """Trigger an immediate metrics collection (with first-time backfill).
+
+        POST /api/v1/deployments/{id}/metrics/collect
+        """
+        return self._deployment_object(
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics/collect",
+            deployment_id=deployment_id,
+            params={"backfill_minutes": backfill_minutes},
+        )
+
     def get_deployment_logs(
         self,
         deployment_id: str,

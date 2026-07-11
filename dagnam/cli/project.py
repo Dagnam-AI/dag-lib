@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from dagnam.cli.common import (
     add_collection_output_args,
+    confirm_destructive,
     error,
     format_local,
     load_json_arg,
@@ -217,6 +218,73 @@ def cmd_projects_versions_latest(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_projects_thumbnail(args: argparse.Namespace) -> None:
+    import dagnam
+
+    if args.set:
+        result = dagnam.upload_project_thumbnail(args.project_id, args.set)
+        url = result.get("thumbnail_url")
+        print(f"Thumbnail uploaded: {url}")
+        return
+    dest = dagnam.download_project_thumbnail(args.project_id, out=args.out)
+    print(f"Saved thumbnail to {dest}")
+
+
+def cmd_projects_update(args: argparse.Namespace) -> None:
+    import dagnam
+
+    fields: dict[str, object] = {}
+    if args.title is not None:
+        fields["title"] = args.title
+    if args.description is not None:
+        fields["description"] = args.description
+    if args.framework is not None:
+        fields["framework"] = args.framework
+    if args.visibility is not None:
+        fields["visibility"] = args.visibility
+    if args.tags is not None:
+        fields["tags"] = [tag.strip() for tag in args.tags.split(",") if tag.strip()]
+    if not fields:
+        error(
+            "Nothing to update: pass at least one of "
+            "--title/--description/--framework/--visibility/--tags."
+        )
+    # Cast for the dynamic-kwargs forward: pyright otherwise distributes each
+    # dict value to update()'s reserved keyword params (client/api_key/api_url).
+    result = dagnam.projects.update(args.project_id, **cast("dict[str, Any]", fields))
+    print_json(result)
+
+
+def cmd_projects_bulk_delete(args: argparse.Namespace) -> None:
+    import dagnam
+
+    count = len(args.project_ids)
+    confirm_destructive(
+        f"delete {count}",
+        yes=args.yes,
+        prompt=(
+            f"About to permanently delete {count} project(s): {', '.join(args.project_ids)}\n"
+            f"Type 'delete {count}' to continue: "
+        ),
+    )
+    result = dagnam.projects.bulk_delete(args.project_ids)
+    print_json(result)
+
+
+def cmd_projects_link_dataset(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.projects.link_dataset(args.project_id, args.dataset_id, args.role)
+    print_json(result)
+
+
+def cmd_projects_unlink_dataset(args: argparse.Namespace) -> None:
+    import dagnam
+
+    dagnam.projects.unlink_dataset(args.project_id, args.dataset_id)
+    print(f"Dataset {args.dataset_id} unlinked from project {args.project_id}.")
+
+
 def _register_project_versions(project_sub: SubParsersAction) -> None:
     """Register the nested ``projects versions …`` command group."""
     versions = project_sub.add_parser(
@@ -342,4 +410,60 @@ def register_projects(subparsers: SubParsersAction) -> None:
     project_arch.add_argument("--message", help="Optional commit message for the version.")
     add_collection_output_args(project_arch)
     project_arch.set_defaults(func=cmd_projects_architecture)
+    project_thumb = project_sub.add_parser(
+        "thumbnail",
+        help="Upload or download a project thumbnail.",
+        description=(
+            "Upload a project thumbnail image with --set PATH, or download the "
+            "current thumbnail to --out (default: current dir)."
+        ),
+    )
+    project_thumb.add_argument("project_id", help="ID of the project.")
+    project_thumb.add_argument("--set", help="Path to an image file to upload as the thumbnail.")
+    project_thumb.add_argument(
+        "--out",
+        default=".",
+        help="Directory to save the downloaded thumbnail (default: current dir).",
+    )
+    project_thumb.set_defaults(func=cmd_projects_thumbnail)
+
+    project_update = project_sub.add_parser(
+        "update", help="Update a project.", description="Update mutable project fields."
+    )
+    project_update.add_argument("project_id", help="ID of the project.")
+    project_update.add_argument("--title", help="New title.")
+    project_update.add_argument("--description", help="New description.")
+    project_update.add_argument("--framework", help="New framework.")
+    project_update.add_argument("--visibility", help="New visibility: public or private.")
+    project_update.add_argument("--tags", help="Comma-separated tags (replaces existing).")
+    project_update.set_defaults(func=cmd_projects_update)
+
+    project_bulk_delete = project_sub.add_parser(
+        "bulk-delete",
+        help="Delete multiple projects.",
+        description="Permanently delete multiple projects at once.",
+    )
+    project_bulk_delete.add_argument("project_ids", nargs="+", help="IDs of the projects.")
+    project_bulk_delete.add_argument(
+        "--yes", action="store_true", help="Skip the typed confirmation prompt."
+    )
+    project_bulk_delete.set_defaults(func=cmd_projects_bulk_delete)
+
+    project_link = project_sub.add_parser(
+        "link-dataset", help="Link a dataset.", description="Link a dataset to a project."
+    )
+    project_link.add_argument("project_id", help="ID of the project.")
+    project_link.add_argument("dataset_id", help="ID of the dataset.")
+    project_link.add_argument(
+        "--role", required=True, help="Dataset role in the project (e.g. train, validation)."
+    )
+    project_link.set_defaults(func=cmd_projects_link_dataset)
+
+    project_unlink = project_sub.add_parser(
+        "unlink-dataset", help="Unlink a dataset.", description="Unlink a dataset from a project."
+    )
+    project_unlink.add_argument("project_id", help="ID of the project.")
+    project_unlink.add_argument("dataset_id", help="ID of the dataset.")
+    project_unlink.set_defaults(func=cmd_projects_unlink_dataset)
+
     _register_project_versions(project_sub)

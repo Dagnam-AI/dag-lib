@@ -16,7 +16,7 @@ from dagnam._core.client.common import (
     response_json_object,
 )
 from dagnam._core.exceptions import APIError
-from dagnam._types import JsonObject, QueryParams
+from dagnam._types import JsonObject, QueryParams, ensure_json_object
 
 
 class AsyncDatasetsMixin(BaseAsyncDagnamClient):
@@ -148,4 +148,69 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
     async def get_dataset_task_status(self, task_id: str) -> JsonObject:
         resp = await self._request("GET", f"/api/v1/datasets/tasks/{quote_path_segment(task_id)}")
         raise_for_task(resp, task_id)
+        return response_json_object(resp)
+
+    async def preview_dataset(self, dataset_id: str, rows: int = 10) -> JsonObject:
+        """Preview a dataset's samples and statistics.
+
+        ``GET /api/v1/datasets/{dataset_id}/preview?rows=N`` — see the sync
+        mirror in ``dagnam._core.client.datasets``.
+        """
+        params: QueryParams = {"rows": rows}
+        resp = await self._request(
+            "GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/preview", params=params
+        )
+        raise_for_dataset(resp, dataset_id)
+        return response_json_object(resp)
+
+    async def update_dataset(
+        self,
+        dataset_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        visibility: str | None = None,
+    ) -> JsonObject:
+        """Update a dataset's mutable fields. ``PUT /api/v1/datasets/{dataset_id}``.
+
+        Sends only the provided fields as multipart form data. At least one field
+        is required; all three omitted raises ``ValueError`` before any request.
+        """
+        if name is None and description is None and visibility is None:
+            raise ValueError(
+                "update_dataset requires at least one of name, description, or visibility"
+            )
+        fields: dict[str, str] = {}
+        if name is not None:
+            fields["name"] = name
+        if description is not None:
+            fields["description"] = description
+        if visibility is not None:
+            fields["visibility"] = visibility
+        resp = await self._request(
+            "PUT", f"/api/v1/datasets/{quote_path_segment(dataset_id)}", data=fields
+        )
+        raise_for_dataset(resp, dataset_id)
+        return response_json_object(resp)
+
+    async def delete_dataset(self, dataset_id: str) -> None:
+        """Delete a dataset. ``DELETE /api/v1/datasets/{dataset_id}`` (204 No Content)."""
+        resp = await self._request("DELETE", f"/api/v1/datasets/{quote_path_segment(dataset_id)}")
+        raise_for_dataset(resp, dataset_id)
+
+    async def update_dataset_roles(
+        self,
+        dataset_id: str,
+        column_roles: dict[str, str],
+        task_type_hint: str | None = None,
+    ) -> JsonObject:
+        """Set a dataset's column roles. ``PATCH /api/v1/datasets/{dataset_id}/roles``."""
+        body: JsonObject = {
+            "column_roles": ensure_json_object(column_roles),
+            "task_type_hint": task_type_hint,
+        }
+        resp = await self._request(
+            "PATCH", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/roles", json=body
+        )
+        raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)

@@ -61,6 +61,44 @@ def cmd_inference_schema(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_inference_stream(args: argparse.Namespace) -> None:
+    import sys
+
+    import dagnam
+
+    try:
+        source = f"@{args.input_file}" if args.input_file else args.input
+        payload = ensure_json_object(load_json_arg(source))
+    except (json.JSONDecodeError, OSError, TypeError) as exc:
+        error(f"Failed to parse --input: {exc}")
+
+    token_count = 0
+    printed_tokens = False
+    for event in dagnam.inference_stream(args.deployment_id, payload):
+        if args.json:
+            print(json.dumps({"event": event.event, "data": event.data}), flush=True)
+            if event.event == "error":
+                data = event.data if isinstance(event.data, dict) else {}
+                error(str(data.get("message") or "streaming inference failed"))
+            continue
+        if event.event == "token":
+            data = event.data if isinstance(event.data, dict) else {}
+            text = data.get("token")
+            if isinstance(text, str):
+                token_count += 1
+                printed_tokens = True
+                print(text, end="", flush=True)
+        elif event.event == "complete":
+            if printed_tokens:
+                print()
+            print(f"Stream complete ({token_count} tokens).", file=sys.stderr)
+        elif event.event == "error":
+            if printed_tokens:
+                print()
+            data = event.data if isinstance(event.data, dict) else {}
+            error(str(data.get("message") or "streaming inference failed"))
+
+
 def register_inference(subparsers: SubParsersAction) -> None:
     """Register the ``inference`` command group on the top-level subparsers."""
     inference = subparsers.add_parser(
@@ -105,3 +143,19 @@ def register_inference(subparsers: SubParsersAction) -> None:
     schema.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     schema.add_argument("--output", help="Write the JSON response to this path.")
     schema.set_defaults(func=cmd_inference_schema)
+    stream = inference_sub.add_parser(
+        "stream",
+        help="Stream a prediction token-by-token.",
+        description=(
+            "Stream a prediction from a text/LLM deployment over SSE. "
+            "Prints tokens incrementally; --json emits one JSON event per line (NDJSON)."
+        ),
+    )
+    stream.add_argument("deployment_id", help="ID of the deployment.")
+    stream_input = stream.add_mutually_exclusive_group(required=True)
+    stream_input.add_argument("--input", help="JSON literal, or @path to a JSON file.")
+    stream_input.add_argument("--input-file", help="Path to a JSON object file.")
+    stream.add_argument(
+        "--json", action="store_true", help="Emit NDJSON events instead of raw tokens."
+    )
+    stream.set_defaults(func=cmd_inference_stream)

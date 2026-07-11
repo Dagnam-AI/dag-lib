@@ -65,6 +65,13 @@ class TestReadDelegation:
         client.get_deployment.assert_called_once_with("dep-1")
         assert out["status"] == "running"
 
+    def test_collect_metrics_delegates(self) -> None:
+        client = MagicMock()
+        client.collect_deployment_metrics.return_value = {"points_created": 1}
+        result = deployments.collect_metrics("dep1", backfill_minutes=30, client=client)
+        assert result == {"points_created": 1}
+        client.collect_deployment_metrics.assert_called_once_with("dep1", backfill_minutes=30)
+
     def test_logs_forwards_all_filters(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.get_deployment_logs.return_value = {"items": []}
@@ -358,3 +365,20 @@ class TestPlanningDelegation:
         out = deployments.retry("d1", client=client)
         client.retry_deployment.assert_called_once_with("d1")
         assert out["status"] == "deploying"
+
+
+def test_predict_stream_is_inference_stream_alias(monkeypatch) -> None:
+    from dagnam.resources import deployments as deployments_mod
+
+    calls = {}
+
+    def fake_stream(
+        deployment_id, inputs, *, include_heartbeats=False, client=None, api_key=None, api_url=None
+    ):
+        calls["args"] = (deployment_id, inputs, include_heartbeats, client)
+        return iter(())
+
+    monkeypatch.setattr(deployments_mod, "inference_stream", fake_stream)
+    result = deployments_mod.predict_stream("dep1", {"text": "x"}, client="C")  # pyright: ignore[reportArgumentType]
+    assert list(result) == []
+    assert calls["args"] == ("dep1", {"text": "x"}, False, "C")

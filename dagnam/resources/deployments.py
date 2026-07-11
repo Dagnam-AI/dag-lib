@@ -20,6 +20,7 @@ from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
 from dagnam._core.sse import TERMINAL_DEPLOYMENT_EVENTS, SSEEvent, iter_with_reconnect
 from dagnam._types import JsonArray, JsonMapping, JsonObject
+from dagnam.resources.inference import inference_stream
 
 # Terminal status values returned by the deployment status enum.
 _ACTIVE_STATES = frozenset({"running"})
@@ -124,6 +125,25 @@ def metrics(
     """Fetch aggregated deployment metrics for the given time range."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_deployment_metrics(_stringify_id(deployment_id), time_range=time_range)
+
+
+def collect_metrics(
+    deployment_id: str,
+    *,
+    backfill_minutes: int = 60,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Trigger an immediate metrics collection for a deployment.
+
+    Backfills ``backfill_minutes`` of 1-minute data points when the deployment
+    has no metrics yet; otherwise collects a single new point.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.collect_deployment_metrics(
+        _stringify_id(deployment_id), backfill_minutes=backfill_minutes
+    )
 
 
 def logs(
@@ -501,7 +521,28 @@ def stream_events(
     )
 
 
+def predict_stream(
+    deployment_id: str,
+    inputs: JsonObject,
+    *,
+    include_heartbeats: bool = False,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> Iterator[SSEEvent]:
+    """Stream a prediction from this deployment (alias of ``dagnam.inference_stream``)."""
+    return inference_stream(
+        deployment_id,
+        inputs,
+        include_heartbeats=include_heartbeats,
+        client=client,
+        api_key=api_key,
+        api_url=api_url,
+    )
+
+
 __all__ = [
+    "collect_metrics",
     "create",
     "delete",
     "estimate_cost",
@@ -512,6 +553,7 @@ __all__ = [
     "metrics",
     "pause",
     "platforms",
+    "predict_stream",
     "resume",
     "retry",
     "rollback",

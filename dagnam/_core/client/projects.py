@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
+    content_disposition_safe_name,
     requests,
 )
-from dagnam._core.client.common import quote_path_segment, requests_query_params
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_project,
+    requests_query_params,
+)
 from dagnam._types import FormData, JsonObject, JsonValue, QueryParams, QueryValue, UploadFiles
 
 
@@ -254,3 +261,42 @@ class ProjectsClientMixin(BaseDagnamClient):
                 project_id=project_id,
             )
         )
+
+    # --------------------------------------------------------------- thumbnail
+
+    def upload_project_thumbnail(self, project_id: str, file_path: str | Path) -> JsonObject:
+        """Upload a project thumbnail image. ``POST /api/v1/projects/{id}/thumbnail`` (multipart).
+
+        Streams the file as ``multipart/form-data`` under the ``file`` field and
+        returns ``{"thumbnail_url": <str>}``.
+        """
+        path = Path(file_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"No such file: {path}")
+        with open(path, "rb") as fh:
+            files = {"file": (path.name, fh)}
+            value = self._project_request(
+                "POST",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/thumbnail",
+                project_id=project_id,
+                files=files,
+            )
+        if isinstance(value, dict):
+            return value
+        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
+
+    def download_project_thumbnail(self, project_id: str, dest_dir: str | Path) -> Path:
+        """Stream-download a project's thumbnail image into ``dest_dir``.
+
+        ``GET /api/v1/projects/{id}/thumbnail`` returns the raw image bytes. The
+        saved filename is taken from the ``Content-Disposition`` header and
+        reduced to a bare basename (see ``content_disposition_safe_name``), so a
+        hostile or malformed header can never write outside ``dest_dir``.
+        """
+        url = f"{self.api_url}/api/v1/projects/{quote_path_segment(project_id)}/thumbnail"
+        resp = self._get_stream(url)
+        raise_for_project(resp, project_id)
+        name = content_disposition_safe_name(
+            resp.headers.get("Content-Disposition"), default=f"{project_id}-thumbnail.png"
+        )
+        return self._stream_response_to_file(resp, Path(dest_dir) / name)

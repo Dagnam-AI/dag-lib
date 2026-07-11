@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+import requests_mock as rm_module
 from tests.typing_helpers import JsonValue
 
 from dagnam import deployment_health, inference, inference_batch, inference_schema
@@ -15,6 +16,12 @@ from dagnam._core.exceptions import (
     AuthError,
     DeploymentNotFoundError,
 )
+
+
+@pytest.fixture
+def rmock():
+    with rm_module.Mocker() as m:
+        yield m
 
 
 def _mock_response(status: int, body: JsonValue = None, ok: bool | None = None) -> MagicMock:
@@ -109,3 +116,54 @@ class TestClientErrorMapping:
         with patch("dagnam._core.client.base.requests.get", return_value=_mock_response(404)):
             with pytest.raises(DeploymentNotFoundError):
                 client.schema("dep_404")
+
+
+def test_inference_stream_delegates_to_iter_sse_once(monkeypatch) -> None:
+    from dagnam._core.sse import SSEEvent
+    from dagnam.resources import inference as inference_mod
+
+    captured = {}
+
+    def fake_iter(open_stream, *, terminal_events, include_heartbeats, resource_label):
+        captured["terminal_events"] = terminal_events
+        captured["include_heartbeats"] = include_heartbeats
+        captured["resource_label"] = resource_label
+        captured["open_stream_callable"] = callable(open_stream)
+        yield SSEEvent(event="token", data={"token": "hi"})
+        yield SSEEvent(event="complete", data={})
+
+    monkeypatch.setattr(inference_mod, "iter_sse_once", fake_iter)
+
+    class _Client:
+        def open_inference_stream(self, deployment_id, inputs):
+            return object()
+
+    events = list(
+        inference_mod.inference_stream("dep_x", {"text": "hi"}, client=_Client())  # pyright: ignore[reportArgumentType]
+    )
+    assert [ev.event for ev in events] == ["token", "complete"]
+    assert "complete" in captured["terminal_events"]
+    assert "error" in captured["terminal_events"]
+    assert captured["include_heartbeats"] is False
+    assert captured["open_stream_callable"] is True
+    assert "dep_x" in captured["resource_label"]
+
+
+def test_inference_stream_wire_end_to_end(rmock) -> None:
+    """Real client + mocked HTTP: token minted per connection, never the API key."""
+    from dagnam._core.client import DagnamClient
+    from dagnam.resources import inference as inference_mod
+
+    client = DagnamClient("https://api.test", "k")
+    rmock.post(
+        "https://api.test/api/v1/inference/dep1/stream-access-token",
+        json={"token": "stream-t-1"},
+    )
+    stream_route = rmock.get(
+        "https://api.test/api/v1/inference/dep1/predict/stream",
+        text=('event: token\ndata: {"token": "he"}\n\nevent: complete\ndata: {"done": true}\n\n'),
+        headers={"Content-Type": "text/event-stream"},
+    )
+    events = list(inference_mod.inference_stream("dep1", {"text": "hi"}, client=client))
+    assert [ev.event for ev in events] == ["token", "complete"]
+    assert stream_route.request_history[0].qs["token"] == ["stream-t-1"]

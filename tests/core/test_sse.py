@@ -13,8 +13,11 @@ from tests.typing_helpers import PytestMonkeyPatch
 from dagnam._core import sse as sse_mod
 from dagnam._core.exceptions import StreamError
 from dagnam._core.sse import (
+    TERMINAL_INFERENCE_EVENTS,
     SSEEvent,
+    aiter_sse_once,
     aiter_with_reconnect,
+    iter_sse_once,
     iter_with_reconnect,
     parse_raw_event,
 )
@@ -324,3 +327,165 @@ class TestAiterWithReconnect:
                     backoff_base=0,
                 )
             ]
+
+
+# ------------------------------------------------------------- single-shot
+
+
+def test_iter_sse_once_yields_until_terminal_and_closes(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    _install_fake_sseclient(
+        monkeypatch,
+        [
+            [
+                _FakeRawEvent(event="token", data='{"token": "he"}'),
+                _FakeRawEvent(event="token", data='{"token": "llo"}'),
+                _FakeRawEvent(event="complete", data='{"done": true}'),
+                _FakeRawEvent(event="token", data='{"token": "never"}'),
+            ]
+        ],
+    )
+    response = _FakeResponse()
+    events = list(
+        iter_sse_once(
+            lambda: response,
+            terminal_events=TERMINAL_INFERENCE_EVENTS,
+        )
+    )
+    assert [ev.event for ev in events] == ["token", "token", "complete"]
+    assert response.closed
+
+
+def test_iter_sse_once_skips_heartbeats_by_default(monkeypatch: PytestMonkeyPatch) -> None:
+    _install_fake_sseclient(
+        monkeypatch,
+        [
+            [
+                _FakeRawEvent(event="heartbeat", data="{}"),
+                _FakeRawEvent(event="complete", data="{}"),
+            ]
+        ],
+    )
+    events = list(iter_sse_once(lambda: _FakeResponse(), terminal_events=frozenset({"complete"})))
+    assert [ev.event for ev in events] == ["complete"]
+
+
+def test_iter_sse_once_includes_heartbeats_when_requested(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    _install_fake_sseclient(
+        monkeypatch,
+        [[_FakeRawEvent(event="heartbeat", data="{}"), _FakeRawEvent(event="complete", data="{}")]],
+    )
+    events = list(
+        iter_sse_once(
+            lambda: _FakeResponse(),
+            terminal_events=frozenset({"complete"}),
+            include_heartbeats=True,
+        )
+    )
+    assert [ev.event for ev in events] == ["heartbeat", "complete"]
+
+
+def test_iter_sse_once_raises_streamerror_on_transport_drop(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    _install_fake_sseclient(
+        monkeypatch,
+        [
+            [
+                _FakeRawEvent(event="token", data='{"token": "a"}'),
+                requests.exceptions.ConnectionError("boom"),
+            ]
+        ],
+    )
+    response = _FakeResponse()
+    it = iter_sse_once(
+        lambda: response,
+        terminal_events=TERMINAL_INFERENCE_EVENTS,
+        resource_label="inference stream dep-1",
+    )
+    assert next(it).event == "token"
+    with pytest.raises(StreamError, match="inference stream dep-1 dropped"):
+        list(it)
+    assert response.closed
+
+
+def test_iter_sse_once_raises_streamerror_when_no_terminal(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    _install_fake_sseclient(monkeypatch, [[_FakeRawEvent(event="token", data='{"token": "a"}')]])
+    with pytest.raises(StreamError, match="ended without a terminal event"):
+        list(iter_sse_once(lambda: _FakeResponse(), terminal_events=TERMINAL_INFERENCE_EVENTS))
+
+
+def test_iter_sse_once_swallows_close_errors(monkeypatch: PytestMonkeyPatch) -> None:
+    _install_fake_sseclient(monkeypatch, [[_FakeRawEvent(event="complete", data="{}")]])
+    events = list(
+        iter_sse_once(lambda: _ExplodingResponse(), terminal_events=frozenset({"complete"}))
+    )
+    assert [ev.event for ev in events] == ["complete"]
+
+
+@pytest.mark.anyio
+async def test_aiter_sse_once_yields_until_terminal() -> None:
+    async def open_stream() -> AsyncIterator[SSEEvent]:
+        yield SSEEvent(event="token", data={"token": "h"})
+        yield SSEEvent(event="heartbeat", data={})
+        yield SSEEvent(event="complete", data={"done": True})
+        yield SSEEvent(event="token", data={"token": "never"})
+
+    got = [
+        ev
+        async for ev in aiter_sse_once(
+            lambda: open_stream(), terminal_events=TERMINAL_INFERENCE_EVENTS
+        )
+    ]
+    assert [ev.event for ev in got] == ["token", "complete"]
+
+
+@pytest.mark.anyio
+async def test_aiter_sse_once_heartbeats_when_requested() -> None:
+    async def open_stream() -> AsyncIterator[SSEEvent]:
+        yield SSEEvent(event="heartbeat", data={})
+        yield SSEEvent(event="complete", data={})
+
+    got = [
+        ev
+        async for ev in aiter_sse_once(
+            lambda: open_stream(),
+            terminal_events=frozenset({"complete"}),
+            include_heartbeats=True,
+        )
+    ]
+    assert [ev.event for ev in got] == ["heartbeat", "complete"]
+
+
+@pytest.mark.anyio
+async def test_aiter_sse_once_raises_on_transient_drop() -> None:
+    async def open_stream() -> AsyncIterator[SSEEvent]:
+        yield SSEEvent(event="token", data={"token": "a"})
+        raise ConnectionError("dropped")
+
+    with pytest.raises(StreamError, match="dropped mid-stream"):
+        _ = [
+            ev
+            async for ev in aiter_sse_once(
+                lambda: open_stream(), terminal_events=TERMINAL_INFERENCE_EVENTS
+            )
+        ]
+
+
+@pytest.mark.anyio
+async def test_aiter_sse_once_raises_when_no_terminal() -> None:
+    async def open_stream() -> AsyncIterator[SSEEvent]:
+        yield SSEEvent(event="token", data={"token": "a"})
+
+    with pytest.raises(StreamError, match="ended without a terminal event"):
+        _ = [
+            ev
+            async for ev in aiter_sse_once(
+                lambda: open_stream(), terminal_events=TERMINAL_INFERENCE_EVENTS
+            )
+        ]
