@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3
       - name: Build
         run: uv build
       - name: Check distribution metadata
@@ -32,7 +32,7 @@ jobs:
           uv run --with twine twine check dist/*
           uv run --with "readme-renderer[md]" python -m readme_renderer README.md > /dev/null
       - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
         with:
           subject-path: "dist/*"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -63,7 +63,7 @@ jobs:
     needs: publish-testpypi
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - name: Install from TestPyPI
