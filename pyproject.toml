@@ -1,6 +1,6 @@
 [project]
 name = "dagnam"
-version = "0.6.0"
+dynamic = ["version"]
 description = "Official Python SDK for Dagnam.AI - datasets, training, model hub, deployments, and inference."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
@@ -132,6 +132,14 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Single source of truth for the version: hatchling reads ``__version__`` from
+# ``dagnam/__init__.py`` at build time (default ``__version__ = "..."`` regex).
+# Bump the version in that one file only — the built wheel/sdist metadata and
+# ``importlib.metadata.version("dagnam")`` both derive from it, so there is no
+# second place to keep in sync.
+[tool.hatch.version]
+path = "dagnam/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["dagnam"]
 include = [
@@ -157,6 +165,7 @@ include = [
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
     "pyproject.toml",
 ]
 
@@ -173,8 +182,8 @@ skip_covered = true
 # Hard gate: the suite must keep dagnam at 100% statement AND branch coverage
 # (branch = true in [tool.coverage.run] folds branch coverage into the total %
 # that fail_under checks). Any regression fails `uv run poe check`. Genuinely
-# non-coverable lines are documented in info/superpowers/ledgers/dag-lib-exclusions.md
-# and excluded via exclude_also / `# pragma: no cover` / `# pragma: no branch`.
+# non-coverable lines are excluded narrowly via exclude_also / `# pragma: no
+# cover` / `# pragma: no branch`, each with an inline reason.
 fail_under = 100
 # Exclude only genuinely non-coverable lines (not whole files). These are
 # boilerplate that can never execute in a normal test run, so counting them
@@ -414,10 +423,8 @@ check = { sequence = [
 release-check = { sequence = ["check", "audit", "build"], help = "Run quality gates, dependency audit, and package build" }
 
 # Layer-first import contract for the SDK. The package keeps its layer-first
-# layout by design (see
-# info/superpowers/specs/2026-06-02-dag-lib-hygiene-cleanup-design.md):
-# cli -> resources -> data -> _core, where a layer may import only the layers
-# below it. Enforced (blocking) in CI via `uv run lint-imports`.
+# layout by design: cli -> resources -> data -> _core, where a layer may import
+# only the layers below it. Enforced (blocking) in CI via `uv run lint-imports`.
 [tool.importlinter]
 root_package = "dagnam"
 
