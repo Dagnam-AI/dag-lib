@@ -6,8 +6,8 @@ Security fixes are provided for the current public release line.
 
 | Version | Supported |
 | --- | --- |
-| `0.1.x` | yes |
-| `0.5.x` | yes |
+| `0.7.x` | yes |
+| `< 0.7` | no (please upgrade) |
 
 ## Reporting a Vulnerability
 

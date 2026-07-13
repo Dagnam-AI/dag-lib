@@ -7,6 +7,33 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-13
+
+### Added
+
+- **Automatic retries for transient failures.** Retry-safe API requests
+  (idempotent methods, plus any request carrying an idempotency key) now retry
+  on connection errors and `429`/`5xx` responses using equal-jitter exponential
+  backoff, bounded by a per-client **retry budget** (token bucket) so a flapping
+  backend cannot trigger an unbounded retry storm. A server `Retry-After` header
+  is honored but capped, so a hostile value cannot wedge the client in a long
+  sleep.
+- **Idempotency keys** for retry-safe writes: a retriable `POST` mints one
+  `uuid4` `Idempotency-Key` and reuses it across retries, so a retried create is
+  not applied twice server-side.
+- **Cross-process cache locking.** Dataset/checkpoint cache writes and LRU
+  eviction are serialized with a file lock (new `filelock>=3.13` base
+  dependency), so multiple processes sharing a cache root no longer race or
+  corrupt entries.
+- Async parity: `dagnam.aio.AsyncDagnamClient` now applies the same
+  retry/backoff and transport-error handling as the sync client, fully
+  non-blocking on the event loop.
+- `dagnam.ResponseError` — a public `APIError` subclass for malformed,
+  undecodable, or wrong-shape server response bodies.
+- Library logging contract: a package-level `NullHandler`, namespaced child
+  loggers (`dagnam.http`/`dagnam.cache`/`dagnam.lro`/`dagnam.sse`) with a
+  credential-redacting filter, and `dagnam.enable_debug_logging()` convenience.
+
 ### Changed
 
 - `response_json_value`/`response_json_object`/`response_json_array` and
@@ -20,13 +47,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `dagnam.APIError`/`dagnam.DagnamError`) instead. Client mixins that
   optionally fall back to a plain-text response body preserve that behavior.
 
-### Added
+### Security
 
-- `dagnam.ResponseError` — a public `APIError` subclass for malformed,
-  undecodable, or wrong-shape server response bodies.
-- Library logging contract: a package-level `NullHandler`, namespaced child
-  loggers (`dagnam.http`/`dagnam.cache`/`dagnam.lro`/`dagnam.sse`) with a
-  credential-redacting filter, and `dagnam.enable_debug_logging()` convenience.
+- **Path traversal / arbitrary-file-write (critical).** A server-supplied
+  dataset filename (dataset metadata / `Content-Disposition`) is now reduced to
+  a safe bare basename before it is joined under the download directory.
+  Previously a malicious or compromised server could return an absolute path or
+  a `..` sequence and make a dataset download write outside the cache — a
+  remote-code-execution vector (for example, overwriting a shell rc file).
+- **Presigned-URL credential redaction.** The log/error redaction filter now
+  scrubs presigned-URL credential parameters (`X-Amz-Signature`,
+  `X-Amz-Credential`, `Signature`, `sig`, `AWSAccessKeyId`, …) in addition to
+  `token`/`api_key`/`signature`, and transport-error text is scrubbed before it
+  reaches a log record or exception — so a presigned dataset/checkpoint URL can
+  no longer leak its signature into logs.
+- **Cache trust boundary.** The SDK warns once when the cache root is
+  group/world-writable (a same-size cache-poisoning risk on a shared host) and
+  documents `verify=True` to force a full checksum re-verification on load for
+  shared caches.
+- The `LongRunningOperation` poll interval is floored at 0.1 s, so a hostile
+  server flooding `429`/`503` cannot drive a `sleep(0)` busy-loop.
 
 ## [0.6.0] - 2026-07-02
 

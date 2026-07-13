@@ -14,13 +14,25 @@ def test_project_metadata_advertises_python_3_12_plus_support() -> None:
     assert "Programming Language :: Python :: 3.13" in project["classifiers"]
 
 
-def test_version_string_matches_across_pyproject_and_package() -> None:
-    # The in-tree ``__version__`` is the source-checkout fallback for
-    # resolve_version(); it must never drift from the packaged version.
+def test_version_is_single_sourced_from_package_init() -> None:
+    # The version lives in exactly one place: ``dagnam.__version__`` in
+    # ``dagnam/__init__.py``. hatchling derives the built package version from it
+    # (``[tool.hatch.version] path``), so ``[project]`` must NOT carry a static
+    # ``version`` and must instead declare it dynamic. This guards against a
+    # regression that reintroduces a second, drift-prone copy of the version.
     import dagnam
 
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert dagnam.__version__ == pyproject["project"]["version"]
+    project = pyproject["project"]
+
+    assert "version" not in project, "version must be dynamic, not statically pinned"
+    assert "version" in project.get("dynamic", []), "version must be declared dynamic"
+    assert pyproject["tool"]["hatch"]["version"]["path"] == "dagnam/__init__.py"
+
+    # The single source is a real, non-empty version string.
+    assert isinstance(dagnam.__version__, str)
+    assert dagnam.__version__
+    assert dagnam.__version__.strip() == dagnam.__version__
 
 
 def test_base_dependencies_include_numpy_and_pillow() -> None:
@@ -39,7 +51,9 @@ def test_ml_extras_have_installable_floors() -> None:
     optional_dependencies = pyproject["project"]["optional-dependencies"]
 
     # torchvision backs the PyTorch image loaders (ImageFolder/transforms).
-    assert optional_dependencies["pytorch"] == ["torch>=2.4", "torchvision>=0.19"]
+    # torch>=2.12.1 is the validated security floor shared with audio/all
+    # (older torch carries known advisories); keep this in step with pyproject.
+    assert optional_dependencies["pytorch"] == ["torch>=2.12.1", "torchvision>=0.19"]
     # torchaudio>=2.x decodes via TorchCodec, so torchcodec is a runtime dep (G083).
     assert optional_dependencies["audio"] == [
         "torch>=2.12.1",

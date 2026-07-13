@@ -1,14 +1,19 @@
 # dagnam
 
+[![PyPI version](https://img.shields.io/pypi/v/dagnam.svg)](https://pypi.org/project/dagnam/)
+[![Python versions](https://img.shields.io/pypi/pyversions/dagnam.svg)](https://pypi.org/project/dagnam/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/Dagnam-AI/dag-lib/actions/workflows/dag-lib-ci.yml/badge.svg)](https://github.com/Dagnam-AI/dag-lib/actions/workflows/dag-lib-ci.yml)
+
 The official Python SDK for Dagnam.AI.
 
 `dagnam` lets Python users work with Dagnam datasets, checkpoints, training
 streams, deployments, projects, code generation, and the Model Hub from scripts,
 notebooks, services, and generated training code.
 
-This is the first public PyPI release line. The API is usable today and will
-remain backwards-compatible within the `0.6.x` line where practical, but the SDK
-is still marked alpha while the platform API continues to mature.
+The API is usable today and stays backwards-compatible within a minor (`0.7.x`)
+release line where practical, but the SDK is still marked alpha while the
+platform API continues to mature.
 
 ## Installation
 
@@ -394,6 +399,30 @@ it can never wedge the agent.
 `.claude-plugin/marketplace.json`, so Claude Code users can `/plugin install` the
 `dagnam-runner` subagent and guard hook directly from the repo.
 
+## Reliability
+
+The client is resilient to transient platform failures out of the box:
+
+- **Automatic retries.** Retry-safe requests (idempotent methods, and any
+  request carrying an idempotency key) retry on connection errors and
+  `429`/`5xx` responses with equal-jitter exponential backoff, bounded by a
+  per-client retry budget so a flapping backend can't trigger a retry storm. A
+  server `Retry-After` is honored but capped.
+- **Idempotency keys.** A retriable `POST` mints a `uuid4` `Idempotency-Key`
+  once and reuses it across retries, so a retried create is never applied twice.
+- **Cross-process cache safety.** Cache writes and LRU eviction are serialized
+  with a file lock, so multiple processes sharing a cache root don't corrupt it.
+- **Credential-safe logging.** Namespaced loggers
+  (`dagnam.http`/`dagnam.cache`/`dagnam.lro`/`dagnam.sse`) ship a redacting
+  filter that scrubs API keys and presigned-URL signatures from log records and
+  error text. Turn on verbose logs with `dagnam.enable_debug_logging()`.
+
+The cache directory is a **trust boundary**: a cache hit is loaded without
+re-hashing for speed, so keep the cache root private (the default under
+`~/.dagnam` is user-only). The SDK warns once if it detects a group/world-
+writable cache root; for a deliberately shared cache, pass `verify=True` to
+force full checksum re-verification on every load.
+
 ## Configuration
 
 The config file lives at `~/.dagnam/config.json`.
@@ -422,11 +451,12 @@ Environment variables:
 
 | SDK version | Backend version | Notes |
 | --- | --- | --- |
+| `0.7.x` | `>=0.5.0` | Client resilience (retries, idempotency, cache locking) + security hardening |
 | `0.6.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
 
 The SDK follows semantic versioning. Public APIs may still expand quickly while
 the package is alpha, but patch releases should avoid breaking documented
-`0.6.x` behavior.
+`0.7.x` behavior.
 
 ## Development
 
