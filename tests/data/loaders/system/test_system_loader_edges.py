@@ -497,3 +497,26 @@ def test_download_artifact_aborts_body_over_cap(
         dispatch._download_artifact("https://example.test/a", tmp_path / "a.bin")
     assert not (tmp_path / "a.bin").exists()
     assert not (tmp_path / "a.bin.tmp").exists()
+
+
+def test_download_artifact_scrubs_presigned_signature_on_transport_error(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    # A transport failure fetching a presigned artifact URL must not leak the
+    # signature into the raised APIError message (retry-path exception scrub).
+    from dagnam._core.exceptions import APIError
+
+    monkeypatch.setattr(dispatch, "_RETRY_SLEEP", lambda _s: None)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise dispatch.requests.ConnectionError(
+            "HTTPSConnectionPool: Max retries exceeded with url: "
+            "/obj?X-Amz-Signature=SECRETSIG&X-Amz-Credential=AKIA"
+        )
+
+    monkeypatch.setattr(dispatch.requests, "get", _boom)
+    url = "https://bucket.s3.amazonaws.com/obj?X-Amz-Signature=SECRETSIG&X-Amz-Credential=AKIA"
+    with pytest.raises(APIError) as ei:
+        dispatch._download_artifact(url, tmp_path / "a.bin")
+    assert "SECRETSIG" not in str(ei.value)
+    assert "AKIA" not in str(ei.value)

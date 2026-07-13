@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import requests
 
 from dagnam._core._retry import RetryBudget, run_with_retry
-from dagnam._core.client.base import resolve_max_download_bytes
+from dagnam._core.client.base import resolve_max_download_bytes, scrub_secret_params
 from dagnam._core.exceptions import APIError, DownloadTooLargeError
 from dagnam._types import JsonObject
 from dagnam.data.cache import cache_dir_name
@@ -107,7 +107,9 @@ def _open_artifact_response(url: str) -> requests.Response:
         try:
             response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT)
         except requests.RequestException as exc:
-            raise APIError(0, f"Artifact download failed: {exc}") from exc
+            # `exc` embeds the (possibly presigned) URL; scrub its signature/token
+            # before it reaches the raised message or a --debug traceback.
+            raise APIError(0, f"Artifact download failed: {scrub_secret_params(str(exc))}") from exc
         if not (200 <= response.status_code < 300):
             status = response.status_code
             response.close()
@@ -121,7 +123,9 @@ def _open_artifact_response(url: str) -> requests.Response:
         sleep=_RETRY_SLEEP,
         rng=_RETRY_RNG,
         logger=_HTTP_LOGGER,
-        label=f"GET {url}",
+        # Pre-scrub the label: the retry logger redacts too, but a presigned
+        # signature must never reach the log record in the first place.
+        label=f"GET {scrub_secret_params(url)}",
     )
 
 

@@ -310,3 +310,17 @@ def test_lro_logs_debug_per_retry_and_warning_on_giveup(caplog: pytest.LogCaptur
     assert debug_records
     assert warning_records
     assert "giving up" in warning_records[0].message
+
+
+def test_configure_polling_clamps_nonpositive_min_interval() -> None:
+    from dagnam._core.lro import LongRunningOperation
+
+    op = LongRunningOperation(
+        poll=lambda: {"status": "running"},
+        state_key="status",
+        success_states={"done"},
+    )
+    op.configure_polling(min_interval=0.0, max_interval=-1.0)
+    # 0/negative would enable a sleep(0) tight-spin under a 429/503 flood; floored.
+    assert op._poll_min == 0.1
+    assert op._poll_max >= op._poll_min

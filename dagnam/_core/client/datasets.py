@@ -14,6 +14,7 @@ from dagnam._core.client.base import (
     BaseDagnamClient,
     parse_content_disposition_filename,
     requests,
+    safe_download_basename,
 )
 from dagnam._core.client.common import (
     quote_path_segment,
@@ -146,6 +147,14 @@ class DatasetsClientMixin(BaseDagnamClient):
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # The explicit filename is often server-controlled (dataset
+        # metadata["filename"]). Reduce it to a bare basename so an absolute path
+        # or ``..`` traversal cannot escape output_dir and overwrite an arbitrary
+        # file (e.g. ~/.bashrc) — a compromised-server arbitrary-write / RCE. The
+        # Content-Disposition fallback below is sanitized separately.
+        if filename is not None:
+            filename = safe_download_basename(filename, default="dataset")
 
         # Determine URL and headers
         if download_url:
