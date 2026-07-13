@@ -15,7 +15,7 @@ from dagnam._core.client.common import (
     response_json_value,
     stream_query_params,
 )
-from dagnam._core.exceptions import APIError
+from dagnam._core.exceptions import APIError, ResponseError
 from dagnam._core.sse import (
     TERMINAL_DEPLOYMENT_EVENTS,
     SSEEvent,
@@ -44,14 +44,22 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         timeout: int | None = None,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
-        resp = await self._request(method, path, params=params, json=json_body, timeout=timeout)
-        raise_for_deployment(resp, deployment_id or "deployment")
+        resp = await self._request(
+            method,
+            path,
+            params=params,
+            json=json_body,
+            timeout=timeout,
+            raise_for=lambda r: raise_for_deployment(r, deployment_id or "deployment"),
+            idempotent=idempotent,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     async def list_deployments(
@@ -88,7 +96,9 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
 
     async def create_deployment(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
-            await self._deployment_req("POST", "/api/v1/deployments", json_body=payload)
+            await self._deployment_req(
+                "POST", "/api/v1/deployments", json_body=payload, idempotent=True
+            )
         )
 
     async def estimate_cost(self, payload: JsonObject) -> JsonObject:

@@ -15,7 +15,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import RespxMockRouter
+    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
 
@@ -157,3 +157,53 @@ async def test_async_stream_predict_connect_timeout_maps_apierror(
     mock.get("/api/v1/inference/dep1/predict/stream").mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(APIError):
         _ = [ev async for ev in client.stream_predict("dep1", {"x": 1})]
+
+
+# ---------------------------------------------------------------- transient retry (Plan 03)
+
+
+async def test_async_schema_retries_transient(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    monkeypatch.setattr(client, "_rng", lambda: 1.0)
+    mock.get("/api/v1/inference/d1/schema").mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(200, json={"inputs": []}),
+        ]
+    )
+    out = await client.schema("d1")
+    assert out == {"inputs": []}
+
+
+async def test_async_schema_404_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.get("/api/v1/inference/missing/schema").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    with pytest.raises(DeploymentNotFoundError):
+        await client.schema("missing")
+    assert route.call_count == 1
+
+
+async def test_async_predict_post_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A predict POST is non-idempotent: a transient status is not retried."""
+
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.post("/api/v1/inference/d1/predict").mock(
+        return_value=httpx.Response(503, json={})
+    )
+    with pytest.raises(APIError):
+        await client.predict("d1", {"x": 1})
+    assert route.call_count == 1

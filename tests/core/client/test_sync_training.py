@@ -8,7 +8,7 @@ import pytest
 import requests
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
+from dagnam._core.exceptions import APIError, AuthError, ResponseError, TrainingJobNotFoundError
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
@@ -25,24 +25,36 @@ def test_create_training_job_posts_payload(client: DagnamClient, rmock: Requests
     assert rmock.last_request.json() == {"project_id": "p1"}
 
 
-def test_training_request_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_training_request_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # create is a POST → issued once, mapped centrally to APIError(0, "Request failed").
+    rmock.post(f"{API}/api/v1/training/jobs", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.create_training_job({"project_id": "p1"})
 
 
-def test_training_request_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_training_request_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.create_training_job({"project_id": "p1"})
+
+
+def test_training_get_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/training/jobs/j1",
+        [{"status_code": 503}, {"status_code": 200, "json": {"id": "j1"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.get_training_job("j1") == {"id": "j1"}
+    assert rmock.call_count == 2
+
+
+def test_training_get_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/training/jobs/j1", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(TrainingJobNotFoundError):
+        client.get_training_job("j1")
+    assert rmock.call_count == 1
 
 
 def test_training_request_collection_404_is_generic_apierror(
@@ -62,26 +74,26 @@ def test_training_request_job_404_maps_to_not_found(
         client.get_training_job("j1")
 
 
-def test_training_request_returns_none_on_empty_body(
+def test_training_request_empty_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    # 200 with no content -> _expect_object sees None and raises TypeError.
+    # 200 with no content -> _expect_object sees None and raises ResponseError.
     rmock.post(f"{API}/api/v1/training/jobs", content=b"")
-    with pytest.raises(TypeError):
+    with pytest.raises(ResponseError):
         client.create_training_job({"project_id": "p1"})
 
 
 def test_training_request_non_json_body_falls_back_to_text(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    # Non-JSON body -> response_json_value raises ValueError -> returns text,
+    # Non-JSON body -> response_json_value raises ResponseError -> returns text,
     # which _expect_object then rejects (string, not object).
     rmock.post(
         f"{API}/api/v1/training/jobs",
         content=b"plain text",
         headers={"Content-Type": "text/plain"},
     )
-    with pytest.raises(TypeError):
+    with pytest.raises(ResponseError):
         client.create_training_job({"project_id": "p1"})
 
 
@@ -224,24 +236,19 @@ def test_upload_training_events_unknown_sdk_version(
 
 
 def test_upload_training_events_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+    client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+    # upload is a POST → issued once, mapped centrally to APIError(0, "Request failed").
+    rmock.post(
+        f"{API}/api/v1/training/jobs/j1/metrics/events", exc=requests.ConnectionError("nope")
+    )
+    with pytest.raises(APIError, match="Request failed"):
         client.upload_training_events("j1", [{"type": "metric"}])
 
 
-def test_upload_training_events_timeout(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_upload_training_events_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs/j1/metrics/events", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.upload_training_events("j1", [{"type": "metric"}])
 
 
@@ -381,3 +388,36 @@ def test_open_training_stream_scrubs_token_on_timeout(monkeypatch: PytestMonkeyP
     with pytest.raises(APIError) as ei:
         client.open_training_stream("j1")
     assert "SECRET" not in str(ei.value)
+
+
+def test_create_job_sends_idempotency_key(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/training/jobs", json={"id": "j1"})
+    client.create_training_job({"project_id": "p1"})
+    assert rmock.last_request.headers.get("Idempotency-Key")
+
+
+def test_create_job_retries_with_same_key(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/training/jobs",
+        [{"status_code": 503}, {"status_code": 201, "json": {"id": "j1"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    client.create_training_job({"project_id": "p1"})
+    keys = {req.headers.get("Idempotency-Key") for req in rmock.request_history}
+    assert len(keys) == 1  # same key on both attempts
+    assert next(iter(keys))
+    assert rmock.call_count == 2
+
+
+def test_create_job_409_retries_into_replay(client: DagnamClient, rmock: RequestsMocker) -> None:
+    """A 409 from the server-side idempotency middleware means a copy is in
+    flight — the client-side conflict-retry resolves it into the replayed 201."""
+    rmock.post(
+        f"{API}/api/v1/training/jobs",
+        [{"status_code": 409}, {"status_code": 201, "json": {"id": "j1"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    client.create_training_job({"project_id": "p1"})
+    assert rmock.call_count == 2

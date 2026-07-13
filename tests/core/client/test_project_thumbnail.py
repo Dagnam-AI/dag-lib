@@ -13,7 +13,7 @@ import pytest
 import requests
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, ProjectNotFoundError
+from dagnam._core.exceptions import APIError, ProjectNotFoundError, ResponseError
 
 if TYPE_CHECKING:
     from tests.typing_helpers import RequestsMocker
@@ -62,11 +62,29 @@ def test_upload_thumbnail_403_raises_apierror(
     assert exc_info.value.status_code == 403
 
 
-def test_upload_thumbnail_empty_body_raises_typeerror(
+def test_upload_thumbnail_empty_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:
+    # The standalone multipart upload decodes via response_json_object, so an
+    # empty/undecodable body surfaces as ResponseError (like upload_dataset).
     rmock.post(THUMB, status_code=200)
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="malformed response body"):
+        client.upload_project_thumbnail("proj-1", _image(tmp_path))
+
+
+def test_upload_thumbnail_connection_error(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    rmock.post(THUMB, exc=requests.exceptions.ConnectionError("down"))
+    with pytest.raises(APIError, match="Connection failed"):
+        client.upload_project_thumbnail("proj-1", _image(tmp_path))
+
+
+def test_upload_thumbnail_timeout(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    rmock.post(THUMB, exc=requests.exceptions.Timeout("slow"))
+    with pytest.raises(APIError, match="Request timed out"):
         client.upload_project_thumbnail("proj-1", _image(tmp_path))
 
 

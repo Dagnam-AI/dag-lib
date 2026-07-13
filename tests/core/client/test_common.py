@@ -22,6 +22,7 @@ from dagnam._core.exceptions import (
     HubModelNotFoundError,
     ProjectNotFoundError,
     QuotaExceededError,
+    ResponseError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
     UploadError,
@@ -662,3 +663,55 @@ def test_raise_for_upload_other_code() -> None:
 def test_ok_returns_false_for_unknown_response_shape() -> None:
     r = _StatuslessResp(ok=None)
     assert common._ok(r) is False
+
+
+# ResponseError mapping (Task 6 — decode/shape failures -> ResponseError) ------
+
+
+class _RaisingResp:
+    """Response whose .json() decode fails or yields a wrong-shape payload."""
+
+    def __init__(
+        self, payload: object = None, exc: Exception | None = None, status_code: int = 200
+    ) -> None:
+        self._payload = payload
+        self._exc = exc
+        self.status_code = status_code
+        self.headers: dict[str, str] = {}
+        self.text = ""
+        self.content = b""
+
+    def json(self) -> object:
+        if self._exc is not None:
+            raise self._exc
+        return self._payload
+
+
+def test_response_json_object_maps_decode_error() -> None:
+    resp = _RaisingResp(exc=ValueError("Expecting value"), status_code=502)
+    with pytest.raises(ResponseError) as ei:
+        common.response_json_object(resp)
+    assert ei.value.status_code == 502
+
+
+def test_response_json_object_maps_wrong_shape() -> None:
+    with pytest.raises(ResponseError):
+        common.response_json_object(_RaisingResp(payload=[1, 2, 3]))  # list, not object
+
+
+def test_response_json_array_maps_wrong_shape() -> None:
+    with pytest.raises(ResponseError):
+        common.response_json_array(_RaisingResp(payload={"a": 1}))
+
+
+def test_response_json_value_maps_decode_error() -> None:
+    with pytest.raises(ResponseError):
+        common.response_json_value(_RaisingResp(exc=ValueError("boom")))
+
+
+def test_response_status_defaults_to_zero_when_non_int() -> None:
+    resp = _RaisingResp(exc=ValueError("boom"), status_code=0)
+    resp.status_code = "oops"  # type: ignore[assignment]
+    with pytest.raises(ResponseError) as ei:
+        common.response_json_value(resp)
+    assert ei.value.status_code == 0

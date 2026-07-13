@@ -421,7 +421,7 @@ def test_download_checkpoint_eviction_failure_is_logged(
 
     client.download_checkpoint_stream.side_effect = fake_stream
     monkeypatch.setattr(ck_module, "get_config_value", _checkpoint_cache_limit)
-    monkeypatch.setattr(ck_module, "evict_lru", MagicMock(side_effect=OSError("disk full")))
+    monkeypatch.setattr(ck_module, "evict_lru_locked", MagicMock(side_effect=OSError("disk full")))
 
     import logging
 

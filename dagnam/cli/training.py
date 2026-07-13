@@ -273,17 +273,31 @@ def cmd_training_estimate(args: argparse.Namespace) -> None:
 
 
 def _render_strategies(result: object) -> str:
-    data = result if isinstance(result, dict) else {}
-    rows: list[dict[str, object]] = [
-        {"strategy": label, "available": "Yes" if available else "No"}
-        for label, available in sorted(data.items())
-    ]
+    data = dict(result) if isinstance(result, dict) else {}
+    # The endpoint ships a registry-driven `required_tiers` {label: tier} map
+    # alongside the flat availability entries (free strategies omitted). Pop it
+    # out so it never renders as a phantom strategy row, and use it to annotate
+    # each locked strategy with the minimum tier that unlocks it.
+    raw_tiers = data.pop("required_tiers", {})
+    required_tiers = raw_tiers if isinstance(raw_tiers, dict) else {}
+    rows: list[dict[str, object]] = []
+    for label, available in sorted(data.items()):
+        tier = required_tiers.get(label)
+        rows.append(
+            {
+                "strategy": label,
+                "available": "Yes" if available else "No",
+                # Tier only matters for a strategy the credential can't use.
+                "tier": str(tier).title() if (not available and tier) else "-",
+            }
+        )
     if not rows:
         return "No strategies available."
     return render_table(
         (
             Column("Strategy", "strategy", 24),
             Column("Available", "available", 9),
+            Column("Required Tier", "tier", 13),
         ),
         rows,
     )

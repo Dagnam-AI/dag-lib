@@ -38,84 +38,75 @@ def rmock():
 
 
 def test_predict_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # A POST 404 is a domain error, mapped and never retried.
     rmock.post(f"{API}/api/v1/inference/dep1/predict", status_code=404)
+    client._sleep = lambda _s: None
     with pytest.raises(DeploymentNotFoundError):
         client.predict("dep1", {"x": 1})
+    assert rmock.call_count == 1
 
 
-def test_predict_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
+def test_deployment_health_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/inference/dep1/health",
+        [{"status_code": 503}, {"status_code": 200, "json": {"status": "ok"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.deployment_health("dep1") == {"status": "ok"}
+    assert rmock.call_count == 2
 
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+
+def test_predict_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # POST is not retried, so no sleep stub is needed.
+    rmock.post(f"{API}/api/v1/inference/dep1/predict", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.predict("dep1", {"x": 1})
 
 
-def test_predict_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_predict_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.predict("dep1", {"x": 1})
 
 
-def test_predict_batch_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_predict_batch_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict/batch", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.predict_batch("dep1", [{"x": 1}])
 
 
-def test_predict_batch_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_predict_batch_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict/batch", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.predict_batch("dep1", [{"x": 1}])
 
 
-def test_deployment_health_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_deployment_health_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/inference/dep1/health", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.deployment_health("dep1")
 
 
-def test_deployment_health_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_deployment_health_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/inference/dep1/health", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.deployment_health("dep1")
 
 
-def test_schema_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_schema_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/inference/dep1/schema", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.schema("dep1")
 
 
-def test_schema_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_schema_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/inference/dep1/schema", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.schema("dep1")
 
 
@@ -278,9 +269,30 @@ def test_download_code_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPa
 
 
 def test_codegen_500_raises(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # validate is a POST → issued once, never retried; 500 maps via raise_for_codegen.
     rmock.post(f"{API}/api/v1/projects/p1/validate", status_code=500, text="boom")
     with pytest.raises(CodegenError):
         client.validate_code("p1")
+
+
+def test_codegen_get_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/projects/p1/code-preview",
+        [{"status_code": 503}, {"status_code": 200, "json": {"code": "..."}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.preview_code("p1", "pytorch") == {"code": "..."}
+    assert rmock.call_count == 2
+
+
+def test_codegen_get_500_not_retried_is_post(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # A POST validate is not retried even though 500 is transient.
+    rmock.post(f"{API}/api/v1/projects/p1/validate", status_code=500, text="boom")
+    client._sleep = lambda _s: None
+    with pytest.raises(CodegenError):
+        client.validate_code("p1")
+    assert rmock.call_count == 1
 
 
 def test_codegen_400_raises_validation(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -303,21 +315,17 @@ def test_codegen_empty_response(client: DagnamClient, rmock: RequestsMocker) -> 
     assert client.preview_code("p1", "pytorch") is None
 
 
-def test_codegen_connectionerror(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_codegen_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/projects/p1/code-preview", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.preview_code("p1", "pytorch")
 
 
-def test_codegen_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_codegen_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/projects/p1/code-preview", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.preview_code("p1", "pytorch")
 
 
@@ -348,27 +356,41 @@ def test_list_checkpoints_401(client: DagnamClient, rmock: RequestsMocker) -> No
 
 def test_list_checkpoints_500(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/training/jobs/job1/checkpoints", status_code=500, text="boom")
+    client._sleep = lambda _s: None  # 500 is transient on a GET → retried; don't sleep
     with pytest.raises(APIError):
         client.list_checkpoints("job1")
 
 
-def test_list_checkpoints_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
+def test_list_checkpoints_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/training/jobs/job1/checkpoints",
+        [{"status_code": 503}, {"status_code": 200, "json": [{"id": "c1"}]}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.list_checkpoints("job1") == [{"id": "c1"}]
+    assert rmock.call_count == 2
 
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+
+def test_list_checkpoints_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/training/jobs/job1/checkpoints", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(TrainingJobNotFoundError):
+        client.list_checkpoints("job1")
+    assert rmock.call_count == 1
+
+
+def test_list_checkpoints_connectionerror(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/training/jobs/job1/checkpoints", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_checkpoints("job1")
 
 
-def test_list_checkpoints_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_list_checkpoints_timeout(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/training/jobs/job1/checkpoints", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_checkpoints("job1")
 
 

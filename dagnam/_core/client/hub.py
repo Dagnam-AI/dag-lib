@@ -11,7 +11,14 @@ from dagnam._core.client.base import (
     BaseDagnamClient,
     requests,
 )
-from dagnam._core.client.common import quote_path_segment, requests_query_params
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_hub,
+    requests_query_params,
+    response_json_object,
+    response_json_value,
+)
+from dagnam._core.exceptions import ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, QueryValue
 
 
@@ -28,31 +35,21 @@ class HubClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> JsonValue | str | None:
-        from dagnam._core.client.common import raise_for_hub, response_json_value
-
         url = f"{self.api_url}{path}"
-        try:
-            resp = requests.request(
-                method,
-                url,
-                headers=self._headers(),
-                params=requests_query_params(params),
-                json=json_body,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_hub(resp, model_id)
-
+        resp = self._request(
+            method,
+            url,
+            raise_for=lambda r: raise_for_hub(r, model_id),
+            params=requests_query_params(params),
+            json=json_body,
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     def _hub_object(
@@ -143,8 +140,6 @@ class HubClientMixin(BaseDagnamClient):
         boundary Content-Type is set by ``requests`` itself, so only the bearer
         auth header is supplied (a manual Content-Type would corrupt the body).
         """
-        from dagnam._core.client.common import raise_for_hub, response_json_object
-
         path = Path(file_path)
         url = f"{self.api_url}/api/v1/hub/models/{quote_path_segment(model_id)}/files"
         try:

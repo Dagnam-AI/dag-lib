@@ -126,6 +126,21 @@ async def test_allowed_strategies_returns_flat_map(
     assert await client.get_allowed_strategies() == body
 
 
+async def test_allowed_strategies_passes_through_required_tiers(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    # The additive `required_tiers` map rides through the async client untouched.
+    body = {
+        "cpu": True,
+        "multi_gpu_ddp": False,
+        "required_tiers": {"multi_gpu_ddp": "pro"},
+    }
+    mock.get("/api/v1/training/allowed-strategies").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    assert await client.get_allowed_strategies() == body
+
+
 async def test_allowed_strategies_401_raises_autherror(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:

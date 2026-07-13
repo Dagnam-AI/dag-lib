@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.common import quote_path_segment, raise_for_hub, response_json_value
+from dagnam._core.exceptions import ResponseError
 from dagnam._types import (
     JsonArray,
     JsonObject,
@@ -29,13 +30,18 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
     ) -> JsonValue | str | None:
-        resp = await self._request(method, path, params=params, json=json_body)
-        raise_for_hub(resp, model_id)
+        resp = await self._request(
+            method,
+            path,
+            params=params,
+            json=json_body,
+            raise_for=lambda r: raise_for_hub(r, model_id),
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     async def list_hub_models(self, **filter_params: QueryValue) -> JsonObject:

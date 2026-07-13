@@ -37,8 +37,8 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             json=inputs,
             headers=self._headers(),
             timeout=timeout,
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
-        raise_for_deployment(resp, deployment_id)
         return resp.json()
 
     async def predict_batch(
@@ -50,8 +50,8 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             json={"inputs": inputs},
             headers=self._headers(),
             timeout=timeout,
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
-        raise_for_deployment(resp, deployment_id)
         return resp.json()
 
     async def mint_inference_stream_token(self, deployment_id: str) -> str:
@@ -60,8 +60,8 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             "POST",
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/stream-access-token",
             headers=self._headers(),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
-        raise_for_deployment(resp, deployment_id)
         return str(resp.json()["token"])
 
     async def _open_inference_stream(
@@ -111,8 +111,8 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             "GET",
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/health",
             headers=self._headers(),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
-        raise_for_deployment(resp, deployment_id)
         return resp.json()
 
     async def schema(self, deployment_id: str, timeout: int | None = None) -> JsonObject:
@@ -122,6 +122,6 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/schema",
             headers=self._headers(),
             timeout=timeout,
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
-        raise_for_deployment(resp, deployment_id)
         return resp.json()

@@ -13,10 +13,10 @@ import pytest
 import requests
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError
+from dagnam._core.exceptions import APIError, ResponseError
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
+    from tests.typing_helpers import RequestsMocker
 
 API = "https://api.test"
 
@@ -47,45 +47,58 @@ def test_api_key_usage_quotes_path_segment(client: DagnamClient, rmock: Requests
     assert rmock.last_request.path.lower().endswith("/api-keys/a%2fb/usage")
 
 
-def test_account_empty_body_raises_type_error(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_account_empty_body_raises_response_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     # _account_get returns None on an empty body; _expect_object then rejects it.
     rmock.get(ENTITLEMENTS, status_code=204, text="")
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="Expected JSON object"):
         client.get_entitlements()
 
 
-def test_account_non_json_body_raises_type_error(
+def test_account_non_json_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
     # Non-JSON body falls back to resp.text (a str); _expect_object rejects it.
     rmock.get(ENTITLEMENTS, text="not-json", headers={"Content-Type": "text/plain"})
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="Expected JSON object"):
         client.get_entitlements()
 
 
 def test_account_500_raises_apierror(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(ENTITLEMENTS, status_code=500, text="boom")
+    client._sleep = lambda _s: None  # 500 is transient on a GET → retried; don't sleep
     with pytest.raises(APIError):
         client.get_entitlements()
 
 
-def test_account_connectionerror_wrapped(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
+def test_account_get_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(ENTITLEMENTS, [{"status_code": 503}, {"status_code": 200, "json": {"plan": "pro"}}])
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.get_entitlements()["plan"] == "pro"
+    assert rmock.call_count == 2
 
-    # _account_get delegates to _account_write, which calls requests.request
-    # (not requests.get) so the GET and write paths share one transport call.
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+
+def test_account_get_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(ENTITLEMENTS, status_code=404, text="nope")
+    client._sleep = lambda _s: None
+    with pytest.raises(APIError):
+        client.get_entitlements()
+    assert rmock.call_count == 1
+
+
+def test_account_connectionerror_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # Transport errors now map centrally in ``_request`` to
+    # ``APIError(0, "Request failed: ...")``; the GET path exhausts its retries.
+    client._sleep = lambda _s: None
+    rmock.get(ENTITLEMENTS, exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.get_entitlements()
 
 
-def test_account_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_account_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(QUOTA, exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.get_storage_quota()

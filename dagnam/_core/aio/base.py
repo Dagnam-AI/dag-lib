@@ -10,9 +10,14 @@ except ImportError as _exc:
     ) from _exc
 
 import asyncio
+import logging
 from pathlib import Path, PurePosixPath
+import random
 import re
+from typing import Awaitable, Callable
+import uuid
 
+from dagnam._core._retry import RetryBudget, run_with_retry_async
 from dagnam._core.client.base import resolve_max_download_bytes
 from dagnam._core.client.common import bearer_headers, safe_response_text
 from dagnam._core.exceptions import (
@@ -51,6 +56,9 @@ class BaseAsyncDagnamClient:
         self.api_key = api_key
         self.timeout = timeout
         self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+        self._retry_budget = RetryBudget()
+        self._async_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+        self._rng: Callable[[], float] = random.random
 
     async def __aenter__(self) -> BaseAsyncDagnamClient:
         return self
@@ -72,23 +80,69 @@ class BaseAsyncDagnamClient:
         files: UploadFiles | None = None,
         headers: dict[str, str] | None = None,
         timeout: int | None = None,
+        raise_for: Callable[[httpx.Response], None] | None = None,
+        idempotent: bool = False,
+        idempotency_key: str | None = None,
     ) -> httpx.Response:
+        """Issue an async request, retrying transient failures when ``raise_for`` is set.
+
+        With ``raise_for=None`` (default) behavior is unchanged: no status raise
+        and no retry — existing async call sites stay byte-compatible until each
+        mixin opts in. When ``raise_for`` is supplied, transient 429/5xx (and
+        status-0 transport failures) retry per the shared policy; the mapper
+        still runs on the final response so domain 404s keep their exact types.
+        """
         url = f"{self.api_url}{path}"
-        try:
-            return await self._client.request(
-                method,
-                url,
-                headers=headers or self._headers(),
-                params=params,
-                json=json,
-                data=data,
-                files=files,
-                timeout=timeout or self.timeout,
-            )
-        except httpx.ConnectError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except httpx.TimeoutException as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+        req_headers = dict(headers or self._headers())
+        if idempotent and idempotency_key is None:
+            idempotency_key = str(uuid.uuid4())
+        if idempotency_key is not None:
+            req_headers["Idempotency-Key"] = idempotency_key
+        method_upper = method.upper()
+        retryable = raise_for is not None and (
+            method_upper in {"GET", "HEAD", "PUT", "DELETE"} or bool(idempotency_key)
+        )
+
+        async def _attempt() -> httpx.Response:
+            try:
+                resp = await self._client.request(
+                    method_upper,
+                    url,
+                    headers=req_headers,
+                    params=params,
+                    json=json,
+                    data=data,
+                    files=files,
+                    timeout=timeout or self.timeout,
+                )
+            except httpx.TransportError as exc:
+                # httpx.TransportError is the umbrella base covering
+                # ConnectError/TimeoutException *and* ReadError, WriteError,
+                # CloseError, ProtocolError, ProxyError — the sync client's
+                # blanket requests.RequestException catch has no narrower
+                # equivalent, so match that breadth here. Preserve the existing
+                # timeout-specific message where it applies.
+                if isinstance(exc, httpx.TimeoutException):
+                    raise APIError(0, f"Request timed out: {exc}") from exc
+                raise APIError(0, f"Connection failed: {exc}") from exc
+            if raise_for is not None:
+                try:
+                    raise_for(resp)
+                except APIError as exc:
+                    exc.retry_after_header = resp.headers.get("Retry-After")
+                    raise
+            return resp
+
+        return await run_with_retry_async(
+            _attempt,
+            retryable=retryable,
+            budget=self._retry_budget,
+            sleep=self._async_sleep,
+            rng=self._rng,
+            logger=logging.getLogger("dagnam.http"),
+            label=f"{method_upper} {url}",
+            idempotency_key=idempotency_key,
+        )
 
     async def _stream_response_to_file(self, resp: httpx.Response, dest: Path) -> None:
         """Stream an open httpx response body to ``dest``, bounded by the cap.

@@ -9,9 +9,10 @@ import httpx
 import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
+from dagnam._core.exceptions import CodegenValidationError
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import RespxMockRouter
+    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
 
@@ -131,3 +132,37 @@ async def test_async_download_code_to_file_error_status(
     mock.get("/api/v1/projects/p1/download-code").mock(return_value=httpx.Response(500))
     with pytest.raises(CodegenError):
         await client.download_code("p1", dest_path=tmp_path / "out.zip")
+
+
+# ---------------------------------------------------------------- transient retry (Plan 03)
+
+
+async def test_async_get_code_status_retries_transient(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    monkeypatch.setattr(client, "_rng", lambda: 1.0)
+    mock.get("/api/v1/projects/p1/code-status/t1").mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(200, json={"status": "done"}),
+        ]
+    )
+    status = await client.get_code_status("p1", "t1")
+    assert status["status"] == "done"
+
+
+async def test_async_preview_code_422_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.get("/api/v1/projects/p1/code-preview").mock(
+        return_value=httpx.Response(422, json={})
+    )
+    with pytest.raises(CodegenValidationError):
+        await client.preview_code("p1", "pytorch")
+    assert route.call_count == 1

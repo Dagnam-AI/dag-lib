@@ -13,9 +13,12 @@ from dagnam._core.client.base import (
 )
 from dagnam._core.client.common import (
     quote_path_segment,
+    raise_for_deployment,
     requests_query_params,
+    response_json_value,
     stream_query_params,
 )
+from dagnam._core.exceptions import ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, ensure_json_array
 
 
@@ -31,38 +34,34 @@ class DeploymentsClientMixin(BaseDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
         """Issue an authenticated request against a deployment route.
 
         Maps transport errors to ``APIError(0, …)``, translates status
         codes through :func:`_common.raise_for_deployment`, and decodes
         JSON on success.  Returns ``None`` for empty bodies (e.g. 204).
+
+        ``idempotent=True`` mints an ``Idempotency-Key`` so a transient failure
+        on a create POST retries into a server-side replay instead of a
+        duplicate deployment.
         """
-        from dagnam._core.client.common import raise_for_deployment, response_json_value
-
         url = f"{self.api_url}{path}"
-        try:
-            resp = requests.request(
-                method,
-                url,
-                headers=self._headers(),
-                params=requests_query_params(params),
-                json=json_body,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_deployment(resp, deployment_id or "deployment")
-
+        resp = self._request(
+            method,
+            url,
+            raise_for=lambda r: raise_for_deployment(r, deployment_id or "deployment"),
+            params=requests_query_params(params),
+            json=json_body,
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+            idempotent=idempotent,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     def _deployment_object(
@@ -74,6 +73,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
+        idempotent: bool = False,
     ) -> JsonObject:
         value = self._deployment_request(
             method,
@@ -82,6 +82,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
             params=params,
             json_body=json_body,
             timeout=timeout,
+            idempotent=idempotent,
         )
         if isinstance(value, dict):
             return value
@@ -122,7 +123,9 @@ class DeploymentsClientMixin(BaseDagnamClient):
 
     def create_deployment(self, payload: JsonObject) -> JsonObject:
         """POST /api/v1/deployments"""
-        return self._deployment_object("POST", "/api/v1/deployments", json_body=payload)
+        return self._deployment_object(
+            "POST", "/api/v1/deployments", json_body=payload, idempotent=True
+        )
 
     def estimate_cost(self, payload: JsonObject) -> JsonObject:
         """Estimate deployment cost. ``POST /api/v1/deployments/estimate-cost``."""
@@ -284,8 +287,6 @@ class DeploymentsClientMixin(BaseDagnamClient):
 
         GET /api/v1/deployments/{id}/stream?token=...
         """
-        from dagnam._core.client.common import raise_for_deployment
-
         token = self.mint_deployment_stream_token(deployment_id)
         url = f"{self.api_url}/api/v1/deployments/{quote_path_segment(deployment_id)}/stream"
         params = stream_query_params(token)

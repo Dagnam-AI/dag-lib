@@ -25,7 +25,7 @@ from dagnam._core.client.common import (
     response_json_value,
     stream_query_params,
 )
-from dagnam._core.exceptions import AuthError, TrainingJobNotFoundError
+from dagnam._core.exceptions import AuthError, ResponseError, TrainingJobNotFoundError
 from dagnam._types import JsonObject, JsonValue, QueryParams, QueryValue
 
 
@@ -41,6 +41,7 @@ class TrainingClientMixin(BaseDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
         """Issue an authenticated training-job request and decode the body.
 
@@ -48,36 +49,37 @@ class TrainingClientMixin(BaseDagnamClient):
         supplied (collection routes have no job to miss); 401 to
         :class:`AuthError`; every other non-2xx to :class:`APIError` carrying the
         backend's detail message (e.g. tier-limit rejections on create).
+
+        ``idempotent=True`` mints an ``Idempotency-Key`` for the POST so a
+        transient failure retries into a server-side replay instead of creating
+        a duplicate job (see the backend idempotency middleware).
         """
         url = f"{self.api_url}{path}"
-        try:
-            resp = requests.request(
-                method,
-                url,
-                headers=self._headers(),
-                params=requests_query_params(params),
-                json=json_body,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_generic(resp, TrainingJobNotFoundError if job_id else None, job_id)
-
+        resp = self._request(
+            method,
+            url,
+            raise_for=lambda r: raise_for_generic(
+                r, TrainingJobNotFoundError if job_id else None, job_id
+            ),
+            params=requests_query_params(params),
+            json=json_body,
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+            idempotent=idempotent,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     def create_training_job(self, payload: JsonObject) -> JsonObject:
         """Create a platform training job. ``POST /api/v1/training/jobs``."""
         return self._expect_object(
-            self._training_request("POST", "/api/v1/training/jobs", json_body=payload)
+            self._training_request(
+                "POST", "/api/v1/training/jobs", json_body=payload, idempotent=True
+            )
         )
 
     def register_local_run(
@@ -186,7 +188,10 @@ class TrainingClientMixin(BaseDagnamClient):
         """List distribution strategies available to the credential.
 
         ``GET /api/v1/training/allowed-strategies`` returns a flat
-        ``dict[str, bool]`` mapping each strategy label to its availability.
+        ``{strategy_label: available}`` map plus a registry-driven
+        ``required_tiers`` ``{strategy_label: tier}`` entry naming the minimum
+        tier that unlocks each *lockable* strategy (free strategies omitted).
+        The whole object is returned untouched.
         """
         return self._expect_object(
             self._training_request("GET", "/api/v1/training/allowed-strategies")
@@ -277,39 +282,26 @@ class TrainingClientMixin(BaseDagnamClient):
         if not events:
             return {"accepted": 0, "duplicates": 0}
 
+        from importlib.metadata import PackageNotFoundError, version
+
         try:
-            from importlib.metadata import PackageNotFoundError, version
+            sdk_version = version("dagnam")
+        except PackageNotFoundError:
+            sdk_version = "0+unknown"
 
-            try:
-                sdk_version = version("dagnam")
-            except PackageNotFoundError:
-                sdk_version = "0+unknown"
-
-            job_path = quote_path_segment(job_id)
-            url = f"{self.api_url}/api/v1/training/jobs/{job_path}/metrics/events"
-            resp = requests.post(
-                url,
-                headers={
-                    **self._headers(),
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "events": events,
-                    "source": source
-                    or {
-                        "kind": "local_attach",
-                        "sdk_version": sdk_version,
-                    },
-                },
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        self.raise_for_job_response(resp, job_id)
+        job_path = quote_path_segment(job_id)
+        url = f"{self.api_url}/api/v1/training/jobs/{job_path}/metrics/events"
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: self.raise_for_job_response(r, job_id),
+            json={
+                "events": events,
+                "source": source or {"kind": "local_attach", "sdk_version": sdk_version},
+            },
+            headers={"Content-Type": "application/json"},
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def open_training_stream(

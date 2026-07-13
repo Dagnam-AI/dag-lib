@@ -26,25 +26,34 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         params: QueryParams = {"type": type}
         if search:
             params["search"] = search
-        resp = await self._request("GET", "/api/v1/datasets/browse", params=params)
-        raise_for_dataset(resp, "browse")
+        resp = await self._request(
+            "GET",
+            "/api/v1/datasets/browse",
+            params=params,
+            raise_for=lambda r: raise_for_dataset(r, "browse"),
+        )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     async def get_dataset_meta(self, dataset_id: str) -> JsonObject:
-        resp = await self._request("GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/meta")
-        raise_for_dataset(resp, dataset_id)
+        resp = await self._request(
+            "GET",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}/meta",
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+        )
         return response_json_object(resp)
 
     async def list_system_datasets(self) -> list[JsonObject]:
-        resp = await self._request("GET", "/api/v1/datasets/system")
-        raise_for_dataset(resp, "system")
+        resp = await self._request(
+            "GET", "/api/v1/datasets/system", raise_for=lambda r: raise_for_dataset(r, "system")
+        )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     async def get_system_dataset_meta(self, dataset_id: str) -> JsonObject:
         resp = await self._request(
-            "GET", f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}"
+            "GET",
+            f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}",
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
-        raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)
 
     async def _download_to_dir(self, path: str, output_dir: Path, dataset_id: str) -> Path:
@@ -141,13 +150,17 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         }
         if description:
             body["description"] = description
-        resp = await self._request("POST", "/api/v1/datasets/upload-url", json=body)
-        raise_for_upload(resp)
+        resp = await self._request(
+            "POST", "/api/v1/datasets/upload-url", json=body, raise_for=raise_for_upload
+        )
         return response_json_object(resp)
 
     async def get_dataset_task_status(self, task_id: str) -> JsonObject:
-        resp = await self._request("GET", f"/api/v1/datasets/tasks/{quote_path_segment(task_id)}")
-        raise_for_task(resp, task_id)
+        resp = await self._request(
+            "GET",
+            f"/api/v1/datasets/tasks/{quote_path_segment(task_id)}",
+            raise_for=lambda r: raise_for_task(r, task_id),
+        )
         return response_json_object(resp)
 
     async def preview_dataset(self, dataset_id: str, rows: int = 10) -> JsonObject:
@@ -158,9 +171,11 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         """
         params: QueryParams = {"rows": rows}
         resp = await self._request(
-            "GET", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/preview", params=params
+            "GET",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}/preview",
+            params=params,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
-        raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)
 
     async def update_dataset(
@@ -188,15 +203,20 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         if visibility is not None:
             fields["visibility"] = visibility
         resp = await self._request(
-            "PUT", f"/api/v1/datasets/{quote_path_segment(dataset_id)}", data=fields
+            "PUT",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}",
+            data=fields,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
-        raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)
 
     async def delete_dataset(self, dataset_id: str) -> None:
         """Delete a dataset. ``DELETE /api/v1/datasets/{dataset_id}`` (204 No Content)."""
-        resp = await self._request("DELETE", f"/api/v1/datasets/{quote_path_segment(dataset_id)}")
-        raise_for_dataset(resp, dataset_id)
+        await self._request(
+            "DELETE",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}",
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+        )
 
     async def update_dataset_roles(
         self,
@@ -210,7 +230,9 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
             "task_type_hint": task_type_hint,
         }
         resp = await self._request(
-            "PATCH", f"/api/v1/datasets/{quote_path_segment(dataset_id)}/roles", json=body
+            "PATCH",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}/roles",
+            json=body,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
-        raise_for_dataset(resp, dataset_id)
         return response_json_object(resp)

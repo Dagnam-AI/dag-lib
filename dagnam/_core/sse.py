@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from importlib import import_module
 import json
+import logging
 import random
 import time
 from typing import Callable, Optional, Protocol, cast
@@ -27,6 +28,8 @@ import requests
 
 from dagnam._core.exceptions import StreamError
 from dagnam._types import JsonObject, ensure_json_object
+
+_LOGGER = logging.getLogger("dagnam.sse")
 
 DEFAULT_MAX_RECONNECTS = 50
 DEFAULT_BACKOFF_BASE = 1.0
@@ -158,10 +161,20 @@ def iter_with_reconnect(
         if not made_progress:
             attempts += 1
             if attempts > max_reconnects:
+                _LOGGER.warning(
+                    "%s: giving up after %d reconnect attempts", resource_label, max_reconnects
+                )
                 raise StreamError(
                     f"{resource_label} dropped after {max_reconnects} reconnect attempts"
                 )
         delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
+        _LOGGER.debug(
+            "%s: reconnecting (attempt %d/%d) after %.2fs",
+            resource_label,
+            attempts,
+            max_reconnects,
+            delay,
+        )
         if delay:
             time.sleep(delay + random.uniform(0, delay * 0.1))
 
@@ -211,10 +224,20 @@ async def aiter_with_reconnect(
         if not made_progress:
             attempts += 1
             if attempts > max_reconnects:
+                _LOGGER.warning(
+                    "%s: giving up after %d reconnect attempts", resource_label, max_reconnects
+                )
                 raise StreamError(
                     f"{resource_label} dropped after {max_reconnects} reconnect attempts"
                 )
         delay = backoff_base * (2 ** (min(attempts, 6) - 1)) if attempts else backoff_base
+        _LOGGER.debug(
+            "%s: reconnecting (attempt %d/%d) after %.2fs",
+            resource_label,
+            attempts,
+            max_reconnects,
+            delay,
+        )
         if delay:
             await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
 

@@ -7,16 +7,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 from pathlib import Path
 import shutil
 import time
 from typing import TypedDict
 from urllib.parse import quote
 
+import filelock
+
 from dagnam._types import JsonObject, ensure_json_object
 
 DEFAULT_CACHE_DIR: Path = Path.home() / ".dagnam" / "datasets"
 DEFAULT_MAX_CACHE_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
+DEFAULT_LOCK_TIMEOUT: float = 60.0
+# Reserved sibling directory (under the cache base) that holds in-progress,
+# not-yet-promoted downloads. It is NOT a dataset, so cache enumeration and
+# eviction must skip it — otherwise eviction could rmtree a peer process's
+# live staging download.
+STAGING_DIR_NAME = ".staging"
+_CACHE_LOG = logging.getLogger("dagnam.cache")
 
 
 class CacheInfo(TypedDict):
@@ -117,7 +128,7 @@ def get_cache_info(base_dir: Path | None = None) -> list[CacheInfo]:
 
     entries: list[CacheInfo] = []
     for child in base.iterdir():
-        if not child.is_dir():
+        if not child.is_dir() or child.name == STAGING_DIR_NAME:
             continue
         size = _dir_size(child)
         access_file = child / ".last_access"
@@ -183,11 +194,114 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
     return evicted
 
 
-def save_metadata(dataset_id: str, meta: JsonObject, base_dir: Path | None = None) -> None:
-    """Write meta.json to cache directory."""
+def lock_timeout() -> float:
+    """Cache-lock acquisition timeout (seconds), from ``DAGNAM_CACHE_LOCK_TIMEOUT``.
+
+    An absent or unparseable value falls back to :data:`DEFAULT_LOCK_TIMEOUT`.
+    """
+    raw = os.environ.get("DAGNAM_CACHE_LOCK_TIMEOUT")
+    if raw is None:
+        return DEFAULT_LOCK_TIMEOUT
+    try:
+        return float(raw)
+    except ValueError:
+        return DEFAULT_LOCK_TIMEOUT
+
+
+def dataset_lock(
+    dataset_id: str, *, base_dir: Path | None = None, timeout: float | None = None
+) -> filelock.FileLock:
+    """Exclusive cross-process lock for one dataset's cache dir.
+
+    The lock file is a **sibling** of the dataset directory
+    (``<base>/<cache_dir_name>.lock``), never inside it, so eviction can
+    ``rmtree`` the dataset dir without deleting a lock another process may be
+    holding.
+    """
+    base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
+    base.mkdir(parents=True, exist_ok=True)
+    lock_path = base / f"{cache_dir_name(dataset_id)}.lock"
+    return filelock.FileLock(str(lock_path), timeout=lock_timeout() if timeout is None else timeout)
+
+
+def eviction_lock(
+    *, base_dir: Path | None = None, timeout: float | None = None
+) -> filelock.FileLock:
+    """Global cross-process lock serializing cache eviction (``<base>/.eviction.lock``)."""
+    base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
+    base.mkdir(parents=True, exist_ok=True)
+    return filelock.FileLock(
+        str(base / ".eviction.lock"), timeout=lock_timeout() if timeout is None else timeout
+    )
+
+
+def evict_lru_locked(max_size_bytes: int | None = None, base_dir: Path | None = None) -> list[str]:
+    """Evict LRU cache entries under the global eviction lock; best-effort.
+
+    A busy lock (another process/thread already evicting) is **not** an error:
+    this logs a warning and returns ``[]`` instead of blocking or raising, since
+    eviction is disk housekeeping and must never fail a caller that just
+    finished a successful download.
+    """
+    try:
+        with eviction_lock(base_dir=base_dir):
+            return evict_lru(max_size_bytes=max_size_bytes, base_dir=base_dir)
+    except filelock.Timeout:
+        _CACHE_LOG.warning("eviction lock busy; skipping eviction this round")
+        return []
+
+
+def save_metadata(
+    dataset_id: str,
+    meta: JsonObject,
+    base_dir: Path | None = None,
+    *,
+    data_file: Path | None = None,
+) -> None:
+    """Write meta.json to cache directory.
+
+    When ``data_file`` is given, also records its ``size`` + ``mtime`` under a
+    namespaced ``_cache`` key so a later :func:`verify_cached` can cheaply check
+    a cache hit without a full re-hash. **Contract:** callers MUST pass
+    ``data_file`` at its FINAL on-disk path (after any staging/rename is
+    complete) — recording a pre-rename staging path's mtime would make every
+    subsequent cheap check fail spuriously.
+    """
     cache_dir = get_cache_dir(dataset_id, base_dir)
+    payload = dict(meta)
+    if data_file is not None and data_file.exists():
+        st = data_file.stat()
+        payload["_cache"] = {"file": data_file.name, "size": st.st_size, "mtime": st.st_mtime}
     meta_file = cache_dir / "meta.json"
-    meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    meta_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def verify_cached(
+    dataset_id: str, server_checksum: str, *, base_dir: Path | None = None, full: bool = False
+) -> bool:
+    """Verify a cache hit: cheap size+mtime by default, full sha256 on demand.
+
+    On a ``True`` result this calls :func:`touch_cache` first — mirroring
+    :func:`is_cached`'s touch-on-hit behavior so a hit resolved via
+    ``verify_cached`` still counts as a recent access for LRU eviction. Returns
+    ``False`` when the recorded ``_cache`` block is missing, the data file is
+    gone, size/mtime differ, or (when ``full``) the sha256 mismatches.
+    """
+    cache_dir = get_cache_dir(dataset_id, base_dir)
+    meta = load_metadata(dataset_id, base_dir)
+    info = meta.get("_cache")
+    if not isinstance(info, dict):
+        return False
+    data_file = cache_dir / str(info.get("file", ""))
+    if not data_file.exists():
+        return False
+    st = data_file.stat()
+    if st.st_size != info.get("size") or st.st_mtime != info.get("mtime"):
+        return False
+    if full and compute_file_checksum(data_file) != server_checksum.removeprefix("sha256:"):
+        return False
+    touch_cache(dataset_id, base_dir)
+    return True
 
 
 def load_metadata(dataset_id: str, base_dir: Path | None = None) -> JsonObject:

@@ -134,8 +134,28 @@ def test_hub_text_body_returned_when_not_json(client: DagnamClient, rmock: Reque
 
 def test_hub_500_raises_apierror(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/hub/categories", status_code=500, text="boom")
+    client._sleep = lambda _s: None  # 500 is transient on a GET → retried; don't sleep
     with pytest.raises(APIError):
         client.list_hub_categories()
+
+
+def test_hub_get_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/hub/models/m1",
+        [{"status_code": 503}, {"status_code": 200, "json": {"id": "m1"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.get_hub_model("m1") == {"id": "m1"}
+    assert rmock.call_count == 2
+
+
+def test_hub_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/missing", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(HubModelNotFoundError):
+        client.get_hub_model("missing")
+    assert rmock.call_count == 1
 
 
 def test_hub_400_raises_huberror(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -144,21 +164,17 @@ def test_hub_400_raises_huberror(client: DagnamClient, rmock: RequestsMocker) ->
         client.create_hub_model({})
 
 
-def test_hub_connectionerror_wrapped(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_hub_connectionerror_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/hub/categories", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_hub_categories()
 
 
-def test_hub_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_hub_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/hub/categories", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_hub_categories()
 
 

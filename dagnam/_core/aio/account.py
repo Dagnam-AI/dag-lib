@@ -21,7 +21,7 @@ from dagnam._core.client.common import (
     raise_for_upload,
     response_json_value,
 )
-from dagnam._core.exceptions import APIError
+from dagnam._core.exceptions import APIError, ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue, ensure_json_array, ensure_json_object
 
 # Mirrors dagnam._core.client.account._ACCOUNT_DELETION_CONFIRMATION (same
@@ -136,13 +136,14 @@ class AsyncAccountMixin(BaseAsyncDagnamClient):
     async def _account_write(
         self, method: str, path: str, json_body: JsonObject | None = None
     ) -> JsonValue | str | None:
-        resp = await self._request(method, path, json=json_body)
-        raise_for_generic(resp)
+        resp = await self._request(
+            method, path, json=json_body, raise_for=lambda r: raise_for_generic(r)
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     async def get_settings(self) -> JsonObject:

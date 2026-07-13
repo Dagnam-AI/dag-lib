@@ -50,14 +50,19 @@ class CheckpointError(DagnamError):
 class APIError(DagnamError):
     """General API communication failure."""
 
-    def __init__(self, status_code: int, message: str):
+    def __init__(self, status_code: int, message: str, *, retry_after_header: str | None = None):
         self.status_code = status_code
         self.message = message
+        self.retry_after_header = retry_after_header
         super().__init__(f"API error {status_code}: {message}")
 
 
 class DownloadTooLargeError(APIError):
     """A download exceeded the configured ``max_download_bytes`` ceiling."""
+
+
+class ResponseError(APIError):
+    """Server returned a malformed, undecodable, or wrong-shape response body."""
 
 
 class ChecksumError(DagnamError):

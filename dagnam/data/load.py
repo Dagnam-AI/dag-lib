@@ -16,25 +16,33 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
+
+import filelock
 
 from dagnam._core.auth import get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
-from dagnam._core.exceptions import ChecksumError
+from dagnam._core.exceptions import ChecksumError, DagnamError
 from dagnam._types import JsonObject, ensure_json_object
 from dagnam.data.cache import (
+    DEFAULT_CACHE_DIR,
+    STAGING_DIR_NAME,
+    cache_dir_name,
     compute_file_checksum,
-    evict_lru,
+    dataset_lock,
+    evict_lru_locked,
     get_cache_dir,
-    is_cached,
     load_metadata,
     save_checksum,
     save_metadata,
     touch_cache,
+    verify_cached,
 )
 from dagnam.data.dataset import DagnamDataset
 
 logger = logging.getLogger(__name__)
+_CACHE_LOG = logging.getLogger("dagnam.cache")
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -88,6 +96,7 @@ def load_dataset(
     resume: bool = True,
     show_progress: bool = True,
     binding: dict[str, object] | None = None,
+    verify: bool = False,
 ) -> DagnamDataset:
     """Load a dataset by ID. Auto-downloads and caches if needed.
 
@@ -131,42 +140,87 @@ def load_dataset(
         presigned_url or download_url or _optional_meta_str(meta, "download_url")
     )
 
-    if is_cached(cache_key, checksum, base_dir=cache_dir_path):
+    # Fast path: a valid cache hit (cheap size+mtime, or a full re-hash when
+    # verify=True) skips the lock and download entirely.
+    if verify_cached(cache_key, checksum, base_dir=cache_dir_path, full=verify):
         cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
         ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
         return DagnamDataset(cached_meta, ds_cache_dir)
 
+    base = cache_dir_path if cache_dir_path is not None else DEFAULT_CACHE_DIR
+    lock = dataset_lock(cache_key, base_dir=cache_dir_path)
+    _CACHE_LOG.debug("waiting for dataset lock: %s", cache_key)
+    try:
+        with lock:
+            final_dir = base / cache_dir_name(cache_key)
+            staging_dir = base / STAGING_DIR_NAME / cache_dir_name(cache_key)
+
+            # Re-check under the lock: a peer may have finished while we waited.
+            if verify_cached(cache_key, checksum, base_dir=cache_dir_path, full=verify):
+                _CACHE_LOG.debug("cache filled by peer for %s", cache_key)
+                # A peer finished while we waited; drop any leftover staging dir
+                # from an aborted attempt (no-op if absent).
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
+                ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
+                return DagnamDataset(cached_meta, ds_cache_dir)
+
+            staging_dir.parent.mkdir(parents=True, exist_ok=True)
+            # verify_cached just said this entry is invalid (and its get_cache_dir
+            # call already created an empty final_dir) -- clear any stale/corrupt
+            # leftover so os.replace's target is guaranteed absent, never a racy
+            # overwrite. rmtree(ignore_errors) is a no-op if it is already gone.
+            shutil.rmtree(final_dir, ignore_errors=True)
+
+            if is_system:
+                downloaded_file = client.download_system_dataset(
+                    dataset_id,
+                    staging_dir,
+                    show_progress=show_progress,
+                )
+            else:
+                downloaded_file = client.download_dataset(
+                    dataset_id,
+                    staging_dir,
+                    download_url=effective_download_url,
+                    filename=_optional_meta_str(meta, "filename"),
+                    version=version,
+                    resume=resume,
+                    show_progress=show_progress,
+                )
+
+            local_checksum = compute_file_checksum(downloaded_file)
+            expected_checksum = checksum.removeprefix("sha256:")
+            if local_checksum != expected_checksum:
+                # Leave the corrupt bytes in staging_dir for inspection rather
+                # than silently resuming from them next time.
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                raise ChecksumError(
+                    f"Checksum mismatch for dataset '{dataset_id}': "
+                    f"expected {checksum}, got {local_checksum}"
+                )
+
+            os.replace(staging_dir, final_dir)  # atomic promotion
+            final_data_file = final_dir / downloaded_file.name
+            _CACHE_LOG.debug(
+                "staged->promoted %s (%d bytes)", cache_key, final_data_file.stat().st_size
+            )
+            # Stat the FINAL path, post-rename -- recording the staging path's
+            # mtime would make the next verify_cached() cheap-check fail
+            # spuriously (see cache.save_metadata's contract note).
+            save_metadata(cache_key, meta, base_dir=cache_dir_path, data_file=final_data_file)
+            save_checksum(cache_key, checksum, base_dir=cache_dir_path)
+            touch_cache(cache_key, base_dir=cache_dir_path)
+    except filelock.Timeout as exc:
+        raise DagnamError(f"Timed out acquiring cache lock for {cache_key}") from exc
+
+    # Evict OUTSIDE the dataset lock, under the (separate) global eviction lock
+    # -- best-effort, never raises.
+    evicted = evict_lru_locked(max_size_bytes=_resolve_cache_budget(), base_dir=cache_dir_path)
+    if evicted:
+        _CACHE_LOG.debug("evicted %d cache dirs: %s", len(evicted), evicted)
+
     ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
-    if is_system:
-        downloaded_file = client.download_system_dataset(
-            dataset_id,
-            ds_cache_dir,
-            show_progress=show_progress,
-        )
-    else:
-        downloaded_file = client.download_dataset(
-            dataset_id,
-            ds_cache_dir,
-            download_url=effective_download_url,
-            filename=_optional_meta_str(meta, "filename"),
-            version=version,
-            resume=resume,
-            show_progress=show_progress,
-        )
-
-    local_checksum = compute_file_checksum(downloaded_file)
-    expected_checksum = checksum.removeprefix("sha256:")
-    if local_checksum != expected_checksum:
-        raise ChecksumError(
-            f"Checksum mismatch for dataset '{dataset_id}': "
-            f"expected {checksum}, got {local_checksum}"
-        )
-
-    save_metadata(cache_key, meta, base_dir=cache_dir_path)
-    save_checksum(cache_key, checksum, base_dir=cache_dir_path)
-    touch_cache(cache_key, base_dir=cache_dir_path)
-    evict_lru(max_size_bytes=_resolve_cache_budget(), base_dir=cache_dir_path)
-
     return DagnamDataset(meta, ds_cache_dir)
 
 

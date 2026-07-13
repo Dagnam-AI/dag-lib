@@ -16,7 +16,7 @@ from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import APIError, AuthError
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import RespxMockRouter
+    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
 
@@ -84,3 +84,34 @@ async def test_async_account_500_raises_apierror(
     mock.get(ENTITLEMENTS).mock(return_value=httpx.Response(500, text="boom"))
     with pytest.raises(APIError):
         await client.get_entitlements()
+
+
+# ---------------------------------------------------------------- transient retry (Plan 03)
+
+
+async def test_async_get_entitlements_retries_transient(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    monkeypatch.setattr(client, "_rng", lambda: 1.0)
+    mock.get(ENTITLEMENTS).mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(200, json={"plan": "pro"}),
+        ]
+    )
+    assert (await client.get_entitlements())["plan"] == "pro"
+
+
+async def test_async_get_entitlements_401_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.get(ENTITLEMENTS).mock(return_value=httpx.Response(401, json={}))
+    with pytest.raises(AuthError):
+        await client.get_entitlements()
+    assert route.call_count == 1

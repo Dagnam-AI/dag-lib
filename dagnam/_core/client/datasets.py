@@ -15,7 +15,13 @@ from dagnam._core.client.base import (
     parse_content_disposition_filename,
     requests,
 )
-from dagnam._core.client.common import quote_path_segment, response_json_array, response_json_object
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_task,
+    raise_for_upload,
+    response_json_array,
+    response_json_object,
+)
 from dagnam._types import JsonObject, ensure_json_object
 
 
@@ -28,19 +34,13 @@ class DatasetsClientMixin(BaseDagnamClient):
         params: dict[str, str] = {"type": type}
         if search:
             params["search"] = search
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, "browse")
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, "browse"),
+            params=params,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
@@ -51,37 +51,24 @@ class DatasetsClientMixin(BaseDagnamClient):
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/{dataset_path}/meta"
         params = {"version": version} if version else None
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        self._raise_for_status(resp, dataset_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            params=params,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def list_system_datasets(self) -> list[JsonObject]:
         """GET /api/v1/datasets/system — List all system datasets."""
         url = f"{self.api_url}/api/v1/datasets/system"
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, "system")
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, "system"),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     def get_system_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
@@ -89,19 +76,13 @@ class DatasetsClientMixin(BaseDagnamClient):
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}"
         params = {"version": version} if version else None
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, dataset_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            params=params,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def download_system_dataset(
@@ -312,8 +293,6 @@ class DatasetsClientMixin(BaseDagnamClient):
         description: str | None = None,
         visibility: str = "private",
     ) -> JsonObject:
-        from dagnam._core.client.common import raise_for_upload
-
         endpoint = f"{self.api_url}/api/v1/datasets/upload-url"
         body: dict[str, str] = {
             "url": url,
@@ -324,40 +303,24 @@ class DatasetsClientMixin(BaseDagnamClient):
         }
         if description:
             body["description"] = description
-        try:
-            resp = requests.post(
-                endpoint,
-                headers=self._headers(),
-                json=body,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_upload(resp)
+        resp = self._request(
+            "POST",
+            endpoint,
+            raise_for=lambda r: raise_for_upload(r),
+            json=body,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def get_dataset_task_status(self, task_id: str) -> JsonObject:
-        from dagnam._core.client.common import raise_for_task
-
         task_path = quote_path_segment(task_id)
         url = f"{self.api_url}/api/v1/datasets/tasks/{task_path}"
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_task(resp, task_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: raise_for_task(r, task_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def preview_dataset(self, dataset_id: str, rows: int = 10) -> JsonObject:
@@ -369,19 +332,13 @@ class DatasetsClientMixin(BaseDagnamClient):
         """
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/{dataset_path}/preview"
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params={"rows": rows},
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, dataset_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            params={"rows": rows},
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def update_dataset(
@@ -412,37 +369,25 @@ class DatasetsClientMixin(BaseDagnamClient):
 
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/{dataset_path}"
-        try:
-            resp = requests.put(
-                url,
-                headers=self._headers(),
-                data=fields,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, dataset_id)
+        resp = self._request(
+            "PUT",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            data=fields,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)
 
     def delete_dataset(self, dataset_id: str) -> None:
         """Delete a dataset. ``DELETE /api/v1/datasets/{dataset_id}`` (204 No Content)."""
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/{dataset_path}"
-        try:
-            resp = requests.delete(
-                url,
-                headers=self._headers(),
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, dataset_id)
+        self._request(
+            "DELETE",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
 
     def update_dataset_roles(
         self,
@@ -461,17 +406,11 @@ class DatasetsClientMixin(BaseDagnamClient):
         }
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/{dataset_path}/roles"
-        try:
-            resp = requests.patch(
-                url,
-                headers=self._headers(),
-                json=body,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_status(resp, dataset_id)
+        resp = self._request(
+            "PATCH",
+            url,
+            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            json=body,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return response_json_object(resp)

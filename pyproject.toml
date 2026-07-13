@@ -64,6 +64,7 @@ dependencies = [
     "polars>=1.0",
     "tqdm>=4.60",
     "typing_extensions>=4.12",
+    "filelock>=3.13",
 ]
 
 [project.optional-dependencies]
@@ -348,7 +349,9 @@ ignore = [
 "dagnam/_agent/runner.py" = ["T20"]
 "dagnam/_agent/guardhook.py" = ["T20"]
 "dagnam/_agent/skill/scripts/**" = ["T20"]
-"dagnam/__init__.py" = ["F401"]
+# E402: the NullHandler must be attached BEFORE any subpackage import can log,
+# so one non-import statement necessarily precedes the imports below it.
+"dagnam/__init__.py" = ["F401", "E402"]
 "dagnam/_core/__init__.py" = ["F401"]
 "dagnam/aio.py" = ["F401"]
 

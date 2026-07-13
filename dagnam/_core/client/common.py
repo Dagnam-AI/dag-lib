@@ -26,6 +26,7 @@ from dagnam._core.exceptions import (
     HubModelNotFoundError,
     ProjectNotFoundError,
     QuotaExceededError,
+    ResponseError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
     UploadError,
@@ -58,19 +59,33 @@ def quote_path_segment(value: str) -> str:
     return quote(str(value), safe="")
 
 
+def _response_status(resp: JsonResponseLike) -> int:
+    code = getattr(resp, "status_code", 0)
+    return code if isinstance(code, int) else 0
+
+
 def response_json_value(resp: JsonResponseLike) -> JsonValue:
     """Decode a response body and validate that it is JSON-compatible."""
-    return ensure_json_value(resp.json())
+    try:
+        return ensure_json_value(resp.json())
+    except (ValueError, TypeError) as exc:
+        raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
 def response_json_object(resp: JsonResponseLike) -> JsonObject:
     """Decode a response body and validate that it is a JSON object."""
-    return ensure_json_object(resp.json())
+    try:
+        return ensure_json_object(resp.json())
+    except (ValueError, TypeError) as exc:
+        raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
 def response_json_array(resp: JsonResponseLike) -> JsonArray:
     """Decode a response body and validate that it is a JSON array."""
-    return ensure_json_array(resp.json())
+    try:
+        return ensure_json_array(resp.json())
+    except (ValueError, TypeError) as exc:
+        raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
 def bearer_headers(api_key: str, *, extra: Mapping[str, str] | None = None) -> dict[str, str]:

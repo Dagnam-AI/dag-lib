@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, AuthError, QuotaExceededError
+from dagnam._core.exceptions import APIError, AuthError, QuotaExceededError, ResponseError
 
 if TYPE_CHECKING:
     from tests.typing_helpers import RequestsMocker
@@ -69,11 +69,11 @@ def test_change_password_422_raises_apierror(client: DagnamClient, rmock: Reques
         client.change_password("OldPassw0rd", "short")
 
 
-def test_change_password_empty_body_raises_typeerror(
+def test_change_password_empty_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
     rmock.post(CHANGE_PASSWORD, status_code=200, content=b"")
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="Expected JSON object"):
         client.change_password("OldPassw0rd", "NewPassw0rd")
 
 

@@ -8,7 +8,7 @@ import httpx
 
 from dagnam._core.aio.base import BaseAsyncDagnamClient, content_disposition_safe_name
 from dagnam._core.client.common import quote_path_segment, raise_for_project, response_json_value
-from dagnam._core.exceptions import APIError
+from dagnam._core.exceptions import APIError, ResponseError
 from dagnam._types import (
     FormData,
     JsonObject,
@@ -35,14 +35,19 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         files: UploadFiles | None = None,
     ) -> JsonValue | str | None:
         resp = await self._request(
-            method, path, params=params, json=json_body, data=data, files=files
+            method,
+            path,
+            params=params,
+            json=json_body,
+            data=data,
+            files=files,
+            raise_for=lambda r: raise_for_project(r, project_id),
         )
-        raise_for_project(resp, project_id)
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     async def list_projects(self, **filter_params: QueryValue) -> JsonObject | str | None:

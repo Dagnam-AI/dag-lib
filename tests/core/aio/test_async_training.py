@@ -359,3 +359,70 @@ async def test_async_stream_training_timeout(
     mock.get(_STREAM_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(APIError, match="Request timed out"):
         _ = [e async for e in client.stream_training_events("j1")]
+
+
+# ---------------------------------------------------------------- transient retry (Plan 03)
+
+
+async def test_async_get_job_retries_transient(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    monkeypatch.setattr(client, "_rng", lambda: 1.0)
+    mock.get("/api/v1/training/jobs/j1").mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(200, json={"id": "j1"}),
+        ]
+    )
+    job = await client.get_training_job("j1")
+    assert job["id"] == "j1"
+
+
+async def test_async_get_job_404_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.get("/api/v1/training/jobs/missing").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    with pytest.raises(TrainingJobNotFoundError):
+        await client.get_training_job("missing")
+    assert route.call_count == 1  # 404 is non-transient -> single attempt
+
+
+async def test_async_create_job_sends_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/training/jobs").mock(
+        return_value=httpx.Response(201, json={"id": "j1"})
+    )
+    await client.create_training_job({"project_id": "p1"})
+    assert route.calls.last.request.headers.get("Idempotency-Key")
+
+
+async def test_async_create_job_409_retries_into_replay(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """Async mirror: a 409 on an idempotent create retries into the replayed 201
+    with the same minted key on both attempts."""
+
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    client._rng = lambda: 1.0
+    route = mock.post("/api/v1/training/jobs").mock(
+        side_effect=[
+            httpx.Response(409, json={}),
+            httpx.Response(201, json={"id": "j1"}),
+        ]
+    )
+    await client.create_training_job({"project_id": "p1"})
+    assert route.call_count == 2
+    keys = {c.request.headers.get("Idempotency-Key") for c in route.calls}
+    assert len(keys) == 1
+    assert next(iter(keys))

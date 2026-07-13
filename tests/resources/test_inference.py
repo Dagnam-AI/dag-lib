@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 import requests_mock as rm_module
-from tests.typing_helpers import JsonValue
 
 from dagnam import deployment_health, inference, inference_batch, inference_schema
 from dagnam._core.client import DagnamClient
@@ -17,20 +16,14 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
 )
 
+if TYPE_CHECKING:
+    from tests.typing_helpers import RequestsMocker
+
 
 @pytest.fixture
 def rmock():
     with rm_module.Mocker() as m:
         yield m
-
-
-def _mock_response(status: int, body: JsonValue = None, ok: bool | None = None) -> MagicMock:
-    resp = MagicMock(spec=requests.Response)
-    resp.status_code = status
-    resp.ok = (status < 400) if ok is None else ok
-    resp.text = str(body) if body is not None else ""
-    resp.json.return_value = body if body is not None else {}
-    return resp
 
 
 class TestInferenceDelegation:
@@ -78,44 +71,40 @@ class TestAuthResolution:
 
 
 class TestClientErrorMapping:
-    def test_predict_maps_401(self) -> None:
-        client = DagnamClient("https://x", "key")
-        with patch("dagnam._core.client.base.requests.post", return_value=_mock_response(401)):
-            with pytest.raises(AuthError):
-                client.predict("dep_1", {"x": 1})
+    def test_predict_maps_401(self, rmock: RequestsMocker) -> None:
+        rmock.post("https://x/api/v1/inference/dep_1/predict", status_code=401)
+        with pytest.raises(AuthError):
+            DagnamClient("https://x", "key").predict("dep_1", {"x": 1})
 
-    def test_predict_maps_404(self) -> None:
-        client = DagnamClient("https://x", "key")
-        with patch("dagnam._core.client.base.requests.post", return_value=_mock_response(404)):
-            with pytest.raises(DeploymentNotFoundError):
-                client.predict("dep_404", {"x": 1})
+    def test_predict_maps_404(self, rmock: RequestsMocker) -> None:
+        rmock.post("https://x/api/v1/inference/dep_404/predict", status_code=404)
+        with pytest.raises(DeploymentNotFoundError):
+            DagnamClient("https://x", "key").predict("dep_404", {"x": 1})
 
-    def test_predict_maps_500(self) -> None:
-        client = DagnamClient("https://x", "key")
-        resp = _mock_response(500, body="boom")
-        with patch("dagnam._core.client.base.requests.post", return_value=resp):
-            with pytest.raises(APIError) as exc:
-                client.predict("dep_1", {"x": 1})
-            assert exc.value.status_code == 500
+    def test_predict_maps_500(self, rmock: RequestsMocker) -> None:
+        # POST is not retried, so a single 500 surfaces directly.
+        rmock.post("https://x/api/v1/inference/dep_1/predict", status_code=500, text="boom")
+        with pytest.raises(APIError) as exc:
+            DagnamClient("https://x", "key").predict("dep_1", {"x": 1})
+        assert exc.value.status_code == 500
+        assert rmock.call_count == 1
 
-    def test_health_returns_json(self) -> None:
-        client = DagnamClient("https://x", "key")
-        resp = _mock_response(200, body={"status": "healthy"})
-        with patch("dagnam._core.client.base.requests.get", return_value=resp):
-            assert client.deployment_health("dep_1") == {"status": "healthy"}
+    def test_health_returns_json(self, rmock: RequestsMocker) -> None:
+        rmock.get("https://x/api/v1/inference/dep_1/health", json={"status": "healthy"})
+        assert DagnamClient("https://x", "key").deployment_health("dep_1") == {"status": "healthy"}
 
-    def test_schema_returns_json(self) -> None:
-        client = DagnamClient("https://x", "key")
-        resp = _mock_response(200, body={"input_schema": {"type": "object"}, "output_schema": {}})
-        with patch("dagnam._core.client.base.requests.get", return_value=resp):
-            out = client.schema("dep_1")
-            assert out["input_schema"] == {"type": "object"}
+    def test_schema_returns_json(self, rmock: RequestsMocker) -> None:
+        rmock.get(
+            "https://x/api/v1/inference/dep_1/schema",
+            json={"input_schema": {"type": "object"}, "output_schema": {}},
+        )
+        out = DagnamClient("https://x", "key").schema("dep_1")
+        assert out["input_schema"] == {"type": "object"}
 
-    def test_schema_maps_404(self) -> None:
-        client = DagnamClient("https://x", "key")
-        with patch("dagnam._core.client.base.requests.get", return_value=_mock_response(404)):
-            with pytest.raises(DeploymentNotFoundError):
-                client.schema("dep_404")
+    def test_schema_maps_404(self, rmock: RequestsMocker) -> None:
+        rmock.get("https://x/api/v1/inference/dep_404/schema", status_code=404)
+        with pytest.raises(DeploymentNotFoundError):
+            DagnamClient("https://x", "key").schema("dep_404")
 
 
 def test_inference_stream_delegates_to_iter_sse_once(monkeypatch) -> None:

@@ -2,6 +2,7 @@
 
 import pytest
 
+import dagnam
 from dagnam._contracts import ParamError
 from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
@@ -11,6 +12,7 @@ from dagnam._core.exceptions import (
     ChecksumError,
     DagnamError,
     DatasetNotFoundError,
+    ResponseError,
 )
 
 
@@ -131,6 +133,25 @@ class TestAPIError:
             safe_response_text(Response())  # pyright: ignore[reportArgumentType]
             == "<streaming application/octet-stream body omitted>"
         )
+
+
+class TestAPIErrorRetryCarrier:
+    def test_api_error_has_retry_after_header_default_none(self) -> None:
+        exc = APIError(503, "x")
+        assert exc.retry_after_header is None
+        exc2 = APIError(503, "x", retry_after_header="5")
+        assert exc2.retry_after_header == "5"
+
+
+class TestResponseError:
+    def test_response_error_is_api_error_and_dagnam_error(self) -> None:
+        exc = ResponseError(200, "malformed body")
+        assert isinstance(exc, APIError)
+        assert isinstance(exc, DagnamError)
+        assert exc.status_code == 200
+
+    def test_response_error_exported_from_top_level(self) -> None:
+        assert dagnam.ResponseError is ResponseError
 
 
 class TestChecksumError:
