@@ -7,7 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from dagnam.data.loaders.system.column_store import Column, ColumnStore
-from dagnam.data.loaders.system.decoders._helpers import extensions, read_rgb, spec_dict
+from dagnam.data.loaders.system.decoders._helpers import (
+    extensions,
+    read_rgb,
+    safe_subpath,
+    spec_dict,
+)
 from dagnam.data.loaders.system.decoders.base import DecodeError
 
 
@@ -17,7 +22,7 @@ class ImageFolderDecoder:
     def decode(self, artifact_dir: Path, layout: dict[str, object], split: str) -> ColumnStore:
         del split
         image_spec = spec_dict(layout, "image")
-        root = artifact_dir / str(image_spec["dir"])
+        root = safe_subpath(artifact_dir, str(image_spec["dir"]))
         image_exts = extensions(image_spec)
         if not root.exists():
             raise DecodeError(f"image_folder: image root does not exist: {root}")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import httpx
 import pytest
@@ -163,3 +163,61 @@ async def test_async_download_checkpoint_500(
     mock.get(url).mock(return_value=httpx.Response(500, text="boom"))
     with pytest.raises(APIError):
         await client.download_checkpoint("job1", "ck1", tmp_path / "x")
+
+
+async def test_async_download_checkpoint_enforces_size_cap(
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A hostile/compromised server streaming an oversized body must be refused
+    # (async streams to disk now, so the cap protects memory AND disk).
+    from dagnam._core.aio import base as aio_base
+    from dagnam._core.exceptions import DownloadTooLargeError
+
+    monkeypatch.setattr(aio_base, "resolve_max_download_bytes", lambda: 4)
+    url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
+    mock.get(url).mock(
+        return_value=httpx.Response(200, content=b"xxxxxxxx", headers={"Content-Length": "8"})
+    )
+    dest = tmp_path / "ck.bin"
+    with pytest.raises(DownloadTooLargeError):
+        await client.download_checkpoint("job1", "ck1", dest)
+    assert not dest.exists()
+
+
+async def test_async_download_checkpoint_presigned_non_success_status(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    """A non-success status from the presigned URL maps to a checkpoint error."""
+    url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
+    presigned = "https://bucket.s3.example.com/ck1?sig=xyz"
+    mock.get(url).mock(return_value=httpx.Response(307, headers={"location": presigned}))
+    mock.get(presigned).mock(return_value=httpx.Response(404))
+    with pytest.raises(CheckpointNotFoundError):
+        await client.download_checkpoint("job1", "ck1", tmp_path / "x")
+
+
+async def test_stream_response_to_file_aborts_mid_stream(
+    client: AsyncDagnamClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A chunked body (no Content-Length) that crosses the cap mid-stream must
+    # abort and delete the partial.
+    from dagnam._core.aio import base as aio_base
+    from dagnam._core.exceptions import DownloadTooLargeError
+
+    monkeypatch.setattr(aio_base, "resolve_max_download_bytes", lambda: 4)
+
+    class _FakeResp:
+        headers: ClassVar[dict[str, str]] = {}
+
+        async def aiter_bytes(self):
+            yield b"xx"
+            yield b"xx"
+            yield b"xx"
+
+    dest = tmp_path / "x.bin"
+    with pytest.raises(DownloadTooLargeError):
+        await client._stream_response_to_file(_FakeResp(), dest)  # type: ignore[arg-type]
+    assert not dest.exists()

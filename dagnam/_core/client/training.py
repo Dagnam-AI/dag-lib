@@ -15,6 +15,7 @@ from dagnam._core.client.base import (
     is_success_response,
     requests,
     safe_error_body_from_response,
+    scrub_secret_params,
 )
 from dagnam._core.client.common import (
     quote_path_segment,
@@ -337,10 +338,13 @@ class TrainingClientMixin(BaseDagnamClient):
                 timeout=(STREAM_CONNECT_TIMEOUT, SSE_READ_TIMEOUT),
                 allow_redirects=ALLOW_REDIRECTS,
             )
+        # The SSE stream token rides in ``params`` (never in ``url``), so it is
+        # requests/urllib3 that embeds the composed ``?token=…`` URL in the
+        # exception text — scrub it before it reaches the error message.
         except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
+            raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
         except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            raise APIError(0, f"Request timed out: {scrub_secret_params(str(exc))}") from exc
 
         if not is_success_response(resp):
             code = resp.status_code

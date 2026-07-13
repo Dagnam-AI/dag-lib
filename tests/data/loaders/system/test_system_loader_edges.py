@@ -61,6 +61,37 @@ def test_helper_validation_and_safe_extract_rejects_escape(tmp_path: Path) -> No
         safe_extract_tar(tarball, tmp_path / "out")
 
 
+def _make_tar(path: Path, names_sizes: list[tuple[str, int]]) -> None:
+    import io
+
+    with tarfile.open(path, "w:gz") as archive:
+        for name, size in names_sizes:
+            info = tarfile.TarInfo(name)
+            info.size = size
+            archive.addfile(info, fileobj=io.BytesIO(b"x" * size))
+
+
+def test_safe_extract_tar_rejects_decompression_bomb(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    from dagnam.data.loaders.system.decoders import _helpers
+
+    # Too many members.
+    many = tmp_path / "many.tar.gz"
+    _make_tar(many, [(f"f{i}.txt", 1) for i in range(4)])
+    monkeypatch.setattr(_helpers, "_MAX_TAR_MEMBERS", 2)
+    with pytest.raises(DecodeError, match="too many members"):
+        safe_extract_tar(many, tmp_path / "out-many")
+
+    # Total uncompressed size over the cap.
+    monkeypatch.setattr(_helpers, "_MAX_TAR_MEMBERS", 200_000)
+    monkeypatch.setattr(_helpers, "_MAX_TAR_UNCOMPRESSED_BYTES", 4)
+    big = tmp_path / "big.tar.gz"
+    _make_tar(big, [("a.bin", 8)])
+    with pytest.raises(DecodeError, match="uncompressed size exceeds"):
+        safe_extract_tar(big, tmp_path / "out-big")
+
+
 def test_array_decoder_missing_artifact_and_key(tmp_path: Path) -> None:
     decoder = ArrayDecoder()
     with pytest.raises(DecodeError, match=r"no \.npz"):
@@ -299,10 +330,14 @@ def test_dispatch_artifact_dir_variants(tmp_path: Path, monkeypatch: PytestMonke
     no_url = {"id": "no-url", "filename": "missing.npz"}
     assert dispatch._artifact_dir(no_url) == tmp_path / "cache" / "no-url"  # type: ignore[attr-defined]
 
+    # A download_url that is a local filesystem path (not http/https) is
+    # hostile server input and must be refused, never silently copied (the old
+    # Path(url).exists() local-copy branch was an arbitrary-file-read vector).
     remote_source = tmp_path / "remote.npz"
     remote_source.write_bytes(b"remote")
     meta = {"id": "path-url", "filename": "remote.npz", "download_url": str(remote_source)}
-    assert (dispatch._artifact_dir(meta) / "remote.npz").read_bytes() == b"remote"  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="non-http"):
+        dispatch._artifact_dir(meta)  # type: ignore[attr-defined]
 
     checksum_file = tmp_path / "checked.bin"
     checksum = hashlib.sha256(b"abc").hexdigest()
@@ -335,3 +370,124 @@ def test_dispatch_artifact_dir_variants(tmp_path: Path, monkeypatch: PytestMonke
     assert (dispatch._artifact_dir(meta) / "download.npz").read_bytes() == b"net"  # type: ignore[attr-defined]
     assert dispatch._artifact_dir(meta) == tmp_path / "cache" / "download"  # type: ignore[attr-defined]
     assert dispatch._artifact_dir({"id": "empty"}) == tmp_path / "cache" / "empty"  # type: ignore[attr-defined]
+
+
+def test_dispatch_artifact_dir_rejects_server_path_traversal(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A hostile server descriptor cannot escape SYSTEM_CACHE_ROOT.
+
+    Both the dataset id and the artifact filename come from the server. A
+    traversal payload in either must land strictly inside the cache root, never
+    at an arbitrary path such as ~/.bashrc.
+    """
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(dispatch, "SYSTEM_CACHE_ROOT", cache_root)
+    outside = tmp_path / "outside.txt"
+
+    captured: dict[str, Path] = {}
+    monkeypatch.setattr(
+        dispatch,
+        "_download_artifact",
+        lambda _url, dest: captured.__setitem__("dest", dest) or dest.write_bytes(b"x"),
+    )
+
+    # Traversal in the filename resolves to a basename inside the cache dir.
+    meta: JsonObject = {
+        "id": "ds",
+        "filename": f"{'../' * 8}{outside.name}",
+        "download_url": "https://example.test/a",
+    }
+    dispatch._artifact_dir(meta)  # type: ignore[attr-defined]
+    assert not outside.exists()
+    assert cache_root.resolve() in captured["dest"].resolve().parents
+
+    # Traversal in the dataset id is percent-encoded into a single component.
+    captured.clear()
+    meta = {
+        "id": f"{'../' * 8}evil",
+        "filename": "a.npz",
+        "download_url": "https://example.test/a",
+    }
+    dispatch._artifact_dir(meta)  # type: ignore[attr-defined]
+    assert cache_root.resolve() in captured["dest"].resolve().parents
+
+    # A filename that reduces to nothing usable writes no file and returns the
+    # cache dir rather than a bogus destination.
+    captured.clear()
+    result = dispatch._artifact_dir(  # type: ignore[attr-defined]
+        {"id": "ds", "filename": "..", "download_url": "https://example.test/a"}
+    )
+    assert result == cache_root / "ds"
+    assert "dest" not in captured
+
+
+def test_safe_artifact_filename_reduces_to_basename() -> None:
+    assert dispatch._safe_artifact_filename("../../.bashrc") == ".bashrc"  # type: ignore[attr-defined]
+    assert dispatch._safe_artifact_filename("a/b/c.npz") == "c.npz"  # type: ignore[attr-defined]
+    assert dispatch._safe_artifact_filename("C:\\x\\d.bin") == "d.bin"  # type: ignore[attr-defined]
+    assert dispatch._safe_artifact_filename("..") == ""  # type: ignore[attr-defined]
+    assert dispatch._safe_artifact_filename("plain.npz") == "plain.npz"  # type: ignore[attr-defined]
+
+
+def test_download_artifact_rejects_non_http_scheme(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="non-http"):
+        dispatch._download_artifact("file:///etc/passwd", tmp_path / "x")  # type: ignore[attr-defined]
+
+
+def test_download_artifact_rejects_oversized_content_length(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    from dagnam._core.exceptions import DownloadTooLargeError
+
+    class _Resp:
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "100"}
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def iter_content(self, chunk_size: int) -> object:
+            yield b"x" * 100
+
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            pass
+
+    monkeypatch.setattr(dispatch, "resolve_max_download_bytes", lambda: 4)
+    monkeypatch.setattr(dispatch.requests, "get", lambda *_a, **_k: _Resp())
+    with pytest.raises(DownloadTooLargeError):
+        dispatch._download_artifact("https://example.test/a", tmp_path / "a.bin")
+    assert not (tmp_path / "a.bin").exists()
+    assert not (tmp_path / "a.bin.tmp").exists()
+
+
+def test_download_artifact_aborts_body_over_cap(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    from dagnam._core.exceptions import DownloadTooLargeError
+
+    class _Resp:
+        headers: ClassVar[dict[str, str]] = {}
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def iter_content(self, chunk_size: int) -> object:
+            yield b"xx"
+            yield b"xx"
+            yield b"xx"
+
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            pass
+
+    monkeypatch.setattr(dispatch, "resolve_max_download_bytes", lambda: 4)
+    monkeypatch.setattr(dispatch.requests, "get", lambda *_a, **_k: _Resp())
+    with pytest.raises(DownloadTooLargeError):
+        dispatch._download_artifact("https://example.test/a", tmp_path / "a.bin")
+    assert not (tmp_path / "a.bin").exists()
+    assert not (tmp_path / "a.bin.tmp").exists()

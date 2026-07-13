@@ -69,6 +69,21 @@ def touch_cache(dataset_id: str, base_dir: Path | None = None) -> None:
     access_file.write_text(str(time.time()), encoding="utf-8")
 
 
+def _is_managed_cache_entry(child: Path) -> bool:
+    """True if *child* is a dagnam-managed cache directory.
+
+    A managed entry carries a dagnam marker dotfile: ``.last_access`` (written by
+    :func:`touch_cache` for every dataset *and* checkpoint entry enrolled in LRU
+    accounting) or ``.checksum`` (written by :func:`save_checksum` after a
+    verified dataset download). Eviction requires one of these markers so it can
+    NEVER delete an unrelated directory that merely happens to sit next to the
+    cache root (e.g. when ``base_dir`` is a user-supplied path such as the
+    current working directory). The checkpoint cache has no ``.checksum`` for
+    S3-presigned downloads, so ``.last_access`` is the marker both caches share.
+    """
+    return (child / ".last_access").is_file() or (child / ".checksum").is_file()
+
+
 def _dir_size(root: Path) -> int:
     """Total size in bytes of the regular files under ``root``.
 
@@ -152,10 +167,18 @@ def evict_lru(max_size_bytes: int | None = None, base_dir: Path | None = None) -
         if total <= max_size_bytes:
             break
         ds_dir = base / entry["dataset_id"]
-        if ds_dir.exists():
-            shutil.rmtree(ds_dir)
-            total -= entry["size_bytes"]
-            evicted.append(entry["dataset_id"])
+        if not ds_dir.exists():
+            # Reported by get_cache_info but removed by a concurrent process
+            # before we reached it (a TOCTOU race); nothing to evict.
+            continue
+        if not _is_managed_cache_entry(ds_dir):
+            # Not a dagnam cache directory (no .checksum marker). Never delete
+            # an unrelated directory, even when base_dir points at a shared
+            # location such as the current working directory.
+            continue
+        shutil.rmtree(ds_dir)
+        total -= entry["size_bytes"]
+        evicted.append(entry["dataset_id"])
 
     return evicted
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 from dagnam._core.aio.base import BaseAsyncDagnamClient
@@ -94,15 +93,21 @@ class AsyncCodegenMixin(BaseAsyncDagnamClient):
         params: QueryParams = {"framework": framework}
         if version_id:
             params["version_id"] = version_id
-        resp = await self._request(
-            "GET", f"/api/v1/projects/{quote_path_segment(project_id)}/download-code", params=params
-        )
-        raise_for_codegen(resp)
+        url = f"{self.api_url}/api/v1/projects/{quote_path_segment(project_id)}/download-code"
+        # When writing to a file, stream straight to disk (bounded by the cap)
+        # rather than buffering the whole ZIP in memory via resp.content.
         if dest_path:
             dest = Path(dest_path)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(dest.write_bytes, resp.content)
+            async with self._client.stream(
+                "GET", url, headers=self._headers(), params=params
+            ) as resp:
+                if not resp.is_success:
+                    await resp.aread()
+                    raise_for_codegen(resp)
+                await self._stream_response_to_file(resp, dest)
             return dest
+        resp = await self._request("GET", url.removeprefix(self.api_url), params=params)
+        raise_for_codegen(resp)
         return resp.content
 
     async def download_code_zip(

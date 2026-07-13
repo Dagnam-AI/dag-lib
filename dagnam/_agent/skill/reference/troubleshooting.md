@@ -26,6 +26,10 @@ except DagnamError as exc:
 - Credentials/config: `~/.dagnam/config.json` (key is masked in `dagnam whoami` / `config list`).
 - Cache root: `~/.dagnam` by default, or `DAGNAM_CACHE_DIR`.
 
+## Security config keys (`~/.dagnam/config.json`)
+- `max_download_bytes` (int, default 100 GiB) — caps every on-disk download; an oversized body raises `DownloadTooLargeError` and the partial is deleted.
+- `require_checkpoint_checksum` (bool, default `false`) — when `true`, a checkpoint that arrives without a server checksum raises `ChecksumError` (and the unverified file is removed) instead of downloading with a warning. Turn this on when you only ever pull checkpoints that carry a server-side SHA-256, since checkpoints are `torch.load`'d downstream.
+
 ## Optional extras
 Some features need extras: `pip install 'dagnam[streaming]'` (SSE training streams),
 `'dagnam[pytorch]'`, `'dagnam[tensorflow]'`, `'dagnam[flax]'`, `'dagnam[audio]'`, `'dagnam[aio]'`

@@ -3,19 +3,42 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import requests
 
+from dagnam._core.client.base import resolve_max_download_bytes
+from dagnam._core.exceptions import DownloadTooLargeError
 from dagnam._types import JsonObject
+from dagnam.data.cache import cache_dir_name
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.loaders.system.bound_dataset import BoundNativeDataset
 from dagnam.data.loaders.system.common import SYSTEM_CACHE_ROOT
 from dagnam.data.loaders.system.decoders import get_decoder
 
 _DOWNLOAD_TIMEOUT = (30, 60)
+# Artifact URLs must be real network URLs. A non-http(s) value (a bare local
+# path, file://, etc.) is treated as hostile: the descriptor comes from the
+# server, and a local path would let it read/copy arbitrary local files.
+_ALLOWED_ARTIFACT_SCHEMES = frozenset({"http", "https"})
+
+
+def _safe_artifact_filename(raw: str) -> str:
+    """Reduce a server-supplied artifact filename to a safe basename.
+
+    The descriptor is server-controlled, so ``raw`` may contain traversal
+    (``../../.bashrc``), path separators, or a drive/stream prefix. Stripping to
+    the bare basename guarantees the result joins strictly inside the cache dir.
+    Returns ``""`` for a value that reduces to nothing usable so the caller can
+    fall back to the cache directory rather than write a bogus file.
+    """
+    candidate = PurePosixPath(raw.replace("\\", "/")).name.rsplit(":", 1)[-1]
+    if candidate in {"", ".", ".."}:
+        return ""
+    return candidate
 
 
 def detect_installed_framework() -> str:
@@ -61,15 +84,27 @@ def _copy_local_artifact(source: Path, destination: Path) -> None:
 
 
 def _download_artifact(url: str, destination: Path) -> None:
+    if urlparse(url).scheme not in _ALLOWED_ARTIFACT_SCHEMES:
+        raise ValueError(f"Refusing to fetch system dataset artifact from non-http(s) URL: {url!r}")
+    max_bytes = resolve_max_download_bytes()
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".tmp")
     tmp.unlink(missing_ok=True)
     try:
         with requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT) as response:
             response.raise_for_status()
+            length = response.headers.get("Content-Length")
+            if length is not None and int(length) > max_bytes:
+                raise DownloadTooLargeError(0, f"Artifact exceeds max_download_bytes={max_bytes}")
+            written = 0
             with tmp.open("wb") as handle:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     if chunk:
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise DownloadTooLargeError(
+                                0, f"Artifact exceeded max_download_bytes={max_bytes}"
+                            )
                         handle.write(chunk)
         tmp.replace(destination)
     except Exception:
@@ -100,11 +135,16 @@ def _ensure_verified_file(url: str, destination: Path, expected_sha256: str) -> 
 
 def _artifact_dir(meta: JsonObject) -> Path:
     """Resolve/download the local artifact directory for a system descriptor."""
+    # dataset_id and filename come from the server descriptor; both are
+    # sanitized so a hostile value can never escape SYSTEM_CACHE_ROOT.
     dataset_id = str(meta.get("id") or meta.get("name") or "system")
-    cache = SYSTEM_CACHE_ROOT / dataset_id
+    cache = SYSTEM_CACHE_ROOT / cache_dir_name(dataset_id)
     cache.mkdir(parents=True, exist_ok=True)
-    filename = _artifact_filename(meta)
-    if filename is None:
+    raw_filename = _artifact_filename(meta)
+    if raw_filename is None:
+        return cache
+    filename = _safe_artifact_filename(raw_filename)
+    if not filename:
         return cache
 
     destination = cache / filename
@@ -118,9 +158,9 @@ def _artifact_dir(meta: JsonObject) -> Path:
     url, checksum = _artifact_source(meta)
     if url is None:
         return cache
-    if Path(url).exists():
-        _copy_local_artifact(Path(url), destination)
-        return cache
+    # A ``download_url`` is a network URL, never a local path: the removed
+    # ``Path(url).exists()`` branch let a server-supplied path copy arbitrary
+    # local files into the cache. Local artifacts arrive only via ``file_path``.
     if checksum:
         _ensure_verified_file(url, destination, checksum.removeprefix("sha256:"))
     elif not destination.exists():

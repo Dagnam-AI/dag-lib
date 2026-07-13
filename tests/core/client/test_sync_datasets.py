@@ -201,6 +201,27 @@ def test_upload_dataset_timeout(
         client.upload_dataset(f, name="x", dataset_type="t", format="csv")
 
 
+def test_upload_dataset_uses_bounded_timeout(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    # timeout=None would hang forever on a dead socket; a (connect, read) tuple
+    # fails fast while a progressing upload keeps resetting the read timeout.
+    from dagnam._core.client.base import STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT
+
+    f = tmp_path / "data.csv"
+    f.write_text("x")
+    captured: dict[str, object] = {}
+
+    def _capture(*_a: object, **kw: object) -> None:
+        captured.update(kw)
+        raise requests.ConnectionError("stop after capture")
+
+    monkeypatch.setattr(requests, "post", _capture)
+    with pytest.raises(APIError):
+        client.upload_dataset(f, name="x", dataset_type="t", format="csv")
+    assert captured["timeout"] == (STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT)
+
+
 def test_upload_dataset_from_url(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/datasets/upload-url", json={"task_id": "t1"})
     result = client.upload_dataset_from_url(
@@ -304,13 +325,15 @@ def test_download_dataset_resume_disabled_without_partial(
 def test_download_dataset_resume_206(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:
-    # Pre-existing partial file
+    # Pre-existing partial file (3 bytes) -> Range: bytes=3-. A well-behaved 206
+    # confirms the offset via Content-Range, so the body appends.
     part = tmp_path / "ds.bin.part"
     part.write_bytes(b"abc")
     rmock.get(
         f"{API}/api/v1/datasets/ds1/download",
         content=b"def",
         status_code=206,
+        headers={"Content-Range": "bytes 3-5/6"},
     )
     out = client.download_dataset("ds1", tmp_path, filename="ds.bin", resume=True)
     assert out.read_bytes() == b"abcdef"

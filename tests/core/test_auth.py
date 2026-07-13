@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,10 @@ from dagnam._core.exceptions import AuthError
 
 
 @pytest.fixture(autouse=True)
-def reset_inline_state():
+def reset_inline_state(monkeypatch: PytestMonkeyPatch):
     """Auth module keeps mutable module-level state; reset it around each test."""
     auth_mod.configure(api_key=None, api_url=None)
+    monkeypatch.setattr(auth_mod, "_api_url_warned", False)
     yield
     auth_mod.configure(api_key=None, api_url=None)
 
@@ -98,3 +100,78 @@ def test_load_config_returns_empty_on_oserror(
 
 def test_get_config_value_default(isolated_config: Path) -> None:
     assert config_mod.get_config_value("missing", default="fallback") == "fallback"
+
+
+def _credential_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "credentials will be sent" in r.getMessage()]
+
+
+def test_get_api_url_warns_once_on_cleartext_env_url(
+    isolated_config: Path,
+    monkeypatch: PytestMonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_URL", "http://evil.example")
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url() == "http://evil.example"
+        auth_mod.get_api_url()  # second call: no duplicate warning
+    warnings = _credential_warnings(caplog)
+    assert len(warnings) == 1
+    assert "cleartext http" in warnings[0]
+
+
+def test_get_api_url_warns_on_non_default_https_config_host(
+    isolated_config: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (isolated_config / "config.json").write_text(json.dumps({"api_url": "https://other.example"}))
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url() == "https://other.example"
+    warnings = _credential_warnings(caplog)
+    assert len(warnings) == 1
+    assert "cleartext" not in warnings[0]
+
+
+def test_get_api_url_default_host_via_env_stays_silent(
+    isolated_config: Path,
+    monkeypatch: PytestMonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Checked (env origin) but benign: default host over https — no warning.
+    monkeypatch.setenv("DAGNAM_API_URL", "https://api.dagnam.ai")
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url() == "https://api.dagnam.ai"
+    assert not _credential_warnings(caplog)
+
+
+def test_get_api_url_override_and_inline_stay_silent(
+    isolated_config: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Explicit override and configure(api_url=…) are deliberate programmatic
+    # choices — never warned, even for a non-default cleartext host.
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url("http://staging.internal") == "http://staging.internal"
+        auth_mod.configure(api_url="http://staging.internal")
+        assert auth_mod.get_api_url() == "http://staging.internal"
+    assert not _credential_warnings(caplog)
+
+
+def test_get_api_url_default_fallback_stays_silent(
+    isolated_config: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url() == "https://api.dagnam.ai"
+    assert not _credential_warnings(caplog)
+
+
+def test_warn_helper_allows_cleartext_localhost(
+    isolated_config: Path,
+    monkeypatch: PytestMonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # http://localhost is non-default (warned as such) but NOT flagged cleartext.
+    monkeypatch.setenv("DAGNAM_API_URL", "http://localhost:8000")
+    with caplog.at_level(logging.WARNING):
+        assert auth_mod.get_api_url() == "http://localhost:8000"
+    warnings = _credential_warnings(caplog)
+    assert len(warnings) == 1
+    assert "cleartext" not in warnings[0]

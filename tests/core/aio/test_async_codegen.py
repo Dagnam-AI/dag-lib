@@ -120,3 +120,14 @@ async def test_async_get_code_status(client: AsyncDagnamClient, mock: RespxMockR
         return_value=httpx.Response(200, json={"status": "done"})
     )
     assert await client.get_code_status("p1", "t1") == {"status": "done"}
+
+
+async def test_async_download_code_to_file_error_status(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    """A non-success status while streaming to a file surfaces a codegen error."""
+    from dagnam._core.exceptions import CodegenError
+
+    mock.get("/api/v1/projects/p1/download-code").mock(return_value=httpx.Response(500))
+    with pytest.raises(CodegenError):
+        await client.download_code("p1", dest_path=tmp_path / "out.zip")

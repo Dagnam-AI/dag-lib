@@ -14,3 +14,4 @@ Datasets and checkpoints are cached on disk so repeat runs are fast and offline-
 ## Config
 - Set `DAGNAM_CACHE_DIR` to relocate the cache root (otherwise it defaults under `~/.dagnam`).
 - `load_dataset` reads from the cache transparently; delete entries with `dagnam cache clear` if disk is tight.
+- `max_download_bytes` (`~/.dagnam/config.json`, integer bytes, default 100 GiB) caps every on-disk download — datasets, checkpoints, and system-dataset artifacts. A download whose size exceeds the cap is refused up-front (or aborted mid-stream) with `DownloadTooLargeError`, and the partial file is deleted, so a hostile or misconfigured server cannot fill your disk. A non-integer or non-positive value falls back to the default.

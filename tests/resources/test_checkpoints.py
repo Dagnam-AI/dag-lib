@@ -115,6 +115,59 @@ class TestDownloadCheckpoint:
         assert path.exists()
         assert any("checksum" in record.message.lower() for record in caplog.records)
 
+    def test_missing_checksum_fails_closed_when_required(
+        self, ck_cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # With require_checkpoint_checksum set, a no-checksum download must raise
+        # and the unverified file must not be left on disk.
+        import dagnam.resources.checkpoints as cp
+
+        monkeypatch.setattr(
+            cp,
+            "get_config_value",
+            lambda key, default=None: True if key == "require_checkpoint_checksum" else default,
+        )
+
+        def side_effect(job_id: str, checkpoint_id: str, dest: Path) -> tuple[Path, None]:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"weights")
+            return dest, None
+
+        client = MagicMock(spec=DagnamClient)
+        client.download_checkpoint_stream.side_effect = side_effect
+
+        with pytest.raises(ChecksumError, match="no server checksum"):
+            download_checkpoint("job_1", "ck_1", client=client, cache_dir=ck_cache)
+        assert not (ck_cache / "job_1" / "ck_1.pt").exists()
+
+    def test_missing_checksum_required_removal_tolerates_oserror(
+        self, ck_cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The fail-closed unlink is best-effort: a removal error must not mask
+        # the ChecksumError the caller needs to see.
+        import dagnam.resources.checkpoints as cp
+
+        monkeypatch.setattr(
+            cp,
+            "get_config_value",
+            lambda key, default=None: True if key == "require_checkpoint_checksum" else default,
+        )
+
+        def side_effect(job_id: str, checkpoint_id: str, dest: Path) -> tuple[Path, None]:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"weights")
+            return dest, None
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise OSError("unlink denied")
+
+        monkeypatch.setattr(Path, "unlink", _boom)
+        client = MagicMock(spec=DagnamClient)
+        client.download_checkpoint_stream.side_effect = side_effect
+
+        with pytest.raises(ChecksumError, match="no server checksum"):
+            download_checkpoint("job_1", "ck_1", client=client, cache_dir=ck_cache)
+
     def test_checksum_mismatch_raises_and_removes(self, ck_cache: Path) -> None:
         def side_effect(job_id: str, checkpoint_id: str, dest: Path):
             dest.parent.mkdir(parents=True, exist_ok=True)

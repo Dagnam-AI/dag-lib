@@ -56,6 +56,10 @@ class APIError(DagnamError):
         super().__init__(f"API error {status_code}: {message}")
 
 
+class DownloadTooLargeError(APIError):
+    """A download exceeded the configured ``max_download_bytes`` ceiling."""
+
+
 class ChecksumError(DagnamError):
     """Downloaded file checksum does not match server-reported checksum."""
 

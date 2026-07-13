@@ -48,8 +48,11 @@ def test_dataset_list_with_rows(
 
 
 def test_dataset_list_json_forwards_filters_and_overrides(
-    run_cli: CliRunner, capsys: StrCapture
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
+    # The API key is resolved from the environment/config, never a CLI flag
+    # (an --api-key argv value would leak via ps/shell history).
+    monkeypatch.setenv("DAGNAM_API_KEY", "key")
     list_datasets = mock.Mock(return_value=[{"id": "ds-1"}])
     with mock.patch("dagnam._core.client.DagnamClient") as client:
         client.return_value.list_datasets = list_datasets
@@ -63,8 +66,6 @@ def test_dataset_list_json_forwards_filters_and_overrides(
                 "iris",
                 "--api-url",
                 "https://example.test",
-                "--api-key",
-                "key",
                 "--json",
             ]
         )

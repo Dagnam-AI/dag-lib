@@ -40,11 +40,10 @@ This document is for maintainers publishing `dagnam` to PyPI.
    `uv build`, leaving `dist/dagnam-<version>-py3-none-any.whl` plus the sdist.
    Run `python -m twine check dist/*` afterward as above.
 
-   The same script feeds **local training tests**: with
-   `DAGNAM_PACKAGE_SOURCE=wheelhouse` and `DAGNAM_LOCAL_PATH=<dag-lib>` set in
-   `mvp-backend`, the training pipeline installs `dagnam` from this `dist/` via
-   `uv pip install --find-links`, so a real training job exercises the exact
-   wheel you're about to publish.
+   The same script can feed a **local end-to-end test** of a downstream
+   consumer: point the consumer at this `dist/` (e.g. via
+   `uv pip install --find-links`) so a real workflow exercises the exact wheel
+   you're about to publish.
 
 5. Install the wheel in a clean environment and smoke-test import, CLI help, and
    metadata:

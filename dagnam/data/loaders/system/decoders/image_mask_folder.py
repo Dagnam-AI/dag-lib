@@ -11,6 +11,7 @@ from dagnam.data.loaders.system.decoders._helpers import (
     read_mask,
     read_rgb,
     safe_extract_tar,
+    safe_subpath,
     spec_dict,
 )
 from dagnam.data.loaders.system.decoders.base import DecodeError
@@ -38,8 +39,8 @@ class ImageMaskFolderDecoder:
         if mask_name is None:
             raise DecodeError("image_mask_folder requires a mask column")
         mask_spec = cast("dict[str, Any]", layout[mask_name])
-        image_dir = root / str(image_spec["dir"])
-        mask_dir = root / str(mask_spec["dir"])
+        image_dir = safe_subpath(root, str(image_spec["dir"]))
+        mask_dir = safe_subpath(root, str(mask_spec["dir"]))
         image_exts = extensions(image_spec)
         mask_exts = extensions(mask_spec)
         if not image_dir.exists() or not mask_dir.exists():

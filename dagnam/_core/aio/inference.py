@@ -8,7 +8,8 @@ import json
 import httpx
 from httpx_sse import aconnect_sse
 
-from dagnam._core.aio.base import BaseAsyncDagnamClient
+from dagnam._core.aio.base import SSE_READ_TIMEOUT, BaseAsyncDagnamClient
+from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
@@ -78,7 +79,7 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
                 url,
                 params=params,
                 headers={"Accept": "text/event-stream"},
-                timeout=self.timeout,
+                timeout=httpx.Timeout(self.timeout, read=SSE_READ_TIMEOUT),
             ) as event_source:
                 response = event_source.response
                 if not 200 <= response.status_code < 300:
@@ -87,9 +88,9 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
                 async for sse in event_source.aiter_sse():
                     yield parse_raw_event(sse)
         except httpx.ConnectError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
+            raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
         except httpx.ConnectTimeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            raise APIError(0, f"Request timed out: {scrub_secret_params(str(exc))}") from exc
 
     def stream_predict(self, deployment_id: str, inputs: JsonObject) -> AsyncIterator[SSEEvent]:
         """Yield streaming-predict SSE events (``token`` … ``complete``/``error``).

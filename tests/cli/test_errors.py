@@ -136,6 +136,22 @@ def test_render_report_aligns_fields_and_tries() -> None:
     ]
 
 
+def test_render_report_sanitizes_server_supplied_escapes() -> None:
+    # A hostile backend error body (the Detail field) must not reach the TTY as
+    # a live escape; title and bullets are sanitised too.
+    report = errors_mod.ErrorReport(
+        title="\x1b]0;pwned\x07broke",
+        fields=[("Detail", "\x1b[31mred\x9b2J")],
+        bullets=["\x1bhostile bullet"],
+    )
+    out = errors_mod.render_report(report, color=False)
+    assert "\x1b" not in out
+    assert "\x9b" not in out
+    assert "\x07" not in out
+    assert "broke" in out
+    assert "red" in out
+
+
 def test_render_message_with_and_without_hint() -> None:
     with_hint = errors_mod.render_message("bad input", hint="Fix the JSON and retry.")
     assert "Error: bad input" in with_hint

@@ -270,6 +270,9 @@ class TestEvictLru:
         ds_dir = cache_dir / name
         ds_dir.mkdir(parents=True, exist_ok=True)
         (ds_dir / "data.bin").write_bytes(b"x" * size)
+        # Every real cache entry carries a .checksum marker (see save_checksum);
+        # eviction only ever deletes directories that have one.
+        (ds_dir / ".checksum").write_text("sha256:0", encoding="utf-8")
         if last_access is not None:
             (ds_dir / ".last_access").write_text(str(last_access), encoding="utf-8")
 
@@ -393,6 +396,49 @@ class TestEvictLru:
         assert "ghost" not in evicted
         assert "real" in evicted
         assert not (cache_dir / "real").exists()
+
+    def test_evicts_checkpoint_style_entry_without_checksum(self, tmp_path: Path) -> None:
+        """A checkpoint cache entry (only .last_access, no .checksum) is evictable.
+
+        download_checkpoint marks entries via touch_cache only (S3-presigned
+        checkpoints have no server checksum), so the managed-entry marker must
+        recognize .last_access, not just .checksum, or checkpoint eviction
+        silently becomes a no-op.
+        """
+        ckpt_dir = tmp_path / "job-1"
+        ckpt_dir.mkdir()
+        (ckpt_dir / "ckpt.pt").write_bytes(b"z" * 200)
+        (ckpt_dir / ".last_access").write_text("1000.0", encoding="utf-8")
+
+        evicted = evict_lru(max_size_bytes=0, base_dir=tmp_path)
+
+        assert evicted == ["job-1"]
+        assert not ckpt_dir.exists()
+
+    def test_never_deletes_unmanaged_sibling_directory(self, tmp_path: Path) -> None:
+        """Eviction must NEVER delete a directory without a .checksum marker.
+
+        Reproduces the data-loss condition: `dagnam dataset download` defaults
+        --output-dir to the current directory, which becomes the eviction
+        base_dir. Any unrelated sibling directory in that location must survive
+        even when the cache budget is exceeded.
+        """
+        # An unrelated user directory that merely sits next to the cache — no
+        # dagnam marker. This is what `dataset download .` would put at risk.
+        important = tmp_path / "important-project"
+        important.mkdir()
+        (important / "thesis.txt").write_bytes(b"y" * 10_000)
+
+        # A genuine dagnam cache entry alongside it.
+        self._make_dataset(tmp_path, "ds-managed", 100, last_access=1000.0)
+
+        evicted = evict_lru(max_size_bytes=0, base_dir=tmp_path)
+
+        assert evicted == ["ds-managed"]
+        assert not (tmp_path / "ds-managed").exists()
+        # The unrelated directory and its contents are untouched.
+        assert important.exists()
+        assert (important / "thesis.txt").read_bytes() == b"y" * 10_000
 
 
 class TestDefaultMaxCacheBytes:

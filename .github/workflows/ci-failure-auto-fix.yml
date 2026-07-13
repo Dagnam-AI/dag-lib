@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
@@ -54,7 +54,7 @@ jobs:
 
       - name: Get CI failure details
         id: failure_details
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const run = await github.rest.actions.getWorkflowRun({
@@ -92,7 +92,7 @@ jobs:
 
       - name: Fix CI failures with Claude
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
         with:
           # Pro/Max subscription auth (generated via `claude setup-token`)
           anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
