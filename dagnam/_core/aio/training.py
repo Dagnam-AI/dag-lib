@@ -35,7 +35,7 @@ from dagnam._core.client.common import (
     response_json_value,
     stream_query_params,
 )
-from dagnam._core.exceptions import APIError, TrainingJobNotFoundError
+from dagnam._core.exceptions import APIError, ResponseError, TrainingJobNotFoundError
 from dagnam._core.sse import (
     TERMINAL_TRAINING_EVENTS,
     SSEEvent,
@@ -62,6 +62,7 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         job_id: str | None = None,
         params: QueryParams | None = None,
         json_body: JsonValue = None,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
         """Issue an authenticated training request and decode the body.
 
@@ -69,20 +70,34 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         supplied (collection routes have no job to miss); other non-2xx codes are
         mapped by :func:`raise_for_generic` (401 → auth, 402/413 → quota, else
         :class:`APIError` carrying the backend detail).
+
+        ``idempotent=True`` mints an ``Idempotency-Key`` so a transient failure
+        on a create POST retries into a server-side replay, mirroring the sync
+        client.
         """
-        resp = await self._request(method, path, params=params, json=json_body)
-        raise_for_generic(resp, TrainingJobNotFoundError if job_id else None, job_id)
+        resp = await self._request(
+            method,
+            path,
+            params=params,
+            json=json_body,
+            raise_for=lambda r: raise_for_generic(
+                r, TrainingJobNotFoundError if job_id else None, job_id
+            ),
+            idempotent=idempotent,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     async def create_training_job(self, payload: JsonObject) -> JsonObject:
         """Create a platform training job. ``POST /api/v1/training/jobs``."""
         return ensure_json_object(
-            await self._training_req("POST", "/api/v1/training/jobs", json_body=payload)
+            await self._training_req(
+                "POST", "/api/v1/training/jobs", json_body=payload, idempotent=True
+            )
         )
 
     async def register_local_run(
@@ -193,7 +208,10 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         """List distribution strategies available to the credential.
 
         ``GET /api/v1/training/allowed-strategies`` returns a flat
-        ``dict[str, bool]`` mapping each strategy label to its availability.
+        ``{strategy_label: available}`` map plus a registry-driven
+        ``required_tiers`` ``{strategy_label: tier}`` entry naming the minimum
+        tier that unlocks each *lockable* strategy (free strategies omitted).
+        The whole object is returned untouched.
         """
         return ensure_json_object(
             await self._training_req("GET", "/api/v1/training/allowed-strategies")
@@ -324,8 +342,8 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
             "POST",
             f"/api/v1/training/jobs/{quote_path_segment(job_id)}/metrics/events",
             json=payload,
+            raise_for=lambda r: raise_for_job_response(r, job_id),
         )
-        raise_for_job_response(resp, job_id)
         return response_json_object(resp)
 
     async def _open_training_stream(

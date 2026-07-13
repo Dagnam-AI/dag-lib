@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from tests.typing_helpers import PytestMonkeyPatch
 
+from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject, NativeSplit, TensorflowDataset
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.loaders.system import dispatch
@@ -265,13 +266,12 @@ def test_converter_compatibility_prefers_framework_native_when_also_generic() ->
 class _Response:
     headers: ClassVar[dict[str, str]] = {"Content-Length": "3"}
 
-    def __init__(self, chunks: list[bytes], fail: bool = False) -> None:
+    def __init__(self, chunks: list[bytes], status: int = 200) -> None:
         self._chunks = chunks
-        self._fail = fail
+        self.status_code = status
 
-    def raise_for_status(self) -> None:
-        if self._fail:
-            raise RuntimeError("boom")
+    def close(self) -> None:
+        return None
 
     def iter_content(self, chunk_size: int):
         del chunk_size
@@ -303,6 +303,8 @@ def test_dispatch_artifact_helpers(tmp_path: Path, monkeypatch: PytestMonkeyPatc
     dispatch._copy_local_artifact(source, copied)  # type: ignore[attr-defined]
     assert copied.read_bytes() == b"abc"
 
+    # The empty middle chunk exercises the ``if chunk:`` skip guard in
+    # ``_download_artifact`` (a real transport never yields an empty chunk).
     monkeypatch.setattr(
         "dagnam.data.loaders.system.dispatch.requests.get",
         lambda *a, **k: _Response([b"a", b"", b"b"]),
@@ -311,12 +313,14 @@ def test_dispatch_artifact_helpers(tmp_path: Path, monkeypatch: PytestMonkeyPatc
     dispatch._download_artifact("https://example.test/d.bin", downloaded)  # type: ignore[attr-defined]
     assert downloaded.read_bytes() == b"ab"
 
+    # A non-transient error status is mapped to APIError and not retried; the
+    # staged .tmp file is cleaned up on failure.
     monkeypatch.setattr(
         "dagnam.data.loaders.system.dispatch.requests.get",
-        lambda *a, **k: _Response([], fail=True),
+        lambda *a, **k: _Response([], status=404),
     )
     failed = tmp_path / "failed.bin"
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(APIError):
         dispatch._download_artifact("https://example.test/f.bin", failed)  # type: ignore[attr-defined]
     assert not failed.with_suffix(".bin.tmp").exists()
 
@@ -442,6 +446,7 @@ def test_download_artifact_rejects_oversized_content_length(
 
     class _Resp:
         headers: ClassVar[dict[str, str]] = {"Content-Length": "100"}
+        status_code: ClassVar[int] = 200
 
         def raise_for_status(self) -> None:
             pass
@@ -470,6 +475,7 @@ def test_download_artifact_aborts_body_over_cap(
 
     class _Resp:
         headers: ClassVar[dict[str, str]] = {}
+        status_code: ClassVar[int] = 200
 
         def raise_for_status(self) -> None:
             pass

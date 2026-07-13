@@ -25,6 +25,7 @@ from dagnam._core.client.common import (
     response_json_object,
     response_json_value,
 )
+from dagnam._core.exceptions import ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue
 
 # The backend's required machine confirmation token for account deletion - the
@@ -148,27 +149,18 @@ class AccountClientMixin(BaseDagnamClient):
         self, method: str, path: str, json_body: JsonObject | None = None
     ) -> JsonValue | str | None:
         url = f"{self.api_url}{path}"
-        try:
-            resp = requests.request(
-                method,
-                url,
-                headers=self._headers(),
-                json=json_body,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_generic(resp)
-
+        resp = self._request(
+            method,
+            url,
+            raise_for=lambda r: raise_for_generic(r),
+            json=json_body,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     def get_settings(self) -> JsonObject:

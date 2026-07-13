@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from contextlib import closing
+import logging
 from pathlib import Path, PurePosixPath
+import random
 import re
 import sys
+import time
+from typing import Any
+import uuid
 
 import requests
 from tqdm import tqdm
 
-from dagnam._core.client.common import safe_response_text
+from dagnam._core._retry import RetryBudget, run_with_retry
+from dagnam._core.client.common import build_url, safe_response_text
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import (
     APIError,
@@ -18,9 +25,12 @@ from dagnam._core.exceptions import (
     DatasetNotFoundError,
     DeploymentNotFoundError,
     DownloadTooLargeError,
+    ResponseError,
     TrainingJobNotFoundError,
 )
 from dagnam._types import JsonArray, JsonObject, JsonValue, ResponseLike, StatusResponseLike
+
+_HTTP_LOGGER = logging.getLogger("dagnam.http")
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
@@ -115,13 +125,88 @@ class BaseDagnamClient:
     def __init__(self, api_url: str, api_key: str) -> None:
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
+        self._session = requests.Session()
+        self._retry_budget = RetryBudget()
+        self._sleep: Callable[[float], None] = time.sleep
+        self._rng: Callable[[], float] = random.random
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _request(
+        self,
+        method: str,
+        path_or_url: str,
+        *,
+        raise_for: Callable[[requests.Response], None],
+        json: Any = None,
+        params: Any = None,
+        data: Any = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
+        allow_redirects: bool = True,
+        idempotent: bool = False,
+        idempotency_key: str | None = None,
+    ) -> requests.Response:
+        """Issue a request with shared transport mapping, status mapping, and retry.
+
+        ``raise_for`` is the per-endpoint status mapper (e.g.
+        ``lambda r: raise_for_dataset(r, dataset_id)``); it turns a transient
+        429/5xx into ``APIError`` (retried) and a domain 404 into its typed
+        exception (surfaced immediately). POSTs retry only when ``idempotent`` (a
+        key is minted) or a key is supplied.
+        """
+        url = (
+            path_or_url
+            if path_or_url.startswith(("http://", "https://"))
+            else build_url(self.api_url, path_or_url)
+        )
+        req_headers = dict(self._headers())
+        if headers:
+            req_headers.update(headers)
+        if idempotent and idempotency_key is None:
+            idempotency_key = str(uuid.uuid4())
+        if idempotency_key is not None:
+            req_headers["Idempotency-Key"] = idempotency_key
+
+        method_upper = method.upper()
+        retryable = method_upper in {"GET", "HEAD", "PUT", "DELETE"} or bool(idempotency_key)
+
+        def _attempt() -> requests.Response:
+            try:
+                resp = self._session.request(
+                    method_upper,
+                    url,
+                    json=json,
+                    params=params,
+                    data=data,
+                    headers=req_headers,
+                    timeout=timeout,
+                    allow_redirects=allow_redirects,
+                )
+            except requests.RequestException as exc:
+                raise APIError(0, f"Request failed: {exc}") from exc
+            try:
+                raise_for(resp)
+            except APIError as exc:
+                exc.retry_after_header = resp.headers.get("Retry-After")
+                raise
+            return resp
+
+        return run_with_retry(
+            _attempt,
+            retryable=retryable,
+            budget=self._retry_budget,
+            sleep=self._sleep,
+            rng=self._rng,
+            logger=_HTTP_LOGGER,
+            label=f"{method_upper} {url}",
+            idempotency_key=idempotency_key,
+        )
+
     @staticmethod
     def _expect_object(value: JsonValue | str | None) -> JsonObject:
-        """Narrow a decoded response body to a JSON object or raise.
+        """Narrow a decoded response body to a JSON object or raise ResponseError.
 
         Shared by the resource mixins so every ``GET``/``POST`` that promises an
         object body fails loudly (rather than mis-typing) when the backend
@@ -129,7 +214,7 @@ class BaseDagnamClient:
         """
         if isinstance(value, dict):
             return value
-        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
+        raise ResponseError(0, f"Expected JSON object, got {type(value).__name__}")
 
     @staticmethod
     def _expect_array(value: JsonValue | str | None) -> JsonArray:

@@ -198,17 +198,20 @@ class TestChecksumMismatch:
         }
         dataset_id = str(meta["id"])
 
+        def _fake_download(_ds_id: str, output_dir: Path, **_kwargs: object) -> Path:
+            # The locked flow downloads into a staging dir; write the (bad) bytes there.
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            staged = out / "data.csv"
+            staged.write_bytes(bad_content)
+            return staged
+
         with (
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
-            patch.object(DagnamClient, "download_dataset") as mock_dl,
+            patch.object(DagnamClient, "download_dataset", side_effect=_fake_download),
         ):
-            dest = tmp_path / dataset_id / "data.csv"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(bad_content)
-            mock_dl.return_value = dest
-
             with pytest.raises(ChecksumError, match="Checksum mismatch"):
                 load_dataset(dataset_id, cache_dir=str(tmp_path))
 
@@ -225,15 +228,20 @@ class TestSystemDownloadPath:
             "source_type": "system",
         }
 
-        dest = tmp_path / "mnist-digits" / "data.csv"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(csv_content)
+        def _fake_download(_ds_id: str, output_dir: Path, **_kwargs: object) -> Path:
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            staged = out / "data.csv"
+            staged.write_bytes(csv_content)
+            return staged
 
         with (
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
-            patch.object(DagnamClient, "download_system_dataset", return_value=dest) as mock_dl,
+            patch.object(
+                DagnamClient, "download_system_dataset", side_effect=_fake_download
+            ) as mock_dl,
             patch(
                 "dagnam.data.loaders.system.load_system_dataset",
                 side_effect=RuntimeError("no tfds"),

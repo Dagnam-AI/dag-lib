@@ -14,7 +14,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import RespxMockRouter
+    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
 
@@ -259,3 +259,65 @@ async def test_async_collect_deployment_metrics_409(
     )
     with pytest.raises(DeploymentStateError):
         await client.collect_deployment_metrics("dep1")
+
+
+# ---------------------------------------------------------------- transient retry (Plan 03)
+
+
+async def test_async_get_deployment_retries_transient(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    monkeypatch.setattr(client, "_rng", lambda: 1.0)
+    mock.get("/api/v1/deployments/d1").mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(200, json={"id": "d1"}),
+        ]
+    )
+    dep = await client.get_deployment("d1")
+    assert dep["id"] == "d1"
+
+
+async def test_async_get_deployment_404_not_retried(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.get("/api/v1/deployments/missing").mock(return_value=httpx.Response(404, json={}))
+    with pytest.raises(DeploymentNotFoundError):
+        await client.get_deployment("missing")
+    assert route.call_count == 1
+
+
+async def test_async_create_deployment_sends_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments").mock(
+        return_value=httpx.Response(201, json={"id": "dep1"})
+    )
+    await client.create_deployment({"project_id": "p1"})
+    assert route.calls.last.request.headers.get("Idempotency-Key")
+
+
+async def test_async_create_deployment_retries_transient_with_same_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    client._rng = lambda: 1.0
+    route = mock.post("/api/v1/deployments").mock(
+        side_effect=[
+            httpx.Response(503, json={}),
+            httpx.Response(201, json={"id": "dep1"}),
+        ]
+    )
+    await client.create_deployment({"project_id": "p1"})
+    assert route.call_count == 2
+    keys = {c.request.headers.get("Idempotency-Key") for c in route.calls}
+    assert len(keys) == 1
+    assert next(iter(keys))

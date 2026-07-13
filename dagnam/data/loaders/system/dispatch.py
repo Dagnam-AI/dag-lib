@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path, PurePosixPath
+import random
 import shutil
+import time
 from typing import Any, cast
 from urllib.parse import urlparse
 
 import requests
 
+from dagnam._core._retry import RetryBudget, run_with_retry
 from dagnam._core.client.base import resolve_max_download_bytes
-from dagnam._core.exceptions import DownloadTooLargeError
+from dagnam._core.exceptions import APIError, DownloadTooLargeError
 from dagnam._types import JsonObject
 from dagnam.data.cache import cache_dir_name
 from dagnam.data.dataset import DagnamDataset
@@ -24,6 +28,13 @@ _DOWNLOAD_TIMEOUT = (30, 60)
 # path, file://, etc.) is treated as hostile: the descriptor comes from the
 # server, and a local path would let it read/copy arbitrary local files.
 _ALLOWED_ARTIFACT_SCHEMES = frozenset({"http", "https"})
+
+# Module-level so tests can inject a no-op sleep / deterministic RNG. The budget
+# is shared across artifact downloads, mirroring the client's per-instance one.
+_RETRY_SLEEP = time.sleep
+_RETRY_RNG = random.random
+_DISPATCH_BUDGET = RetryBudget()
+_HTTP_LOGGER = logging.getLogger("dagnam.http")
 
 
 def _safe_artifact_filename(raw: str) -> str:
@@ -83,6 +94,37 @@ def _copy_local_artifact(source: Path, destination: Path) -> None:
     shutil.copyfile(source, destination)
 
 
+def _open_artifact_response(url: str) -> requests.Response:
+    """Open the artifact download, retrying only the connect/initial-response phase.
+
+    Transport errors and transient (429/5xx) initial responses are retried via
+    the shared retry policy and mapped to :class:`APIError`; a non-transient
+    error status (e.g. 404) surfaces immediately. The streamed body is *not*
+    retried by the caller — a mid-stream failure is never silently restarted.
+    """
+
+    def _attempt() -> requests.Response:
+        try:
+            response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT)
+        except requests.RequestException as exc:
+            raise APIError(0, f"Artifact download failed: {exc}") from exc
+        if not (200 <= response.status_code < 300):
+            status = response.status_code
+            response.close()
+            raise APIError(status, f"Artifact download failed: HTTP {status}")
+        return response
+
+    return run_with_retry(
+        _attempt,
+        retryable=True,
+        budget=_DISPATCH_BUDGET,
+        sleep=_RETRY_SLEEP,
+        rng=_RETRY_RNG,
+        logger=_HTTP_LOGGER,
+        label=f"GET {url}",
+    )
+
+
 def _download_artifact(url: str, destination: Path) -> None:
     if urlparse(url).scheme not in _ALLOWED_ARTIFACT_SCHEMES:
         raise ValueError(f"Refusing to fetch system dataset artifact from non-http(s) URL: {url!r}")
@@ -91,21 +133,23 @@ def _download_artifact(url: str, destination: Path) -> None:
     tmp = destination.with_suffix(destination.suffix + ".tmp")
     tmp.unlink(missing_ok=True)
     try:
-        with requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT) as response:
-            response.raise_for_status()
+        # Connect/initial-response phase is retried (transient 429/5xx + transport
+        # errors) via _open_artifact_response; the streamed body is capped so a
+        # hostile server cannot fill the disk. _open_artifact_response already
+        # rejects a non-2xx status, so no separate raise_for_status() is needed.
+        with _open_artifact_response(url) as response, tmp.open("wb") as handle:
             length = response.headers.get("Content-Length")
             if length is not None and int(length) > max_bytes:
                 raise DownloadTooLargeError(0, f"Artifact exceeds max_download_bytes={max_bytes}")
             written = 0
-            with tmp.open("wb") as handle:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        written += len(chunk)
-                        if written > max_bytes:
-                            raise DownloadTooLargeError(
-                                0, f"Artifact exceeded max_download_bytes={max_bytes}"
-                            )
-                        handle.write(chunk)
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise DownloadTooLargeError(
+                            0, f"Artifact exceeded max_download_bytes={max_bytes}"
+                        )
+                    handle.write(chunk)
         tmp.replace(destination)
     except Exception:
         tmp.unlink(missing_ok=True)

@@ -29,6 +29,7 @@ class RequestsRecord(Protocol):
     headers: Mapping[str, str]
     method: str
     path: str
+    url: str
     qs: dict[str, list[str]]
     text: str | None
 
@@ -37,12 +38,15 @@ class RequestsRecord(Protocol):
 
 class RequestsMocker(Protocol):
     last_request: RequestsRecord
+    call_count: int
 
-    def get(self, url: str, **kwargs: object) -> object: ...
-    def post(self, url: str, **kwargs: object) -> object: ...
-    def put(self, url: str, **kwargs: object) -> object: ...
-    def patch(self, url: str, **kwargs: object) -> object: ...
-    def delete(self, url: str, **kwargs: object) -> object: ...
+    # The optional positional ``*args`` carries requests_mock's ``response_list``
+    # (a list of per-attempt response dicts) used to script sequential responses.
+    def get(self, url: str, *args: object, **kwargs: object) -> object: ...
+    def post(self, url: str, *args: object, **kwargs: object) -> object: ...
+    def put(self, url: str, *args: object, **kwargs: object) -> object: ...
+    def patch(self, url: str, *args: object, **kwargs: object) -> object: ...
+    def delete(self, url: str, *args: object, **kwargs: object) -> object: ...
 
 
 class RespxCall(Protocol):
@@ -52,6 +56,7 @@ class RespxCall(Protocol):
 class RespxRoute(Protocol):
     calls: Sequence[RespxCall]
     called: bool
+    call_count: int
 
     def mock(self, **kwargs: object) -> RespxRoute: ...
 

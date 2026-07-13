@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import pytest
@@ -225,3 +226,87 @@ class TestCustomStateKey:
     def test_requires_success_state(self) -> None:
         with pytest.raises(ValueError):
             LongRunningOperation(poll=lambda: {}, success_states=[])
+
+
+# ---------------------------------------------------------------------------
+# Task 8: LRO error-retry unified onto the shared jittered-backoff policy
+# ---------------------------------------------------------------------------
+
+
+def _recording_sleep(clk: FakeClock, slept: list[float]) -> Callable[[float], None]:
+    def _sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clk.sleep(seconds)
+
+    return _sleep
+
+
+def test_lro_uses_shared_transient_status() -> None:
+    from dagnam._core import lro
+    from dagnam._core._retry import TRANSIENT_STATUS
+
+    assert lro.TRANSIENT_STATUS is TRANSIENT_STATUS
+
+
+def test_lro_error_retry_uses_jittered_backoff_bounds() -> None:
+    """The error-retry path (NOT the normal poll cadence) now goes through the
+    shared compute_backoff jitter policy: rng() * min(poll_max, poll_min * 2**attempt)."""
+    calls = {"n": 0}
+    slept: list[float] = []
+
+    def poll() -> JsonMapping:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise APIError(503, "down")
+        return {"status": "running"}
+
+    op = LongRunningOperation(poll=poll, success_states={"running"}, poll_min=2.0, poll_max=10.0)
+    clk = FakeClock()
+    op.wait(
+        timeout=60,
+        sleep=_recording_sleep(clk, slept),
+        now=clk.now,
+        rng=lambda: 1.0,  # pin jitter to the full window
+    )
+    # compute_backoff(attempt=0, base=poll_min=2.0, cap=poll_max=10.0, rng=1.0)
+    #   == 1.0 * min(10.0, 2.0 * 2**0) == 2.0
+    assert slept == [2.0]
+
+
+def test_lro_error_retry_honors_retry_after_header_over_backoff() -> None:
+    calls = {"n": 0}
+    slept: list[float] = []
+
+    def poll() -> JsonMapping:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            exc = APIError(429, "rate limited")
+            exc.retry_after_header = "3"
+            raise exc
+        return {"status": "running"}
+
+    op = LongRunningOperation(poll=poll, success_states={"running"}, poll_min=2.0, poll_max=10.0)
+    clk = FakeClock()
+    op.wait(
+        timeout=60,
+        sleep=_recording_sleep(clk, slept),
+        now=clk.now,
+        rng=lambda: 1.0,
+    )
+    assert slept == [3.0]  # header (3.0) wins over computed backoff (2.0)
+
+
+def test_lro_logs_debug_per_retry_and_warning_on_giveup(caplog: pytest.LogCaptureFixture) -> None:
+    def poll() -> JsonMapping:
+        raise APIError(503, "down")
+
+    op = LongRunningOperation(poll=poll, success_states={"running"}, poll_min=0.1, poll_max=0.1)
+    clk = FakeClock()
+    with caplog.at_level(logging.DEBUG, logger="dagnam.lro"):
+        with pytest.raises(APIError):
+            op.wait(timeout=0.25, sleep=clk.sleep, now=clk.now, rng=lambda: 1.0)
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert debug_records
+    assert warning_records
+    assert "giving up" in warning_records[0].message

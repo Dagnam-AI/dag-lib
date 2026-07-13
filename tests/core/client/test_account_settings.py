@@ -15,10 +15,10 @@ import pytest
 import requests
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, AuthError, QuotaExceededError
+from dagnam._core.exceptions import APIError, AuthError, QuotaExceededError, ResponseError
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
+    from tests.typing_helpers import RequestsMocker
 
 API = "https://api.test"
 SETTINGS = f"{API}/api/v1/users/me/settings"
@@ -98,41 +98,35 @@ def test_reset_settings_409_raises_apierror(client: DagnamClient, rmock: Request
         client.reset_settings()
 
 
-def test_reset_settings_empty_body_raises_type_error(
+def test_reset_settings_empty_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
     # _account_write returns None on an empty body; _expect_object then rejects it.
     rmock.post(SETTINGS_RESET, status_code=204, text="")
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="Expected JSON object"):
         client.reset_settings()
 
 
-def test_reset_settings_non_json_body_raises_type_error(
+def test_reset_settings_non_json_body_raises_response_error(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
     # Non-JSON body falls back to resp.text (a str); _expect_object rejects it.
     rmock.post(SETTINGS_RESET, text="not-json", headers={"Content-Type": "text/plain"})
-    with pytest.raises(TypeError, match="Expected JSON object"):
+    with pytest.raises(ResponseError, match="Expected JSON object"):
         client.reset_settings()
 
 
-def test_account_write_connectionerror_wrapped(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_account_write_connectionerror_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # reset_settings is a POST → issued once, never retried; transport error
+    # maps centrally in ``_request`` to ``APIError(0, "Request failed: ...")``.
+    rmock.post(SETTINGS_RESET, exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.reset_settings()
 
 
-def test_account_write_timeout_wrapped(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_account_write_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    # update_notification_prefs is a PUT (retryable) → exhausts retries; stub sleep.
+    client._sleep = lambda _s: None
+    rmock.put(NOTIFICATIONS, exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.update_notification_prefs({"weekly_digest": True})

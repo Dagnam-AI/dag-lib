@@ -1,8 +1,8 @@
 """Load the generated component schema (DATA) shipped with the SDK.
 
-This JSON is generated from the backend's canonical Pydantic registry and
-regenerated-and-diffed in CI (info/scripts/check_contracts.py). The SDK ships
-the DATA only — it never imports backend code (spec §11).
+This JSON is generated from the platform's canonical component registry and
+regenerated-and-diffed in CI so the shipped data never drifts from that source
+of truth. The SDK ships the DATA only — it never imports backend code (spec §11).
 """
 
 from __future__ import annotations

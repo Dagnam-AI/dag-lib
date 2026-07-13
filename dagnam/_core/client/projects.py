@@ -16,8 +16,11 @@ from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_project,
     requests_query_params,
+    response_json_object,
+    response_json_value,
 )
-from dagnam._types import FormData, JsonObject, JsonValue, QueryParams, QueryValue, UploadFiles
+from dagnam._core.exceptions import ResponseError
+from dagnam._types import JsonObject, JsonValue, QueryParams, QueryValue
 
 
 class ProjectsClientMixin(BaseDagnamClient):
@@ -31,37 +34,23 @@ class ProjectsClientMixin(BaseDagnamClient):
         project_id: str | None = None,
         params: QueryParams | None = None,
         json_body: JsonValue = None,
-        data: FormData | None = None,
-        files: UploadFiles | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> JsonValue | str | None:
-        from dagnam._core.client.common import raise_for_project, response_json_value
-
         url = f"{self.api_url}{path}"
-        try:
-            resp = requests.request(
-                method,
-                url,
-                headers=self._headers(),
-                params=requests_query_params(params),
-                json=json_body,
-                data=data,
-                files=files,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_project(resp, project_id)
-
+        resp = self._request(
+            method,
+            url,
+            raise_for=lambda r: raise_for_project(r, project_id),
+            params=requests_query_params(params),
+            json=json_body,
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         if not resp.content:
             return None
         try:
             return response_json_value(resp)
-        except ValueError:
+        except ResponseError:
             return resp.text
 
     def list_projects(self, **filter_params: QueryValue) -> JsonObject | str | None:
@@ -273,17 +262,23 @@ class ProjectsClientMixin(BaseDagnamClient):
         path = Path(file_path)
         if not path.is_file():
             raise FileNotFoundError(f"No such file: {path}")
-        with open(path, "rb") as fh:
-            files = {"file": (path.name, fh)}
-            value = self._project_request(
-                "POST",
-                f"/api/v1/projects/{quote_path_segment(project_id)}/thumbnail",
-                project_id=project_id,
-                files=files,
-            )
-        if isinstance(value, dict):
-            return value
-        raise TypeError(f"Expected JSON object, got {type(value).__name__}")
+        url = f"{self.api_url}/api/v1/projects/{quote_path_segment(project_id)}/thumbnail"
+        try:
+            with open(path, "rb") as fh:
+                files = {"file": (path.name, fh)}
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    files=files,
+                    timeout=DEFAULT_TIMEOUT,
+                    allow_redirects=ALLOW_REDIRECTS,
+                )
+        except requests.ConnectionError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+        raise_for_project(resp, project_id)
+        return response_json_object(resp)
 
     def download_project_thumbnail(self, project_id: str, dest_dir: str | Path) -> Path:
         """Stream-download a project's thumbnail image into ``dest_dir``.

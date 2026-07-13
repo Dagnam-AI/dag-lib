@@ -26,20 +26,14 @@ class InferenceClientMixin(BaseDagnamClient):
         """POST /api/v1/inference/{deployment_id}/predict"""
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict"
-        headers = self._headers()
-        try:
-            resp = requests.post(
-                url,
-                headers=headers,
-                json=inputs,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            json=inputs,
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return resp.json()
 
     def predict_batch(
@@ -48,20 +42,14 @@ class InferenceClientMixin(BaseDagnamClient):
         """POST /api/v1/inference/{deployment_id}/predict/batch"""
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict/batch"
-        headers = self._headers()
-        try:
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={"inputs": inputs},
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            json={"inputs": inputs},
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return resp.json()
 
     def mint_inference_stream_token(self, deployment_id: str) -> str:
@@ -71,18 +59,12 @@ class InferenceClientMixin(BaseDagnamClient):
         """
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/stream-access-token"
-        try:
-            resp = requests.post(
-                url,
-                headers=self._headers(),
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return str(resp.json()["token"])
 
     def open_inference_stream(self, deployment_id: str, inputs: JsonObject) -> requests.Response:
@@ -117,19 +99,12 @@ class InferenceClientMixin(BaseDagnamClient):
         """GET /api/v1/inference/{deployment_id}/health"""
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/health"
-        headers = self._headers()
-        try:
-            resp = requests.get(
-                url,
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return resp.json()
 
     def schema(self, deployment_id: str, timeout: int = DEFAULT_TIMEOUT) -> JsonObject:
@@ -140,17 +115,11 @@ class InferenceClientMixin(BaseDagnamClient):
         """
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/schema"
-        headers = self._headers()
-        try:
-            resp = requests.get(
-                url,
-                headers=headers,
-                timeout=timeout,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            timeout=timeout,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return resp.json()

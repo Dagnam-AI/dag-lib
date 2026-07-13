@@ -106,6 +106,20 @@ def test_allowed_strategies_returns_flat_map(client: DagnamClient, rmock: Reques
     assert rmock.last_request.method == "GET"
 
 
+def test_allowed_strategies_passes_through_required_tiers(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    # The endpoint ships a registry-driven `required_tiers` map alongside the
+    # flat availability entries; the client returns the whole object untouched.
+    body = {
+        "cpu": True,
+        "multi_gpu_ddp": False,
+        "required_tiers": {"multi_gpu_ddp": "pro"},
+    }
+    rmock.get(STRATEGIES, json=body)
+    assert client.get_allowed_strategies() == body
+
+
 def test_allowed_strategies_401_raises_autherror(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:

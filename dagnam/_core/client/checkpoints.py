@@ -6,12 +6,10 @@ from pathlib import Path
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
-    DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
     is_redirect_response,
     is_success_response,
-    requests,
     safe_error_body_from_response,
 )
 from dagnam._core.client.common import quote_path_segment
@@ -26,18 +24,12 @@ class CheckpointsClientMixin(BaseDagnamClient):
         """GET /api/v1/training/jobs/{job_id}/checkpoints"""
         job_path = quote_path_segment(job_id)
         url = f"{self.api_url}/api/v1/training/jobs/{job_path}/checkpoints"
-        try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                timeout=DEFAULT_TIMEOUT,
-                allow_redirects=ALLOW_REDIRECTS,
-            )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-        self.raise_for_job_response(resp, job_id)
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: self.raise_for_job_response(r, job_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
         return [item for item in ensure_json_array(resp.json()) if isinstance(item, dict)]
 
     def download_checkpoint_stream(

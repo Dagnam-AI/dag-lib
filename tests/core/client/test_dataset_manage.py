@@ -147,8 +147,12 @@ def test_connection_error_wrapped(
     register: Callable[..., object],
     call: Callable[[DagnamClient], object],
 ) -> None:
+    # Transport errors are now mapped centrally in ``_request`` to
+    # ``APIError(0, "Request failed: ...")``; retryable verbs exhaust the retry
+    # budget first, so the sleep is stubbed to keep the test fast.
+    client._sleep = lambda _s: None
     register(rmock, exc=requests.exceptions.ConnectionError("down"))
-    with pytest.raises(APIError, match="Connection failed"):
+    with pytest.raises(APIError, match="Request failed"):
         call(client)
 
 
@@ -159,6 +163,7 @@ def test_timeout_wrapped(
     register: Callable[..., object],
     call: Callable[[DagnamClient], object],
 ) -> None:
+    client._sleep = lambda _s: None
     register(rmock, exc=requests.exceptions.Timeout("slow"))
-    with pytest.raises(APIError, match="Request timed out"):
+    with pytest.raises(APIError, match="Request failed"):
         call(client)

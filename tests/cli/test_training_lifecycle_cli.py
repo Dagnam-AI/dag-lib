@@ -171,8 +171,38 @@ def test_training_allowed_strategies_renders_yes_no(run_cli: CliRunner, capsys: 
     lines = out.splitlines()
     cpu_line = next(line for line in lines if line.startswith("cpu"))
     ddp_line = next(line for line in lines if line.startswith("multi_gpu_ddp"))
-    assert cpu_line.strip().endswith("Yes")
-    assert ddp_line.strip().endswith("No")
+    assert "Yes" in cpu_line
+    assert "No" in ddp_line
+    # Without a `required_tiers` map the Required-Tier cell falls back to "-".
+    assert cpu_line.strip().endswith("-")
+    assert ddp_line.strip().endswith("-")
+
+
+def test_training_allowed_strategies_renders_required_tier_for_locked(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    body = {
+        "cpu": True,
+        "multi_gpu_ddp": False,
+        "multi_node": False,
+        # Registry-driven metadata shipped alongside the flat availability map.
+        "required_tiers": {"multi_gpu_ddp": "pro", "multi_node": "enterprise"},
+    }
+    with mock.patch("dagnam.allowed_strategies", mock.Mock(return_value=body)):
+        run_cli(["training", "allowed-strategies"])
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    # `required_tiers` is metadata, not a strategy — it must never render as a row.
+    assert not any(line.startswith("required_tiers") for line in lines)
+    assert "Required Tier" in out
+    cpu_line = next(line for line in lines if line.startswith("cpu"))
+    ddp_line = next(line for line in lines if line.startswith("multi_gpu_ddp"))
+    node_line = next(line for line in lines if line.startswith("multi_node"))
+    # Each locked strategy shows the minimum tier that unlocks it, title-cased.
+    assert ddp_line.strip().endswith("Pro")
+    assert node_line.strip().endswith("Enterprise")
+    # An available strategy needs no tier.
+    assert cpu_line.strip().endswith("-")
 
 
 def test_training_allowed_strategies_empty(run_cli: CliRunner, capsys: StrCapture) -> None:

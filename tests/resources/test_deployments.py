@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import cast
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import pytest
 import requests
-from tests.typing_helpers import JsonObject, JsonValue
+from tests.typing_helpers import JsonObject
 
 from dagnam import deployments
 from dagnam._core.client import DagnamClient
@@ -20,15 +20,8 @@ from dagnam._core.exceptions import (
 )
 from dagnam._core.lro import LongRunningOperation
 
-
-def _mock_response(status: int, body: JsonValue = None) -> MagicMock:
-    resp = MagicMock(spec=requests.Response)
-    resp.status_code = status
-    resp.ok = status < 400
-    resp.text = str(body) if body is not None else ""
-    resp.content = b"x" if body is not None else b""
-    resp.json.return_value = body if body is not None else {}
-    return resp
+if TYPE_CHECKING:
+    from tests.typing_helpers import RequestsMocker
 
 
 # ---------------------------------------------------------------------------
@@ -184,56 +177,45 @@ class TestLifecycleLRO:
 
 class TestClientErrorMapping:
     def _client(self) -> DagnamClient:
-        return DagnamClient("https://x", "key")
+        client = DagnamClient("https://x", "key")
+        client._sleep = lambda _s: None  # retryable verbs don't sleep on transient errors
+        return client
 
-    def test_get_maps_404(self) -> None:
-        with patch("dagnam._core.client.base.requests.request", return_value=_mock_response(404)):
-            with pytest.raises(DeploymentNotFoundError):
-                self._client().get_deployment("missing")
+    def test_get_maps_404(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.get("https://x/api/v1/deployments/missing", status_code=404)
+        with pytest.raises(DeploymentNotFoundError):
+            self._client().get_deployment("missing")
 
-    def test_create_maps_401(self) -> None:
-        with patch("dagnam._core.client.base.requests.request", return_value=_mock_response(401)):
-            with pytest.raises(AuthError):
-                self._client().create_deployment({"name": "x"})
-
-    def test_create_maps_422(self) -> None:
-        with (
-            patch(
-                "dagnam._core.client.base.requests.request",
-                return_value=_mock_response(422, "bad fields"),
-            ),
-            pytest.raises(DeploymentValidationError),
-        ):
+    def test_create_maps_401(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.post("https://x/api/v1/deployments", status_code=401)
+        with pytest.raises(AuthError):
             self._client().create_deployment({"name": "x"})
 
-    def test_scale_maps_409_to_stateerror(self) -> None:
-        with (
-            patch(
-                "dagnam._core.client.base.requests.request",
-                return_value=_mock_response(409, "not running"),
-            ),
-            pytest.raises(DeploymentStateError),
-        ):
+    def test_create_maps_422(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.post("https://x/api/v1/deployments", status_code=422, text="bad fields")
+        with pytest.raises(DeploymentValidationError):
+            self._client().create_deployment({"name": "x"})
+
+    def test_scale_maps_409_to_stateerror(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.put(
+            "https://x/api/v1/deployments/dep-1/scale", status_code=409, text="not running"
+        )
+        with pytest.raises(DeploymentStateError):
             self._client().scale_deployment("dep-1", num_instances=3)
 
-    def test_connectionerror_wrapped(self) -> None:
-        with (
-            patch(
-                "dagnam._core.client.base.requests.request",
-                side_effect=requests.ConnectionError("boom"),
-            ),
-            pytest.raises(APIError),
-        ):
+    def test_connectionerror_wrapped(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.get(
+            "https://x/api/v1/deployments/dep-1", exc=requests.ConnectionError("boom")
+        )
+        with pytest.raises(APIError):
             self._client().get_deployment("dep-1")
 
-    def test_list_success_returns_dict(self) -> None:
-        body = cast("JsonObject", {"items": [{"id": "dep-1"}], "total": 1, "page": 1})
-        with patch(
-            "dagnam._core.client.base.requests.request", return_value=_mock_response(200, body)
-        ):
-            out = cast("JsonObject", self._client().list_deployments(page=1, limit=20))
-            items = cast("list[JsonObject]", out["items"])
-            assert items[0]["id"] == "dep-1"
+    def test_list_success_returns_dict(self, requests_mock: RequestsMocker) -> None:
+        body = {"items": [{"id": "dep-1"}], "total": 1, "page": 1}
+        requests_mock.get("https://x/api/v1/deployments", json=body)
+        out = cast("JsonObject", self._client().list_deployments(page=1, limit=20))
+        items = cast("list[JsonObject]", out["items"])
+        assert items[0]["id"] == "dep-1"
 
 
 # ---------------------------------------------------------------------------

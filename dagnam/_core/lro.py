@@ -19,9 +19,12 @@ threads.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import logging
+import random
 import time
 from typing import Callable, FrozenSet, Optional
 
+from dagnam._core._retry import TRANSIENT_STATUS, compute_backoff, parse_retry_after
 from dagnam._core.exceptions import APIError, LROFailedError, LROTimeoutError
 from dagnam._types import JsonMapping
 
@@ -31,10 +34,7 @@ DEFAULT_POLL_MAX = 10.0
 
 _DEFAULT_FAILURE_STATES: FrozenSet[str] = frozenset({"failed"})
 
-# API errors worth retrying mid-wait: the client maps a network failure to
-# status 0, a rate limit to 429, and a server hiccup to 5xx. A 4xx (404/403/…)
-# is a real, non-transient error and must surface immediately.
-_TRANSIENT_STATUS: FrozenSet[int] = frozenset({0, 429, 500, 502, 503, 504})
+_LOGGER = logging.getLogger("dagnam.lro")
 
 
 def _freeze(values: Optional[Iterable[str]]) -> FrozenSet[str]:
@@ -109,26 +109,49 @@ class LongRunningOperation:
         *,
         sleep: Callable[[float], None],
         now: Callable[[], float],
+        rng: Callable[[], float] = random.random,
     ) -> JsonMapping:
         """Poll once, retrying transient API errors until the deadline.
 
-        Transient means network / 429 / 5xx. A non-transient error (e.g. 404)
-        propagates immediately; a transient error that persists past the
-        deadline is re-raised so the caller sees the real cause rather than a
-        bare timeout.
+        Transient means network / 429 / 5xx (the shared ``TRANSIENT_STATUS``
+        set — single source of truth with the sync ``_request`` retry driver).
+        A non-transient error (e.g. 404) propagates immediately. The retry
+        delay is the shared jittered-backoff policy (``compute_backoff``),
+        honoring an ``APIError.retry_after_header`` via ``parse_retry_after``
+        when the server supplied one. Each retry logs at DEBUG on
+        ``dagnam.lro``; giving up at the deadline logs a WARNING before the
+        real transient error is re-raised — never swallowed as a bare timeout.
         """
-        attempt_delay = self._poll_min
+        attempt = 0
         while True:
             try:
                 return self._poll()
             except APIError as exc:
-                if exc.status_code not in _TRANSIENT_STATUS:
+                if exc.status_code not in TRANSIENT_STATUS:
                     raise
                 remaining = deadline - now()
                 if remaining <= 0:
+                    _LOGGER.warning(
+                        "%s: giving up polling after transient status=%s (deadline exceeded)",
+                        self._name,
+                        exc.status_code,
+                    )
                     raise
-                sleep(min(attempt_delay, remaining))
-                attempt_delay = min(self._poll_max, attempt_delay * 2)
+                delay = parse_retry_after(exc.retry_after_header, cap=self._poll_max)
+                if delay is None:
+                    delay = compute_backoff(
+                        attempt, base=self._poll_min, cap=self._poll_max, rng=rng
+                    )
+                delay = min(delay, remaining)
+                _LOGGER.debug(
+                    "%s: retrying poll after transient status=%s (attempt %d, sleeping %.2fs)",
+                    self._name,
+                    exc.status_code,
+                    attempt + 1,
+                    delay,
+                )
+                sleep(delay)
+                attempt += 1
 
     def done(self) -> bool:
         """True if the most recent payload is in a terminal state.
@@ -151,6 +174,7 @@ class LongRunningOperation:
         *,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        rng: Callable[[], float] = random.random,
     ) -> LongRunningOperation:
         """Block until the operation reaches a terminal state.
 
@@ -164,7 +188,7 @@ class LongRunningOperation:
         delay = self._poll_min
 
         # First read — if already terminal, return immediately.
-        payload = self._poll_resilient(deadline, sleep=sleep, now=now)
+        payload = self._poll_resilient(deadline, sleep=sleep, now=now, rng=rng)
         self._latest = payload
         state = self._current_state(payload)
         if state in self._success or state in self._failure:
@@ -176,7 +200,7 @@ class LongRunningOperation:
             if now() >= deadline:
                 break
 
-            payload = self._poll_resilient(deadline, sleep=sleep, now=now)
+            payload = self._poll_resilient(deadline, sleep=sleep, now=now, rng=rng)
             self._latest = payload
             state = self._current_state(payload)
             if state in self._success or state in self._failure:

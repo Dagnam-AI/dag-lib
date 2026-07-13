@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,6 +16,9 @@ from dagnam import load_dataset
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.load import _load_internal
 from dagnam.data.loaders.system.decoders.base import DecodeError
+
+if TYPE_CHECKING:
+    from tests.typing_helpers import RequestsMocker
 
 # ------------------------------------------------------------------
 # DagnamDataset with native datasets
@@ -81,37 +85,18 @@ class TestResolveSystemDataset:
 
 
 class TestVerifiedSystemDownloads:
-    def test_download_helper_verifies_sha256(self, tmp_path: Path) -> None:
+    def test_download_helper_verifies_sha256(
+        self, tmp_path: Path, requests_mock: RequestsMocker
+    ) -> None:
         from dagnam.data.loaders.system import dispatch
 
-        class Response:
-            def __init__(self) -> None:
-                self.headers = {"Content-Length": "3"}
-
-            def raise_for_status(self):
-                return None
-
-            def iter_content(self, chunk_size: int):
-                yield b"bad"
-
-            def __enter__(self) -> Response:
-                return self
-
-            def __exit__(
-                self, exc_type: type[BaseException] | None, exc: object, tb: object
-            ) -> None:
-                return None
-
-        with patch(
-            "dagnam.data.loaders.system.dispatch.requests.get",
-            return_value=Response(),
-        ):
-            with pytest.raises(ValueError, match="checksum"):
-                dispatch._ensure_verified_file(  # type: ignore[attr-defined]
-                    "https://example.test/imdb.npz",
-                    tmp_path / "imdb.npz",
-                    "0" * 64,
-                )
+        requests_mock.get("https://example.test/imdb.npz", content=b"bad")
+        with pytest.raises(ValueError, match="checksum"):
+            dispatch._ensure_verified_file(  # type: ignore[attr-defined]
+                "https://example.test/imdb.npz",
+                tmp_path / "imdb.npz",
+                "0" * 64,
+            )
 
         assert not (tmp_path / "imdb.npz").exists()
 

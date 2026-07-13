@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator, Sequence
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -489,3 +490,128 @@ async def test_aiter_sse_once_raises_when_no_terminal() -> None:
                 lambda: open_stream(), terminal_events=TERMINAL_INFERENCE_EVENTS
             )
         ]
+
+
+# ---------------------------------------------------------------------------
+# Task 9: dagnam.sse reconnect logging
+# ---------------------------------------------------------------------------
+
+
+def test_iter_with_reconnect_logs_debug_per_reconnect_attempt(
+    monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Connection 1 drops mid-iteration; connection 2 delivers the terminal event.
+    _install_fake_sseclient(
+        monkeypatch,
+        [
+            [requests.exceptions.ConnectionError("boom")],
+            [_FakeRawEvent(event="stream_end", data="{}")],
+        ],
+    )
+
+    def open_stream(_cursor: str | None) -> _FakeResponse:
+        return _FakeResponse()
+
+    with caplog.at_level(logging.DEBUG, logger="dagnam.sse"):
+        events = list(
+            iter_with_reconnect(
+                open_stream,
+                terminal_events=frozenset({"stream_end"}),
+                backoff_base=0.0,
+                max_reconnects=5,
+            )
+        )
+    assert [e.event for e in events] == ["stream_end"]
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert debug_records
+    assert "reconnect" in debug_records[0].message.lower()
+
+
+def test_iter_with_reconnect_logs_warning_when_exhausted(
+    monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Every connection drops immediately; with max_reconnects=2 the loop gives up.
+    _install_fake_sseclient(
+        monkeypatch,
+        [
+            [requests.exceptions.ConnectionError("boom")],
+            [requests.exceptions.ConnectionError("boom")],
+            [requests.exceptions.ConnectionError("boom")],
+        ],
+    )
+
+    def open_stream(_cursor: str | None) -> _FakeResponse:
+        return _FakeResponse()
+
+    with caplog.at_level(logging.DEBUG, logger="dagnam.sse"), pytest.raises(StreamError):
+        list(
+            iter_with_reconnect(
+                open_stream,
+                terminal_events=frozenset({"stream_end"}),
+                backoff_base=0.0,
+                max_reconnects=2,
+            )
+        )
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warning_records
+    assert "giving up" in warning_records[0].message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 3b: dagnam.sse reconnect logging — async mirror (aiter_with_reconnect)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_aiter_with_reconnect_logs_debug_per_reconnect_attempt(
+    monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Connection 1 drops mid-iteration; connection 2 delivers the terminal event.
+    monkeypatch.setattr(sse_mod.asyncio, "sleep", AsyncMock())
+    scripts: list[object] = [RuntimeError("drop"), [SSEEvent(event="stream_end", data="{}")]]
+
+    async def open_stream(_cursor: str | None) -> AsyncIterator[SSEEvent]:
+        step = scripts.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        for ev in step:  # type: ignore[union-attr]
+            yield ev
+
+    with caplog.at_level(logging.DEBUG, logger="dagnam.sse"):
+        events = [
+            e
+            async for e in aiter_with_reconnect(
+                open_stream,
+                terminal_events=frozenset({"stream_end"}),
+                transient_errors=(RuntimeError,),
+                max_reconnects=5,
+            )
+        ]
+    assert [e.event for e in events] == ["stream_end"]
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert debug_records
+    assert "reconnect" in debug_records[0].message.lower()
+
+
+@pytest.mark.anyio
+async def test_aiter_with_reconnect_logs_warning_when_exhausted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Every connection ends without a terminal event; max_reconnects=2 -> give up.
+    async def open_stream(_cursor: str | None) -> AsyncIterator[SSEEvent]:
+        return
+        yield  # pragma: no cover - unreachable sentinel making this an async generator
+
+    with caplog.at_level(logging.DEBUG, logger="dagnam.sse"), pytest.raises(StreamError):
+        _ = [
+            e
+            async for e in aiter_with_reconnect(
+                open_stream,
+                terminal_events=frozenset({"stream_end"}),
+                backoff_base=0.0,
+                max_reconnects=2,
+            )
+        ]
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warning_records
+    assert "giving up" in warning_records[0].message.lower()

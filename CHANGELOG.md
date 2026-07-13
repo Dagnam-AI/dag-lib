@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `response_json_value`/`response_json_object`/`response_json_array` and
+  `BaseDagnamClient._expect_object` now raise `ResponseError` (an `APIError`
+  subclass) instead of a raw `TypeError`/`ValueError`/`json.JSONDecodeError`
+  when a server response body is malformed, undecodable, or the wrong JSON
+  shape. This affects every sync client method that decodes a response body
+  (datasets, training, account, hub, projects, deployments, codegen). Code
+  that narrowly caught `except TypeError`/`except ValueError` around these
+  calls should catch `except dagnam.ResponseError` (or the broader
+  `dagnam.APIError`/`dagnam.DagnamError`) instead. Client mixins that
+  optionally fall back to a plain-text response body preserve that behavior.
+
+### Added
+
+- `dagnam.ResponseError` — a public `APIError` subclass for malformed,
+  undecodable, or wrong-shape server response bodies.
+- Library logging contract: a package-level `NullHandler`, namespaced child
+  loggers (`dagnam.http`/`dagnam.cache`/`dagnam.lro`/`dagnam.sse`) with a
+  credential-redacting filter, and `dagnam.enable_debug_logging()` convenience.
+
 ## [0.6.0] - 2026-07-02
 
 ### Added

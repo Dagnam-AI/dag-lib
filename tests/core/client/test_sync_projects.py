@@ -14,7 +14,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
+    from tests.typing_helpers import RequestsMocker
 
 API = "https://api.test"
 
@@ -92,8 +92,28 @@ def test_link_unlink_dataset(client: DagnamClient, rmock: RequestsMocker) -> Non
 
 def test_projects_500_raises_apierror(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/projects", status_code=500, text="boom")
+    client._sleep = lambda _s: None  # 500 is transient on a GET → retried; don't sleep
     with pytest.raises(APIError):
         client.list_projects()
+
+
+def test_projects_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/projects",
+        [{"status_code": 503}, {"status_code": 200, "json": {"items": []}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.list_projects() == {"items": []}
+    assert rmock.call_count == 2
+
+
+def test_projects_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/projects/p1", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(ProjectNotFoundError):
+        client.get_project("p1")
+    assert rmock.call_count == 1
 
 
 def test_projects_text_response(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -101,23 +121,17 @@ def test_projects_text_response(client: DagnamClient, rmock: RequestsMocker) -> 
     assert client.list_projects() == "plain"
 
 
-def test_projects_connectionerror_wrapped(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+def test_projects_connectionerror_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/projects", exc=requests.ConnectionError("nope"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_projects()
 
 
-def test_projects_timeout_wrapped(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "request", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
+def test_projects_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) -> None:
+    client._sleep = lambda _s: None
+    rmock.get(f"{API}/api/v1/projects", exc=requests.Timeout("slow"))
+    with pytest.raises(APIError, match="Request failed"):
         client.list_projects()
 
 

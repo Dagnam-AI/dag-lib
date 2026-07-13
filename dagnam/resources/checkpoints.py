@@ -16,7 +16,12 @@ from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import CheckpointNotFoundError, ChecksumError
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject
-from dagnam.data.cache import cache_dir_name, compute_file_checksum, evict_lru, touch_cache
+from dagnam.data.cache import (
+    cache_dir_name,
+    compute_file_checksum,
+    evict_lru_locked,
+    touch_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +138,10 @@ def download_checkpoint(
     )
     if max_bytes is not None:
         try:
-            evict_lru(
+            # evict_lru_locked already swallows filelock.Timeout (busy lock ->
+            # []); this try/except still catches genuine OSErrors from the
+            # eviction itself (e.g. disk-full during rmtree).
+            evict_lru_locked(
                 max_size_bytes=max_bytes if isinstance(max_bytes, int) else None,
                 base_dir=base,
             )

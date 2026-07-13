@@ -18,9 +18,10 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
 
     async def list_checkpoints(self, job_id: str) -> list[JsonObject]:
         resp = await self._request(
-            "GET", f"/api/v1/training/jobs/{quote_path_segment(job_id)}/checkpoints"
+            "GET",
+            f"/api/v1/training/jobs/{quote_path_segment(job_id)}/checkpoints",
+            raise_for=lambda r: raise_for_job_response(r, job_id),
         )
-        raise_for_job_response(resp, job_id)
         return [ensure_json_object(item) for item in ensure_json_array(resp.json())]
 
     async def _raise_for_checkpoint(self, resp: httpx.Response, checkpoint_id: str) -> None:

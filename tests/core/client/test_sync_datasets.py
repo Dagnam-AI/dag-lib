@@ -38,75 +38,34 @@ def test_list_datasets_no_search(client: DagnamClient, rmock: RequestsMocker) ->
     assert qs == {"type": ["all"]}
 
 
-def test_list_datasets_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.list_datasets()
-
-
-def test_list_datasets_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.list_datasets()
-
-
 def test_get_dataset_meta_with_version(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/datasets/ds1/meta", json={"id": "ds1"})
     client.get_dataset_meta("ds1", version="v2")
     assert rmock.last_request.qs == {"version": ["v2"]}
 
 
-def test_get_dataset_meta_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
+def test_get_dataset_meta_retries_transient(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/datasets/ds1/meta",
+        [{"status_code": 503}, {"status_code": 200, "json": {"id": "ds1"}}],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.get_dataset_meta("ds1") == {"id": "ds1"}
+    assert rmock.call_count == 2
 
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
+
+def test_get_dataset_meta_404_not_retried(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/datasets/ds1/meta", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(DatasetNotFoundError):
         client.get_dataset_meta("ds1")
-
-
-def test_get_dataset_meta_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.get_dataset_meta("ds1")
+    assert rmock.call_count == 1
 
 
 def test_list_system_datasets(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/datasets/system", json=[{"id": "iris"}])
     assert client.list_system_datasets() == [{"id": "iris"}]
-
-
-def test_list_system_datasets_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.list_system_datasets()
-
-
-def test_list_system_datasets_timeout(client: DagnamClient, monkeypatch: PytestMonkeyPatch) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.list_system_datasets()
 
 
 def test_get_system_dataset_meta(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -119,28 +78,6 @@ def test_get_system_dataset_meta_no_version(client: DagnamClient, rmock: Request
     rmock.get(f"{API}/api/v1/datasets/system/iris", json={"id": "iris"})
     client.get_system_dataset_meta("iris")
     assert rmock.last_request.qs == {}
-
-
-def test_get_system_dataset_meta_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.get_system_dataset_meta("ds1")
-
-
-def test_get_system_dataset_meta_timeout(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.get_system_dataset_meta("ds1")
 
 
 def test_download_system_dataset_writes_file(
@@ -237,53 +174,17 @@ def test_upload_dataset_from_url(client: DagnamClient, rmock: RequestsMocker) ->
     assert body["description"] == "d"
 
 
-def test_upload_dataset_from_url_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
+def test_upload_dataset_from_url_without_description(
+    client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.upload_dataset_from_url("u", name="x", dataset_type="t", format="csv")
-
-
-def test_upload_dataset_from_url_timeout(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "post", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.upload_dataset_from_url("u", name="x", dataset_type="t", format="csv")
+    rmock.post(f"{API}/api/v1/datasets/upload-url", json={"task_id": "t2"})
+    client.upload_dataset_from_url("u", name="x", dataset_type="t", format="csv")
+    assert "description" not in rmock.last_request.json()
 
 
 def test_get_dataset_task_status(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/datasets/tasks/t1", json={"status": "done"})
     assert client.get_dataset_task_status("t1") == {"status": "done"}
-
-
-def test_get_dataset_task_status_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.get_dataset_task_status("t1")
-
-
-def test_get_dataset_task_status_timeout(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.get_dataset_task_status("t1")
 
 
 def test_download_dataset_full(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:

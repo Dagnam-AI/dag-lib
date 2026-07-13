@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+import logging as _logging
+
+# Attach a NullHandler before any subpackage import so a DEBUG log emitted while
+# dagnam.* wires itself up never falls through to logging.lastResort (the
+# idiomatic PyPI-library logging contract — the app configures logging, not us).
+# This one non-import statement must precede all imports below, so E402 is
+# ignored file-wide in pyproject.toml with a documented reason.
+_logging.getLogger("dagnam").addHandler(_logging.NullHandler())
+
 from typing import TYPE_CHECKING, Any
 
+from dagnam._core._logging import enable_debug_logging
 from dagnam._core.auth import configure, get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
@@ -39,6 +49,7 @@ from dagnam.exceptions import (
     LROTimeoutError,
     ProjectNotFoundError,
     QuotaExceededError,
+    ResponseError,
     StreamError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
@@ -131,6 +142,7 @@ __all__ = [
     "LongRunningOperation",
     "ProjectNotFoundError",
     "QuotaExceededError",
+    "ResponseError",
     "StreamError",
     "TaskNotFoundError",
     "TrainingEvent",
@@ -153,6 +165,7 @@ __all__ = [
     "download_code",
     "download_dag",
     "download_project_thumbnail",
+    "enable_debug_logging",
     "estimate_resources",
     "evict_lru",
     "get_api_key",
