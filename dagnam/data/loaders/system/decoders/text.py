@@ -8,6 +8,7 @@ from typing import Any, cast
 import numpy as np
 
 from dagnam.data.loaders.system.column_store import Column, ColumnStore
+from dagnam.data.loaders.system.decoders._helpers import safe_subpath
 from dagnam.data.loaders.system.decoders.base import DecodeError
 from dagnam.data.loaders.text_lm import build_lm_sequences
 
@@ -24,7 +25,7 @@ class TextDecoder:
         filename = spec.get("file")
         if not isinstance(filename, str):
             raise DecodeError("text format requires layout.text.file")
-        path = artifact_dir / filename
+        path = safe_subpath(artifact_dir, filename)
         if not path.exists():
             raise DecodeError(f"text format: file does not exist: {path}")
         corpus = path.read_text(encoding="utf-8")

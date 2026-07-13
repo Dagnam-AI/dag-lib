@@ -1,8 +1,8 @@
 """SDK-local parameter interpreter — verdict + message parity with the backend.
 
-These cases mirror ``mvp-backend/tests/validation/contracts/test_interpret.py``
-so both runtimes assert the SAME verdicts and messages (the parity oracle for
-Phase 6), plus the extra cases needed to drive full branch coverage of the port.
+These cases mirror the backend's validation contract test suite so both
+runtimes assert the SAME verdicts and messages (the parity oracle), plus the
+extra cases needed to drive full branch coverage of the port.
 """
 
 from __future__ import annotations

@@ -11,17 +11,26 @@ import requests
 from tqdm import tqdm
 
 from dagnam._core.client.common import safe_response_text
+from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import (
     APIError,
     AuthError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
+    DownloadTooLargeError,
     TrainingJobNotFoundError,
 )
 from dagnam._types import JsonArray, JsonObject, JsonValue, ResponseLike, StatusResponseLike
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
+
+# A hostile or compromised server (or redirect target) can stream an unbounded
+# body and exhaust the client's disk. Every on-disk download funnels through the
+# two stream writers below, so a single cap here bounds them all. 100 GiB is far
+# above any real dataset/checkpoint; override via the ``max_download_bytes``
+# config key.
+DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024 * 1024  # 100 GiB
 
 # For streaming downloads, requests' single-int timeout only applies to the
 # initial connect + header phase. Once headers arrive, a stalled body will hang
@@ -35,6 +44,29 @@ STREAM_READ_TIMEOUT = 60  # seconds — per-chunk read timeout
 # still failing a genuinely dead socket so the reconnect loop can recover.
 SSE_READ_TIMEOUT = 90  # seconds
 ALLOW_REDIRECTS = False
+
+
+# Query-parameter names whose VALUES are secrets (SSE stream tokens, presigned
+# object-storage signatures). requests/urllib3 embed the full request URL in
+# their exception text, so a raw ``{exc}`` in an error message would leak the
+# token into logs, tracebacks, and ``--debug`` output. Scrub the values before
+# they reach any user-visible message.
+_SENSITIVE_QUERY_PARAMS = re.compile(
+    r"(?i)([?&]?[\w.-]*(?:token|signature|credential|sig|key)[\w.-]*=)[^&\s'\"]+"
+)
+
+
+def scrub_secret_params(text: str) -> str:
+    """Mask sensitive query-parameter values embedded in error/exception text."""
+    return _SENSITIVE_QUERY_PARAMS.sub(r"\1***", text)
+
+
+def resolve_max_download_bytes() -> int:
+    """Configured download ceiling in bytes; a non-int/<=0 value uses the default."""
+    configured = get_config_value("max_download_bytes", DEFAULT_MAX_DOWNLOAD_BYTES)
+    if isinstance(configured, bool) or not isinstance(configured, int) or configured <= 0:
+        return DEFAULT_MAX_DOWNLOAD_BYTES
+    return configured
 
 
 def _progress_disabled(total_bytes: int | None, *, show_progress: bool) -> bool:
@@ -129,25 +161,46 @@ class BaseDagnamClient:
         *,
         show_progress: bool = True,
     ) -> Path:
-        """Write a streaming response body to ``dest`` with a tqdm progress bar."""
+        """Write a streaming response body to ``dest`` with a tqdm progress bar.
+
+        Bounded by ``max_download_bytes``: an oversized ``Content-Length`` is
+        rejected up-front, and a body that crosses the ceiling mid-stream aborts
+        and deletes the partial file so a hostile server cannot fill the disk.
+        """
+        max_bytes = resolve_max_download_bytes()
         total = resp.headers.get("Content-Length")
         total_bytes = int(total) if total is not None else None
+        if total_bytes is not None and total_bytes > max_bytes:
+            resp.close()
+            raise DownloadTooLargeError(
+                0, f"Download of {total_bytes} bytes exceeds max_download_bytes={max_bytes}"
+            )
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with (
-            closing(resp),
-            open(dest, "wb") as fh,
-            tqdm(
-                total=total_bytes,
-                unit="B",
-                unit_scale=True,
-                unit_divisor=1024,
-                disable=_progress_disabled(total_bytes, show_progress=show_progress),
-            ) as bar,
-        ):
-            for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
-                fh.write(chunk)
-                bar.update(len(chunk))
+        written = 0
+        try:
+            with (
+                closing(resp),
+                open(dest, "wb") as fh,
+                tqdm(
+                    total=total_bytes,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    disable=_progress_disabled(total_bytes, show_progress=show_progress),
+                ) as bar,
+            ):
+                for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise DownloadTooLargeError(
+                            0, f"Download exceeded max_download_bytes={max_bytes}"
+                        )
+                    fh.write(chunk)
+                    bar.update(len(chunk))
+        except DownloadTooLargeError:
+            dest.unlink(missing_ok=True)
+            raise
         return dest
 
     def _get_stream(self, url: str) -> requests.Response:
@@ -167,9 +220,9 @@ class BaseDagnamClient:
                 allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
+            raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
         except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            raise APIError(0, f"Request timed out: {scrub_secret_params(str(exc))}") from exc
 
     @staticmethod
     def _get_stream_no_auth(url: str) -> requests.Response:
@@ -187,9 +240,9 @@ class BaseDagnamClient:
                 allow_redirects=ALLOW_REDIRECTS,
             )
         except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
+            raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
         except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            raise APIError(0, f"Request timed out: {scrub_secret_params(str(exc))}") from exc
 
     @staticmethod
     def _append_stream_to_file(
@@ -198,24 +251,46 @@ class BaseDagnamClient:
         *,
         show_progress: bool = True,
     ) -> None:
-        """Append streaming response body to an existing file."""
+        """Append streaming response body to an existing file.
+
+        Bounded by ``max_download_bytes`` over the *resumed total* (already-written
+        bytes plus the incoming body), so resuming cannot be used to sidestep the
+        cap. A breach aborts and deletes the partial file.
+        """
+        max_bytes = resolve_max_download_bytes()
         total = resp.headers.get("Content-Length")
         total_bytes = int(total) if total is not None else None
+        written = dest.stat().st_size if dest.exists() else 0
+        if total_bytes is not None and written + total_bytes > max_bytes:
+            resp.close()
+            dest.unlink(missing_ok=True)
+            raise DownloadTooLargeError(
+                0, f"Resumed download exceeds max_download_bytes={max_bytes}"
+            )
 
-        with (
-            closing(resp),
-            open(dest, "ab") as fh,
-            tqdm(
-                total=total_bytes,
-                unit="B",
-                unit_scale=True,
-                unit_divisor=1024,
-                disable=_progress_disabled(total_bytes, show_progress=show_progress),
-            ) as bar,
-        ):
-            for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
-                fh.write(chunk)
-                bar.update(len(chunk))
+        try:
+            with (
+                closing(resp),
+                open(dest, "ab") as fh,
+                tqdm(
+                    total=total_bytes,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    disable=_progress_disabled(total_bytes, show_progress=show_progress),
+                ) as bar,
+            ):
+                for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise DownloadTooLargeError(
+                            0, f"Download exceeded max_download_bytes={max_bytes}"
+                        )
+                    fh.write(chunk)
+                    bar.update(len(chunk))
+        except DownloadTooLargeError:
+            dest.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _raise_for_deployment(response: requests.Response, deployment_id: str) -> None:

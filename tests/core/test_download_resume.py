@@ -134,6 +134,55 @@ class TestResumableDownload:
         # Verify content was appended
         assert path.read_bytes() == b"hello world"
 
+    def test_resume_restarts_on_content_range_mismatch(self, tmp_path: Path) -> None:
+        """A 206 whose Content-Range start != requested offset restarts cleanly."""
+        part_file = tmp_path / "data.csv.part"
+        part_file.write_bytes(b"hello ")  # 6 bytes -> Range: bytes=6-
+
+        client = DagnamClient("https://api.test", "secret")
+        # Server misbehaves: 206 but the body starts at offset 0, not 6.
+        bad = _mock_response(
+            206,
+            {
+                "Content-Disposition": 'attachment; filename="data.csv"',
+                "Content-Length": "11",
+                "Content-Range": "bytes 0-10/11",
+            },
+            [b"hello world"],
+        )
+        full = _mock_response(
+            200,
+            {"Content-Disposition": 'attachment; filename="data.csv"', "Content-Length": "11"},
+            [b"hello world"],
+        )
+        with patch("dagnam._core.client.base.requests.get", side_effect=[bad, full]) as mock_get:
+            path = client.download_dataset("ds1", tmp_path, filename="data.csv", resume=True)
+
+        assert path.read_bytes() == b"hello world"  # not the misaligned append
+        assert mock_get.call_count == 2
+        assert "Range" not in mock_get.call_args_list[1].kwargs.get("headers", {})
+
+    def test_resume_restarts_on_missing_content_range(self, tmp_path: Path) -> None:
+        """A 206 with no Content-Range header is untrustworthy -> restart."""
+        part_file = tmp_path / "data.csv.part"
+        part_file.write_bytes(b"hello ")
+
+        client = DagnamClient("https://api.test", "secret")
+        bad = _mock_response(
+            206,
+            {"Content-Disposition": 'attachment; filename="data.csv"', "Content-Length": "11"},
+            [b"hello world"],
+        )
+        full = _mock_response(
+            200,
+            {"Content-Disposition": 'attachment; filename="data.csv"', "Content-Length": "11"},
+            [b"hello world"],
+        )
+        with patch("dagnam._core.client.base.requests.get", side_effect=[bad, full]):
+            path = client.download_dataset("ds1", tmp_path, filename="data.csv", resume=True)
+
+        assert path.read_bytes() == b"hello world"
+
     def test_resume_restarts_on_200(self, tmp_path: Path) -> None:
         """If server returns 200 instead of 206, restart full download."""
         # Create a partial download

@@ -56,3 +56,14 @@ def test_system_text_decoder_raises_decode_error_when_corpus_too_short(tmp_path:
             },
             "train",
         )
+
+
+def test_system_text_decoder_rejects_traversal_file(tmp_path: Path) -> None:
+    # A malicious server descriptor must not read files outside the artifact dir.
+    with pytest.raises(DecodeError):
+        get_decoder("text").decode(tmp_path, {"text": {"file": "../../../etc/passwd"}}, "train")
+
+
+def test_system_text_decoder_rejects_absolute_file(tmp_path: Path) -> None:
+    with pytest.raises(DecodeError):
+        get_decoder("text").decode(tmp_path, {"text": {"file": "/etc/passwd"}}, "train")

@@ -12,6 +12,7 @@ from dagnam.data.loaders.system.column_store import Column, ColumnStore
 from dagnam.data.loaders.system.decoders._helpers import (
     extensions,
     safe_extract_tar,
+    safe_subpath,
     spec_dict,
 )
 from dagnam.data.loaders.system.decoders.base import DecodeError
@@ -34,7 +35,7 @@ def _audio_root(artifact_dir: Path, configured_dir: str) -> Path:
         roots = [item for item in unpacked.iterdir() if item.is_dir()]
         base = roots[0] if len(roots) == 1 else unpacked
     if configured_dir:
-        candidate = base / configured_dir
+        candidate = safe_subpath(base, configured_dir)
         if candidate.exists():
             return candidate
     return base

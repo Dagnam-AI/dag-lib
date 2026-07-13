@@ -22,6 +22,7 @@ import sys
 from typing import TYPE_CHECKING, cast
 
 from dagnam.cli.common import DOCS_URL
+from dagnam.cli.presentation import sanitize_terminal_text
 
 if TYPE_CHECKING:
     from dagnam._core.exceptions import APIError, ArchitectureValidationError
@@ -92,18 +93,23 @@ class ErrorReport:
 
 
 def render_report(report: ErrorReport, *, color: bool) -> str:
-    """Render a report into the unified error block."""
-    lines = [f"{_style('Error:', 'error', color=color)} {report.title}"]
+    """Render a report into the unified error block.
+
+    Title, field values, and bullets can carry server-supplied text (e.g. the
+    ``Detail`` field is the backend's error message), so they are sanitised of
+    terminal control/escape sequences before reaching the TTY.
+    """
+    lines = [f"{_style('Error:', 'error', color=color)} {sanitize_terminal_text(report.title)}"]
     if report.fields:
         lines.append("")
         width = max(len(label) for label, _ in report.fields) + _GAP
         lines.extend(
-            f"{_INDENT}{_cell(label, width, 'dim', color=color)}{value}"
+            f"{_INDENT}{_cell(label, width, 'dim', color=color)}{sanitize_terminal_text(value)}"
             for label, value in report.fields
         )
     if report.bullets:
         lines.append("")
-        lines.extend(f"{_INDENT}- {bullet}" for bullet in report.bullets)
+        lines.extend(f"{_INDENT}- {sanitize_terminal_text(bullet)}" for bullet in report.bullets)
     if report.tries:
         lines.append("")
         lines.append(_style("Try:", "bold", color=color))

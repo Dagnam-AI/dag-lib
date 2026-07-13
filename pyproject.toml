@@ -47,13 +47,20 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "requests>=2.28",
+    # >=2.32.0 is a security floor: it carries the credential/cert fixes
+    # (CVE-2023-32681 Proxy-Authorization leak on redirect, CVE-2024-35195
+    # cert-verify bypass on session reuse) and requests is the client that
+    # carries the API key.
+    "requests>=2.32.0",
     # numpy is imported eagerly by the dataset layer (dagnam.data.dataset.base),
     # so it is required for any dataset operation, not optional.
     "numpy>=1.24",
     # Pillow decodes images in the framework-agnostic system-dataset loaders, so
     # image datasets work from a plain ``pip install dagnam`` (no framework extra).
-    "pillow>=10.0",
+    # >=10.3.0 is a security floor: it excludes CVE-2023-50447 (ImageMath.eval
+    # RCE, fixed 10.2) and CVE-2024-28219 (_imagingcms overflow, fixed 10.3),
+    # and the SDK feeds dataset-supplied image bytes straight to the decoder.
+    "pillow>=10.3.0",
     "polars>=1.0",
     "tqdm>=4.60",
     "typing_extensions>=4.12",
@@ -63,8 +70,9 @@ dependencies = [
 streaming = ["sseclient-py>=1.7"]
 # torchvision supplies ImageFolder + transforms for the PyTorch image loaders
 # (dagnam.data.loaders.image_folder); it is a real runtime dep of this extra.
-# torchvision>=0.19 pairs with torch>=2.4.
-pytorch = ["torch>=2.4", "torchvision>=0.19"]
+# torch>=2.12.1 is the validated security floor shared with the audio/all extras
+# (older torch carries known advisories); torchvision>=0.19 pairs with it.
+pytorch = ["torch>=2.12.1", "torchvision>=0.19"]
 # torchaudio (>=2.x) decodes audio via TorchCodec, so torchcodec is required at
 # runtime to load audio datasets (else "TorchCodec is required for
 # load_with_torchcodec ... No module named 'torchcodec'"). (G083) This trio is
@@ -148,7 +156,6 @@ include = [
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
-    "RELEASE.md",
     "pyproject.toml",
 ]
 

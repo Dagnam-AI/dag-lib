@@ -302,3 +302,163 @@ def test_raise_for_status_maps_other_codes_to_apierror() -> None:
     with pytest.raises(APIError) as exc_info:
         BaseDagnamClient._raise_for_status(_ErrorResponse(500), "ds-1")  # pyright: ignore[reportArgumentType]
     assert exc_info.value.status_code == 500
+
+
+# ---------------------------------------------------------------- download size cap
+
+
+class _FakeResp:
+    """Minimal streaming-response stand-in for the base writers."""
+
+    def __init__(self, chunks: list[bytes], content_length: int | None) -> None:
+        self._chunks = chunks
+        self.headers: dict[str, str] = (
+            {} if content_length is None else {"Content-Length": str(content_length)}
+        )
+
+    def iter_content(self, chunk_size: int) -> object:
+        yield from self._chunks
+
+    def close(self) -> None:
+        pass
+
+
+def testresolve_max_download_bytes_default(monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(base_mod, "get_config_value", lambda _k, default: default)
+    assert base_mod.resolve_max_download_bytes() == base_mod.DEFAULT_MAX_DOWNLOAD_BYTES
+
+
+@pytest.mark.parametrize("bad", [True, "10", 0, -5, 1.5])
+def testresolve_max_download_bytes_rejects_non_positive_int(
+    monkeypatch: PytestMonkeyPatch, bad: object
+) -> None:
+    monkeypatch.setattr(base_mod, "get_config_value", lambda _k, _default: bad)
+    assert base_mod.resolve_max_download_bytes() == base_mod.DEFAULT_MAX_DOWNLOAD_BYTES
+
+
+def testresolve_max_download_bytes_honours_valid_int(monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(base_mod, "get_config_value", lambda _k, _default: 4096)
+    assert base_mod.resolve_max_download_bytes() == 4096
+
+
+def test_stream_rejects_oversized_content_length(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 4)
+    dest = tmp_path / "big.bin"
+    with pytest.raises(base_mod.DownloadTooLargeError):
+        BaseDagnamClient._stream_response_to_file(
+            _FakeResp([b"xxxxxxxx"], content_length=8),  # pyright: ignore[reportArgumentType]
+            dest,
+            show_progress=False,
+        )
+    assert not dest.exists()
+
+
+def test_stream_aborts_when_body_exceeds_cap(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 4)
+    dest = tmp_path / "big.bin"
+    with pytest.raises(base_mod.DownloadTooLargeError):
+        BaseDagnamClient._stream_response_to_file(
+            _FakeResp([b"xx", b"xx", b"xx"], content_length=None),  # pyright: ignore[reportArgumentType]
+            dest,
+            show_progress=False,
+        )
+    assert not dest.exists()
+
+
+def test_stream_writes_within_cap(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 1024)
+    dest = tmp_path / "ok.bin"
+    BaseDagnamClient._stream_response_to_file(
+        _FakeResp([b"ab", b"cd"], content_length=4),  # pyright: ignore[reportArgumentType]
+        dest,
+        show_progress=False,
+    )
+    assert dest.read_bytes() == b"abcd"
+
+
+def test_append_rejects_oversized_resumed_total(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 6)
+    dest = tmp_path / "part.bin"
+    dest.write_bytes(b"aaaa")  # 4 already written; +4 incoming would exceed 6
+    with pytest.raises(base_mod.DownloadTooLargeError):
+        BaseDagnamClient._append_stream_to_file(
+            _FakeResp([b"bbbb"], content_length=4),  # pyright: ignore[reportArgumentType]
+            dest,
+            show_progress=False,
+        )
+    assert not dest.exists()
+
+
+def test_append_aborts_mid_stream_over_cap(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 5)
+    dest = tmp_path / "part.bin"
+    dest.write_bytes(b"aa")  # 2 written; streaming 4 more crosses 5 with no Content-Length
+    with pytest.raises(base_mod.DownloadTooLargeError):
+        BaseDagnamClient._append_stream_to_file(
+            _FakeResp([b"bb", b"bb"], content_length=None),  # pyright: ignore[reportArgumentType]
+            dest,
+            show_progress=False,
+        )
+    assert not dest.exists()
+
+
+def test_append_within_cap_succeeds(tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+    monkeypatch.setattr(base_mod, "resolve_max_download_bytes", lambda: 1024)
+    dest = tmp_path / "part.bin"
+    dest.write_bytes(b"aa")
+    BaseDagnamClient._append_stream_to_file(
+        _FakeResp([b"bb"], content_length=2),  # pyright: ignore[reportArgumentType]
+        dest,
+        show_progress=False,
+    )
+    assert dest.read_bytes() == b"aabb"
+
+
+# ---------------------------------------------------------------- token scrub
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_absent", "expected_present"),
+    [
+        ("url: /x?token=SECRET", "SECRET", "token=***"),
+        ("GET /y?X-Amz-Signature=ABC&z=1 failed", "ABC", "Signature=***"),
+        ("/z?credential=CRED", "CRED", "credential=***"),
+        ("plain message no query", "", "plain message no query"),
+    ],
+)
+def testscrub_secret_params(raw: str, expected_absent: str, expected_present: str) -> None:
+    scrubbed = base_mod.scrub_secret_params(raw)
+    if expected_absent:
+        assert expected_absent not in scrubbed
+    assert expected_present in scrubbed
+
+
+def test_get_stream_scrubs_token_on_connection_error(monkeypatch: PytestMonkeyPatch) -> None:
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise base_mod.requests.ConnectionError(
+            "HTTPSConnectionPool(host='api.test', port=443): Max retries exceeded "
+            "with url: /x?token=SECRET (Caused by NewConnectionError)"
+        )
+
+    monkeypatch.setattr(base_mod.requests, "get", _boom)
+    client = DagnamClient(API, "k")
+    with pytest.raises(APIError) as ei:
+        client._get_stream(f"{API}/x?token=SECRET")
+    assert "SECRET" not in str(ei.value)
+    assert "token=***" in str(ei.value)
+
+
+def test_get_stream_no_auth_scrubs_token_on_timeout(monkeypatch: PytestMonkeyPatch) -> None:
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise base_mod.requests.Timeout("timed out for url: /obj?X-Amz-Signature=SECRET")
+
+    monkeypatch.setattr(base_mod.requests, "get", _boom)
+    with pytest.raises(APIError) as ei:
+        BaseDagnamClient._get_stream_no_auth(f"{API}/obj?X-Amz-Signature=SECRET")
+    assert "SECRET" not in str(ei.value)

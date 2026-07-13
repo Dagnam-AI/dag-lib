@@ -1,6 +1,15 @@
 """Shared SSE iteration + reconnect logic.
 
 Used by ``dagnam.training.stream_training`` and ``dagnam.deployments.stream_logs``.
+
+Note on event size: a single SSE ``data:`` field is not length-bounded at this
+layer — the sync ``sseclient`` and async ``httpx_sse`` decoders yield whatever
+the server sends before a newline, and only then does :func:`parse_raw_event`
+``json.loads`` it. A hostile or compromised streaming endpoint could therefore
+send one very large unterminated event to pressure client memory. Callers that
+stream from an untrusted endpoint should treat that as the trust boundary; the
+authoritative mitigation is server-side (bounded event framing), not this
+client, which cannot cap a line the upstream decoder has already buffered.
 """
 
 from __future__ import annotations

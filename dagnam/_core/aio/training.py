@@ -22,10 +22,12 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from dagnam._core.aio.base import (
+    SSE_READ_TIMEOUT,
     BaseAsyncDagnamClient,
     content_disposition_safe_name,
     raise_for_job_response,
 )
+from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
@@ -350,7 +352,10 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 url,
                 params=stream_query_params(token),
                 headers=headers,
-                timeout=self.timeout,
+                # A read timeout above the ~30s server heartbeat avoids spurious
+                # ReadTimeouts that would churn the reconnect loop; connect stays
+                # at self.timeout. Mirrors the sync SSE_READ_TIMEOUT.
+                timeout=httpx.Timeout(self.timeout, read=SSE_READ_TIMEOUT),
             ) as event_source:
                 response = event_source.response
                 if not 200 <= response.status_code < 300:
@@ -358,10 +363,11 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                     raise_for_job_response(response, job_id)
                 async for sse in event_source.aiter_sse():
                     yield parse_raw_event(sse)
+        # The stream token rides in params, so scrub it out of the exception text.
         except httpx.ConnectError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
+            raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
         except httpx.ConnectTimeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            raise APIError(0, f"Request timed out: {scrub_secret_params(str(exc))}") from exc
 
     def stream_training_events(
         self, job_id: str, last_event_id: str | None = None

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from dagnam._types import JsonObject
 from dagnam.cli.common import add_collection_output_args, confirm_or_abort, error, print_json
-from dagnam.cli.presentation import Column, emit_result, render_table
+from dagnam.cli.presentation import Column, emit_result, render_table, sanitize_terminal_text
 
 if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
@@ -26,6 +26,10 @@ _IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"GIF89a", "gif"),
     (b"BM", "bmp"),
 )
+
+# Upper bound on a single base64 preview-image field, to cap the in-memory
+# decode of a hostile server response.
+_MAX_PREVIEW_IMAGE_B64_CHARS: int = 24 * 1024 * 1024
 
 
 def _render_datasets(result: object) -> str:
@@ -56,7 +60,7 @@ def cmd_dataset_list(args: argparse.Namespace) -> None:
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.client import DagnamClient
 
-    api_key = args.api_key or get_api_key()
+    api_key = get_api_key()
     api_url = args.api_url or get_api_url()
 
     client = DagnamClient(api_url, api_key)
@@ -107,11 +111,11 @@ def cmd_dataset_info(args: argparse.Namespace) -> None:
         if isinstance(value, dict):
             print(f"{key}:")
             for k, v in value.items():
-                print(f"  {k}: {v}")
+                print(f"  {k}: {sanitize_terminal_text(v)}")
         elif isinstance(value, list):
-            print(f"{key}: {', '.join(str(v) for v in value)}")
+            print(f"{key}: {', '.join(sanitize_terminal_text(v) for v in value)}")
         else:
-            print(f"{key}: {value}")
+            print(f"{key}: {sanitize_terminal_text(value)}")
 
 
 def _decode_image_bytes(value: object) -> tuple[bytes, str] | None:
@@ -129,6 +133,11 @@ def _decode_image_bytes(value: object) -> tuple[bytes, str] | None:
         if value.startswith("data:") and ";base64," in value
         else value
     )
+    # A malicious server could return a multi-GB base64 blob; cap the decode so
+    # a preview cannot exhaust the client's memory. 24 MB of base64 (~18 MB
+    # decoded) is far above any legitimate thumbnail preview.
+    if len(payload) > _MAX_PREVIEW_IMAGE_B64_CHARS:
+        return None
     try:
         raw = base64.b64decode(payload, validate=True)
     except ValueError:
@@ -193,7 +202,10 @@ def _render_preview_table(rows: list[dict[str, object]]) -> str:
 def cmd_dataset_preview(args: argparse.Namespace) -> None:
     import dagnam
 
-    result = dagnam.preview_dataset(args.dataset_id, rows=args.rows)
+    # Clamp to the documented 1-100 range so a huge/negative --rows can't be
+    # forwarded to the server as an unbounded request.
+    rows = max(1, min(100, args.rows))
+    result = dagnam.preview_dataset(args.dataset_id, rows=rows)
     if args.json:
         print_json(result)
         return
@@ -303,7 +315,6 @@ def register_dataset(subparsers: SubParsersAction) -> None:
         "list", help="List datasets.", description="List available datasets."
     )
     dataset_list.add_argument("--api-url", help="Override the API base URL.")
-    dataset_list.add_argument("--api-key", help="Override the API key.")
     dataset_list.add_argument(
         "--type",
         default="all",
@@ -317,7 +328,6 @@ def register_dataset(subparsers: SubParsersAction) -> None:
     )
     dataset_info.add_argument("dataset_id", help="ID of the dataset to inspect.")
     dataset_info.add_argument("--api-url", help="Override the API base URL.")
-    dataset_info.add_argument("--api-key", help="Override the API key.")
     dataset_info.add_argument(
         "--show-download-url",
         action="store_true",

@@ -5,10 +5,9 @@
 # Two uses:
 #   1. Release prep — produces the exact artifacts you twine-upload to PyPI
 #      (see RELEASE.md).
-#   2. Local training tests — mvp-backend's training pipeline, when
-#      DAGNAM_PACKAGE_SOURCE=wheelhouse, installs dagnam from this dist/ via
-#      `uv pip install --find-links <dag-lib>/dist`. That exercises the same
-#      artifact you'll publish, before you publish it.
+#   2. Local end-to-end tests — a downstream consumer can install dagnam from
+#      this dist/ via `uv pip install --find-links <dag-lib>/dist`, exercising
+#      the same artifact you'll publish, before you publish it.
 #
 # Usage:
 #   ./scripts/build-wheel.ps1            # clean build into dist/ (default)
@@ -49,6 +48,5 @@ $wheel = Get-ChildItem -Path $DistDir -Filter 'dagnam-*.whl' | Select-Object -Fi
 Write-Host ''
 Write-Host "Built: $($wheel.FullName)"
 Write-Host ''
-Write-Host 'To exercise it from the training pipeline, set in mvp-backend/.env:'
-Write-Host '  DAGNAM_PACKAGE_SOURCE=wheelhouse'
-Write-Host "  DAGNAM_LOCAL_PATH=$DagLibRoot"
+Write-Host 'To exercise it from a downstream consumer, install from this wheelhouse:'
+Write-Host "  uv pip install --find-links $DistDir dagnam"

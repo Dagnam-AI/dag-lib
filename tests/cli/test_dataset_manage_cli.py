@@ -13,7 +13,7 @@ import pytest
 from dagnam.cli.dataset import _decode_image_bytes
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import CliRunner, StrCapture
+    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
 _PNG = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 _WEBP = b"RIFF\x00\x00\x00\x00WEBPfake"
@@ -47,6 +47,16 @@ def test_decode_image_bytes_rejects_non_string() -> None:
     assert _decode_image_bytes(12345) is None
 
 
+def test_decode_image_bytes_rejects_oversized_payload(monkeypatch: PytestMonkeyPatch) -> None:
+    # A hostile server returning a multi-GB base64 blob must not be decoded into
+    # memory; the size cap rejects it before base64.b64decode runs.
+    from dagnam.cli import dataset as dataset_cli
+
+    monkeypatch.setattr(dataset_cli, "_MAX_PREVIEW_IMAGE_B64_CHARS", 4)
+    oversized = base64.b64encode(_PNG).decode()
+    assert _decode_image_bytes(oversized) is None
+
+
 # ------------------------------------------------------------------- preview
 
 
@@ -62,6 +72,13 @@ def test_preview_tabular_renders_table_and_statistics(
     assert "b" in out
     assert "Statistics:" in out
     assert "count: 1" in out
+
+
+def test_preview_clamps_rows_above_range(run_cli: CliRunner, capsys: StrCapture) -> None:
+    payload = {"samples": [], "statistics": {}}
+    with mock.patch("dagnam.preview_dataset", mock.Mock(return_value=payload)) as preview:
+        run_cli(["dataset", "preview", "ds-1", "--rows", "100000"])
+    preview.assert_called_once_with("ds-1", rows=100)
 
 
 def test_preview_decodes_image_samples(

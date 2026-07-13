@@ -112,3 +112,16 @@ def test_system_audio_folder_excludes_background_noise_dir(tmp_path: Path) -> No
 
     assert len(store) == 2
     assert sorted(int(store.column("label")[i]) for i in range(2)) == [0, 1]
+
+
+def test_system_audio_folder_rejects_traversal_dir(tmp_path: Path) -> None:
+    import pytest
+
+    from dagnam.data.loaders.system.decoders.base import DecodeError
+
+    with pytest.raises(DecodeError):
+        get_decoder("audio_folder").decode(
+            tmp_path,
+            {"audio": {"dir": "../../../etc", "ext": [".wav"]}, "label": {"from": "subdir"}},
+            "train",
+        )

@@ -347,3 +347,37 @@ def test_open_training_stream_500(client: DagnamClient, rmock: RequestsMocker) -
     rmock.get(f"{API}/api/v1/streaming/training-jobs/j1/stream", status_code=500, text="boom")
     with pytest.raises(APIError):
         client.open_training_stream("j1")
+
+
+def test_open_training_stream_scrubs_token_on_connection_error(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    # The SSE token rides in params=, so the leak is via the requests exception
+    # text (urllib3 embeds the composed ?token=… URL), not the local url var.
+    client = DagnamClient(API, "key")
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job: "SECRET")
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.ConnectionError(
+            "HTTPSConnectionPool(host='api.test', port=443): Max retries exceeded "
+            "with url: /api/v1/streaming/training-jobs/j1/stream?token=SECRET"
+        )
+
+    monkeypatch.setattr(requests, "get", _boom)
+    with pytest.raises(APIError) as ei:
+        client.open_training_stream("j1")
+    assert "SECRET" not in str(ei.value)
+    assert "token=***" in str(ei.value)
+
+
+def test_open_training_stream_scrubs_token_on_timeout(monkeypatch: PytestMonkeyPatch) -> None:
+    client = DagnamClient(API, "key")
+    monkeypatch.setattr(client, "mint_training_stream_token", lambda _job: "SECRET")
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise requests.Timeout("timed out with url: /stream?token=SECRET")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    with pytest.raises(APIError) as ei:
+        client.open_training_stream("j1")
+    assert "SECRET" not in str(ei.value)

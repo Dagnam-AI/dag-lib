@@ -12,11 +12,15 @@ on:
 
 jobs:
   claude:
+    # Only trusted authors (repo owner/member/collaborator) can drive this
+    # write-scoped, secret-bearing job. Without this gate any GitHub user could
+    # trigger it from a public comment; the action's internal gating must not be
+    # the only line of defence.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,13 +30,13 @@ jobs:
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
         with:
           # Pro/Max subscription auth (generated via `claude setup-token`)
           anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

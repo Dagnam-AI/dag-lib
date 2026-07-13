@@ -3,8 +3,8 @@
 This is the contract that every refactor phase must keep green: the set of
 exported names, the importability of every documented ``dagnam.*`` path, and the
 resolution of the lazy exports. A change that fails this test is a public-API
-break and must be a deliberate, CHANGELOG'd decision coordinated with consumers
-(notably ``mvp-backend``), not an accident of a hygiene refactor.
+break and must be a deliberate, CHANGELOG'd decision coordinated with downstream
+consumers, not an accident of a hygiene refactor.
 """
 
 from __future__ import annotations

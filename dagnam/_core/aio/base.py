@@ -9,14 +9,25 @@ except ImportError as _exc:
         "dagnam.aio requires httpx. Install with: pip install 'dagnam[aio]'"
     ) from _exc
 
-from pathlib import PurePosixPath
+import asyncio
+from pathlib import Path, PurePosixPath
 import re
 
+from dagnam._core.client.base import resolve_max_download_bytes
 from dagnam._core.client.common import bearer_headers, safe_response_text
-from dagnam._core.exceptions import APIError, AuthError, TrainingJobNotFoundError
+from dagnam._core.exceptions import (
+    APIError,
+    AuthError,
+    DownloadTooLargeError,
+    TrainingJobNotFoundError,
+)
 from dagnam._types import FormData, JsonValue, QueryParams, UploadFiles
 
 DEFAULT_TIMEOUT = 30
+# SSE streams are quiet between events (~30s server heartbeat); a read timeout
+# comfortably above that avoids spurious ReadTimeouts that would churn the
+# reconnect loop and re-mint a stream token. Mirrors the sync SSE_READ_TIMEOUT.
+SSE_READ_TIMEOUT = 90
 _WINDOWS_RESERVED_FILENAMES = {
     "con",
     "prn",
@@ -79,19 +90,35 @@ class BaseAsyncDagnamClient:
         except httpx.TimeoutException as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
-    async def _get_no_auth(self, url: str) -> httpx.Response:
-        """GET an absolute URL with NO auth header (e.g. a presigned URL).
+    async def _stream_response_to_file(self, resp: httpx.Response, dest: Path) -> None:
+        """Stream an open httpx response body to ``dest``, bounded by the cap.
 
-        Presigned S3/GCS URLs carry their own signature in the query string and
-        reject (or are confused by) a forwarded ``Authorization`` header, so the
-        redirect follow-up must not send the API key.
+        ``resp`` must come from an open ``self._client.stream(...)`` context so
+        the body is never buffered in memory (a large checkpoint would OOM). An
+        oversized ``Content-Length`` is rejected up-front and a body that crosses
+        ``max_download_bytes`` mid-stream aborts and deletes the partial file.
         """
+        max_bytes = resolve_max_download_bytes()
+        total = resp.headers.get("content-length")
+        total_bytes = int(total) if total is not None else None
+        if total_bytes is not None and total_bytes > max_bytes:
+            raise DownloadTooLargeError(
+                0, f"Download of {total_bytes} bytes exceeds max_download_bytes={max_bytes}"
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
         try:
-            return await self._client.get(url, timeout=self.timeout)
-        except httpx.ConnectError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except httpx.TimeoutException as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
+            with open(dest, "wb") as fh:
+                async for chunk in resp.aiter_bytes():
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise DownloadTooLargeError(
+                            0, f"Download exceeded max_download_bytes={max_bytes}"
+                        )
+                    fh.write(chunk)
+        except DownloadTooLargeError:
+            await asyncio.to_thread(dest.unlink, missing_ok=True)
+            raise
 
 
 def raise_for_job_response(resp: httpx.Response, job_id: str) -> None:

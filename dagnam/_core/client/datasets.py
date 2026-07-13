@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
+    STREAM_CONNECT_TIMEOUT,
+    STREAM_READ_TIMEOUT,
     APIError,
     BaseDagnamClient,
     parse_content_disposition_filename,
@@ -213,6 +216,26 @@ class DatasetsClientMixin(BaseDagnamClient):
 
         # Handle resume logic
         if "Range" in headers and resp.status_code == 206:
+            # Validate the server honoured the exact Range we asked for before
+            # appending — a 206 whose Content-Range starts at a different offset
+            # (server ignored/miscounted the range) would silently corrupt the
+            # file. On any mismatch or a missing/garbled header, discard the
+            # partial and restart a clean full download.
+            requested_start = int(headers["Range"].split("=", 1)[1].split("-", 1)[0])
+            content_range = resp.headers.get("Content-Range", "")
+            match = re.match(r"bytes\s+(\d+)-", content_range)
+            if match is None or int(match.group(1)) != requested_start:
+                part_path.unlink(missing_ok=True)
+                resp.close()
+                return self.download_dataset(
+                    dataset_id,
+                    output_dir,
+                    download_url=download_url,
+                    filename=filename,
+                    version=version,
+                    resume=False,
+                    show_progress=show_progress,
+                )
             # Append to existing partial file
             self._append_stream_to_file(resp, part_path, show_progress=show_progress)
             # Rename .part to final filename
@@ -265,7 +288,11 @@ class DatasetsClientMixin(BaseDagnamClient):
                     headers=self._headers(),
                     data=fields,
                     files=files,
-                    timeout=None,
+                    # A (connect, read) tuple rather than None: the per-socket
+                    # read timeout resets on each write, so a progressing large
+                    # upload is unaffected while a dead socket fails fast instead
+                    # of hanging forever.
+                    timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT),
                     allow_redirects=ALLOW_REDIRECTS,
                 )
         except requests.ConnectionError as exc:

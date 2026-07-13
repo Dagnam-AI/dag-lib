@@ -98,14 +98,26 @@ def download_checkpoint(
             )
     else:
         # No server checksum (e.g. an S3 presigned redirect, which cannot carry
-        # the X-Checksum-SHA256 header). The file is accepted so S3-backed
-        # deployments keep working, but the unverified state is surfaced LOUDLY
-        # — never silently — because a checkpoint is loaded downstream via
-        # torch.load and a swapped file is a code-execution vector.
+        # the X-Checksum-SHA256 header). A checkpoint is loaded downstream via
+        # torch.load, so a swapped file is a code-execution vector. Operators who
+        # want to fail closed can set require_checkpoint_checksum=true; otherwise
+        # the file is accepted (so S3-backed deployments keep working) but the
+        # unverified state is surfaced LOUDLY — never silently.
+        require_checksum = get_config_value("require_checkpoint_checksum", default=False)
+        if require_checksum:
+            try:
+                local_path.unlink()
+            except OSError:
+                pass
+            raise ChecksumError(
+                f"Checkpoint '{checkpoint_id}' for job '{job_id}' arrived with no "
+                "server checksum and require_checkpoint_checksum is set; refusing to "
+                "return an unverified checkpoint (it is torch.load'd downstream)."
+            )
         logger.warning(
             "Checkpoint '%s' for job '%s' was downloaded WITHOUT a server "
             "checksum; integrity could not be verified. Only load checkpoints "
-            "from sources you trust.",
+            "from sources you trust. Set require_checkpoint_checksum=true to fail closed.",
             checkpoint_id,
             job_id,
         )

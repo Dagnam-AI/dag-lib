@@ -47,8 +47,13 @@ def _different_checksum(_path: Path) -> str:
     return "different"
 
 
-def _checkpoint_cache_limit(_key: str, _default: object | None = None) -> int:
-    return 1024
+def _checkpoint_cache_limit(key: str, default: object | None = None) -> object:
+    # Only the cache-size keys are bounded; other reads (e.g.
+    # require_checkpoint_checksum) fall through to their default so this stub
+    # does not accidentally flip an unrelated feature flag on.
+    if key in {"max_checkpoint_cache_size", "max_cache_size"}:
+        return 1024
+    return default
 
 
 def _raw_event(
