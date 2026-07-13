@@ -19,6 +19,7 @@ from dagnam._core.client.base import (
     is_redirect_response,
     is_success_response,
     parse_content_disposition_filename,
+    safe_download_basename,
     safe_error_body_from_response,
 )
 from dagnam._core.exceptions import APIError, AuthError
@@ -462,3 +463,25 @@ def test_get_stream_no_auth_scrubs_token_on_timeout(monkeypatch: PytestMonkeyPat
     with pytest.raises(APIError) as ei:
         BaseDagnamClient._get_stream_no_auth(f"{API}/obj?X-Amz-Signature=SECRET")
     assert "SECRET" not in str(ei.value)
+
+
+# ---------------------------------------------------------------- safe_download_basename
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("data.csv", "data.csv"),  # legit basename preserved
+        ("/home/u/.bashrc", ".bashrc"),  # absolute -> basename
+        ("../../../etc/passwd", "passwd"),  # traversal -> basename
+        ("a/b/c/file.bin", "file.bin"),  # nested -> basename
+        ("C:\\Windows\\evil.exe", "evil.exe"),  # windows drive + backslash
+        ("name:stream", "stream"),  # NTFS ADS prefix stripped
+        ("..", "DEF"),  # reduces to nothing usable -> default
+        ("", "DEF"),  # empty -> default
+        ("nul", "DEF"),  # windows reserved device -> default
+        ("con.txt", "DEF"),  # reserved stem -> default
+    ],
+)
+def test_safe_download_basename(raw: str, expected: str) -> None:
+    assert safe_download_basename(raw, default="DEF") == expected

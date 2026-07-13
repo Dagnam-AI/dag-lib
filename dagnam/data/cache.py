@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import sys
 import time
 from typing import TypedDict
 from urllib.parse import quote
@@ -49,12 +50,49 @@ def cache_dir_name(dataset_id: str) -> str:
     return encoded
 
 
+# Cache roots already checked for insecure permissions this process — statted
+# at most once each so the hot get_cache_dir path stays a cheap set lookup.
+_cache_perms_checked: set[str] = set()
+
+
+def _warn_if_cache_insecure(base: Path) -> None:
+    """Warn once per cache root that is group/world-WRITABLE (POSIX only).
+
+    A cache hit is trusted at load time (not re-hashed unless ``verify=True``),
+    so another local user who can WRITE the cache dir could swap a cached
+    dataset/checkpoint file for a same-size payload. Only write access matters
+    here — cache data is not secret (contrast the config file, where read access
+    leaks the API key). Warn-only, mirroring ``config._warn_if_config_insecure``;
+    Windows relies on filesystem ACLs and is skipped.
+    """
+    if sys.platform == "win32":
+        return
+    key = str(base)
+    if key in _cache_perms_checked:
+        return
+    _cache_perms_checked.add(key)
+    try:
+        st = os.stat(base)
+    except OSError:
+        return
+    if st.st_mode & 0o022:
+        _CACHE_LOG.warning(
+            "Dagnam cache directory %s is group/world-writable; another local user "
+            "could swap cached dataset/checkpoint files (a cache hit is not re-hashed "
+            "by default). Use a private cache dir (chmod 700 %s) or pass verify=True to "
+            "force re-verification.",
+            base,
+            base,
+        )
+
+
 def get_cache_dir(dataset_id: str, base_dir: Path | None = None) -> Path:
     """Returns ~/.dagnam/datasets/{dataset_id}/ (or custom base).
 
     Creates the directory (including parents) if it doesn't exist.
     """
     base = base_dir if base_dir is not None else DEFAULT_CACHE_DIR
+    _warn_if_cache_insecure(base)
     cache_dir = base / cache_dir_name(dataset_id)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir

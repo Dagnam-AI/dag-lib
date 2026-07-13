@@ -330,3 +330,49 @@ def test_download_system_dataset_timeout(
     monkeypatch.setattr(requests, "get", _boom)
     with pytest.raises(APIError, match="Request timed out"):
         client.download_system_dataset("iris", tmp_path)
+
+
+def test_download_dataset_absolute_filename_cannot_escape_output_dir(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    # A server-controlled absolute filename (dataset metadata["filename"]) must be
+    # reduced to a bare basename inside output_dir — never an arbitrary-file-write.
+    outdir = tmp_path / "cache"
+    outdir.mkdir()
+    victim = tmp_path / "VICTIM.txt"
+    victim.write_text("legit", encoding="utf-8")
+    rmock.get(f"{API}/api/v1/datasets/ds1/download", content=b"PAYLOAD", status_code=200)
+
+    out = client.download_dataset("ds1", outdir, filename=str(victim), resume=False)
+
+    assert victim.read_text(encoding="utf-8") == "legit"  # untouched
+    assert out.parent == outdir  # write landed inside output_dir
+    assert out.name == "VICTIM.txt"  # reduced to bare basename
+    assert out.read_bytes() == b"PAYLOAD"
+
+
+def test_download_dataset_traversal_filename_cannot_escape_output_dir(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    outdir = tmp_path / "a" / "b" / "cache"
+    outdir.mkdir(parents=True)
+    rmock.get(f"{API}/api/v1/datasets/ds1/download", content=b"X", status_code=200)
+
+    out = client.download_dataset(
+        "ds1", outdir, filename="../../../../etc/cron.d/evil", resume=False
+    )
+
+    assert out.parent == outdir
+    assert out.name == "evil"
+    assert not (tmp_path / "a" / "etc").exists()
+
+
+def test_download_dataset_unsafe_filename_falls_back_to_default(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    # A filename that reduces to nothing usable (".." / a reserved device) uses
+    # the "dataset" default rather than writing a bogus/redirected file.
+    rmock.get(f"{API}/api/v1/datasets/ds1/download", content=b"Y", status_code=200)
+    out = client.download_dataset("ds1", tmp_path, filename="..", resume=False)
+    assert out.parent == tmp_path
+    assert out.name == "dataset"

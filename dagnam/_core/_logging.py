@@ -34,7 +34,15 @@ SSE_LOGGER = "dagnam.sse"
 
 _CHILD_LOGGER_NAMES = (HTTP_LOGGER, CACHE_LOGGER, LRO_LOGGER, SSE_LOGGER)
 
-_QUERY_CRED_RE = re.compile(r"([?&](?:token|api_key)=)[^&\s]+", re.IGNORECASE)
+# Credential-bearing query params. Kept deliberately BROAD and in sync with
+# dagnam._core.client.base.scrub_secret_params (`token|signature|credential|sig|key`):
+# a presigned S3/GCS/CDN URL carries its secret as X-Amz-Signature / X-Amz-Credential /
+# Signature / sig / AWSAccessKeyId (matched via the `key` alternative), NOT as `token`.
+# A narrower set would leave those unredacted in a logged retry URL. The `[\w.-]*`
+# wings match hyphenated prefixes like `x-amz-`.
+_QUERY_CRED_RE = re.compile(
+    r"([?&][\w.-]*(?:token|signature|credential|sig|key)[\w.-]*=)[^&\s]+", re.IGNORECASE
+)
 # NOTE: the credential value is the REST of the line, not just the next
 # whitespace-delimited token — "Authorization: Bearer sk_live_ABC" has a
 # two-token value, and a `\S+` capture would leave "sk_live_ABC" unredacted.

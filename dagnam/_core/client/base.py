@@ -185,7 +185,7 @@ class BaseDagnamClient:
                     allow_redirects=allow_redirects,
                 )
             except requests.RequestException as exc:
-                raise APIError(0, f"Request failed: {exc}") from exc
+                raise APIError(0, f"Request failed: {scrub_secret_params(str(exc))}") from exc
             try:
                 raise_for(resp)
             except APIError as exc:
@@ -451,14 +451,26 @@ def content_disposition_safe_name(header: str | None, *, default: str) -> str:
     raw = _extract_content_disposition_raw(header)
     if raw is None:
         return default
-    # Reduce to a bare basename with NO path separator, drive letter, or NTFS
-    # alternate-data-stream prefix: PurePosixPath(...).name strips "/" and "\\"
-    # components, then rsplit(":", 1)[-1] drops any leading "<drive>:" / "name:stream"
-    # prefix (colon is a path-defining char on Windows, a supported platform).
-    # The result therefore contains no "/", "\\", or ":" and always joins
-    # strictly inside dest_dir on POSIX and Windows alike. A Windows reserved
-    # device stem (CON, NUL, COM1, ...) is rejected to "default" so the write
-    # can never be redirected to a console/device instead of a file in dest_dir.
+    return safe_download_basename(raw, default=default)
+
+
+def safe_download_basename(raw: str, *, default: str) -> str:
+    """Reduce a possibly-hostile filename to a bare basename safe to join under a dir.
+
+    A download filename may be server-controlled (dataset ``metadata["filename"]``,
+    a Content-Disposition header). An absolute path or ``..`` traversal in it would
+    escape the destination — ``Path(out) / "/home/u/.bashrc"`` is ``/home/u/.bashrc``,
+    and ``Path(out) / "../../x"`` climbs out — enabling an arbitrary-file-write / RCE
+    from a compromised server. Reducing to the bare basename removes every path
+    separator, drive letter, and NTFS ``name:stream`` prefix: ``PurePosixPath(...).name``
+    strips forward- and back-slash components, then ``rsplit(":", 1)[-1]`` drops any
+    leading ``<drive>:`` / ``name:`` prefix (colon is path-defining on Windows). The
+    result contains no separator, colon, or drive prefix and always joins strictly
+    inside the destination on POSIX and Windows alike, so no ``is_relative_to`` runtime
+    assertion is needed. A Windows reserved device stem (CON, NUL, COM1, …) or an
+    empty/``.``/``..`` reduction falls back to ``default`` so the write can never target
+    a device or the directory itself.
+    """
     candidate = PurePosixPath(raw.replace("\\", "/")).name.rsplit(":", 1)[-1]
     reserved_stem = candidate.rstrip(" .").split(".", 1)[0].lower()
     if candidate in {"", ".", ".."} or reserved_stem in _WINDOWS_RESERVED_FILENAMES:

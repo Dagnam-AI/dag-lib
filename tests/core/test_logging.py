@@ -99,3 +99,20 @@ def test_enable_debug_logging_defaults_to_stderr():
 
 def test_enable_debug_logging_exported():
     assert dagnam.enable_debug_logging is enable_debug_logging
+
+
+def test_redacting_filter_scrubs_presigned_url_signature():
+    # A presigned S3/GCS/CDN URL carries its credential as X-Amz-Signature /
+    # X-Amz-Credential / Signature / sig / AWSAccessKeyId — NOT `token`. The
+    # retry logger logs such URLs, so all of these must be redacted.
+    msg = (
+        "retrying GET https://b.s3.amazonaws.com/o?"
+        "X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=SECRETSIG&"
+        "Signature=DEADBEEF&sig=abc&AWSAccessKeyId=AKIA2&a=1 after status=503"
+    )
+    rec = logging.LogRecord("dagnam.http", logging.DEBUG, __file__, 0, msg, (), None)
+    RedactingFilter().filter(rec)
+    out = rec.getMessage()
+    for secret in ("SECRETSIG", "AKIAEXAMPLE", "DEADBEEF", "AKIA2"):
+        assert secret not in out, secret
+    assert "a=1" in out  # non-credential params preserved

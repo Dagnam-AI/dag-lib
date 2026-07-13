@@ -87,8 +87,11 @@ class LongRunningOperation:
         return self._name
 
     def configure_polling(self, min_interval: float, max_interval: float) -> None:
-        self._poll_min = min_interval
-        self._poll_max = max(min_interval, max_interval)
+        # Apply the same floor as __init__: a 0/negative min_interval would let a
+        # hostile server's 429/503 flood drive a sleep(0) tight-spin, and a
+        # negative value makes wait()'s sleep() raise ValueError.
+        self._poll_min = max(0.1, float(min_interval))
+        self._poll_max = max(self._poll_min, float(max_interval))
 
     def initial(self) -> Optional[JsonMapping]:
         """Payload captured at construction (if object) — never re-polled."""

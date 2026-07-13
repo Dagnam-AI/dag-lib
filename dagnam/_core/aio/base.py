@@ -18,7 +18,7 @@ from typing import Awaitable, Callable
 import uuid
 
 from dagnam._core._retry import RetryBudget, run_with_retry_async
-from dagnam._core.client.base import resolve_max_download_bytes
+from dagnam._core.client.base import resolve_max_download_bytes, scrub_secret_params
 from dagnam._core.client.common import bearer_headers, safe_response_text
 from dagnam._core.exceptions import (
     APIError,
@@ -123,8 +123,10 @@ class BaseAsyncDagnamClient:
                 # equivalent, so match that breadth here. Preserve the existing
                 # timeout-specific message where it applies.
                 if isinstance(exc, httpx.TimeoutException):
-                    raise APIError(0, f"Request timed out: {exc}") from exc
-                raise APIError(0, f"Connection failed: {exc}") from exc
+                    raise APIError(
+                        0, f"Request timed out: {scrub_secret_params(str(exc))}"
+                    ) from exc
+                raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc
             if raise_for is not None:
                 try:
                     raise_for(resp)

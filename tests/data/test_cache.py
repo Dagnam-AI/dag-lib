@@ -467,3 +467,64 @@ class TestCacheDirName:
     def test_slash_is_percent_encoded(self) -> None:
         # A path separator must not survive into the directory name.
         assert cache_dir_name("a/b") == "a%2Fb"
+
+
+class TestCachePermissionWarning:
+    """Defense-in-depth: warn when the cache root is group/world-writable."""
+
+    def _arm(self, monkeypatch: PytestMonkeyPatch) -> None:
+        monkeypatch.setattr(cache_module, "_cache_perms_checked", set())
+        monkeypatch.setattr(cache_module.sys, "platform", "linux")
+
+    def test_warns_once_on_world_writable_cache_dir(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import os
+
+        if os.name != "posix":
+            pytest.skip("POSIX-only permission check")
+        self._arm(monkeypatch)
+        base = tmp_path / "shared"
+        base.mkdir()
+        os.chmod(base, 0o777)  # noqa: S103 (simulating an exposed shared cache)
+        with caplog.at_level("WARNING"):
+            cache_module.get_cache_dir("ds1", base_dir=base)
+            cache_module.get_cache_dir("ds2", base_dir=base)  # same base: no re-warn
+        warnings = [r for r in caplog.records if "world-writable" in r.getMessage()]
+        assert len(warnings) == 1
+
+    def test_silent_on_private_cache_dir(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import os
+
+        if os.name != "posix":
+            pytest.skip("POSIX-only permission check")
+        self._arm(monkeypatch)
+        base = tmp_path / "private"
+        base.mkdir()
+        os.chmod(base, 0o700)
+        with caplog.at_level("WARNING"):
+            cache_module.get_cache_dir("ds1", base_dir=base)
+        assert not [r for r in caplog.records if "world-writable" in r.getMessage()]
+
+    def test_tolerates_missing_base(
+        self, tmp_path: Path, monkeypatch: PytestMonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A not-yet-created base is fine: no stat target, get_cache_dir creates it.
+        self._arm(monkeypatch)
+        base = tmp_path / "does_not_exist_yet"
+        with caplog.at_level("WARNING"):
+            out = cache_module.get_cache_dir("ds1", base_dir=base)
+        assert out.exists()
+        assert not [r for r in caplog.records if "world-writable" in r.getMessage()]
+
+    def test_skipped_on_windows(self, tmp_path: Path, monkeypatch: PytestMonkeyPatch) -> None:
+        monkeypatch.setattr(cache_module, "_cache_perms_checked", set())
+        monkeypatch.setattr(cache_module.sys, "platform", "win32")
+
+        def _fail_stat(_p: object) -> object:
+            raise AssertionError("os.stat must not run on Windows")
+
+        monkeypatch.setattr(cache_module.os, "stat", _fail_stat)
+        cache_module.get_cache_dir("ds1", base_dir=tmp_path)  # must not raise
