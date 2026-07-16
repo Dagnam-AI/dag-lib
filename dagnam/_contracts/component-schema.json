@@ -1199,6 +1199,22 @@
           "required": false
         },
         {
+          "applies_when": {
+            "optimizer": [
+              "sgd",
+              "rmsprop"
+            ]
+          },
+          "key": "optimizer_momentum",
+          "kind": "number",
+          "numeric": {
+            "integer": false,
+            "max": 0.999,
+            "min": 0.0
+          },
+          "required": false
+        },
+        {
           "key": "learningRate",
           "kind": "number",
           "numeric": {
@@ -1392,6 +1408,10 @@
           ],
           "enum_values": [
             "none",
+            "reduce_on_plateau",
+            "cosine_annealing",
+            "warmup_decay",
+            "onecycle",
             "step",
             "exponential",
             "cosine",

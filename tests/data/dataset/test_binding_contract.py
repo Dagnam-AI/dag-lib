@@ -64,6 +64,11 @@ def test_column_roles_from_binding_ignores_missing_and_nonstring(roles_fn: _Role
 
 def test_to_pytorch_loader_derives_column_roles_from_binding(tmp_path: Path) -> None:
     ds = _csv_dataset(tmp_path)
+    binding = {
+        "input_column": "x",
+        "target_column": "label",
+        "target_transform": {"kind": "numeric", "params": {"dtype": "float"}},
+    }
     with patch(
         "dagnam.data.loaders.csv.create_pytorch_loader",
         return_value="loader",
@@ -72,13 +77,19 @@ def test_to_pytorch_loader_derives_column_roles_from_binding(tmp_path: Path) -> 
             split="train",
             batch_size=1,
             num_workers=0,
-            binding={"input_column": "x", "target_column": "label"},
+            binding=binding,
         )
     assert mock_create.call_args.kwargs["column_roles"] == {"x": "feature", "label": "target"}
+    assert mock_create.call_args.kwargs["binding"] == binding
 
 
 def test_to_tensorflow_dataset_derives_column_roles_from_binding(tmp_path: Path) -> None:
     ds = _csv_dataset(tmp_path)
+    binding = {
+        "input_column": "x",
+        "target_column": "label",
+        "target_transform": {"kind": "numeric", "params": {"dtype": "float"}},
+    }
     with patch(
         "dagnam.data.loaders.tf.create_tensorflow_dataset",
         return_value="loader",
@@ -86,13 +97,19 @@ def test_to_tensorflow_dataset_derives_column_roles_from_binding(tmp_path: Path)
         ds.to_tensorflow_dataset(
             split="train",
             batch_size=1,
-            binding={"input_column": "x", "target_column": "label"},
+            binding=binding,
         )
     assert mock_create.call_args.kwargs["column_roles"] == {"x": "feature", "label": "target"}
+    assert mock_create.call_args.kwargs["binding"] == binding
 
 
 def test_to_flax_dataset_derives_column_roles_from_binding(tmp_path: Path) -> None:
     ds = _csv_dataset(tmp_path)
+    binding = {
+        "input_column": "x",
+        "target_column": "label",
+        "target_transform": {"kind": "numeric", "params": {"dtype": "float"}},
+    }
     with patch(
         "dagnam.data.loaders.flax.create_flax_dataset",
         return_value=["batch"],
@@ -100,9 +117,10 @@ def test_to_flax_dataset_derives_column_roles_from_binding(tmp_path: Path) -> No
         ds.to_flax_dataset(
             split="train",
             batch_size=1,
-            binding={"input_column": "x", "target_column": "label"},
+            binding=binding,
         )
     assert mock_create.call_args.kwargs["column_roles"] == {"x": "feature", "label": "target"}
+    assert mock_create.call_args.kwargs["binding"] == binding
 
 
 def test_explicit_column_roles_take_precedence_over_binding(tmp_path: Path) -> None:

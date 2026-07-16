@@ -54,11 +54,14 @@ def test_ml_extras_have_installable_floors() -> None:
     # torch>=2.12.1 is the validated security floor shared with audio/all
     # (older torch carries known advisories); keep this in step with pyproject.
     assert optional_dependencies["pytorch"] == ["torch>=2.12.1", "torchvision>=0.19"]
-    # torchaudio>=2.x decodes via TorchCodec, so torchcodec is a runtime dep (G083).
+    # Audio decoding uses SoundFile so uploaded WAV/FLAC/MP3 data does not depend
+    # on a machine-global FFmpeg shared-library installation. Torchaudio remains
+    # required for generated MFCC/Mel transforms, but TorchCodec is not a loader
+    # dependency (G197).
     assert optional_dependencies["audio"] == [
         "torch>=2.12.1",
         "torchaudio>=2.0",
-        "torchcodec>=0.1",
+        "soundfile>=0.13",
     ]
     # TF 2.12 cannot install on Python 3.12; 2.16 is the first 3.12-capable release.
     assert optional_dependencies["tensorflow"] == ["tensorflow>=2.16"]
@@ -67,6 +70,8 @@ def test_ml_extras_have_installable_floors() -> None:
         "flax>=0.7",
     ]
     assert "torchvision>=0.19" in optional_dependencies["all"]
+    assert "soundfile>=0.13" in optional_dependencies["all"]
+    assert not any(req.startswith("torchcodec") for req in optional_dependencies["all"])
     assert "tensorflow>=2.16" in optional_dependencies["all"]
     assert "jax>=0.4" in optional_dependencies["all"]
     assert "flax>=0.7" in optional_dependencies["all"]

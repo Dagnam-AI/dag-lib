@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, SupportsInt, cast
+import wave
 
 from tests.data.loaders._audio_helpers import (
     LabelTensor,
@@ -22,6 +23,38 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------- dataset
+
+
+def test_bound_audio_folder_decodes_real_wav_as_raw_fixed_length_waveform(
+    monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    from dagnam.data.loaders.audio import dataset as dataset_module
+
+    audio_path = tmp_path / "yes" / "clip.wav"
+    audio_path.parent.mkdir()
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\x00\x00" * 800)
+
+    def reject_torchaudio_decode() -> object:
+        raise AssertionError("raw bound audio must not require torchaudio/TorchCodec decoding")
+
+    monkeypatch.setattr(dataset_module, "_load_torchaudio", reject_torchaudio_decode)
+
+    ds = dataset_module.AudioFolderDataset(
+        file_paths=[audio_path],
+        labels=[0],
+        target_sample_rate=8000,
+        target_length=800,
+        max_duration_sec=5.0,
+        return_waveform=True,
+    )
+
+    waveform, label = ds[0]
+    assert tuple(waveform.shape) == (800,)
+    assert int(cast("SupportsInt", label)) == 0
 
 
 def test_audio_folder_dataset_basic(monkeypatch: PytestMonkeyPatch, tmp_path: Path) -> None:

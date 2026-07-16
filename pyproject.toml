@@ -74,11 +74,10 @@ streaming = ["sseclient-py>=1.7"]
 # torch>=2.12.1 is the validated security floor shared with the audio/all extras
 # (older torch carries known advisories); torchvision>=0.19 pairs with it.
 pytorch = ["torch>=2.12.1", "torchvision>=0.19"]
-# torchaudio (>=2.x) decodes audio via TorchCodec, so torchcodec is required at
-# runtime to load audio datasets (else "TorchCodec is required for
-# load_with_torchcodec ... No module named 'torchcodec'"). (G083) This trio is
-# a version-coupled set; kept at the validated floor so the decode chain resolves.
-audio = ["torch>=2.12.1", "torchaudio>=2.0", "torchcodec>=0.1"]
+# SoundFile decodes uploaded WAV/FLAC/MP3 files without a machine-global FFmpeg
+# shared-library install. Torchaudio remains the framework transform dependency
+# for generated MFCC/Mel nodes; TorchCodec is deliberately not a loader dep (G197).
+audio = ["torch>=2.12.1", "torchaudio>=2.0", "soundfile>=0.13"]
 # TensorFlow added Python 3.12 support in 2.16 (2.12 tops out at 3.11), so the
 # floor must be >=2.16 to be installable on the supported interpreters.
 tensorflow = ["tensorflow>=2.16"]
@@ -91,7 +90,7 @@ all = [
     "torch>=2.12.1",
     "torchvision>=0.19",
     "torchaudio>=2.0",
-    "torchcodec>=0.1",
+    "soundfile>=0.13",
     "tensorflow>=2.16",
     "jax>=0.4",
     "flax>=0.7",

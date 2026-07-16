@@ -349,9 +349,15 @@ def test_to_tf_image_folder_dispatches(tmp_path: Path) -> None:
         tmp_path,
     )
     tf_ds = ds.to_tensorflow_dataset(
-        split="train", batch_size=2, shuffle=False, val_ratio=0.2, test_ratio=0.2
+        split="train",
+        batch_size=2,
+        shuffle=False,
+        val_ratio=0.2,
+        test_ratio=0.2,
+        image_size=(16, 16),
     )
-    next(iter(tf_ds))
+    images, _labels = cast("tuple[_HasShape, object]", next(iter(tf_ds)))
+    assert tuple(images.shape[1:]) == (16, 16, 3)
 
 
 # ---------------------------------------------------------------- native_tensorflow_dataset path

@@ -5,8 +5,10 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast
 
+import numpy as np
+
 from dagnam._types import JsonObject
-from dagnam.data._polars_utils import encode_label_series, numeric_columns
+from dagnam.data._polars_utils import encode_target_series, materialize_feature_matrix
 from dagnam.data.loaders.media import select_split_indices
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
@@ -65,6 +67,7 @@ def create_pytorch_loader(
     test_ratio: float,
     seed: int,
     column_roles: dict[str, str] | None = None,
+    binding: dict[str, object] | None = None,
 ) -> DataLoader[object]:
     """Create a PyTorch DataLoader from a CSV/TSV dataset.
 
@@ -89,11 +92,12 @@ def create_pytorch_loader(
         feature_cols = [c for c in df.columns if c != label_col]
 
     # ---- label encoding ----
-    labels = _encode_labels(df[label_col], dagnam_ds.class_names)
+    labels = _encode_labels(df[label_col], dagnam_ds.class_names, binding)
 
-    # ---- feature encoding (numeric columns only) ----
-    numeric_cols = numeric_columns(df, feature_cols)
-    features = torch.tensor(df.select(numeric_cols).to_numpy(), dtype=torch.float32)
+    # ---- binding-driven feature encoding ----
+    feature_matrix = materialize_feature_matrix(df, feature_cols, binding)
+    feature_dtype = torch.long if np.issubdtype(feature_matrix.dtype, np.integer) else torch.float32
+    features = torch.tensor(feature_matrix, dtype=feature_dtype)
 
     # ---- deterministic split ----
     split_indices = select_split_indices(
@@ -203,15 +207,20 @@ def detect_label_column(
     return df.columns[-1]
 
 
-def _encode_labels(series: pl.Series, class_names: list[str] | None) -> TorchTensor:
-    """Encode a label series into a ``long`` tensor.
+def _encode_labels(
+    series: pl.Series,
+    class_names: list[str] | None,
+    binding: dict[str, object] | None = None,
+) -> TorchTensor:
+    """Encode a target series according to the resolved binding.
 
-    If *class_names* is provided, maps each value to its index in the list.
-    Otherwise falls back to first-seen-order factorization.
+    Numeric regression targets become ``[samples, 1]`` float32 tensors. All
+    other targets retain the canonical long class-index behavior.
     """
-    encoded = encode_label_series(series, class_names)
+    encoded = encode_target_series(series, class_names, binding)
     torch = _load_torch()
-    return torch.tensor(encoded, dtype=torch.long)
+    dtype = torch.float32 if np.issubdtype(encoded.dtype, np.floating) else torch.long
+    return torch.tensor(encoded, dtype=dtype)
 
 
 def encode_labels(series: pl.Series, class_names: list[str] | None) -> TorchTensor:

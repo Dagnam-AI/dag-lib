@@ -351,6 +351,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        image_size: tuple[int, int] = (224, 224),
         column_roles: dict[str, str] | None = None,
         binding: dict[str, Any] | None = None,
         transform_fn: ArrayTransform | None = None,
@@ -366,6 +367,8 @@ class FlaxDatasetMixin(DatasetMixinBase):
         Args:
             column_roles: Optional mapping of column names to roles for
                 tabular datasets. Ignored for image/audio formats.
+            image_size: Target ``(height, width)`` for user image-folder
+                datasets. Ignored by other dataset formats.
 
         Raises ImportError if jax/flax is not installed.
         Raises ValueError for unsupported formats or invalid split names.
@@ -449,6 +452,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                image_size=image_size,
                 transform_fn=cast("ImageTransform | None", transform_fn),
                 batch_transform_fn=batch_transform_fn,
             )
@@ -494,6 +498,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
             test_ratio=test_ratio,
             seed=seed,
             column_roles=column_roles,
+            binding=binding,
             transform_fn=cast("FeatureTransform | None", transform_fn),
             batch_transform_fn=cast("TabularBatchTransform | None", batch_transform_fn),
         )

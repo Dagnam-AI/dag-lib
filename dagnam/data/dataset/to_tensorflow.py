@@ -324,6 +324,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        image_size: tuple[int, int] = (224, 224),
         column_roles: dict[str, str] | None = None,
         binding: dict[str, Any] | None = None,
         map_fn: TensorflowMapFn | None = None,
@@ -340,6 +341,8 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             column_roles: Optional mapping of column names to roles for
                 tabular datasets (``{"x": "feature", "label": "target"}``).
                 Ignored for image/audio formats.
+            image_size: Target ``(height, width)`` for user image-folder
+                datasets. Ignored by other dataset formats.
 
         Raises ImportError if tensorflow is not installed.
         Raises ValueError for unsupported formats or invalid split names.
@@ -425,6 +428,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                image_size=image_size,
                 map_fn=map_fn,
                 batch_map_fn=batch_map_fn,
             )
@@ -466,6 +470,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             test_ratio=test_ratio,
             seed=seed,
             column_roles=column_roles,
+            binding=binding,
             map_fn=map_fn,
             batch_map_fn=batch_map_fn,
         )

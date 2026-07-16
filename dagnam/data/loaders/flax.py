@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 import numpy as np
 import numpy.typing as npt
 
-from dagnam.data._polars_utils import encode_label_series, numeric_columns
-from dagnam.data.loaders.csv import detect_label_column
+from dagnam.data._polars_utils import encode_target_series, materialize_feature_matrix
+from dagnam.data.loaders.csv import detect_label_column, split_by_roles
 from dagnam.data.loaders.media import select_split_indices
 
 if TYPE_CHECKING:
@@ -90,6 +90,7 @@ def create_flax_dataset(
     test_ratio: float,
     seed: int,
     column_roles: dict[str, str] | None = None,
+    binding: dict[str, object] | None = None,
     transform_fn: FeatureTransform | None = None,
     batch_transform_fn: BatchTransform | None = None,
 ) -> list[FlaxBatch]:
@@ -104,16 +105,18 @@ def create_flax_dataset(
     as_jax_array = cast("JaxArrayFactory", jnp.array)
     df = dagnam_ds.to_polars()
 
-    label_col = detect_label_column(df, dagnam_ds.feature_schema, column_roles=column_roles)
+    if column_roles is not None:
+        label_col, feature_cols = split_by_roles(df, column_roles)
+    else:
+        label_col = detect_label_column(df, dagnam_ds.feature_schema)
+        feature_cols = [c for c in df.columns if c != label_col]
 
     # Label encoding
     label_series = df[label_col]
-    labels = encode_label_series(label_series, dagnam_ds.class_names)
+    labels = encode_target_series(label_series, dagnam_ds.class_names, binding)
 
     # Feature encoding
-    feature_cols = [c for c in df.columns if c != label_col]
-    numeric_cols = numeric_columns(df, feature_cols)
-    features = df.select(numeric_cols).to_numpy().astype(np.float32)
+    features = materialize_feature_matrix(df, feature_cols, binding)
 
     # Deterministic split
     split_indices = select_split_indices(

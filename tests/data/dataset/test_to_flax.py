@@ -270,9 +270,15 @@ def test_to_flax_image_folder_dispatches(tmp_path: Path) -> None:
         tmp_path,
     )
     batches = ds.to_flax_dataset(
-        split="train", batch_size=2, shuffle=False, val_ratio=0.2, test_ratio=0.2
+        split="train",
+        batch_size=2,
+        shuffle=False,
+        val_ratio=0.2,
+        test_ratio=0.2,
+        image_size=(16, 16),
     )
     assert batches
+    assert batches[0].features.shape[1:] == (16, 16, 3)
 
 
 # ---------------------------------------------------------------- native_flax_dataset path

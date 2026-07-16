@@ -74,7 +74,110 @@ def _csv_ds(tmp_path: Path, with_class_names: bool = True) -> DagnamDataset:
     return DagnamDataset(meta, tmp_path)
 
 
+def _regression_csv_ds(tmp_path: Path) -> DagnamDataset:
+    csv_path = tmp_path / "regression.csv"
+    csv_path.write_text(
+        "feature,target\n" + "\n".join(f"{float(i)},{float(i) + 0.25}" for i in range(20)) + "\n"
+    )
+    return DagnamDataset(
+        {
+            "id": "regression-1",
+            "name": "Regression",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 20,
+            "num_classes": 0,
+            "class_names": None,
+            "feature_schema": None,
+            "filename": "regression.csv",
+        },
+        tmp_path,
+    )
+
+
+def _text_csv_ds(tmp_path: Path) -> DagnamDataset:
+    csv_path = tmp_path / "text.csv"
+    csv_path.write_text(
+        "text,label\n"
+        + "\n".join(
+            f"deterministic short review {index},{'positive' if index % 2 == 0 else 'negative'}"
+            for index in range(40)
+        )
+        + "\n"
+    )
+    return DagnamDataset(
+        {
+            "id": "text-1",
+            "name": "Text",
+            "format": "csv",
+            "dataset_type": "text",
+            "num_samples": 40,
+            "num_classes": 2,
+            "class_names": None,
+            "feature_schema": {
+                "columns": [
+                    {"name": "text", "type": "categorical"},
+                    {"name": "label", "type": "categorical"},
+                ]
+            },
+            "filename": "text.csv",
+        },
+        tmp_path,
+    )
+
+
+_TEXT_ROLES = {"text": "text_input", "label": "target"}
+_TEXT_BINDING: dict[str, object] = {
+    "input_column": "text",
+    "target_column": "label",
+    "input_transform": {
+        "kind": "tokenize",
+        "params": {"vocab_size": 256, "sequence_length": 32},
+    },
+    "target_transform": {"kind": "class_index", "params": {"dtype": "long"}},
+}
+
+
 # ---------------------------------------------------------------- flax tabular
+
+
+def test_flax_loader_text_binding_tokenizes_user_csv(tmp_path: Path) -> None:
+    batches = create_flax_dataset(
+        _text_csv_ds(tmp_path),
+        split="train",
+        batch_size=8,
+        shuffle=False,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        seed=42,
+        column_roles=_TEXT_ROLES,
+        binding=_TEXT_BINDING,
+    )
+
+    features = np.asarray(batches[0].features)
+    labels = np.asarray(batches[0].labels)
+    assert features.shape == (8, 32)
+    assert features.dtype == np.int32
+    assert np.issubdtype(labels.dtype, np.integer)
+    assert features.max() < 256
+
+
+def test_flax_loader_numeric_binding_preserves_float_column_target(tmp_path: Path) -> None:
+    batches = create_flax_dataset(
+        _regression_csv_ds(tmp_path),
+        split="train",
+        batch_size=4,
+        shuffle=False,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        seed=0,
+        column_roles={"feature": "feature", "target": "target"},
+        binding={"target_transform": {"kind": "numeric", "params": {"dtype": "float"}}},
+    )
+
+    targets = np.asarray(batches[0].labels)
+    assert targets.dtype == np.float32
+    assert targets.shape == (4, 1)
 
 
 def test_flax_loader_basic_with_class_names(tmp_path: Path) -> None:
@@ -136,6 +239,46 @@ def test_flax_loader_test_split(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------- tf tabular
+
+
+def test_tf_loader_text_binding_tokenizes_user_csv(tmp_path: Path) -> None:
+    tf_ds = create_tensorflow_dataset(
+        _text_csv_ds(tmp_path),
+        split="train",
+        batch_size=8,
+        shuffle=False,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        seed=42,
+        column_roles=_TEXT_ROLES,
+        binding=_TEXT_BINDING,
+    )
+
+    features, labels = cast("tuple[object, object]", next(iter(tf_ds)))
+    feature_array = np.asarray(features)
+    label_array = np.asarray(labels)
+    assert feature_array.shape == (8, 32)
+    assert feature_array.dtype == np.int32
+    assert label_array.dtype == np.int64
+    assert feature_array.max() < 256
+
+
+def test_tf_loader_numeric_binding_preserves_float_column_target(tmp_path: Path) -> None:
+    tf_ds = create_tensorflow_dataset(
+        _regression_csv_ds(tmp_path),
+        split="train",
+        batch_size=4,
+        shuffle=False,
+        val_ratio=0.1,
+        test_ratio=0.1,
+        seed=0,
+        column_roles={"feature": "feature", "target": "target"},
+        binding={"target_transform": {"kind": "numeric", "params": {"dtype": "float"}}},
+    )
+
+    targets = np.asarray(cast("TensorBatch", next(iter(tf_ds)))[1])
+    assert targets.dtype == np.float32
+    assert targets.shape == (4, 1)
 
 
 def test_tf_loader_basic(tmp_path: Path) -> None:

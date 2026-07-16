@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 import stat
 import tarfile
+import tomllib
 from unittest.mock import patch
 import zipfile
 
@@ -347,8 +348,10 @@ class TestPytorchExtra:
     def test_pytorch_extra_installs_torchvision_for_image_loaders(self) -> None:
         # The image-folder loader imports torchvision at runtime, so the pytorch
         # extra must ship it (this loader would otherwise ImportError).
-        pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-        assert 'pytorch = ["torch>=2.4", "torchvision>=0.19"]' in pyproject
+        pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = pyproject["project"]["optional-dependencies"]["pytorch"]
+        assert any(dependency.startswith("torch>=") for dependency in dependencies)
+        assert any(dependency.startswith("torchvision>=") for dependency in dependencies)
 
 
 # ------------------------------------------------------------------
@@ -378,7 +381,9 @@ class TestImageFolderDispatch:
             "dagnam.data.loaders.image_folder.create_pytorch_loader",
             return_value="loader",
         ) as mock_create:
-            result = ds.to_pytorch_loader(split="train", batch_size=2, num_workers=0)
+            result = ds.to_pytorch_loader(
+                split="train", batch_size=2, num_workers=0, image_size=(16, 16)
+            )
 
         assert result == "loader"
         mock_create.assert_called_once()
@@ -386,6 +391,7 @@ class TestImageFolderDispatch:
         assert call_kwargs["split"] == "train"
         assert call_kwargs["batch_size"] == 2
         assert call_kwargs["num_workers"] == 0
+        assert call_kwargs["image_size"] == (16, 16)
 
     def test_image_folder_raises_importerror_without_torch(self, tmp_path: Path) -> None:
         """Raises ImportError when torch is not available."""

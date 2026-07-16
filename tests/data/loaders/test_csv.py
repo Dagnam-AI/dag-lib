@@ -95,6 +95,59 @@ def _make_csv_dataset(
     return DagnamDataset(meta, data_dir)
 
 
+def _make_regression_csv_dataset(tmp_path: Path, n: int = 20) -> DagnamDataset:
+    data_dir = tmp_path / "regression"
+    data_dir.mkdir()
+    pl.DataFrame(
+        {
+            "feature": [float(i) for i in range(n)],
+            "target": [float(i) + 0.25 for i in range(n)],
+        }
+    ).write_csv(data_dir / "data.csv")
+    return DagnamDataset(
+        {
+            "id": "regression-id",
+            "name": "regression",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": n,
+            "num_classes": 0,
+            "feature_schema": None,
+            "class_names": None,
+        },
+        data_dir,
+    )
+
+
+def _make_text_csv_dataset(tmp_path: Path, n: int = 40) -> DagnamDataset:
+    data_dir = tmp_path / "text"
+    data_dir.mkdir()
+    pl.DataFrame(
+        {
+            "text": [f"deterministic short review {index}" for index in range(n)],
+            "label": ["positive", "negative"] * (n // 2),
+        }
+    ).write_csv(data_dir / "text.csv")
+    return DagnamDataset(
+        {
+            "id": "text-id",
+            "name": "text",
+            "format": "csv",
+            "dataset_type": "text",
+            "num_samples": n,
+            "num_classes": 2,
+            "feature_schema": {
+                "columns": [
+                    {"name": "text", "type": "categorical"},
+                    {"name": "label", "type": "categorical"},
+                ]
+            },
+            "class_names": None,
+        },
+        data_dir,
+    )
+
+
 # ------------------------------------------------------------------
 # _TabularDataset
 # ------------------------------------------------------------------
@@ -283,6 +336,55 @@ class TestEncodeLabels:
 
 
 class TestCreatePytorchLoader:
+    def test_text_binding_tokenizes_user_csv(self, tmp_path: Path) -> None:
+        torch = _torch()
+        loader = create_pytorch_loader(
+            _make_text_csv_dataset(tmp_path),
+            split="train",
+            batch_size=8,
+            num_workers=0,
+            shuffle=False,
+            val_ratio=0.1,
+            test_ratio=0.1,
+            seed=42,
+            column_roles={"text": "text_input", "label": "target"},
+            binding={
+                "input_column": "text",
+                "target_column": "label",
+                "input_transform": {
+                    "kind": "tokenize",
+                    "params": {"vocab_size": 256, "sequence_length": 32},
+                },
+                "target_transform": {"kind": "class_index", "params": {"dtype": "long"}},
+            },
+        )
+
+        features, labels = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
+        assert tuple(features.shape) == (8, 32)
+        assert features.dtype == torch.long
+        assert labels.dtype == torch.long
+        assert max(cast("TensorLike", features[0]).tolist()) < 256
+
+    def test_numeric_binding_preserves_float_column_target(self, tmp_path: Path) -> None:
+        torch = _torch()
+        ds = _make_regression_csv_dataset(tmp_path)
+        loader = create_pytorch_loader(
+            ds,
+            split="train",
+            batch_size=4,
+            num_workers=0,
+            shuffle=False,
+            val_ratio=0.1,
+            test_ratio=0.1,
+            seed=42,
+            column_roles={"feature": "feature", "target": "target"},
+            binding={"target_transform": {"kind": "numeric", "params": {"dtype": "float"}}},
+        )
+
+        _features, targets = cast("tuple[TensorLike, TensorLike]", next(iter(loader)))
+        assert targets.dtype == torch.float32
+        assert tuple(targets.shape) == (4, 1)
+
     def test_train_loader(self, tmp_path: Path) -> None:
         ds = _make_csv_dataset(tmp_path, class_names=["cat", "dog"])
         loader = create_pytorch_loader(

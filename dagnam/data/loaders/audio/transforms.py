@@ -115,6 +115,8 @@ def create_pytorch_loader(
     sample_rate: int | None = None,
     n_mels: int = 64,
     max_duration_sec: float = 5.0,
+    target_length: int | None = None,
+    return_waveform: bool = False,
     waveform_transform: SampleTransform | None = None,
     spectrogram_transform: SampleTransform | None = None,
     target_transform: SampleTransform | None = None,
@@ -138,6 +140,9 @@ def create_pytorch_loader(
         n_mels: Number of mel filterbanks for spectrogram.
         max_duration_sec: Maximum audio duration in seconds (clips longer
             audio, pads shorter).
+        target_length: Exact fixed waveform length from a resolved binding.
+        return_waveform: Return raw waveforms for architectures that own MFCC/Mel
+            feature extraction; retain the legacy mel-spectrogram default otherwise.
 
     Returns:
         A PyTorch DataLoader yielding (spectrogram_tensor, label) batches.
@@ -196,6 +201,8 @@ def create_pytorch_loader(
         target_sample_rate=sample_rate,
         n_mels=n_mels,
         max_duration_sec=max_duration_sec,
+        target_length=target_length,
+        return_waveform=return_waveform,
         waveform_transform=waveform_transform,
         spectrogram_transform=spectrogram_transform,
         target_transform=target_transform,

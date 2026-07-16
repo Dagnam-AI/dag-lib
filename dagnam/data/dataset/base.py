@@ -6,7 +6,6 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 import random
 from typing import TYPE_CHECKING, cast
-import zlib
 
 import numpy as np
 import numpy.typing as npt
@@ -20,7 +19,7 @@ from dagnam._types import (
     TensorflowDataset,
     ensure_json_object,
 )
-from dagnam.data._polars_utils import encode_label_series, numeric_columns
+from dagnam.data._polars_utils import encode_label_series, numeric_columns, tokenize_text
 from dagnam.data.dataset.to_flax import FlaxDatasetMixin
 from dagnam.data.dataset.to_polars import PolarsDatasetMixin
 from dagnam.data.dataset.to_pytorch import PytorchDatasetMixin
@@ -230,13 +229,7 @@ class DagnamDataset(
         keras/flax/torch Embedding integer ids instead of raw strings — an
         integer-indexed Embedding cannot cast a string ("Cast string to int32").
         """
-        vocab = max(2, num_words)
-        result = np.zeros((len(texts), maxlen), dtype=np.int32)
-        for i, text in enumerate(texts):
-            tokens = str(text).split()[:maxlen]
-            for j, tok in enumerate(tokens):
-                result[i, j] = zlib.crc32(tok.encode("utf-8")) % (vocab - 1) + 1
-        return result
+        return tokenize_text(texts, maxlen=maxlen, num_words=num_words)
 
     @staticmethod
     @override

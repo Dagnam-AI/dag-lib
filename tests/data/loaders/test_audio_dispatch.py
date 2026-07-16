@@ -44,6 +44,39 @@ class TestAudioFolderDispatch:
         assert call_kwargs["batch_size"] == 2
         assert call_kwargs["num_workers"] == 0
 
+    def test_audio_binding_requests_raw_fixed_length_waveforms(self, tmp_path: Path) -> None:
+        ds = DagnamDataset(
+            {
+                "id": "aud-bound",
+                "name": "Bound Audio",
+                "format": "audio_folder",
+                "dataset_type": "audio",
+                "num_samples": 2,
+                "num_classes": 2,
+            },
+            tmp_path,
+        )
+        binding = {
+            "input_column": "audio",
+            "target_column": "label",
+            "input_transform": {"kind": "audio", "params": {"target_length": 1600}},
+        }
+
+        with patch(
+            "dagnam.data.loaders.audio.create_pytorch_loader",
+            return_value="loader",
+        ) as mock_create:
+            result = ds.to_pytorch_loader(
+                split="train",
+                batch_size=2,
+                num_workers=0,
+                binding=binding,
+            )
+
+        assert result == "loader"
+        assert mock_create.call_args.kwargs["return_waveform"] is True
+        assert mock_create.call_args.kwargs["target_length"] == 1600
+
     def test_audio_dataset_type_dispatches_to_audio_loader(self, tmp_path: Path) -> None:
         """dataset_type='audio' with non-tabular format routes to audio loader."""
         ds = DagnamDataset(

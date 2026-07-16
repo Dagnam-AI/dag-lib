@@ -36,6 +36,20 @@ def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None
     return roles or None
 
 
+def _audio_binding_options(binding: dict[str, Any] | None) -> tuple[bool, int | None]:
+    """Return whether a binding requests raw audio and its fixed sample count."""
+    if not isinstance(binding, dict):
+        return False, None
+    transform = binding.get("input_transform")
+    if not isinstance(transform, dict) or transform.get("kind") != "audio":
+        return False, None
+    params = transform.get("params")
+    target_length = params.get("target_length") if isinstance(params, dict) else None
+    if not isinstance(target_length, int) or isinstance(target_length, bool) or target_length <= 0:
+        target_length = None
+    return True, target_length
+
+
 def _native_target_tensor(
     y: object,
     tensor: TensorFactory,
@@ -70,6 +84,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         seed: int = 42,
+        image_size: tuple[int, int] = (224, 224),
         column_roles: dict[str, str] | None = None,
         binding: dict[str, Any] | None = None,
         transform: TransformFn | None = None,
@@ -93,6 +108,8 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 (e.g. ``{"x": "feature", "label": "target"}``).
                 Only used by tabular loaders (CSV/JSON). Ignored by
                 image and audio loaders.
+            image_size: Target ``(height, width)`` for user image-folder
+                datasets. Ignored by other dataset formats.
 
         Raises:
             ImportError: If PyTorch is not installed.
@@ -150,6 +167,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                image_size=image_size,
                 transform=transform,
                 target_transform=target_transform,
                 collate_fn=_wrap_collate(collate_fn, batch_transform),
@@ -163,6 +181,8 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 create_pytorch_loader as create_audio_loader,
             )
 
+            return_waveform, target_length = _audio_binding_options(binding)
+
             return create_audio_loader(
                 dagnam_ds=self,
                 split=split,
@@ -172,6 +192,8 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 val_ratio=val_ratio,
                 test_ratio=test_ratio,
                 seed=seed,
+                target_length=target_length,
+                return_waveform=return_waveform,
                 waveform_transform=waveform_transform,
                 spectrogram_transform=spectrogram_transform,
                 target_transform=target_transform,
@@ -197,6 +219,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
             test_ratio=test_ratio,
             seed=seed,
             column_roles=column_roles,
+            binding=binding,
         )
         return _with_collate(loader, collate_fn, batch_transform)
 
