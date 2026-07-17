@@ -126,6 +126,58 @@ def test_numpy_loader_integer_labels_are_1d_long(
     assert y.ndim == 1, f"{split}: target must be 1-D [B], got shape {tuple(y.shape)}"
 
 
+@pytest.fixture
+def high_id_numpy_native_ds() -> DagnamDataset:
+    """IMDB-style RECTANGULAR (already-padded) int token ids with out-of-vocab values."""
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 12,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    row = np.array([[5, 9000, 88576, 1], [0, 12000, 3, 40000]], dtype=np.int64)
+    x_train = np.tile(row, (5, 1))  # 10 rows, ids far above a 10k vocab
+    y_train = (np.arange(10) % 2).astype(np.int64)
+    x_test = np.array([[7, 99999, 2, 4]], dtype=np.int64)
+    y_test = np.array([1], dtype=np.int64)
+    ds.native_train = _native_split(x_train, y_train)
+    ds.native_test = _native_split(x_test, y_test)
+    return ds
+
+
+@pytest.mark.parametrize("split", ["test", "train", "val"])
+def test_numpy_loader_clamps_rectangular_token_ids_to_vocab(
+    high_id_numpy_native_ds: DagnamDataset, split: str
+) -> None:
+    """Rectangular, already-padded token ids above the embedding vocab are clamped to
+    ``< vocab_size`` (Round-2 G247). Raw IMDB ids reach ~88k, so a vocab-sized
+    ``nn.Embedding`` would otherwise raise "index out of range" at the pre-flight smoke.
+    """
+    loader = high_id_numpy_native_ds.to_pytorch_loader(
+        split=split, batch_size=2, num_workers=0, val_ratio=0.2, shuffle=False, vocab_size=10000
+    )
+    x, _y = next(iter(loader))
+    assert int(x.max()) < 10000
+
+
+def test_numpy_loader_leaves_rectangular_ids_unclamped_without_vocab(
+    high_id_numpy_native_ds: DagnamDataset,
+) -> None:
+    """Without a declared embedding vocab there is nothing to clamp against, so
+    rectangular integer data is passed through unchanged."""
+    loader = high_id_numpy_native_ds.to_pytorch_loader(
+        split="test", batch_size=2, num_workers=0, vocab_size=None
+    )
+    x, _y = next(iter(loader))
+    assert int(x.max()) == 99999
+
+
 def test_numpy_loader_val_split(numpy_native_ds: DagnamDataset) -> None:
     loader = numpy_native_ds.to_pytorch_loader(
         split="val", batch_size=2, num_workers=0, val_ratio=0.2

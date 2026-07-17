@@ -17,6 +17,7 @@ from dagnam.data.dataset.hooks import (
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
+    import numpy.typing as npt
     from torch import Tensor
     from torch.utils.data import DataLoader, Dataset
 
@@ -70,6 +71,16 @@ def _native_target_tensor(
     if np.issubdtype(y_arr.dtype, np.integer):
         return tensor(y_arr, dtype=torch_long)
     return tensor(y_arr, dtype=torch_float32).unsqueeze(1)
+
+
+def _clamp_token_ids(array: npt.NDArray[Any], vocab_size: int) -> npt.NDArray[Any]:
+    """Clamp out-of-vocab token ids to 0 so ``nn.Embedding`` never indexes past its table.
+
+    Mirrors ``_pad_sequences``' ``w if w < num_words else 0`` for rectangular
+    (already-padded) token arrays, which otherwise pass raw ids straight through and
+    crash a vocab-sized embedding with "index out of range" (Round-2 G247).
+    """
+    return np.where(array < vocab_size, array, 0)
 
 
 class PytorchDatasetMixin(DatasetMixinBase):
@@ -343,20 +354,30 @@ class PytorchDatasetMixin(DatasetMixinBase):
             # IMDB sequences are variable-length object arrays — pad them
             if np.asarray(x_test).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
-                # Rectangular numeric arrays keep their natural dtype and are left as-is.
+                # _pad_sequences also clamps token ids into ``num_words``.
                 x_test = self._pad_sequences(
                     cast("Sequence[Sequence[int]]", x_test), num_words=num_words
                 )
+            elif vocab_size is not None:
+                # A rectangular, already-padded token array still carries raw ids
+                # that can exceed the embedding's vocab; clamp out-of-vocab ids to 0
+                # exactly like the ragged path, else nn.Embedding raises "index out
+                # of range" (Round-2 G247).
+                x_test = _clamp_token_ids(np.asarray(x_test), vocab_size)
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = _native_target_tensor(y_test, tensor, torch_long, torch_float32)
             ds = TensorDataset(x_t, y_t)
         else:
             if np.asarray(x_train).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
-                # Rectangular numeric arrays keep their natural dtype and are left as-is.
+                # _pad_sequences also clamps token ids into ``num_words``.
                 x_train = self._pad_sequences(
                     cast("Sequence[Sequence[int]]", x_train), num_words=num_words
                 )
+            elif vocab_size is not None:
+                # Rectangular already-padded token ids also need clamping to the
+                # embedding's vocab (Round-2 G247); see the test-split note above.
+                x_train = _clamp_token_ids(np.asarray(x_train), vocab_size)
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
                 # n_val may round to 0 for a small train set; an empty val split
