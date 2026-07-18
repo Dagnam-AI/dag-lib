@@ -118,6 +118,41 @@ class TestUploadFromUrl:
         assert result["status"] == "completed"
 
 
+class TestList:
+    def test_list_delegates_with_defaults(self) -> None:
+        c = _client(list_datasets=MagicMock(return_value=[{"id": "ds1"}]))
+        out = datasets_upload.list(client=c)
+        c.list_datasets.assert_called_once_with(type="all", search=None)
+        assert out == [{"id": "ds1"}]
+
+    def test_list_passes_filters(self) -> None:
+        c = _client(list_datasets=MagicMock(return_value=[]))
+        out = datasets_upload.list(type="tabular", search="iris", client=c)
+        c.list_datasets.assert_called_once_with(type="tabular", search="iris")
+        assert out == []
+
+
+class TestListSystem:
+    def test_list_system_delegates(self) -> None:
+        c = _client(list_system_datasets=MagicMock(return_value=[{"id": "mnist"}]))
+        out = datasets_upload.list_system(client=c)
+        c.list_system_datasets.assert_called_once_with()
+        assert out == [{"id": "mnist"}]
+
+
+class TestGet:
+    def test_get_delegates(self) -> None:
+        c = _client(get_dataset_meta=MagicMock(return_value={"id": "ds1", "name": "n"}))
+        out = datasets_upload.get("ds1", client=c)
+        c.get_dataset_meta.assert_called_once_with("ds1", version=None)
+        assert out["name"] == "n"
+
+    def test_get_passes_version(self) -> None:
+        c = _client(get_dataset_meta=MagicMock(return_value={"id": "ds1"}))
+        datasets_upload.get("ds1", version="v2", client=c)
+        c.get_dataset_meta.assert_called_once_with("ds1", version="v2")
+
+
 class TestErrorPropagation:
     def test_upload_propagates_uploaderror(self) -> None:
         c = _client()

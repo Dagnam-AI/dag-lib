@@ -8,6 +8,7 @@ server-side ingestion completes.
 
 from __future__ import annotations
 
+from builtins import list as builtin_list
 from typing import Callable, Optional
 
 from dagnam._core.client import DagnamClient
@@ -17,6 +18,60 @@ from dagnam._types import JsonObject
 
 _SUCCESS_STATES = frozenset({"completed", "ready"})
 _FAILURE_STATES = frozenset({"failed"})
+
+
+def list(
+    *,
+    type: str = "all",
+    search: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> builtin_list[JsonObject]:
+    """List datasets available to the current credential.
+
+    Mirrors the frontend dataset browser: delegates to the client
+    ``list_datasets`` (``GET /api/v1/datasets/browse``). ``type`` filters by
+    dataset kind (image/text/audio/video/tabular/custom/all); ``search`` filters
+    by a name/description substring.
+
+    >>> dagnam.datasets.list(type="tabular")
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_datasets(type=type, search=search)
+
+
+def list_system(
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> builtin_list[JsonObject]:
+    """List the built-in system datasets (``GET /api/v1/datasets/system``).
+
+    >>> dagnam.datasets.list_system()
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_system_datasets()
+
+
+def get(
+    dataset_id: str,
+    *,
+    version: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Fetch one dataset's metadata by id (``GET /api/v1/datasets/{id}/meta``).
+
+    Mirrors the frontend picker reading a single dataset; delegates to the client
+    ``get_dataset_meta``. Pass ``version`` to pin a specific dataset version.
+
+    >>> dagnam.datasets.get("ds-1")["name"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_dataset_meta(dataset_id, version=version)
 
 
 def upload(
@@ -169,6 +224,9 @@ def update_dataset_roles(
 
 __all__ = [
     "delete_dataset",
+    "get",
+    "list",
+    "list_system",
     "preview_dataset",
     "update_dataset",
     "update_dataset_roles",
