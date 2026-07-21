@@ -200,7 +200,6 @@ class DagnamDataset(
 
     @staticmethod
     @override
-    @staticmethod
     def _pad_sequences(
         sequences: Sequence[Sequence[int]],
         maxlen: int = 200,

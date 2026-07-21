@@ -13,14 +13,15 @@ from unittest.mock import patch
 
 import pytest
 
+from dagnam.data._polars_utils import column_roles_from_binding
 from dagnam.data.dataset import DagnamDataset
-from dagnam.data.dataset.to_flax import _column_roles_from_binding as _roles_flax
-from dagnam.data.dataset.to_pytorch import _column_roles_from_binding as _roles_pt
-from dagnam.data.dataset.to_tensorflow import _column_roles_from_binding as _roles_tf
 from dagnam.data.load import load_dataset
 
 _RolesFn = Callable[[dict[str, Any]], dict[str, str] | None]
-_ALL_ROLE_FNS: list[_RolesFn] = [_roles_pt, _roles_tf, _roles_flax]
+# PyTorch, TensorFlow, and Flax all now share the single canonical
+# column_roles_from_binding (previously triplicated verbatim in each converter
+# module — G306 finding 3), so there is only one function to exercise.
+_ALL_ROLE_FNS: list[_RolesFn] = [column_roles_from_binding]
 
 
 def _csv_dataset(tmp_path: Path) -> DagnamDataset:

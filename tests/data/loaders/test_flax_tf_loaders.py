@@ -238,6 +238,27 @@ def test_flax_loader_test_split(tmp_path: Path) -> None:
     assert batches
 
 
+def test_flax_loader_column_roles_accepts_label_role(tmp_path: Path) -> None:
+    """G307: column_roles={"col": "label"} must resolve the target column for the
+    flax loader. commit ac16b9c switched this loader from detect_label_column
+    (which already accepted "label") to split_by_roles, whose TARGET_ROLES silently
+    omitted "label" and broke this alias.
+    """
+    ds = _csv_ds(tmp_path)
+    batches = create_flax_dataset(
+        ds,
+        split="train",
+        batch_size=4,
+        shuffle=False,
+        val_ratio=0.2,
+        test_ratio=0.2,
+        seed=0,
+        column_roles={"x": "feature", "y": "feature", "species": "label"},
+    )
+    assert batches
+    assert batches[0].features.shape[1] == 2
+
+
 # ---------------------------------------------------------------- tf tabular
 
 
@@ -320,3 +341,21 @@ def test_tf_loader_test_split(tmp_path: Path) -> None:
         ds, split="test", batch_size=2, shuffle=False, val_ratio=0.2, test_ratio=0.2, seed=0
     )
     next(iter(tf_ds))
+
+
+def test_tf_loader_column_roles_accepts_label_role(tmp_path: Path) -> None:
+    """G307: same "label" role alias must work for the tf loader (see the flax
+    loader's ``test_flax_loader_column_roles_accepts_label_role`` above)."""
+    ds = _csv_ds(tmp_path)
+    tf_ds = create_tensorflow_dataset(
+        ds,
+        split="train",
+        batch_size=4,
+        shuffle=False,
+        val_ratio=0.2,
+        test_ratio=0.2,
+        seed=0,
+        column_roles={"x": "feature", "y": "feature", "species": "label"},
+    )
+    batch = cast("TensorBatch", next(iter(tf_ds)))
+    assert batch[0].shape[1] == 2

@@ -21,6 +21,7 @@ from tests.data.dataset._native_helpers import (
     make_native_obj_ds,
 )
 
+from dagnam._types import NativeSplit
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.dataset.to_flax import _LazyFlaxBatchStream
 from dagnam.data.loaders.flax import FlaxBatch
@@ -82,6 +83,44 @@ def test_to_flax_native_numpy_object_clamps_to_vocab_size(tmp_path: Path) -> Non
     batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False, vocab_size=8)
 
     assert batches[0].features[0, :4].tolist() == [6, 7, 0, 0]
+
+
+def test_to_flax_native_numpy_clamps_rectangular_token_ids_to_vocab(tmp_path: Path) -> None:
+    """G306: rectangular, already-padded token ids above the embedding vocab must be
+    clamped to ``< vocab_size`` exactly like the ragged/object-dtype path above
+    (test_to_flax_native_numpy_object_clamps_to_vocab_size) and the pytorch
+    native-numpy loader (G247). Previously only the ragged path was clamped here, so
+    a rectangular IMDB-style array crashed a vocab-sized Embedding with "index out
+    of range".
+    """
+    del tmp_path
+    ds = DagnamDataset(
+        {
+            "id": "imdb",
+            "name": "imdb-like",
+            "format": "native",
+            "dataset_type": "text",
+            "num_samples": 12,
+            "num_classes": 2,
+            "class_names": [],
+        },
+        data_dir=None,
+    )
+    row = np.array([[5, 9000, 88576, 1], [0, 12000, 3, 40000]], dtype=np.int64)
+    x_train = np.tile(row, (5, 1))  # 10 rows, ids far above a 10k vocab
+    y_train = (np.arange(10) % 2).astype(np.int64)
+    x_test = np.array([[7, 99999, 2, 4]], dtype=np.int64)
+    y_test = np.array([1], dtype=np.int64)
+    ds.native_train = cast("NativeSplit", (x_train, y_train))
+    ds.native_test = cast("NativeSplit", (x_test, y_test))
+
+    test_batches = ds.to_flax_dataset(split="test", batch_size=1, shuffle=False, vocab_size=10000)
+    train_batches = ds.to_flax_dataset(
+        split="train", batch_size=2, shuffle=False, val_ratio=0.2, vocab_size=10000
+    )
+
+    assert int(np.asarray(test_batches[0].features).max()) < 10000
+    assert int(np.asarray(train_batches[0].features).max()) < 10000
 
 
 def test_to_flax_native_numpy_not_padded(tmp_path: Path) -> None:

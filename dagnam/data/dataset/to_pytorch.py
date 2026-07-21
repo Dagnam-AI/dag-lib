@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+from dagnam.data._polars_utils import clamp_token_ids, column_roles_from_binding
 from dagnam.data.dataset._typing import DatasetMixinBase
 from dagnam.data.dataset.hooks import (
     _ChannelsFirstImageDataset,
@@ -17,24 +18,12 @@ from dagnam.data.dataset.hooks import (
 from dagnam.data.loaders.torch_utils import should_pin_memory
 
 if TYPE_CHECKING:
-    import numpy.typing as npt
     from torch import Tensor
     from torch.utils.data import DataLoader, Dataset
 
 TransformFn = Callable[[object], object]
 CollateFn = Callable[[object], object]
 TensorFactory = Callable[..., "Tensor"]
-
-
-def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
-    roles: dict[str, str] = {}
-    input_column = binding.get("input_column")
-    target_column = binding.get("target_column")
-    if isinstance(input_column, str) and input_column:
-        roles[input_column] = "feature"
-    if isinstance(target_column, str) and target_column:
-        roles[target_column] = "target"
-    return roles or None
 
 
 def _audio_binding_options(binding: dict[str, Any] | None) -> tuple[bool, int | None]:
@@ -71,16 +60,6 @@ def _native_target_tensor(
     if np.issubdtype(y_arr.dtype, np.integer):
         return tensor(y_arr, dtype=torch_long)
     return tensor(y_arr, dtype=torch_float32).unsqueeze(1)
-
-
-def _clamp_token_ids(array: npt.NDArray[Any], vocab_size: int) -> npt.NDArray[Any]:
-    """Clamp out-of-vocab token ids to 0 so ``nn.Embedding`` never indexes past its table.
-
-    Mirrors ``_pad_sequences``' ``w if w < num_words else 0`` for rectangular
-    (already-padded) token arrays, which otherwise pass raw ids straight through and
-    crash a vocab-sized embedding with "index out of range" (Round-2 G247).
-    """
-    return np.where(array < vocab_size, array, 0)
 
 
 class PytorchDatasetMixin(DatasetMixinBase):
@@ -143,7 +122,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
         if shuffle is None:
             shuffle = split == "train"
         if column_roles is None and binding is not None:
-            column_roles = _column_roles_from_binding(binding)
+            column_roles = column_roles_from_binding(binding)
 
         # --- Native dataset path (system datasets via torchvision etc.) ---
         if self._native_train is not None:
@@ -363,7 +342,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 # that can exceed the embedding's vocab; clamp out-of-vocab ids to 0
                 # exactly like the ragged path, else nn.Embedding raises "index out
                 # of range" (Round-2 G247).
-                x_test = _clamp_token_ids(np.asarray(x_test), vocab_size)
+                x_test = clamp_token_ids(np.asarray(x_test), vocab_size)
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = _native_target_tensor(y_test, tensor, torch_long, torch_float32)
             ds = TensorDataset(x_t, y_t)
@@ -377,7 +356,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
             elif vocab_size is not None:
                 # Rectangular already-padded token ids also need clamping to the
                 # embedding's vocab (Round-2 G247); see the test-split note above.
-                x_train = _clamp_token_ids(np.asarray(x_train), vocab_size)
+                x_train = clamp_token_ids(np.asarray(x_train), vocab_size)
             n_val = int(len(x_train) * val_ratio)
             if split == "val":
                 # n_val may round to 0 for a small train set; an empty val split

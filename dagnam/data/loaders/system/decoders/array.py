@@ -72,6 +72,12 @@ class ArrayDecoder:
         offsets = np.asarray(data[offsets_key])
         if offsets.ndim != 1 or offsets.size < 1:
             raise DecodeError(f"array format: ragged column {column_name!r} has malformed offsets")
+        if np.any(np.diff(offsets) < 0):
+            # Corrupted (non-monotonic) offsets would otherwise silently produce
+            # truncated or negative-length rows from values[offsets[i]:offsets[i+1]].
+            raise DecodeError(
+                f"array format: ragged column {column_name!r} has non-monotonic offsets"
+            )
         n_rows = int(offsets.shape[0]) - 1
         rows = np.empty(n_rows, dtype=object)
         for i in range(n_rows):

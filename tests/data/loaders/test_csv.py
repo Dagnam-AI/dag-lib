@@ -292,6 +292,17 @@ class TestSplitByRoles:
         with pytest.raises(ValueError, match="does not specify object target column"):
             split_by_roles(df, {"a": "feature", "b": "feature"})
 
+    def test_target_role_accepts_label_alias(self) -> None:
+        # G307: "label" must be accepted as a target role alias in TARGET_ROLES,
+        # matching detect_label_column's own "target"/"label" acceptance above.
+        # commit ac16b9c switched the flax/tf loaders from detect_label_column to
+        # split_by_roles, whose TARGET_ROLES silently omitted "label" and broke
+        # column_roles={"col": "label"} for those loaders.
+        df = pl.DataFrame({"label": ["a"], "x1": [1]})
+        label_col, feature_cols = split_by_roles(df, {"label": "label", "x1": "feature"})
+        assert label_col == "label"
+        assert feature_cols == ["x1"]
+
 
 # ------------------------------------------------------------------
 # _encode_labels

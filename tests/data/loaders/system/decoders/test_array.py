@@ -150,3 +150,19 @@ def test_array_decoder_ragged_malformed_offsets_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(DecodeError, match="malformed offsets"):
         get_decoder("array").decode(tmp_path, layout, "train")
+
+
+def test_array_decoder_ragged_non_monotonic_offsets_raises(tmp_path: Path) -> None:
+    """Corrupted (non-monotonic) offsets must raise, never silently produce
+    truncated/negative-length rows from ``values[offsets[i]:offsets[i+1]]``."""
+    np.savez(
+        tmp_path / "d.npz",
+        x_train_values=np.array([1, 2, 3, 4]),
+        x_train_offsets=np.array([0, 3, 2, 4]),  # decreases at index 2 (3 -> 2)
+    )
+    layout = cast(
+        "dict[str, object]",
+        {"review": {"key": "x_train", "test_key": "x_test", "ragged": True}},
+    )
+    with pytest.raises(DecodeError, match="non-monotonic offsets"):
+        get_decoder("array").decode(tmp_path, layout, "train")
