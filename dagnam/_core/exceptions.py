@@ -11,6 +11,41 @@ class AuthError(DagnamError):
     """No API key found or authentication failed (401)."""
 
 
+class EmailNotVerifiedError(DagnamError):
+    """A dispatch action was refused because the account's email is unverified (403).
+
+    Expensive actions (training-job create, dataset upload, deployment create)
+    require the API key's owning account to have a verified email. Verify it via
+    the web app, then retry. ``verification_url`` carries the backend-provided
+    link when present.
+    """
+
+    def __init__(self, message: str, *, verification_url: str | None = None) -> None:
+        self.verification_url = verification_url
+        super().__init__(message)
+
+
+class AccountSuspendedError(DagnamError):
+    """The API key's owning account was administratively suspended (403).
+
+    Raised on any authenticated call once Plan 03's admin moderation suspends
+    or bans the account. Not self-clearing — contact support or the account
+    owner; retrying the same call will not succeed on its own.
+    """
+
+
+class AccountLockedError(DagnamError):
+    """The API key's owning account is temporarily locked out (423).
+
+    Raised when Plan 03's login-lockout state (too many failed interactive
+    login attempts) is active on the account. Unlike ``AccountSuspendedError``
+    this is TEMPORARY and self-clearing once the lockout window elapses —
+    kept as a distinct class (rather than reusing AccountSuspendedError) so a
+    caller can tell "wait and retry" apart from "requires support/admin
+    action" without parsing the message text.
+    """
+
+
 class DatasetNotFoundError(DagnamError):
     """Dataset ID not found (404)."""
 
@@ -141,8 +176,26 @@ class UploadError(DagnamError):
     """Dataset upload failed (transport or server side)."""
 
 
+class InvalidURLError(UploadError):
+    """Dataset-from-URL ingest rejected the URL as invalid or unsafe (4xx).
+
+    Raised when the backend refuses a ``upload_dataset_from_url`` source URL
+    (e.g. an SSRF-blocked host, or a disallowed scheme). A subclass of
+    :class:`UploadError` so existing handlers still catch it.
+    """
+
+
 class QuotaExceededError(DagnamError):
     """Plan/usage limit reached: a storage quota (413) or a plan resource limit (402)."""
+
+
+class PayloadTooLargeError(QuotaExceededError):
+    """Upload rejected for exceeding the server's per-request size cap (413).
+
+    A subclass of :class:`QuotaExceededError` so existing ``except
+    QuotaExceededError`` handlers still catch it, while callers who care about
+    the size-cap case specifically can catch this narrower type.
+    """
 
 
 class TaskNotFoundError(DagnamError):
