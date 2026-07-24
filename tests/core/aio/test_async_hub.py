@@ -142,7 +142,7 @@ async def test_async_finalize_hub_model_404(
         await client.finalize_hub_model("m1")
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_hub_model_retries_transient(

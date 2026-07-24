@@ -104,7 +104,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
             if np.asarray(x_train).dtype == object:
                 # Ragged (variable-length) sequences arrive as object arrays; pad them.
                 # Rectangular numeric arrays keep their natural dtype and are left as-is.
-                # The embedding-derived sequence_length (G079) sets the fixed length;
+                # The embedding-derived sequence_length sets the fixed length;
                 # fall back to _pad_sequences' default when unset.
                 pad_kwargs = {} if sequence_length is None else {"maxlen": sequence_length}
                 x_train = self._pad_sequences(
@@ -257,12 +257,12 @@ class FlaxDatasetMixin(DatasetMixinBase):
         features_list: list[npt.NDArray[Any]] = [np.asarray(b.features) for b in source_batches]
         labels_list: list[npt.NDArray[np.int64]] = [np.asarray(b.labels) for b in source_batches]
         # Text features need fixed-length integer tokens before np.concatenate /
-        # jnp.asarray: raw strings can't index an Embedding (G078); and sequence
+        # jnp.asarray: raw strings can't index an Embedding; and sequence
         # rows must share a length or np.concatenate(axis=0) fails. The ragged
         # case is NOT only object-dtype-within-a-batch — each FlaxBatch is often
         # internally rectangular but DIFFERENT batches have different sequence
-        # lengths (e.g. 4816 vs 3819), which my earlier object-only guard missed
-        # (G079). Pad/truncate every batch to one length whenever the batches
+        # lengths (e.g. 4816 vs 3819), which an object-dtype-only guard misses.
+        # Pad/truncate every batch to one length whenever the batches
         # can't be concatenated as-is.
         if features_list and self._is_text_features(features_list[0]):
             target = sequence_length or 200

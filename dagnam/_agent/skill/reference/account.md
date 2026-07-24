@@ -33,7 +33,8 @@ explicit argument -> `dagnam.configure(...)` -> `DAGNAM_API_KEY` / `DAGNAM_API_U
   uploading a dataset, and creating a deployment require the API key's owning
   account to have a **verified email address**. If it is not verified, these
   calls raise `dagnam.EmailNotVerifiedError` (an actionable message plus the
-  verification link); verify the email in the web app, then retry. Browsing,
+  verification link, surfaced only when the server returns an `https` URL);
+  verify the email in the web app, then retry. Browsing,
   reading, and designing are unaffected.
 - **Upload guards.** An upload larger than the server's per-request size cap
   raises `dagnam.PayloadTooLargeError` (a `QuotaExceededError` subclass). A
@@ -47,4 +48,7 @@ explicit argument -> `dagnam.configure(...)` -> `DAGNAM_API_KEY` / `DAGNAM_API_U
   `dagnam.AccountLockedError` — this clears itself once the lockout window
   elapses; retry after waiting. A request from a blocked IP address raises the
   existing `dagnam.AuthError` (no dedicated exception type, since there is no
-  different remediation an SDK caller can take for it).
+  different remediation an SDK caller can take for it). `EmailNotVerifiedError`,
+  `AccountSuspendedError` and `AccountLockedError` are all `APIError` subclasses,
+  so an existing `except dagnam.APIError` handler still catches them and
+  `.status_code` carries the 403/403/423.

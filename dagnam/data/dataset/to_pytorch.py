@@ -65,7 +65,7 @@ def _native_target_tensor(
 
     A blanket ``float32 + unsqueeze(1)`` (the old behaviour) produced a ``[B, 1]``
     float target that ``CrossEntropyLoss`` rejects with "0D or 1D target tensor
-    expected, multi-target not supported" — see gap G091.
+    expected, multi-target not supported".
     """
     y_arr = np.asarray(y)
     if np.issubdtype(y_arr.dtype, np.integer):

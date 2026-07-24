@@ -7,8 +7,8 @@ exception maps to a builder, never a per-command branch — and transport
 failures (backend down, DNS, TLS, timeouts) are classified by walking the
 exception cause chain instead of leaking raw ``urllib3`` reprs.
 
-All glyphs are plain ASCII so output is safe on legacy Windows code pages
-(G019). Minimal ANSI color is applied only when stderr is an interactive
+All glyphs are plain ASCII so output is safe on legacy Windows code pages.
+Minimal ANSI color is applied only when stderr is an interactive
 terminal that advertises support; piped/captured output is always plain text.
 """
 

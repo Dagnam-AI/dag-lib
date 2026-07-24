@@ -261,7 +261,7 @@ async def test_async_collect_deployment_metrics_409(
         await client.collect_deployment_metrics("dep1")
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_deployment_retries_transient(

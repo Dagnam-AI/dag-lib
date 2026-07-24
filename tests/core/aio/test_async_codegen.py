@@ -134,7 +134,7 @@ async def test_async_download_code_to_file_error_status(
         await client.download_code("p1", dest_path=tmp_path / "out.zip")
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_code_status_retries_transient(

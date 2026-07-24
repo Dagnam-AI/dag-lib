@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from typing import ClassVar
 
@@ -768,6 +769,32 @@ def test_email_not_verified_without_url_message_only():
     assert "Email not verified." in str(ei.value)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(document.cookie)",
+        "http://phishing.example/verify",
+        "https://",
+        "https://[unclosed",
+        "/verify",
+    ],
+)
+def test_unsafe_verification_url_is_dropped_not_echoed(url: str) -> None:
+    """Only an absolute https URL is echoed as a "go here" instruction.
+
+    The API base URL is caller-configurable, so a hostile or misconfigured host
+    could otherwise have the SDK present a ``javascript:`` URL or a plaintext
+    phishing origin as authoritative.
+    """
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_email_body(url=url), content_type="application/json")
+        )
+    assert ei.value.verification_url is None
+    assert url not in str(ei.value)
+    assert "Email not verified." in str(ei.value)
+
+
 def test_plain_403_without_marker_is_not_email_error():
     # A 403 that is not the email-verification gate falls through to APIError
     # (raise_for_generic has no dedicated 403 branch).
@@ -853,6 +880,56 @@ def test_blocked_ip_raises_existing_auth_error_not_a_new_type():
     assert "Request blocked." in str(ei.value)
 
 
+_EVERY_MAPPER: list[Callable[[_Resp], None]] = [
+    common.raise_for_generic,
+    common.raise_for_hub,
+    common.raise_for_project,
+    common.raise_for_codegen,
+    common.raise_for_upload,
+]
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_account_suspended_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    # The suspended-account 403 comes from the shared auth dependency, so it can
+    # arrive on ANY route: every mapper must surface the same typed error.
+    with pytest.raises(AccountSuspendedError):
+        raiser(_resp(403, text=_account_body("account_suspended"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_account_locked_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    with pytest.raises(AccountLockedError):
+        raiser(_resp(423, text=_account_body("account_locked"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_blocked_ip_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    # The IP blocklist middleware runs on every route, not just dispatch ones.
+    with pytest.raises(AuthError):
+        raiser(_resp(403, text=_account_body("blocked_ip"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_email_not_verified_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    with pytest.raises(EmailNotVerifiedError):
+        raiser(_resp(403, text=_email_body(), content_type="application/json"))
+
+
+def test_account_suspended_on_hub_carries_status_code() -> None:
+    with pytest.raises(AccountSuspendedError) as ei:
+        common.raise_for_hub(
+            _resp(
+                403,
+                text=_account_body("account_suspended", "Account suspended."),
+                content_type="application/json",
+            ),
+            model_id="model-1",
+        )
+    assert isinstance(ei.value, APIError)
+    assert ei.value.status_code == 403
+
+
 def test_plain_403_without_account_marker_is_unaffected():
     with pytest.raises(APIError) as ei:
         common.raise_for_generic(_resp(403, text="Forbidden"))
@@ -860,26 +937,26 @@ def test_plain_403_without_account_marker_is_unaffected():
 
 
 def test_check_account_status_no_op_on_ok_status():
-    common._check_account_status(
-        _resp(200, text=_account_body("account_suspended"), content_type="application/json")
-    )
+    resp = _resp(200, text=_account_body("account_suspended"), content_type="application/json")
+    common._check_account_status(resp, common._error_detail_source(resp))
 
 
 # marker-helper branch coverage ------------------------------------------------
 
 
+def _marker(resp: _Resp) -> str | None:
+    return common._error_marker(common._error_detail_source(resp))
+
+
 def test_error_code_reads_top_level_error():
-    assert (
-        common._error_code(
-            _resp(400, text='{"error":"invalid_url"}', content_type="application/json")
-        )
-        == "invalid_url"
+    assert _marker(_resp(400, text='{"error":"invalid_url"}', content_type="application/json")) == (
+        "invalid_url"
     )
 
 
 def test_error_code_reads_detail_wrapped_error():
     assert (
-        common._error_code(
+        _marker(
             _resp(400, text='{"detail":{"error":"invalid_url"}}', content_type="application/json")
         )
         == "invalid_url"
@@ -887,14 +964,11 @@ def test_error_code_reads_detail_wrapped_error():
 
 
 def test_error_code_none_when_error_not_string():
-    assert (
-        common._error_code(_resp(400, text='{"error":123}', content_type="application/json"))
-        is None
-    )
+    assert _marker(_resp(400, text='{"error":123}', content_type="application/json")) is None
 
 
 def test_error_code_none_on_unparseable_body():
-    assert common._error_code(_resp(400, text="not json", content_type="text/plain")) is None
+    assert _marker(_resp(400, text="not json", content_type="text/plain")) is None
 
 
 def test_response_payload_none_on_non_dict_json():
@@ -915,11 +989,52 @@ def test_response_payload_none_when_text_raises():
     assert common._response_payload(_NoText()) is None  # pyright: ignore[reportArgumentType]
 
 
+def test_response_payload_never_drains_an_unread_streaming_body():
+    """A response opened with ``stream=True`` must not be materialized here.
+
+    ``requests`` marks an unread streaming body with ``_content is False``;
+    touching ``.text`` then drains the WHOLE body synchronously with no size
+    cap (a hang or OOM on a large error response), which is exactly what
+    ``safe_response_text`` already refuses to do.
+    """
+
+    class _StreamingResp:
+        _content = False
+        status_code = 403
+        content = b""
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "application/json"}
+            self.text_reads = 0
+
+        @property
+        def text(self) -> str:
+            self.text_reads += 1
+            return _account_body("account_suspended")
+
+    resp = _StreamingResp()
+    assert common._response_payload(resp) is None  # pyright: ignore[reportArgumentType]
+    assert resp.text_reads == 0
+    # Consequence of the guard: a marker is not recovered from an undrained
+    # streaming body, so the mapper falls back to a plain APIError rather than
+    # blocking on an unbounded read.
+    with pytest.raises(APIError) as ei:
+        common.raise_for_deployment(resp, "dep-1")  # pyright: ignore[reportArgumentType]
+    assert not isinstance(ei.value, AccountSuspendedError)
+
+
+def test_response_payload_caps_the_parsed_body_length():
+    # A marker never appears past the cap; a huge body is truncated (and then
+    # fails to parse) instead of being handed whole to json.loads.
+    padding = " " * 4000
+    body = "{" + padding + '"error":"email_not_verified"}'
+    assert common._response_payload(_resp(403, text=body, content_type="application/json")) is None
+
+
 def test_check_email_verification_no_op_on_non_403():
     # non-403 returns without raising even if the marker is present
-    common._check_email_verification(
-        _resp(200, text=_email_body(), content_type="application/json")
-    )
+    resp = _resp(200, text=_email_body(), content_type="application/json")
+    common._check_email_verification(resp, common._error_detail_source(resp))
 
 
 # 413 payload-too-large mapping --------------------------------------------

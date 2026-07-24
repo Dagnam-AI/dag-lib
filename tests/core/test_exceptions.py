@@ -173,11 +173,15 @@ class TestAuthError:
         assert "No API key found" in str(err)
 
 
-def test_email_not_verified_is_dagnam_error_and_carries_url():
+def test_email_not_verified_is_api_error_and_carries_url():
     exc = EmailNotVerifiedError(
         "verify your email", verification_url="https://app.dagnam.ai/verify"
     )
     assert isinstance(exc, DagnamError)
+    # These 403s raised a plain APIError before the dedicated class existed:
+    # staying an APIError keeps `except dagnam.APIError` handlers working.
+    assert isinstance(exc, APIError)
+    assert exc.status_code == 403
     assert exc.verification_url == "https://app.dagnam.ai/verify"
     assert "verify your email" in str(exc)
 
@@ -186,16 +190,20 @@ def test_email_not_verified_url_defaults_none():
     assert EmailNotVerifiedError("nope").verification_url is None
 
 
-def test_account_suspended_is_dagnam_error():
+def test_account_suspended_is_api_error():
     exc = AccountSuspendedError("account suspended")
     assert isinstance(exc, DagnamError)
+    assert isinstance(exc, APIError)  # still catchable as the pre-existing APIError
+    assert exc.status_code == 403
     assert not isinstance(exc, AuthError)  # distinct from an invalid/expired API key
     assert "account suspended" in str(exc)
 
 
-def test_account_locked_is_dagnam_error_and_distinct_from_suspended():
+def test_account_locked_is_api_error_and_distinct_from_suspended():
     exc = AccountLockedError("account locked")
     assert isinstance(exc, DagnamError)
+    assert isinstance(exc, APIError)  # still catchable as the pre-existing APIError
+    assert exc.status_code == 423
     assert not isinstance(exc, AccountSuspendedError)
     assert "account locked" in str(exc)
 

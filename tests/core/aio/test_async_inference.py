@@ -159,7 +159,7 @@ async def test_async_stream_predict_connect_timeout_maps_apierror(
         _ = [ev async for ev in client.stream_predict("dep1", {"x": 1})]
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_schema_retries_transient(

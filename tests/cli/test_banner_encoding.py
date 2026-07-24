@@ -1,4 +1,4 @@
-"""Encoding-safe CLI banner (G019).
+"""Encoding-safe CLI banner.
 
 ``dagnam -v`` / ``dagnam -h`` print the branded ASCII-art banner to stdout via
 argparse. On a legacy code page (cp1252 — the default Windows console, many CI

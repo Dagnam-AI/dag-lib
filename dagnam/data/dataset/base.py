@@ -221,7 +221,7 @@ class DagnamDataset(
         maxlen: int = 200,
         num_words: int = 20000,
     ) -> npt.NDArray[np.int32]:
-        """Hash-tokenize raw text strings into fixed-length integer token ids (G078).
+        """Hash-tokenize raw text strings into fixed-length integer token ids.
 
         Deterministic and framework-agnostic: each whitespace token maps to
         ``crc32(token) % (num_words - 1) + 1`` (id 0 is reserved for padding), then
@@ -236,7 +236,7 @@ class DagnamDataset(
     def _batches_need_padding(features_list: Sequence[np.ndarray]) -> bool:
         """Whether per-batch feature arrays can't be concatenated on axis 0 as-is.
 
-        True (G079) when some batch is ragged/object-dtype, or the batches are
+        True when some batch is ragged/object-dtype, or the batches are
         rectangular but disagree on their trailing (sequence) dims. Either way the
         rows must be padded/truncated to one common length before concatenation.
         """

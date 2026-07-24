@@ -69,7 +69,7 @@ def test_to_flax_native_numpy_object_pad(tmp_path: Path) -> None:
 
 
 def test_to_flax_native_numpy_object_honors_sequence_length(tmp_path: Path) -> None:
-    # G079: the embedding-derived sequence_length overrides the default maxlen on
+    # The embedding-derived sequence_length overrides the default maxlen on
     # the tuple-native ragged path too, so all paths pad to the same fixed length.
     del tmp_path
     ds = make_native_obj_ds()
@@ -322,7 +322,7 @@ def test_to_flax_native_flax_path(tmp_path: Path) -> None:
 
 
 def test_to_flax_native_flax_pads_ragged_sequences(tmp_path: Path) -> None:
-    # G079: a native-FLAX text dataset yields ragged (variable-length) token rows.
+    # A native-FLAX text dataset yields ragged (variable-length) token rows.
     # They must be padded/truncated to a fixed length before np.concatenate so the
     # batch is a rectangular integer array a jax.numpy array can hold.
     del tmp_path
@@ -358,7 +358,7 @@ def test_to_flax_native_flax_pads_ragged_sequences(tmp_path: Path) -> None:
 
 
 def test_to_flax_native_flax_pads_rectangular_batches_of_different_lengths(tmp_path: Path) -> None:
-    # G079 (the REAL platform failure): each FlaxBatch is internally rectangular
+    # The REAL platform failure: each FlaxBatch is internally rectangular
     # integer (dtype != object), but DIFFERENT batches have different sequence
     # lengths (e.g. 4816 vs 3819). np.concatenate(axis=0) then fails on the
     # mismatched dim-1 — the object-only guard missed this. They must pad to one
@@ -396,7 +396,7 @@ def test_to_flax_native_flax_pads_rectangular_batches_of_different_lengths(tmp_p
 
 
 def test_to_flax_native_flax_tokenizes_string_rows(tmp_path: Path) -> None:
-    # G078 (flax defensive): if a native-FLAX batch carries raw text strings, they
+    # Flax defensive: if a native-FLAX batch carries raw text strings, they
     # must be hash-tokenized to fixed-length integer ids, not left as strings.
     del tmp_path
     ds = DagnamDataset(

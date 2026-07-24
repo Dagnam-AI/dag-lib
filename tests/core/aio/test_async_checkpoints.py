@@ -223,7 +223,7 @@ async def test_stream_response_to_file_aborts_mid_stream(
     assert not dest.exists()
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_list_checkpoints_retries_transient(

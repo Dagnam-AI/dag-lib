@@ -261,7 +261,7 @@ class TestToFlaxDataset:
 
 
 def test_tokenize_text_is_deterministic_and_fixed_length() -> None:
-    # G078: hash-tokenization is deterministic (crc32, not Python's salted hash),
+    # Hash-tokenization is deterministic (crc32, not Python's salted hash),
     # pads/truncates to maxlen, reserves 0 for padding, and produces integers.
     import numpy as np
 

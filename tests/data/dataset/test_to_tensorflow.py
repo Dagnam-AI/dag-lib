@@ -93,7 +93,7 @@ def test_to_tf_native_obj_array_clamps_to_vocab_size(tmp_path: Path) -> None:
 
 
 def test_to_tf_native_string_rows_tokenized_to_int(tmp_path: Path) -> None:
-    # G078: a tuple-native text dataset whose rows are raw strings must be
+    # A tuple-native text dataset whose rows are raw strings must be
     # tokenized to fixed-length integer ids — a keras Embedding cannot cast
     # strings ("Cast string to int32").
     del tmp_path
@@ -123,7 +123,7 @@ def test_to_tf_native_string_rows_tokenized_to_int(tmp_path: Path) -> None:
 
 
 def test_to_tf_native_tf_string_dataset_tokenized(tmp_path: Path) -> None:
-    # G078 (the real imdb_reviews path): a native tf.data of (string, label) must
+    # The real imdb_reviews path: a native tf.data of (string, label) must
     # be tokenized to fixed-length integer ids before reaching the model.
     del tmp_path
     import tensorflow as tf
@@ -264,7 +264,7 @@ def test_to_tf_invalid_split(tmp_path: Path) -> None:
 
 
 def test_to_tf_custom_format_system_dataset_accepted(tmp_path: Path) -> None:
-    # G085: a system dataset with format='custom' but a native handle (WikiText-2,
+    # A system dataset with format='custom' but a native handle (WikiText-2,
     # Oxford-Pets) must convert, not be rejected on format before the native check.
     del tmp_path
     ds = DagnamDataset(

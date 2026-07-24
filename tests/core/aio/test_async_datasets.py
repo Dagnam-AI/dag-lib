@@ -215,7 +215,7 @@ async def test_async_get_dataset_task_status(
     assert await client.get_dataset_task_status("t1") == {"status": "done"}
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_dataset_meta_retries_transient(
