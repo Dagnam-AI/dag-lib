@@ -27,6 +27,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -381,7 +382,7 @@ def raise_for_generic(
             raise not_found_exc(not_found_arg)
         raise not_found_exc("not found")
     if code == 413:
-        raise QuotaExceededError(_text(resp) or "Storage quota exceeded")
+        raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     raise APIError(code, _text(resp))
 
 
@@ -465,7 +466,7 @@ def raise_for_upload(resp: ResponseLike) -> None:
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
     if code == 413:
-        raise QuotaExceededError(_text(resp) or "Storage quota exceeded")
+        raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     if code in (400, 422):
         raise UploadError(_text(resp))
     raise APIError(code, _text(resp))

@@ -24,6 +24,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -455,7 +456,7 @@ def test_entitlement_402_non_dict_json_falls_back() -> None:
 
 
 def test_raise_for_generic_413_uses_default_message_on_empty_body() -> None:
-    with pytest.raises(QuotaExceededError, match="Storage quota exceeded"):
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
         common.raise_for_generic(_resp(413))
 
 
@@ -646,7 +647,7 @@ def test_raise_for_upload_413() -> None:
 
 
 def test_raise_for_upload_413_default_message() -> None:
-    with pytest.raises(QuotaExceededError, match="Storage quota exceeded"):
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
         common.raise_for_upload(_resp(413))
 
 
@@ -918,3 +919,23 @@ def test_check_email_verification_no_op_on_non_403():
     common._check_email_verification(
         _resp(200, text=_email_body(), content_type="application/json")
     )
+
+
+# 413 payload-too-large mapping --------------------------------------------
+
+
+def test_413_maps_to_payload_too_large_via_generic():
+    with pytest.raises(PayloadTooLargeError) as ei:
+        common.raise_for_generic(_resp(413, text="File exceeds the 500 MB upload limit"))
+    assert "500 MB" in str(ei.value)
+    assert isinstance(ei.value, QuotaExceededError)  # still catchable as quota
+
+
+def test_413_maps_to_payload_too_large_via_upload():
+    with pytest.raises(PayloadTooLargeError):
+        common.raise_for_upload(_resp(413, text="too big"))
+
+
+def test_413_default_message_is_size_focused():
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
+        common.raise_for_upload(_resp(413))
