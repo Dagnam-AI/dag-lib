@@ -18,6 +18,8 @@ from dagnam._core import exceptions as _core_exceptions
 # write ``except dagnam.APIError`` without reaching into the private
 # ``dagnam._core.exceptions`` path.
 EXCEPTION_EXPORTS = [
+    "AccountLockedError",
+    "AccountSuspendedError",
     "APIError",
     "ArchitectureValidationError",
     "ArchitectureVersionNotFoundError",
@@ -32,10 +34,13 @@ EXCEPTION_EXPORTS = [
     "DeploymentNotFoundError",
     "DeploymentStateError",
     "DeploymentValidationError",
+    "EmailNotVerifiedError",
     "HubError",
     "HubModelNotFoundError",
+    "InvalidURLError",
     "LROFailedError",
     "LROTimeoutError",
+    "PayloadTooLargeError",
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",
