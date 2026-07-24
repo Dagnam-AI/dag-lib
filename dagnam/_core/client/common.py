@@ -27,6 +27,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    InvalidURLError,
     PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
@@ -266,6 +267,7 @@ def _check_entitlement(resp: ResponseLike) -> None:
 
 
 EMAIL_NOT_VERIFIED_CODE = "email_not_verified"
+INVALID_URL_CODES = frozenset({"invalid_url", "url_rejected"})
 
 
 def _response_payload(resp: ResponseLike) -> JsonObject | None:
@@ -468,6 +470,8 @@ def raise_for_upload(resp: ResponseLike) -> None:
     if code == 413:
         raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     if code in (400, 422):
+        if _error_code(resp) in INVALID_URL_CODES:
+            raise InvalidURLError(_text(resp) or "The dataset source URL was rejected")
         raise UploadError(_text(resp))
     raise APIError(code, _text(resp))
 

@@ -24,6 +24,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    InvalidURLError,
     PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
@@ -939,3 +940,26 @@ def test_413_maps_to_payload_too_large_via_upload():
 def test_413_default_message_is_size_focused():
     with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
         common.raise_for_upload(_resp(413))
+
+
+# dataset-from-URL (SSRF) rejection mapping ---------------------------------
+
+
+def test_upload_url_ssrf_rejection_maps_to_invalid_url():
+    body = json.dumps({"detail": {"error": "invalid_url", "message": "URL host is not allowed"}})
+    with pytest.raises(InvalidURLError) as ei:
+        common.raise_for_upload(_resp(400, text=body, content_type="application/json"))
+    assert isinstance(ei.value, UploadError)  # still catchable as UploadError
+    assert "not allowed" in str(ei.value)
+
+
+def test_upload_url_rejected_marker_also_maps_to_invalid_url():
+    body = json.dumps({"error": "url_rejected", "message": "bad scheme"})
+    with pytest.raises(InvalidURLError):
+        common.raise_for_upload(_resp(422, text=body, content_type="application/json"))
+
+
+def test_upload_400_without_url_marker_stays_plain_upload_error():
+    with pytest.raises(UploadError) as ei:
+        common.raise_for_upload(_resp(400, text="name is required"))
+    assert not isinstance(ei.value, InvalidURLError)
