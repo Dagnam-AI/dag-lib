@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import ClassVar
 
 import pytest
 
 from dagnam._core.client import common
 from dagnam._core.exceptions import (
+    AccountLockedError,
+    AccountSuspendedError,
     APIError,
     ArchitectureVersionNotFoundError,
     AuthError,
@@ -18,6 +21,7 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     DeploymentStateError,
     DeploymentValidationError,
+    EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
     ProjectNotFoundError,
@@ -715,3 +719,202 @@ def test_response_status_defaults_to_zero_when_non_int() -> None:
     with pytest.raises(ResponseError) as ei:
         common.response_json_value(resp)
     assert ei.value.status_code == 0
+
+
+# email-not-verified marker mapping ----------------------------------------
+
+
+def _email_body(url: str | None = "https://app.dagnam.ai/verify") -> str:
+    detail: dict[str, str] = {"error": "email_not_verified", "message": "Email not verified."}
+    if url is not None:
+        detail["verification_url"] = url
+    return json.dumps({"detail": detail})
+
+
+def test_email_not_verified_on_training_dispatch_via_generic():
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(_resp(403, text=_email_body(), content_type="application/json"))
+    assert ei.value.verification_url == "https://app.dagnam.ai/verify"
+    assert "app.dagnam.ai/verify" in str(ei.value)
+
+
+def test_email_not_verified_on_deployment_dispatch():
+    with pytest.raises(EmailNotVerifiedError):
+        common.raise_for_deployment(
+            _resp(403, text=_email_body(), content_type="application/json"), "dep-1"
+        )
+
+
+def test_email_not_verified_on_upload_dispatch():
+    with pytest.raises(EmailNotVerifiedError):
+        common.raise_for_upload(_resp(403, text=_email_body(), content_type="application/json"))
+
+
+def test_email_not_verified_top_level_error_key_without_detail_wrapper():
+    body = json.dumps({"error": "email_not_verified", "message": "nope"})
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(_resp(403, text=body, content_type="application/json"))
+    assert ei.value.verification_url is None  # no url in body
+
+
+def test_email_not_verified_without_url_message_only():
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_email_body(url=None), content_type="application/json")
+        )
+    assert ei.value.verification_url is None
+    assert "Email not verified." in str(ei.value)
+
+
+def test_plain_403_without_marker_is_not_email_error():
+    # A 403 that is not the email-verification gate falls through to APIError
+    # (raise_for_generic has no dedicated 403 branch).
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(_resp(403, text="Forbidden"))
+    assert not isinstance(ei.value, EmailNotVerifiedError)
+    assert ei.value.status_code == 403
+
+
+def test_403_with_non_email_marker_is_not_email_error():
+    body = json.dumps({"detail": {"error": "something_else"}})
+    with pytest.raises(APIError):
+        common.raise_for_generic(_resp(403, text=body, content_type="application/json"))
+
+
+# account-status + blocked-IP marker mapping ------------------------------------
+
+
+def _account_body(code: str, message: str = "…") -> str:
+    return json.dumps({"detail": {"error": code, "message": message}})
+
+
+def test_account_suspended_on_training_dispatch_via_generic():
+    with pytest.raises(AccountSuspendedError) as ei:
+        common.raise_for_generic(
+            _resp(
+                403,
+                text=_account_body("account_suspended", "Account suspended."),
+                content_type="application/json",
+            )
+        )
+    assert "Account suspended." in str(ei.value)
+
+
+def test_account_suspended_on_deployment_dispatch():
+    with pytest.raises(AccountSuspendedError):
+        common.raise_for_deployment(
+            _resp(403, text=_account_body("account_suspended"), content_type="application/json"),
+            "dep-1",
+        )
+
+
+def test_account_suspended_on_upload_dispatch():
+    with pytest.raises(AccountSuspendedError):
+        common.raise_for_upload(
+            _resp(403, text=_account_body("account_suspended"), content_type="application/json")
+        )
+
+
+def test_account_locked_on_training_dispatch_via_generic():
+    with pytest.raises(AccountLockedError) as ei:
+        common.raise_for_generic(
+            _resp(
+                423,
+                text=_account_body("account_locked", "Too many failed attempts."),
+                content_type="application/json",
+            )
+        )
+    assert "Too many failed attempts." in str(ei.value)
+
+
+def test_account_locked_status_is_distinct_from_suspended():
+    # A 403 carrying the "account_locked" marker (wrong status for that marker)
+    # must NOT raise AccountLockedError — the two are keyed on status AND marker.
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_account_body("account_locked"), content_type="application/json")
+        )
+    assert not isinstance(ei.value, (AccountLockedError, AccountSuspendedError))
+
+
+def test_blocked_ip_raises_existing_auth_error_not_a_new_type():
+    # Deliberate: no dedicated exception class for a blocked IP (see Task 1).
+    with pytest.raises(AuthError) as ei:
+        common.raise_for_upload(
+            _resp(
+                403,
+                text=_account_body("blocked_ip", "Request blocked."),
+                content_type="application/json",
+            )
+        )
+    assert not isinstance(ei.value, (AccountSuspendedError, AccountLockedError))
+    assert "Request blocked." in str(ei.value)
+
+
+def test_plain_403_without_account_marker_is_unaffected():
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(_resp(403, text="Forbidden"))
+    assert not isinstance(ei.value, (AccountSuspendedError, AccountLockedError))
+
+
+def test_check_account_status_no_op_on_ok_status():
+    common._check_account_status(
+        _resp(200, text=_account_body("account_suspended"), content_type="application/json")
+    )
+
+
+# marker-helper branch coverage ------------------------------------------------
+
+
+def test_error_code_reads_top_level_error():
+    assert (
+        common._error_code(
+            _resp(400, text='{"error":"invalid_url"}', content_type="application/json")
+        )
+        == "invalid_url"
+    )
+
+
+def test_error_code_reads_detail_wrapped_error():
+    assert (
+        common._error_code(
+            _resp(400, text='{"detail":{"error":"invalid_url"}}', content_type="application/json")
+        )
+        == "invalid_url"
+    )
+
+
+def test_error_code_none_when_error_not_string():
+    assert (
+        common._error_code(_resp(400, text='{"error":123}', content_type="application/json"))
+        is None
+    )
+
+
+def test_error_code_none_on_unparseable_body():
+    assert common._error_code(_resp(400, text="not json", content_type="text/plain")) is None
+
+
+def test_response_payload_none_on_non_dict_json():
+    assert (
+        common._response_payload(_resp(400, text="[1,2,3]", content_type="application/json"))
+        is None
+    )
+
+
+def test_response_payload_none_when_text_raises():
+    class _NoText:
+        status_code = 400
+
+        @property
+        def text(self) -> str:
+            raise RuntimeError("boom")
+
+    assert common._response_payload(_NoText()) is None  # pyright: ignore[reportArgumentType]
+
+
+def test_check_email_verification_no_op_on_non_403():
+    # non-403 returns without raising even if the marker is present
+    common._check_email_verification(
+        _resp(200, text=_email_body(), content_type="application/json")
+    )

@@ -11,6 +11,8 @@ import json
 from urllib.parse import quote
 
 from dagnam._core.exceptions import (
+    AccountLockedError,
+    AccountSuspendedError,
     APIError,
     ArchitectureVersionNotFoundError,
     AuthError,
@@ -22,6 +24,7 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     DeploymentStateError,
     DeploymentValidationError,
+    EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
     ProjectNotFoundError,
@@ -261,6 +264,104 @@ def _check_entitlement(resp: ResponseLike) -> None:
         raise QuotaExceededError(_entitlement_message(resp))
 
 
+EMAIL_NOT_VERIFIED_CODE = "email_not_verified"
+
+
+def _response_payload(resp: ResponseLike) -> JsonObject | None:
+    """Best-effort decode of a response body to a JSON object, or None.
+
+    Reads the raw body (not ``safe_response_text``, which flattens a FastAPI
+    ``detail`` and would drop the machine-readable ``error`` marker). Never
+    raises: a body that cannot be read or is not a JSON object yields None.
+    """
+    try:
+        raw = str(resp.text)
+    except Exception:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _error_detail_source(resp: ResponseLike) -> JsonObject | None:
+    """The object that carries the ``error``/``message`` fields.
+
+    Handles both a top-level ``{"error": ...}`` body and a FastAPI
+    ``{"detail": {"error": ...}}`` wrapper (from ``HTTPException(detail={...})``).
+    """
+    data = _response_payload(resp)
+    if data is None:
+        return None
+    detail = data.get("detail")
+    if isinstance(detail, dict):
+        return detail
+    return data
+
+
+def _error_code(resp: ResponseLike) -> str | None:
+    """The machine-readable error marker, or None."""
+    source = _error_detail_source(resp)
+    if source is None:
+        return None
+    code = source.get("error")
+    return code if isinstance(code, str) else None
+
+
+def _check_email_verification(resp: ResponseLike) -> None:
+    """Raise EmailNotVerifiedError for a 403 email-verification-gate rejection.
+
+    Keyed on the ``email_not_verified`` marker so a 403 raised for any other
+    reason falls through to the mapper's existing handling.
+    """
+    if _status_code(resp) != 403:
+        return
+    if _error_code(resp) != EMAIL_NOT_VERIFIED_CODE:
+        return
+    source = _error_detail_source(resp)
+    message = source.get("message") if source is not None else None
+    url = source.get("verification_url") if source is not None else None
+    text = message if isinstance(message, str) else "Email address is not verified."
+    verification_url = url if isinstance(url, str) and url else None
+    if verification_url is not None:
+        text = f"{text} Verify your email at {verification_url}, then retry."
+    raise EmailNotVerifiedError(text, verification_url=verification_url)
+
+
+ACCOUNT_SUSPENDED_CODE = "account_suspended"
+ACCOUNT_LOCKED_CODE = "account_locked"
+BLOCKED_IP_CODE = "blocked_ip"
+
+
+def _check_account_status(resp: ResponseLike) -> None:
+    """Raise AccountSuspendedError/AccountLockedError/AuthError for an account-moderation or blocked-IP rejection.
+
+    From Plan 03's Locked Decision 9 (admin moderation + login lockout).
+    Keyed on status CODE + marker together (not either alone) so a 403/423
+    raised for any other reason falls through to the mapper's existing
+    handling, and a marker on the wrong status code is never misread — see
+    ``test_account_locked_status_is_distinct_from_suspended``.
+
+    A blocked IP deliberately raises the existing ``AuthError`` rather than a
+    new exception type: unlike an unverified email or a lockout window, there
+    is no differently-actionable step an SDK caller can take programmatically
+    (it cannot retry from a different source IP on its own), so a dedicated
+    class would only add a name with no behavioral value.
+    """
+    code = _status_code(resp)
+    marker = _error_code(resp)
+    source = _error_detail_source(resp)
+    message = source.get("message") if source is not None else None
+    text = message if isinstance(message, str) else None
+    if code == 403 and marker == ACCOUNT_SUSPENDED_CODE:
+        raise AccountSuspendedError(text or "This account has been suspended.")
+    if code == 423 and marker == ACCOUNT_LOCKED_CODE:
+        raise AccountLockedError(text or "This account is temporarily locked. Try again later.")
+    if code == 403 and marker == BLOCKED_IP_CODE:
+        raise AuthError(text or "Request blocked: this IP address is not permitted.")
+
+
 def raise_for_generic(
     resp: ResponseLike,
     not_found_exc: type[DagnamError] | None = None,
@@ -270,6 +371,8 @@ def raise_for_generic(
     if _ok(resp):
         return
     _check_entitlement(resp)
+    _check_email_verification(resp)
+    _check_account_status(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
@@ -290,6 +393,8 @@ def raise_for_deployment(resp: ResponseLike, deployment_id: str) -> None:
     if _ok(resp):
         return
     _check_entitlement(resp)
+    _check_email_verification(resp)
+    _check_account_status(resp)
     code = _status_code(resp)
     if code == 409:
         raise DeploymentStateError(_text(resp))
@@ -354,6 +459,8 @@ def raise_for_upload(resp: ResponseLike) -> None:
     if _ok(resp):
         return
     _check_entitlement(resp)
+    _check_email_verification(resp)
+    _check_account_status(resp)
     code = _status_code(resp)
     if code == 401:
         raise AuthError("Authentication failed: invalid or expired API key")
