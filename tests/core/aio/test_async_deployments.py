@@ -300,7 +300,7 @@ async def test_async_create_deployment_sends_idempotency_key(
         return_value=httpx.Response(201, json={"id": "dep1"})
     )
     await client.create_deployment({"project_id": "p1"})
-    assert route.calls.last.request.headers.get("Idempotency-Key")
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
 
 
 async def test_async_create_deployment_retries_transient_with_same_key(

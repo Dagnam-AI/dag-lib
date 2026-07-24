@@ -402,7 +402,7 @@ async def test_async_create_job_sends_idempotency_key(
         return_value=httpx.Response(201, json={"id": "j1"})
     )
     await client.create_training_job({"project_id": "p1"})
-    assert route.calls.last.request.headers.get("Idempotency-Key")
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
 
 
 async def test_async_create_job_409_retries_into_replay(
