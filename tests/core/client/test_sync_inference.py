@@ -9,7 +9,12 @@ import pytest
 import requests as requests_lib
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, AuthError, DeploymentNotFoundError
+from dagnam._core.exceptions import (
+    AccountSuspendedError,
+    APIError,
+    AuthError,
+    DeploymentNotFoundError,
+)
 
 if TYPE_CHECKING:
     from tests.typing_helpers import RequestsMocker
@@ -111,3 +116,33 @@ def test_open_inference_stream_timeout_wraps_apierror(
     with pytest.raises(APIError) as exc_info:
         client.open_inference_stream("dep1", {"x": 1})
     assert exc_info.value.status_code == 0
+
+
+# ------------------------------------------- shared account-status 403 mapping
+# These rejections come from server-side middleware, so they can land on any
+# route. The sync client must map them exactly like the async mirror does —
+# see the twin tests in tests/core/aio/test_async_inference.py.
+
+
+def test_predict_suspended_403_raises_account_suspended(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/inference/dep1/predict",
+        status_code=403,
+        json={"detail": {"error": "account_suspended", "message": "Account suspended."}},
+    )
+    with pytest.raises(AccountSuspendedError, match=r"Account suspended\."):
+        client.predict("dep1", {"x": 1})
+
+
+def test_predict_blocked_ip_403_raises_auth_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/inference/dep1/predict",
+        status_code=403,
+        json={"detail": {"error": "blocked_ip", "message": "IP not permitted."}},
+    )
+    with pytest.raises(AuthError, match=r"IP not permitted\."):
+        client.predict("dep1", {"x": 1})

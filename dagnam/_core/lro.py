@@ -60,7 +60,7 @@ class LongRunningOperation:
         success_states: Iterable[str],
         failure_states: Iterable[str] = _DEFAULT_FAILURE_STATES,
         state_key: str = "status",
-        error_key: str = "error_message",
+        error_key: str | Iterable[str] = "error_message",
         name: str = "operation",
         initial: Optional[JsonMapping] = None,
         poll_min: float = DEFAULT_POLL_MIN,
@@ -72,7 +72,12 @@ class LongRunningOperation:
         if not self._success:
             raise ValueError("LongRunningOperation requires at least one success_state")
         self._state_key = state_key
-        self.error_key = error_key
+        # Accept one key or an ordered fallback chain: different services spell
+        # the failure detail differently (``error_message`` vs ``error``), and a
+        # single payload may carry either.
+        self.error_key: tuple[str, ...] = (
+            (error_key,) if isinstance(error_key, str) else tuple(error_key)
+        )
         self._name = name
         self._latest: Optional[JsonMapping] = initial
         self._poll_min = max(0.1, float(poll_min))
@@ -105,6 +110,14 @@ class LongRunningOperation:
     def _current_state(self, payload: JsonMapping) -> str:
         value = payload.get(self._state_key)
         return str(value) if value is not None else ""
+
+    def _error_detail(self, payload: JsonMapping) -> Optional[str]:
+        """First string failure detail found under ``error_key``, else None."""
+        for key in self.error_key:
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        return None
 
     def _poll_resilient(
         self,
@@ -233,8 +246,7 @@ class LongRunningOperation:
             )
         state = self._current_state(self._latest)
         if state in self._failure:
-            detail = self._latest.get(self.error_key)
-            raise LROFailedError(state, detail if isinstance(detail, str) else None)
+            raise LROFailedError(state, self._error_detail(self._latest))
         if state in self._success:
             return self._latest
         raise LROTimeoutError(f"{self._name} is still in non-terminal state {state!r}")

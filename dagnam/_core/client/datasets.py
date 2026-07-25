@@ -18,6 +18,7 @@ from dagnam._core.client.base import (
 )
 from dagnam._core.client.common import (
     quote_path_segment,
+    raise_for_dataset,
     raise_for_task,
     raise_for_upload,
     response_json_array,
@@ -38,7 +39,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_status(r, "browse"),
+            raise_for=lambda r: raise_for_dataset(r, "browse"),
             params=params,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -55,7 +56,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             params=params,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -67,7 +68,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_status(r, "system"),
+            raise_for=lambda r: raise_for_dataset(r, "system"),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
@@ -80,7 +81,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             params=params,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -102,7 +103,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         dataset_path = quote_path_segment(dataset_id)
         url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}/download"
         resp = self._get_stream(url)
-        self._raise_for_status(resp, dataset_id)
+        raise_for_dataset(resp, dataset_id)
         filename = parse_content_disposition_filename(resp.headers.get("Content-Disposition"))
         return self._stream_response_to_file(
             resp,
@@ -194,7 +195,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
-        self._raise_for_status(resp, dataset_id)
+        raise_for_dataset(resp, dataset_id)
 
         # Determine filename from response if not provided
         if not filename:
@@ -257,10 +258,13 @@ class DatasetsClientMixin(BaseDagnamClient):
     ) -> JsonObject:
         from dagnam._core.client.common import raise_for_upload
 
-        url = f"{self.api_url}/api/v1/datasets/upload"
+        # ``POST /api/v1/datasets/`` is the dataset-create endpoint; the file is
+        # an optional multipart part alongside the metadata form fields. The
+        # server binds them by name, so ``dataset_type`` must not be shortened.
+        url = f"{self.api_url}/api/v1/datasets/"
         fields = {
             "name": name,
-            "type": dataset_type,
+            "dataset_type": dataset_type,
             "format": format,
             "visibility": visibility,
         }
@@ -302,21 +306,22 @@ class DatasetsClientMixin(BaseDagnamClient):
         description: str | None = None,
         visibility: str = "private",
     ) -> JsonObject:
-        endpoint = f"{self.api_url}/api/v1/datasets/upload-url"
-        body: dict[str, str] = {
+        # ``POST /api/v1/datasets/from-url`` takes form fields, not a JSON body.
+        endpoint = f"{self.api_url}/api/v1/datasets/from-url"
+        fields: dict[str, str] = {
             "url": url,
             "name": name,
-            "type": dataset_type,
+            "dataset_type": dataset_type,
             "format": format,
             "visibility": visibility,
         }
         if description:
-            body["description"] = description
+            fields["description"] = description
         resp = self._request(
             "POST",
             endpoint,
             raise_for=lambda r: raise_for_upload(r),
-            json=body,
+            data=fields,
             allow_redirects=ALLOW_REDIRECTS,
         )
         return response_json_object(resp)
@@ -344,7 +349,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             params={"rows": rows},
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -381,7 +386,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "PUT",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             data=fields,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -394,7 +399,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         self._request(
             "DELETE",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             allow_redirects=ALLOW_REDIRECTS,
         )
 
@@ -418,7 +423,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         resp = self._request(
             "PATCH",
             url,
-            raise_for=lambda r: self._raise_for_status(r, dataset_id),
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
             json=body,
             allow_redirects=ALLOW_REDIRECTS,
         )

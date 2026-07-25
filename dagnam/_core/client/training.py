@@ -20,6 +20,7 @@ from dagnam._core.client.base import (
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
+    raise_for_training_job,
     requests_query_params,
     response_json_object,
     response_json_value,
@@ -294,7 +295,7 @@ class TrainingClientMixin(BaseDagnamClient):
         resp = self._request(
             "POST",
             url,
-            raise_for=lambda r: self.raise_for_job_response(r, job_id),
+            raise_for=lambda r: raise_for_training_job(r, job_id),
             json={
                 "events": events,
                 "source": source or {"kind": "local_attach", "sdk_version": sdk_version},

@@ -37,18 +37,32 @@ explicit argument -> `dagnam.configure(...)` -> `DAGNAM_API_KEY` / `DAGNAM_API_U
   verify the email in the web app, then retry. Browsing,
   reading, and designing are unaffected.
 - **Upload guards.** An upload larger than the server's per-request size cap
-  raises `dagnam.PayloadTooLargeError` (a `QuotaExceededError` subclass). A
-  `upload_dataset_from_url` source URL the server rejects as invalid or unsafe
-  raises `dagnam.InvalidURLError` (an `UploadError` subclass) — supply a
-  publicly reachable `https` URL to a real dataset file.
+  raises `dagnam.PayloadTooLargeError` (a `QuotaExceededError` subclass).
+- **A rejected source URL surfaces on one of two paths.** `upload_from_url`
+  starts a server-side ingest job, so a bad URL can be caught either before or
+  after the job is accepted:
+  - **Synchronously**, if the server rejects the URL up front, the call raises
+    `dagnam.InvalidURLError` (an `UploadError` subclass) and no job is created.
+  - **Asynchronously**, if the URL is only found to be unusable once the ingest
+    job runs (unreachable host, wrong content, a download that fails), the call
+    still returns a `LongRunningOperation`; the rejection appears as the job's
+    terminal failure state, so `op.wait(...).result()` raises
+    `dagnam.LROFailedError` with the server's message as `.detail`.
+
+  Handle both: supply a publicly reachable `https` URL to a real dataset file,
+  and check the operation's result rather than assuming the return of
+  `upload_from_url` means the dataset landed.
 - **Account-status rejections.** If the API key's owning account is
   administratively suspended, calls raise `dagnam.AccountSuspendedError` — this
-  is not self-clearing; contact support. If the account is temporarily locked
-  out after repeated failed interactive-login attempts, calls raise
-  `dagnam.AccountLockedError` — this clears itself once the lockout window
-  elapses; retry after waiting. A request from a blocked IP address raises the
-  existing `dagnam.AuthError` (no dedicated exception type, since there is no
-  different remediation an SDK caller can take for it). `EmailNotVerifiedError`,
-  `AccountSuspendedError` and `AccountLockedError` are all `APIError` subclasses,
-  so an existing `except dagnam.APIError` handler still catches them and
-  `.status_code` carries the 403/403/423.
+  is not self-clearing; contact support. A request from a blocked IP address
+  raises the existing `dagnam.AuthError` (no dedicated exception type, since
+  there is no different remediation an SDK caller can take for it). Both are
+  `APIError` subclasses carrying `.status_code == 403`, as is
+  `EmailNotVerifiedError`, so an existing `except dagnam.APIError` handler still
+  catches them.
+- **Lockout applies to interactive login only.** After repeated failed
+  interactive-login attempts the account is temporarily locked out, and the
+  login endpoint answers 423 — so `dagnam login` (and any direct login call)
+  raises `dagnam.AccountLockedError` (an `APIError` subclass, `.status_code ==
+  423`). It clears itself once the lockout window elapses; retry after waiting.
+  API-key requests are not subject to the lockout and never raise it.

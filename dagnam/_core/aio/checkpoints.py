@@ -6,9 +6,13 @@ from pathlib import Path
 
 import httpx
 
-from dagnam._core.aio.base import BaseAsyncDagnamClient, raise_for_job_response
+from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.base import scrub_secret_params
-from dagnam._core.client.common import quote_path_segment, safe_response_text
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_training_job,
+    safe_response_text,
+)
 from dagnam._core.exceptions import APIError, AuthError, CheckpointNotFoundError
 from dagnam._types import JsonObject, ensure_json_array, ensure_json_object
 
@@ -20,7 +24,7 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
         resp = await self._request(
             "GET",
             f"/api/v1/training/jobs/{quote_path_segment(job_id)}/checkpoints",
-            raise_for=lambda r: raise_for_job_response(r, job_id),
+            raise_for=lambda r: raise_for_training_job(r, job_id),
         )
         return [ensure_json_object(item) for item in ensure_json_array(resp.json())]
 

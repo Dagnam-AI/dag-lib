@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
+    AccountSuspendedError,
     APIError,
+    AuthError,
     DatasetNotFoundError,
 )
 
@@ -148,7 +151,9 @@ async def test_async_upload_dataset(
 ) -> None:
     fp = tmp_path / "x.csv"
     fp.write_text("a,b\n1,2")
-    mock.post("/api/v1/datasets/upload").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
+    route = mock.post("/api/v1/datasets/").mock(
+        return_value=httpx.Response(200, json={"id": "ds1"})
+    )
     result = await client.upload_dataset(
         fp,
         name="x",
@@ -158,12 +163,17 @@ async def test_async_upload_dataset(
         license="MIT",
     )
     assert result == {"id": "ds1"}
+    # The server binds the multipart parts by name; `dataset_type` (not `type`)
+    # is the field the create endpoint declares.
+    body = route.calls[0].request.content.decode("utf-8", "replace")
+    assert 'name="dataset_type"' in body
+    assert 'name="type"' not in body
 
 
 async def test_async_upload_dataset_from_url(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/datasets/upload-url").mock(
+    route = mock.post("/api/v1/datasets/from-url").mock(
         return_value=httpx.Response(200, json={"task_id": "t1"})
     )
     result = await client.upload_dataset_from_url(
@@ -174,6 +184,12 @@ async def test_async_upload_dataset_from_url(
         description="d",
     )
     assert result == {"task_id": "t1"}
+    # The endpoint takes form fields, not a JSON body.
+    fields = parse_qs(route.calls[0].request.content.decode())
+    assert fields["url"] == ["https://x/data.csv"]
+    assert fields["dataset_type"] == ["t"]
+    assert fields["description"] == ["d"]
+    assert "type" not in fields
 
 
 async def test_async_upload_dataset_minimal(
@@ -181,7 +197,7 @@ async def test_async_upload_dataset_minimal(
 ) -> None:
     fp = tmp_path / "x.csv"
     fp.write_text("a,b\n1,2")
-    mock.post("/api/v1/datasets/upload").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
+    mock.post("/api/v1/datasets/").mock(return_value=httpx.Response(200, json={"id": "ds1"}))
     result = await client.upload_dataset(
         fp,
         name="x",
@@ -194,7 +210,7 @@ async def test_async_upload_dataset_minimal(
 async def test_async_upload_dataset_from_url_minimal(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/datasets/upload-url").mock(
+    mock.post("/api/v1/datasets/from-url").mock(
         return_value=httpx.Response(200, json={"task_id": "t1"})
     )
     result = await client.upload_dataset_from_url(
@@ -261,3 +277,32 @@ async def test_async_delete_dataset_retries_transient(
         side_effect=[httpx.Response(503, json={}), httpx.Response(204)]
     )
     assert await client.delete_dataset("ds1") is None
+
+
+# ------------------------------------------- shared account-status 403 mapping
+# Twins of the sync assertions in tests/core/client/test_sync_datasets.py: both
+# transports run the same mapper, so both must raise the same typed error.
+
+
+async def test_async_browse_suspended_403_raises_account_suspended(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/datasets/browse").mock(
+        return_value=httpx.Response(
+            403, json={"detail": {"error": "account_suspended", "message": "Account suspended."}}
+        )
+    )
+    with pytest.raises(AccountSuspendedError, match=r"Account suspended\."):
+        await client.list_datasets()
+
+
+async def test_async_browse_blocked_ip_403_raises_auth_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/datasets/browse").mock(
+        return_value=httpx.Response(
+            403, json={"detail": {"error": "blocked_ip", "message": "IP not permitted."}}
+        )
+    )
+    with pytest.raises(AuthError, match=r"IP not permitted\."):
+        await client.list_datasets()

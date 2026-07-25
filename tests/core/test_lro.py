@@ -139,6 +139,41 @@ class TestTerminalResolution:
         assert excinfo.value.state == "failed"
         assert excinfo.value.detail == "OOM"
 
+    def test_error_key_chain_prefers_the_first_present_key(self) -> None:
+        # Services spell the failure detail differently; an ordered chain lets one
+        # LRO read either without the caller knowing which arrived.
+        op = LongRunningOperation(
+            poll=lambda: {"status": "failed", "error": "first", "error_message": "second"},
+            success_states={"running"},
+            error_key=("error", "error_message"),
+        )
+        clk = FakeClock()
+        with pytest.raises(LROFailedError) as excinfo:
+            op.wait(timeout=1, sleep=clk.sleep, now=clk.now).result()
+        assert excinfo.value.detail == "first"
+
+    def test_error_key_chain_falls_through_to_the_later_key(self) -> None:
+        op = LongRunningOperation(
+            poll=lambda: {"status": "failed", "error_message": "second"},
+            success_states={"running"},
+            error_key=("error", "error_message"),
+        )
+        clk = FakeClock()
+        with pytest.raises(LROFailedError) as excinfo:
+            op.wait(timeout=1, sleep=clk.sleep, now=clk.now).result()
+        assert excinfo.value.detail == "second"
+
+    def test_error_key_chain_ignores_non_string_values(self) -> None:
+        op = LongRunningOperation(
+            poll=lambda: {"status": "failed", "error": {"code": 1}, "error_message": "readable"},
+            success_states={"running"},
+            error_key=("error", "error_message"),
+        )
+        clk = FakeClock()
+        with pytest.raises(LROFailedError) as excinfo:
+            op.wait(timeout=1, sleep=clk.sleep, now=clk.now).result()
+        assert excinfo.value.detail == "readable"
+
 
 class TestTimeout:
     def test_timeout_when_never_terminal(self) -> None:

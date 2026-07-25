@@ -12,7 +12,7 @@ from dagnam._core.client.base import (
     is_success_response,
     safe_error_body_from_response,
 )
-from dagnam._core.client.common import quote_path_segment
+from dagnam._core.client.common import quote_path_segment, raise_for_training_job
 from dagnam._core.exceptions import AuthError, CheckpointNotFoundError
 from dagnam._types import JsonObject, ensure_json_array
 
@@ -27,7 +27,7 @@ class CheckpointsClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self.raise_for_job_response(r, job_id),
+            raise_for=lambda r: raise_for_training_job(r, job_id),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return [item for item in ensure_json_array(resp.json()) if isinstance(item, dict)]

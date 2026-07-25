@@ -9,7 +9,9 @@ import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
+    AccountSuspendedError,
     APIError,
+    AuthError,
     DeploymentNotFoundError,
     StreamError,
 )
@@ -207,3 +209,32 @@ async def test_async_predict_post_not_retried(
     with pytest.raises(APIError):
         await client.predict("d1", {"x": 1})
     assert route.call_count == 1
+
+
+# ------------------------------------------- shared account-status 403 mapping
+# Twins of the sync assertions in tests/core/client/test_sync_inference.py: both
+# transports run the same mapper, so both must raise the same typed error.
+
+
+async def test_async_predict_suspended_403_raises_account_suspended(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/inference/dep1/predict").mock(
+        return_value=httpx.Response(
+            403, json={"detail": {"error": "account_suspended", "message": "Account suspended."}}
+        )
+    )
+    with pytest.raises(AccountSuspendedError, match=r"Account suspended\."):
+        await client.predict("dep1", {"x": 1})
+
+
+async def test_async_predict_blocked_ip_403_raises_auth_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/inference/dep1/predict").mock(
+        return_value=httpx.Response(
+            403, json={"detail": {"error": "blocked_ip", "message": "IP not permitted."}}
+        )
+    )
+    with pytest.raises(AuthError, match=r"IP not permitted\."):
+        await client.predict("dep1", {"x": 1})

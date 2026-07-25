@@ -8,7 +8,7 @@ import pytest
 
 from dagnam import datasets as datasets_upload
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import UploadError
+from dagnam._core.exceptions import LROFailedError, UploadError
 from dagnam._core.lro import LongRunningOperation
 
 
@@ -116,6 +116,47 @@ class TestUploadFromUrl:
         result = op._poll()
         c.get_dataset_task_status.assert_called_once_with("t1")
         assert result["status"] == "completed"
+
+    def _op(self, poll_payload: dict[str, object]) -> LongRunningOperation:
+        c = _client(
+            upload_dataset_from_url=MagicMock(return_value={"task_id": "t1", "status": "pending"}),
+            get_dataset_task_status=MagicMock(return_value=poll_payload),
+        )
+        return datasets_upload.upload_from_url(
+            "https://x.com/d.csv",
+            name="ds",
+            dataset_type="tabular",
+            format="csv",
+            client=c,
+        )
+
+    @pytest.mark.parametrize("state", ["SUCCESS", "success", "completed", "ready"])
+    def test_lro_accepts_every_success_spelling(self, state: str) -> None:
+        # The task-status endpoint reports the raw queue status ("SUCCESS")
+        # under `status`; the lower-cased rendering is what `state` carries.
+        op = self._op({"status": state, "dataset_id": "ds1"})
+        assert op.wait(timeout=1, sleep=lambda _d: None).result()["dataset_id"] == "ds1"
+
+    @pytest.mark.parametrize("state", ["FAILURE", "failure", "failed", "REVOKED", "cancelled"])
+    def test_lro_accepts_every_failure_spelling(self, state: str) -> None:
+        op = self._op({"status": state, "error": "download failed"})
+        op.wait(timeout=1, sleep=lambda _d: None)
+        with pytest.raises(LROFailedError, match="download failed"):
+            op.result()
+
+    def test_lro_reads_the_error_field(self) -> None:
+        # The server sends the failure detail as `error`; `error_message` stays
+        # supported as a fallback for any payload that still uses it.
+        op = self._op({"status": "FAILURE", "error": "bad url"})
+        op.wait(timeout=1, sleep=lambda _d: None)
+        with pytest.raises(LROFailedError, match="bad url"):
+            op.result()
+
+    def test_lro_falls_back_to_error_message(self) -> None:
+        op = self._op({"status": "FAILURE", "error_message": "legacy detail"})
+        op.wait(timeout=1, sleep=lambda _d: None)
+        with pytest.raises(LROFailedError, match="legacy detail"):
+            op.result()
 
 
 class TestList:

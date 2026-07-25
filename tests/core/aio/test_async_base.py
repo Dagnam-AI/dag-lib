@@ -11,8 +11,8 @@ from dagnam._core.aio.base import (
     _sanitize_filename,
     content_disposition_safe_name,
     parse_content_disposition_filename,
-    raise_for_job_response,
 )
+from dagnam._core.client.common import raise_for_training_job
 from dagnam._core.exceptions import (
     APIError,
     AuthError,
@@ -146,24 +146,24 @@ async def test_async_base_has_no_inference_headers_method() -> None:
         await c._client.aclose()
 
 
-def testraise_for_job_response_2xx_returns() -> None:
+def testraise_for_training_job_2xx_returns() -> None:
     r = httpx.Response(200)
-    raise_for_job_response(r, "job1")
+    raise_for_training_job(r, "job1")
 
 
-def testraise_for_job_response_401() -> None:
+def testraise_for_training_job_401() -> None:
     with pytest.raises(AuthError):
-        raise_for_job_response(httpx.Response(401), "job1")
+        raise_for_training_job(httpx.Response(401), "job1")
 
 
-def testraise_for_job_response_404() -> None:
+def testraise_for_training_job_404() -> None:
     with pytest.raises(TrainingJobNotFoundError):
-        raise_for_job_response(httpx.Response(404), "job1")
+        raise_for_training_job(httpx.Response(404), "job1")
 
 
-def testraise_for_job_response_500() -> None:
+def testraise_for_training_job_500() -> None:
     with pytest.raises(APIError):
-        raise_for_job_response(httpx.Response(500, text="boom"), "job1")
+        raise_for_training_job(httpx.Response(500, text="boom"), "job1")
 
 
 async def test_base_request_connectionerror_wraps() -> None:

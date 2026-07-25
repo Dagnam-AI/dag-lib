@@ -19,13 +19,8 @@ import uuid
 
 from dagnam._core._retry import RetryBudget, run_with_retry_async
 from dagnam._core.client.base import resolve_max_download_bytes, scrub_secret_params
-from dagnam._core.client.common import bearer_headers, safe_response_text
-from dagnam._core.exceptions import (
-    APIError,
-    AuthError,
-    DownloadTooLargeError,
-    TrainingJobNotFoundError,
-)
+from dagnam._core.client.common import bearer_headers
+from dagnam._core.exceptions import APIError, DownloadTooLargeError
 from dagnam._types import FormData, JsonValue, QueryParams, UploadFiles
 
 DEFAULT_TIMEOUT = 30
@@ -175,18 +170,6 @@ class BaseAsyncDagnamClient:
         except DownloadTooLargeError:
             await asyncio.to_thread(dest.unlink, missing_ok=True)
             raise
-
-
-def raise_for_job_response(resp: httpx.Response, job_id: str) -> None:
-    """Map training-job response errors (mirrors sync client.raise_for_job_response)."""
-    if 200 <= resp.status_code < 300:
-        return
-    code = resp.status_code
-    if code == 401:
-        raise AuthError("Authentication failed: invalid or expired API key")
-    if code == 404:
-        raise TrainingJobNotFoundError(job_id)
-    raise APIError(code, safe_response_text(resp))
 
 
 def _extract_content_disposition_raw(header: str | None) -> str | None:

@@ -16,8 +16,14 @@ from dagnam._core.lro import LongRunningOperation
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject
 
-_SUCCESS_STATES = frozenset({"completed", "ready"})
-_FAILURE_STATES = frozenset({"failed"})
+# ``GET /api/v1/datasets/tasks/{task_id}`` reports the raw task-queue status
+# ("SUCCESS"/"FAILURE"/"REVOKED"/...) under ``status`` and a lower-cased
+# rendering ("completed"/"failed"/"cancelled"/...) under ``state``. Both
+# spellings are accepted so the poll terminates on either shape.
+_SUCCESS_STATES = frozenset({"completed", "ready", "success", "SUCCESS"})
+_FAILURE_STATES = frozenset({"failed", "failure", "FAILURE", "cancelled", "revoked", "REVOKED"})
+# The failure detail is ``error``; ``error_message`` is kept as a fallback.
+_ERROR_KEYS = ("error", "error_message")
 
 
 def list(
@@ -149,7 +155,7 @@ def upload_from_url(
         success_states=_SUCCESS_STATES,
         failure_states=_FAILURE_STATES,
         state_key="status",
-        error_key="error_message",
+        error_key=_ERROR_KEYS,
         name=f"datasets.upload_from_url({task_id_value})",
         initial=initial,
     )

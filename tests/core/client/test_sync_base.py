@@ -22,6 +22,7 @@ from dagnam._core.client.base import (
     safe_download_basename,
     safe_error_body_from_response,
 )
+from dagnam._core.client.common import raise_for_dataset
 from dagnam._core.exceptions import APIError, AuthError
 
 API = "https://api.test"
@@ -97,7 +98,7 @@ def test_append_stream_to_file_closes_response_on_write_error(
 
 
 class _ErrorResponse:
-    """Minimal requests.Response stand-in for `_raise_for_status` error paths."""
+    """Minimal requests.Response stand-in for status-mapper error paths."""
 
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
@@ -294,14 +295,16 @@ def test_safe_error_body_from_response_delegates_to_common(client: DagnamClient)
 
 
 def test_raise_for_status_maps_401_to_autherror() -> None:
+    # The sync dataset calls no longer carry their own status mapper — they use
+    # the shared one, so the mapping is asserted against that single path.
     with pytest.raises(AuthError, match="invalid or expired API key"):
         # Partial response fake exercising only the status-code mapping.
-        BaseDagnamClient._raise_for_status(_ErrorResponse(401), "ds-1")  # pyright: ignore[reportArgumentType]
+        raise_for_dataset(_ErrorResponse(401), "ds-1")  # pyright: ignore[reportArgumentType]
 
 
 def test_raise_for_status_maps_other_codes_to_apierror() -> None:
     with pytest.raises(APIError) as exc_info:
-        BaseDagnamClient._raise_for_status(_ErrorResponse(500), "ds-1")  # pyright: ignore[reportArgumentType]
+        raise_for_dataset(_ErrorResponse(500), "ds-1")  # pyright: ignore[reportArgumentType]
     assert exc_info.value.status_code == 500
 
 
