@@ -125,8 +125,8 @@ def test_scale_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
 
 def test_rollback_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/deployments/dep1/rollback", json={"ok": True})
-    client.rollback_deployment("dep1", "ckpt/path")
-    assert rmock.last_request.qs == {"checkpoint_path": ["ckpt/path"]}
+    client.rollback_deployment("dep1", "ckpt-1")
+    assert rmock.last_request.qs == {"checkpoint_id": ["ckpt-1"]}
 
 
 def test_get_deployment_metrics(client: DagnamClient, rmock: RequestsMocker) -> None:

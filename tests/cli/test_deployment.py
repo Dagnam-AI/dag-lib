@@ -429,10 +429,8 @@ def test_deployments_rollback_waits(run_cli: CliRunner, capsys: StrCapture) -> N
     op = mock.MagicMock()
     op.wait.return_value.result.return_value = {"id": "dep-1", "status": "running"}
     with mock.patch("dagnam.deployments.rollback", return_value=op) as m:
-        assert (
-            run_cli(["deployments", "rollback", "dep-1", "--checkpoint-path", "/ckpt/best.pt"]) == 0
-        )
-    m.assert_called_once_with("dep-1", "/ckpt/best.pt")
+        assert run_cli(["deployments", "rollback", "dep-1", "--checkpoint-id", "ckpt-best"]) == 0
+    m.assert_called_once_with("dep-1", "ckpt-best")
     assert json.loads(capsys.readouterr().out)["status"] == "running"
 
 
@@ -441,9 +439,7 @@ def test_deployments_rollback_no_wait(run_cli: CliRunner, capsys: StrCapture) ->
     op.initial.return_value = {"id": "dep-1", "status": "rolling_back"}
     with mock.patch("dagnam.deployments.rollback", return_value=op):
         assert (
-            run_cli(
-                ["deployments", "rollback", "dep-1", "--checkpoint-path", "/ckpt/x", "--no-wait"]
-            )
+            run_cli(["deployments", "rollback", "dep-1", "--checkpoint-id", "ckpt-x", "--no-wait"])
             == 0
         )
     op.wait.assert_not_called()

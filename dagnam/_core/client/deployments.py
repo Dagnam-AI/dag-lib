@@ -189,12 +189,12 @@ class DeploymentsClientMixin(BaseDagnamClient):
             params={"num_instances": num_instances},
         )
 
-    def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> JsonObject:
+    def rollback_deployment(self, deployment_id: str, checkpoint_id: str) -> JsonObject:
         return self._deployment_object(
             "POST",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
             deployment_id=deployment_id,
-            params={"checkpoint_path": checkpoint_path},
+            params={"checkpoint_id": checkpoint_id},
         )
 
     def retry_deployment(self, deployment_id: str) -> JsonObject:

@@ -54,7 +54,7 @@ async def test_async_deployments_full_surface(
     await client.pause_deployment("dep1")
     await client.resume_deployment("dep1")
     await client.scale_deployment("dep1", 5)
-    await client.rollback_deployment("dep1", "ck")
+    await client.rollback_deployment("dep1", "ck-1")
     await client.get_deployment_metrics("dep1")
     await client.get_deployment_logs(
         "dep1",
