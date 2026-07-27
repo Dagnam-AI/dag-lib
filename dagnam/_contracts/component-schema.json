@@ -304,7 +304,6 @@
           "kind": "number",
           "numeric": {
             "integer": true,
-            "max": 4096.0,
             "min": 1.0
           },
           "required": true
