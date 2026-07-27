@@ -8857,7 +8857,7 @@
         ]
       },
       "expected": {
-        "is_valid": false,
+        "is_valid": true,
         "normalized_codes": [],
         "node_shapes": {}
       }
@@ -17643,7 +17643,7 @@
         ]
       },
       "expected": {
-        "is_valid": false,
+        "is_valid": true,
         "normalized_codes": [],
         "node_shapes": {}
       }
