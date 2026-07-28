@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from dagnam._types import IndexedDataset, SupportsNumpy
+from dagnam.data._polars_utils import clamp_token_ids, column_roles_from_binding
 from dagnam.data.dataset._typing import DatasetMixinBase
 
 if TYPE_CHECKING:
@@ -19,17 +20,6 @@ if TYPE_CHECKING:
 ArrayTransform = Callable[[npt.ArrayLike], npt.ArrayLike]
 JaxArrayFactory = Callable[[npt.ArrayLike], "jax.Array"]
 BatchTransform = Callable[["jax.Array", "jax.Array"], tuple["jax.Array", "jax.Array"]]
-
-
-def _column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
-    roles: dict[str, str] = {}
-    input_column = binding.get("input_column")
-    target_column = binding.get("target_column")
-    if isinstance(input_column, str) and input_column:
-        roles[input_column] = "feature"
-    if isinstance(target_column, str) and target_column:
-        roles[target_column] = "target"
-    return roles or None
 
 
 class _LazyFlaxBatchStream:
@@ -113,6 +103,13 @@ class FlaxDatasetMixin(DatasetMixinBase):
                 x_test = self._pad_sequences(
                     cast("Sequence[Sequence[int]]", x_test), num_words=num_words, **pad_kwargs
                 )
+            elif vocab_size is not None:
+                # A rectangular, already-padded token array still carries raw ids
+                # that can exceed the embedding's vocab; clamp out-of-vocab ids to 0
+                # exactly like the ragged path above, else the embedding raises
+                # "index out of range" (G306, mirrors the pytorch fix for G247).
+                x_train = clamp_token_ids(np.asarray(x_train), vocab_size)
+                x_test = clamp_token_ids(np.asarray(x_test), vocab_size)
             if split == "test":
                 x = cast("npt.NDArray[np.object_]", np.asarray(x_test))
                 y = np.asarray(y_test).astype(np.int64)
@@ -377,7 +374,7 @@ class FlaxDatasetMixin(DatasetMixinBase):
         if split not in valid_splits:
             raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'.")
         if column_roles is None and binding is not None:
-            column_roles = _column_roles_from_binding(binding)
+            column_roles = column_roles_from_binding(binding)
 
         # Format validation — before JAX import.
         fmt = self.format.lower()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import zlib
 
 import numpy as np
@@ -113,6 +113,35 @@ def encode_label_series(series: pl.Series, class_names: list[str] | None) -> npt
         raise ValueError(
             f"Label value {exc.args[0]!r} is not in class_names {class_names}"
         ) from exc
+
+
+def clamp_token_ids(array: npt.NDArray[Any], vocab_size: int) -> npt.NDArray[Any]:
+    """Clamp out-of-vocab token ids to 0 so an Embedding never indexes past its table.
+
+    Mirrors ``tokenize_text``'s reserved-zero-for-padding convention for rectangular
+    (already-padded) token arrays, which otherwise pass raw ids straight through and
+    crash a vocab-sized embedding with "index out of range". Shared by the PyTorch,
+    Flax, and TensorFlow native-numpy converters (Round-2 G247, G306) so all three
+    frameworks clamp identically.
+    """
+    return np.where(array < vocab_size, array, 0)
+
+
+def column_roles_from_binding(binding: dict[str, Any]) -> dict[str, str] | None:
+    """Derive a ``column_roles`` mapping from a resolver binding's input/target columns.
+
+    Shared by the PyTorch, Flax, and TensorFlow dataset converters so a caller that
+    only supplies ``binding`` (and not ``column_roles`` directly) gets identical
+    feature/target role assignment across frameworks.
+    """
+    roles: dict[str, str] = {}
+    input_column = binding.get("input_column")
+    target_column = binding.get("target_column")
+    if isinstance(input_column, str) and input_column:
+        roles[input_column] = "feature"
+    if isinstance(target_column, str) and target_column:
+        roles[target_column] = "target"
+    return roles or None
 
 
 def encode_target_series(

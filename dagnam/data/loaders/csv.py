@@ -137,7 +137,7 @@ FEATURE_ROLES = frozenset(
         "anchor",
     }
 )
-TARGET_ROLES = frozenset({"target", "text_target", "completion"})
+TARGET_ROLES = frozenset({"target", "text_target", "completion", "label"})
 
 
 def split_by_roles(
@@ -166,7 +166,7 @@ def split_by_roles(
     if not target_cols:
         raise ValueError(
             "column_roles does not specify object target column "
-            "(expected a column with role 'target', 'text_target', or 'completion')"
+            "(expected a column with role 'target', 'label', 'text_target', or 'completion')"
         )
 
     # Use the first target column as the label column.
