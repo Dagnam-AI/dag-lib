@@ -503,3 +503,49 @@ def test_native_pytorch_loader_transposes_bound_image_to_channels_first() -> Non
     x = cast("tuple[object, object]", batch)[0]
     assert tuple(cast("Any", x).shape) == (2, 3, 8, 8)  # channels-first
     del torch
+
+
+class TestAudioBindingOptions:
+    """`_audio_binding_options` decides whether the PyTorch path hands the audio
+    loader raw waveforms and, if so, how many samples to pad/trim to.
+
+    Every rejection returns `(False, None)` rather than raising: a binding that
+    does not describe audio simply is not an audio binding, and the caller falls
+    through to the ordinary tensor path.
+    """
+
+    @staticmethod
+    def _options(binding: object) -> tuple[bool, int | None]:
+        module = import_module("dagnam.data.dataset.to_pytorch")
+        return cast("Any", module)._audio_binding_options(binding)
+
+    @pytest.mark.parametrize("not_a_binding", [None, "audio", 42, ["audio"]])
+    def test_a_non_dict_binding_is_not_audio(self, not_a_binding: object) -> None:
+        assert self._options(not_a_binding) == (False, None)
+
+    @pytest.mark.parametrize(
+        "transform",
+        [None, "audio", {"kind": "tokenize"}, {}, {"kind": None}],
+    )
+    def test_a_binding_without_an_audio_transform_is_not_audio(self, transform: object) -> None:
+        assert self._options({"input_transform": transform}) == (False, None)
+
+    def test_an_audio_transform_with_a_positive_target_length_is_honored(self) -> None:
+        binding = {"input_transform": {"kind": "audio", "params": {"target_length": 16000}}}
+        assert self._options(binding) == (True, 16000)
+
+    @pytest.mark.parametrize("bad_length", [0, -1, True, False, "16000", 1.5, None])
+    def test_a_target_length_that_is_not_a_positive_int_means_no_fixed_length(
+        self, bad_length: object
+    ) -> None:
+        # True/False matter specifically: bool subclasses int, so `isinstance(x,
+        # int) and x > 0` alone would accept True and pad every clip to 1 sample.
+        binding = {"input_transform": {"kind": "audio", "params": {"target_length": bad_length}}}
+        assert self._options(binding) == (True, None)
+
+    @pytest.mark.parametrize("params", [None, "params", 7])
+    def test_non_dict_params_still_identify_audio_with_no_fixed_length(
+        self, params: object
+    ) -> None:
+        binding = {"input_transform": {"kind": "audio", "params": params}}
+        assert self._options(binding) == (True, None)

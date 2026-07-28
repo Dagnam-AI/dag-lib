@@ -6,3 +6,13 @@
 # suite, or custom CA re-signs TLS traffic — without this, uv fails with
 # "invalid peer certificate: UnknownIssuer" even when Python/requests work.
 native-tls = true
+
+# setuptools reaches this tree only transitively (chex, tensorboard, tensorflow
+# and torch all depend on it), so there is no direct requirement to raise.
+# Constraining the RESOLUTION keeps setuptools out of the published package's
+# own metadata while still holding the floor: 83.0.0 fixes PYSEC-2026-3447.
+#
+# This lives here rather than in pyproject's [tool.uv]: when both files exist,
+# uv.toml WINS and silently discards the pyproject section (it warns, then
+# ignores it), so a constraint written there would never be enforced.
+constraint-dependencies = ["setuptools>=83.0.0"]

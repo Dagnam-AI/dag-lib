@@ -31,6 +31,9 @@ type WaveformArray = npt.NDArray[np.float32]
 
 class TorchTestModule(Protocol):
     long: object
+    # Raw-waveform datasets may carry a float target (a regression label), so the
+    # stub has to describe float32 as well as long.
+    float32: object
 
     def zeros(self, size: Sequence[int]) -> TorchTensor: ...
 
@@ -39,6 +42,11 @@ class TorchTestModule(Protocol):
 
 class LabelTensor(Protocol):
     dtype: object
+
+    def item(self) -> float:
+        """The scalar value, so a test can assert a transform actually ran
+        rather than only that some tensor came back."""
+        ...
 
 
 def torch_module() -> TorchTestModule:

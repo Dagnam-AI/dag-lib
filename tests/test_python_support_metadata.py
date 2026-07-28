@@ -51,15 +51,16 @@ def test_ml_extras_have_installable_floors() -> None:
     optional_dependencies = pyproject["project"]["optional-dependencies"]
 
     # torchvision backs the PyTorch image loaders (ImageFolder/transforms).
-    # torch>=2.12.1 is the validated security floor shared with audio/all
-    # (older torch carries known advisories); keep this in step with pyproject.
-    assert optional_dependencies["pytorch"] == ["torch>=2.12.1", "torchvision>=0.19"]
+    # torch>=2.13.0 is the validated security floor shared with audio/all
+    # (2.12.1 and below carry GHSA-rrmf-rvhw-rf47); keep this in step with
+    # pyproject.
+    assert optional_dependencies["pytorch"] == ["torch>=2.13.0", "torchvision>=0.19"]
     # Audio decoding uses SoundFile so uploaded WAV/FLAC/MP3 data does not depend
     # on a machine-global FFmpeg shared-library installation. Torchaudio remains
     # required for generated MFCC/Mel transforms, but TorchCodec is not a loader
     # dependency (G197).
     assert optional_dependencies["audio"] == [
-        "torch>=2.12.1",
+        "torch>=2.13.0",
         "torchaudio>=2.0",
         "soundfile>=0.13",
     ]
