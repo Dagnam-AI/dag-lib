@@ -41,7 +41,7 @@ DAGNAM_ASCII_ART = r"""
 # stdout via argparse; on a legacy code page (cp1252 — the default Windows
 # console, many CI shells, Git Bash) writing those glyphs raises
 # ``UnicodeEncodeError`` and crashes a command that must never fail. When stdout
-# cannot be upgraded to UTF-8, the banner degrades to this ASCII form (G019).
+# cannot be upgraded to UTF-8, the banner degrades to this ASCII form.
 # JS Stick Letters font
 DAGNAM_ASCII_FALLBACK_ART = r"""
  __        __
@@ -155,7 +155,7 @@ def configure_console_encoding() -> None:
     instead of degrading to ASCII. Any stream that cannot be reconfigured (a
     plain pipe, a redirected file, a substituted test stream) is silently
     skipped; those are covered by the ASCII fallback in ``format_ascii_art`` so
-    the command still never crashes on a legacy code page (G019).
+    the command still never crashes on a legacy code page.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -212,7 +212,7 @@ def format_ascii_art(columns: int | None = None, *, color: bool | None = None) -
     terminal resizes rather than freezing at the width seen on first render.
     Degrades to a plain-ASCII banner when stdout's encoding cannot represent the
     box-drawing glyphs, so ``dagnam -v``/``-h`` never crash on a cp1252 console
-    (G019). When ``color`` is ``None`` the banner is painted in the brand
+    When ``color`` is ``None`` the banner is painted in the brand
     palette only if stdout supports ANSI styling (same gate as error output).
     """
     width = columns if columns is not None else _terminal_width()

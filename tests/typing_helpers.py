@@ -38,6 +38,7 @@ class RequestsRecord(Protocol):
 
 class RequestsMocker(Protocol):
     last_request: RequestsRecord
+    request_history: Sequence[RequestsRecord]
     call_count: int
 
     # The optional positional ``*args`` carries requests_mock's ``response_list``

@@ -250,7 +250,7 @@ class TestClientSystemMethods:
 
 
 # ------------------------------------------------------------------
-# Concurrency-safe caching: locks + atomic staging + verify (Plan 03 Task 6)
+# Concurrency-safe caching: locks + atomic staging + verify
 # ------------------------------------------------------------------
 
 USER_DATASET_ID = "550e8400-e29b-41d4-a716-446655440099"

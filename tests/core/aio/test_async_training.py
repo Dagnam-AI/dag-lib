@@ -361,7 +361,7 @@ async def test_async_stream_training_timeout(
         _ = [e async for e in client.stream_training_events("j1")]
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_job_retries_transient(
@@ -402,7 +402,7 @@ async def test_async_create_job_sends_idempotency_key(
         return_value=httpx.Response(201, json={"id": "j1"})
     )
     await client.create_training_job({"project_id": "p1"})
-    assert route.calls.last.request.headers.get("Idempotency-Key")
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
 
 
 async def test_async_create_job_409_retries_into_replay(

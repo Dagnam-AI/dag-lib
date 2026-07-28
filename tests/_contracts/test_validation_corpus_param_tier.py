@@ -1,8 +1,8 @@
 """Cross-validator parity corpus — public SDK (param-tier) side.
 
-The bundled ``validation-corpus.json`` (byte-identical to
-``info/contracts/validation-corpus.json``) pins the reconciled cross-validator
-verdict for each diagram. The SDK is param-tier only — it has no graph or shape
+The bundled ``validation-corpus.json`` (a byte-identical copy of the shared
+cross-validator corpus) pins the reconciled cross-validator verdict for each
+diagram. The SDK is param-tier only — it has no graph or shape
 engine — so it cannot reproduce the structural ``is_valid`` flip or the
 shape/graph codes. What it CAN (and must) reproduce is the *parameter* slice of
 the verdict: after normalizing the diagram exactly as the studio does, the SDK's

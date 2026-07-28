@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs
 
 import pytest
 import requests
@@ -11,7 +12,9 @@ import requests_mock as rm_module
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
+    AccountSuspendedError,
     APIError,
+    AuthError,
     DatasetNotFoundError,
 )
 
@@ -98,7 +101,7 @@ def test_upload_dataset_streams_file(
 ) -> None:
     f = tmp_path / "data.csv"
     f.write_text("a,b\n1,2")
-    rmock.post(f"{API}/api/v1/datasets/upload", json={"id": "ds1"})
+    rmock.post(f"{API}/api/v1/datasets/", json={"id": "ds1"})
     result = client.upload_dataset(
         f,
         name="x",
@@ -108,6 +111,11 @@ def test_upload_dataset_streams_file(
         license="MIT",
     )
     assert result == {"id": "ds1"}
+    # The server binds the multipart parts by name; `dataset_type` (not `type`)
+    # is the field the create endpoint declares.
+    body = str(rmock.last_request.text)
+    assert 'name="dataset_type"' in body
+    assert 'name="type"' not in body
 
 
 def test_upload_dataset_connectionerror(
@@ -160,7 +168,7 @@ def test_upload_dataset_uses_bounded_timeout(
 
 
 def test_upload_dataset_from_url(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/datasets/upload-url", json={"task_id": "t1"})
+    rmock.post(f"{API}/api/v1/datasets/from-url", json={"task_id": "t1"})
     result = client.upload_dataset_from_url(
         "https://example/data.csv",
         name="x",
@@ -169,17 +177,20 @@ def test_upload_dataset_from_url(client: DagnamClient, rmock: RequestsMocker) ->
         description="d",
     )
     assert result == {"task_id": "t1"}
-    body = rmock.last_request.json()
-    assert body["url"] == "https://example/data.csv"
-    assert body["description"] == "d"
+    # The endpoint takes form fields, not a JSON body.
+    fields = parse_qs(str(rmock.last_request.text))
+    assert fields["url"] == ["https://example/data.csv"]
+    assert fields["description"] == ["d"]
+    assert fields["dataset_type"] == ["tabular"]
+    assert "type" not in fields
 
 
 def test_upload_dataset_from_url_without_description(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    rmock.post(f"{API}/api/v1/datasets/upload-url", json={"task_id": "t2"})
+    rmock.post(f"{API}/api/v1/datasets/from-url", json={"task_id": "t2"})
     client.upload_dataset_from_url("u", name="x", dataset_type="t", format="csv")
-    assert "description" not in rmock.last_request.json()
+    assert "description" not in parse_qs(str(rmock.last_request.text))
 
 
 def test_get_dataset_task_status(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -376,3 +387,33 @@ def test_download_dataset_unsafe_filename_falls_back_to_default(
     out = client.download_dataset("ds1", tmp_path, filename="..", resume=False)
     assert out.parent == tmp_path
     assert out.name == "dataset"
+
+
+# ------------------------------------------- shared account-status 403 mapping
+# These rejections come from server-side middleware, so they can land on any
+# route. The sync client must map them exactly like the async mirror does —
+# see the twin tests in tests/core/aio/test_async_datasets.py.
+
+
+def test_browse_suspended_403_raises_account_suspended(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(
+        f"{API}/api/v1/datasets/browse",
+        status_code=403,
+        json={"detail": {"error": "account_suspended", "message": "Account suspended."}},
+    )
+    with pytest.raises(AccountSuspendedError, match=r"Account suspended\."):
+        client.list_datasets()
+
+
+def test_browse_blocked_ip_403_raises_auth_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(
+        f"{API}/api/v1/datasets/browse",
+        status_code=403,
+        json={"detail": {"error": "blocked_ip", "message": "IP not permitted."}},
+    )
+    with pytest.raises(AuthError, match=r"IP not permitted\."):
+        client.list_datasets()

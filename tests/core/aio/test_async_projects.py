@@ -125,7 +125,7 @@ async def test_async_get_project_version_404(
         await client.get_project_version("p1", "missing")
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_project_retries_transient(

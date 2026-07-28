@@ -253,7 +253,7 @@ def cmd_deployments_scale(args: argparse.Namespace) -> None:
 def cmd_deployments_rollback(args: argparse.Namespace) -> None:
     import dagnam
 
-    op = dagnam.deployments.rollback(args.deployment_id, args.checkpoint_path)
+    op = dagnam.deployments.rollback(args.deployment_id, args.checkpoint_id)
     print_json(op.initial() if args.no_wait else op.wait().result())
 
 
@@ -452,7 +452,10 @@ def register_deployments(subparsers: SubParsersAction) -> None:
     )
     dep_rollback.add_argument("deployment_id", help="ID of the deployment.")
     dep_rollback.add_argument(
-        "--checkpoint-path", required=True, dest="checkpoint_path", help="Checkpoint to redeploy."
+        "--checkpoint-id",
+        required=True,
+        dest="checkpoint_id",
+        help="ID of the checkpoint to redeploy.",
     )
     dep_rollback.add_argument(
         "--no-wait", action="store_true", help="Return immediately without polling."

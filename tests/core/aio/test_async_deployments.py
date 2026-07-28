@@ -54,7 +54,7 @@ async def test_async_deployments_full_surface(
     await client.pause_deployment("dep1")
     await client.resume_deployment("dep1")
     await client.scale_deployment("dep1", 5)
-    await client.rollback_deployment("dep1", "ck")
+    await client.rollback_deployment("dep1", "ck-1")
     await client.get_deployment_metrics("dep1")
     await client.get_deployment_logs(
         "dep1",
@@ -261,7 +261,7 @@ async def test_async_collect_deployment_metrics_409(
         await client.collect_deployment_metrics("dep1")
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_deployment_retries_transient(
@@ -300,7 +300,7 @@ async def test_async_create_deployment_sends_idempotency_key(
         return_value=httpx.Response(201, json={"id": "dep1"})
     )
     await client.create_deployment({"project_id": "p1"})
-    assert route.calls.last.request.headers.get("Idempotency-Key")
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
 
 
 async def test_async_create_deployment_retries_transient_with_same_key(

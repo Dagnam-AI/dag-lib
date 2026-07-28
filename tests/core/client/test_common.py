@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+import json
 from typing import ClassVar
 
 import pytest
 
 from dagnam._core.client import common
 from dagnam._core.exceptions import (
+    AccountLockedError,
+    AccountSuspendedError,
     APIError,
     ArchitectureVersionNotFoundError,
     AuthError,
@@ -18,8 +22,11 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     DeploymentStateError,
     DeploymentValidationError,
+    EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    InvalidURLError,
+    PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -451,7 +458,7 @@ def test_entitlement_402_non_dict_json_falls_back() -> None:
 
 
 def test_raise_for_generic_413_uses_default_message_on_empty_body() -> None:
-    with pytest.raises(QuotaExceededError, match="Storage quota exceeded"):
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
         common.raise_for_generic(_resp(413))
 
 
@@ -642,7 +649,7 @@ def test_raise_for_upload_413() -> None:
 
 
 def test_raise_for_upload_413_default_message() -> None:
-    with pytest.raises(QuotaExceededError, match="Storage quota exceeded"):
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
         common.raise_for_upload(_resp(413))
 
 
@@ -715,3 +722,359 @@ def test_response_status_defaults_to_zero_when_non_int() -> None:
     with pytest.raises(ResponseError) as ei:
         common.response_json_value(resp)
     assert ei.value.status_code == 0
+
+
+# email-not-verified marker mapping ----------------------------------------
+
+
+def _email_body(url: str | None = "https://app.dagnam.ai/verify") -> str:
+    detail: dict[str, str] = {"error": "email_not_verified", "message": "Email not verified."}
+    if url is not None:
+        detail["verification_url"] = url
+    return json.dumps({"detail": detail})
+
+
+def test_email_not_verified_on_training_dispatch_via_generic():
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(_resp(403, text=_email_body(), content_type="application/json"))
+    assert ei.value.verification_url == "https://app.dagnam.ai/verify"
+    assert "app.dagnam.ai/verify" in str(ei.value)
+
+
+def test_email_not_verified_on_deployment_dispatch():
+    with pytest.raises(EmailNotVerifiedError):
+        common.raise_for_deployment(
+            _resp(403, text=_email_body(), content_type="application/json"), "dep-1"
+        )
+
+
+def test_email_not_verified_on_upload_dispatch():
+    with pytest.raises(EmailNotVerifiedError):
+        common.raise_for_upload(_resp(403, text=_email_body(), content_type="application/json"))
+
+
+def test_email_not_verified_top_level_error_key_without_detail_wrapper():
+    body = json.dumps({"error": "email_not_verified", "message": "nope"})
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(_resp(403, text=body, content_type="application/json"))
+    assert ei.value.verification_url is None  # no url in body
+
+
+def test_email_not_verified_without_url_message_only():
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_email_body(url=None), content_type="application/json")
+        )
+    assert ei.value.verification_url is None
+    assert "Email not verified." in str(ei.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(document.cookie)",
+        "http://phishing.example/verify",
+        "https://",
+        "https://[unclosed",
+        "/verify",
+    ],
+)
+def test_unsafe_verification_url_is_dropped_not_echoed(url: str) -> None:
+    """Only an absolute https URL is echoed as a "go here" instruction.
+
+    The API base URL is caller-configurable, so a hostile or misconfigured host
+    could otherwise have the SDK present a ``javascript:`` URL or a plaintext
+    phishing origin as authoritative.
+    """
+    with pytest.raises(EmailNotVerifiedError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_email_body(url=url), content_type="application/json")
+        )
+    assert ei.value.verification_url is None
+    assert url not in str(ei.value)
+    assert "Email not verified." in str(ei.value)
+
+
+def test_plain_403_without_marker_is_not_email_error():
+    # A 403 that is not the email-verification gate falls through to APIError
+    # (raise_for_generic has no dedicated 403 branch).
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(_resp(403, text="Forbidden"))
+    assert not isinstance(ei.value, EmailNotVerifiedError)
+    assert ei.value.status_code == 403
+
+
+def test_403_with_non_email_marker_is_not_email_error():
+    body = json.dumps({"detail": {"error": "something_else"}})
+    with pytest.raises(APIError):
+        common.raise_for_generic(_resp(403, text=body, content_type="application/json"))
+
+
+# account-status + blocked-IP marker mapping ------------------------------------
+
+
+def _account_body(code: str, message: str = "…") -> str:
+    return json.dumps({"detail": {"error": code, "message": message}})
+
+
+def test_account_suspended_on_training_dispatch_via_generic():
+    with pytest.raises(AccountSuspendedError) as ei:
+        common.raise_for_generic(
+            _resp(
+                403,
+                text=_account_body("account_suspended", "Account suspended."),
+                content_type="application/json",
+            )
+        )
+    assert "Account suspended." in str(ei.value)
+
+
+def test_account_suspended_on_deployment_dispatch():
+    with pytest.raises(AccountSuspendedError):
+        common.raise_for_deployment(
+            _resp(403, text=_account_body("account_suspended"), content_type="application/json"),
+            "dep-1",
+        )
+
+
+def test_account_suspended_on_upload_dispatch():
+    with pytest.raises(AccountSuspendedError):
+        common.raise_for_upload(
+            _resp(403, text=_account_body("account_suspended"), content_type="application/json")
+        )
+
+
+def test_account_locked_on_training_dispatch_via_generic():
+    with pytest.raises(AccountLockedError) as ei:
+        common.raise_for_generic(
+            _resp(
+                423,
+                text=_account_body("account_locked", "Too many failed attempts."),
+                content_type="application/json",
+            )
+        )
+    assert "Too many failed attempts." in str(ei.value)
+
+
+def test_account_locked_status_is_distinct_from_suspended():
+    # A 403 carrying the "account_locked" marker (wrong status for that marker)
+    # must NOT raise AccountLockedError — the two are keyed on status AND marker.
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(
+            _resp(403, text=_account_body("account_locked"), content_type="application/json")
+        )
+    assert not isinstance(ei.value, (AccountLockedError, AccountSuspendedError))
+
+
+def test_blocked_ip_raises_existing_auth_error_not_a_new_type():
+    # Deliberate: no dedicated exception class for a blocked IP (see Task 1).
+    with pytest.raises(AuthError) as ei:
+        common.raise_for_upload(
+            _resp(
+                403,
+                text=_account_body("blocked_ip", "Request blocked."),
+                content_type="application/json",
+            )
+        )
+    assert not isinstance(ei.value, (AccountSuspendedError, AccountLockedError))
+    assert "Request blocked." in str(ei.value)
+
+
+_EVERY_MAPPER: list[Callable[[_Resp], None]] = [
+    common.raise_for_generic,
+    common.raise_for_hub,
+    common.raise_for_project,
+    common.raise_for_codegen,
+    common.raise_for_upload,
+]
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_account_suspended_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    # The suspended-account 403 comes from the shared auth dependency, so it can
+    # arrive on ANY route: every mapper must surface the same typed error.
+    with pytest.raises(AccountSuspendedError):
+        raiser(_resp(403, text=_account_body("account_suspended"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_account_locked_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    with pytest.raises(AccountLockedError):
+        raiser(_resp(423, text=_account_body("account_locked"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_blocked_ip_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    # The IP blocklist middleware runs on every route, not just dispatch ones.
+    with pytest.raises(AuthError):
+        raiser(_resp(403, text=_account_body("blocked_ip"), content_type="application/json"))
+
+
+@pytest.mark.parametrize("raiser", _EVERY_MAPPER)
+def test_email_not_verified_is_typed_on_every_mapper(raiser: Callable[[_Resp], None]) -> None:
+    with pytest.raises(EmailNotVerifiedError):
+        raiser(_resp(403, text=_email_body(), content_type="application/json"))
+
+
+def test_account_suspended_on_hub_carries_status_code() -> None:
+    with pytest.raises(AccountSuspendedError) as ei:
+        common.raise_for_hub(
+            _resp(
+                403,
+                text=_account_body("account_suspended", "Account suspended."),
+                content_type="application/json",
+            ),
+            model_id="model-1",
+        )
+    assert isinstance(ei.value, APIError)
+    assert ei.value.status_code == 403
+
+
+def test_plain_403_without_account_marker_is_unaffected():
+    with pytest.raises(APIError) as ei:
+        common.raise_for_generic(_resp(403, text="Forbidden"))
+    assert not isinstance(ei.value, (AccountSuspendedError, AccountLockedError))
+
+
+def test_check_account_status_no_op_on_ok_status():
+    resp = _resp(200, text=_account_body("account_suspended"), content_type="application/json")
+    common._check_account_status(resp, common._error_detail_source(resp))
+
+
+# marker-helper branch coverage ------------------------------------------------
+
+
+def _marker(resp: _Resp) -> str | None:
+    return common._error_marker(common._error_detail_source(resp))
+
+
+def test_error_code_reads_top_level_error():
+    assert _marker(_resp(400, text='{"error":"invalid_url"}', content_type="application/json")) == (
+        "invalid_url"
+    )
+
+
+def test_error_code_reads_detail_wrapped_error():
+    assert (
+        _marker(
+            _resp(400, text='{"detail":{"error":"invalid_url"}}', content_type="application/json")
+        )
+        == "invalid_url"
+    )
+
+
+def test_error_code_none_when_error_not_string():
+    assert _marker(_resp(400, text='{"error":123}', content_type="application/json")) is None
+
+
+def test_error_code_none_on_unparseable_body():
+    assert _marker(_resp(400, text="not json", content_type="text/plain")) is None
+
+
+def test_response_payload_none_on_non_dict_json():
+    assert (
+        common._response_payload(_resp(400, text="[1,2,3]", content_type="application/json"))
+        is None
+    )
+
+
+def test_response_payload_none_when_text_raises():
+    class _NoText:
+        status_code = 400
+
+        @property
+        def text(self) -> str:
+            raise RuntimeError("boom")
+
+    assert common._response_payload(_NoText()) is None  # pyright: ignore[reportArgumentType]
+
+
+def test_response_payload_never_drains_an_unread_streaming_body():
+    """A response opened with ``stream=True`` must not be materialized here.
+
+    ``requests`` marks an unread streaming body with ``_content is False``;
+    touching ``.text`` then drains the WHOLE body synchronously with no size
+    cap (a hang or OOM on a large error response), which is exactly what
+    ``safe_response_text`` already refuses to do.
+    """
+
+    class _StreamingResp:
+        _content = False
+        status_code = 403
+        content = b""
+
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "application/json"}
+            self.text_reads = 0
+
+        @property
+        def text(self) -> str:
+            self.text_reads += 1
+            return _account_body("account_suspended")
+
+    resp = _StreamingResp()
+    assert common._response_payload(resp) is None  # pyright: ignore[reportArgumentType]
+    assert resp.text_reads == 0
+    # Consequence of the guard: a marker is not recovered from an undrained
+    # streaming body, so the mapper falls back to a plain APIError rather than
+    # blocking on an unbounded read.
+    with pytest.raises(APIError) as ei:
+        common.raise_for_deployment(resp, "dep-1")  # pyright: ignore[reportArgumentType]
+    assert not isinstance(ei.value, AccountSuspendedError)
+
+
+def test_response_payload_caps_the_parsed_body_length():
+    # A marker never appears past the cap; a huge body is truncated (and then
+    # fails to parse) instead of being handed whole to json.loads.
+    padding = " " * 4000
+    body = "{" + padding + '"error":"email_not_verified"}'
+    assert common._response_payload(_resp(403, text=body, content_type="application/json")) is None
+
+
+def test_check_email_verification_no_op_on_non_403():
+    # non-403 returns without raising even if the marker is present
+    resp = _resp(200, text=_email_body(), content_type="application/json")
+    common._check_email_verification(resp, common._error_detail_source(resp))
+
+
+# 413 payload-too-large mapping --------------------------------------------
+
+
+def test_413_maps_to_payload_too_large_via_generic():
+    with pytest.raises(PayloadTooLargeError) as ei:
+        common.raise_for_generic(_resp(413, text="File exceeds the 500 MB upload limit"))
+    assert "500 MB" in str(ei.value)
+    assert isinstance(ei.value, QuotaExceededError)  # still catchable as quota
+
+
+def test_413_maps_to_payload_too_large_via_upload():
+    with pytest.raises(PayloadTooLargeError):
+        common.raise_for_upload(_resp(413, text="too big"))
+
+
+def test_413_default_message_is_size_focused():
+    with pytest.raises(PayloadTooLargeError, match="Upload exceeds the maximum allowed size"):
+        common.raise_for_upload(_resp(413))
+
+
+# dataset-from-URL (SSRF) rejection mapping ---------------------------------
+
+
+def test_upload_url_ssrf_rejection_maps_to_invalid_url():
+    body = json.dumps({"detail": {"error": "invalid_url", "message": "URL host is not allowed"}})
+    with pytest.raises(InvalidURLError) as ei:
+        common.raise_for_upload(_resp(400, text=body, content_type="application/json"))
+    assert isinstance(ei.value, UploadError)  # still catchable as UploadError
+    assert "not allowed" in str(ei.value)
+
+
+def test_upload_url_rejected_marker_also_maps_to_invalid_url():
+    body = json.dumps({"error": "url_rejected", "message": "bad scheme"})
+    with pytest.raises(InvalidURLError):
+        common.raise_for_upload(_resp(422, text=body, content_type="application/json"))
+
+
+def test_upload_400_without_url_marker_stays_plain_upload_error():
+    with pytest.raises(UploadError) as ei:
+        common.raise_for_upload(_resp(400, text="name is required"))
+    assert not isinstance(ei.value, InvalidURLError)

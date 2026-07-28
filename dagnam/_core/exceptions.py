@@ -8,7 +8,12 @@ class DagnamError(Exception):
 
 
 class AuthError(DagnamError):
-    """No API key found or authentication failed (401)."""
+    """Authentication failed (401) or the request was refused by an access control (403).
+
+    Covers both "no API key found / invalid or expired key" and a server-side
+    access control that refuses the request outright (for example a blocked
+    source IP address), where no programmatic retry can succeed.
+    """
 
 
 class DatasetNotFoundError(DagnamError):
@@ -63,6 +68,53 @@ class DownloadTooLargeError(APIError):
 
 class ResponseError(APIError):
     """Server returned a malformed, undecodable, or wrong-shape response body."""
+
+
+class EmailNotVerifiedError(APIError):
+    """A dispatch action was refused because the account's email is unverified (403).
+
+    Expensive actions (training-job create, dataset upload, deployment create)
+    require the API key's owning account to have a verified email. Verify it via
+    the web app, then retry. ``verification_url`` carries the server-provided
+    link when it is present and safe to surface.
+
+    A subclass of :class:`APIError` (these were plain ``APIError`` 403s before
+    the dedicated class existed) so existing ``except APIError`` handlers still
+    catch it and ``.status_code`` is populated.
+    """
+
+    def __init__(self, message: str, *, verification_url: str | None = None) -> None:
+        self.verification_url = verification_url
+        super().__init__(403, message)
+
+
+class AccountSuspendedError(APIError):
+    """The API key's owning account was administratively suspended (403).
+
+    Raised on any authenticated call while the account is suspended or banned
+    by an administrator. Not self-clearing — contact support or the account
+    owner; retrying the same call will not succeed on its own. A subclass of
+    :class:`APIError` so existing ``except APIError`` handlers still catch it.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(403, message)
+
+
+class AccountLockedError(APIError):
+    """The API key's owning account is temporarily locked out (423).
+
+    Raised while a login-lockout window (too many failed interactive login
+    attempts) is active on the account. Unlike ``AccountSuspendedError`` this is
+    TEMPORARY and self-clearing once the lockout window elapses — kept as a
+    distinct class (rather than reusing AccountSuspendedError) so a caller can
+    tell "wait and retry" apart from "requires support/admin action" without
+    parsing the message text. A subclass of :class:`APIError` so existing
+    ``except APIError`` handlers still catch it.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(423, message)
 
 
 class ChecksumError(DagnamError):
@@ -141,8 +193,26 @@ class UploadError(DagnamError):
     """Dataset upload failed (transport or server side)."""
 
 
+class InvalidURLError(UploadError):
+    """Dataset-from-URL ingest rejected the URL as invalid or unsafe (4xx).
+
+    Raised when the backend refuses a ``upload_dataset_from_url`` source URL
+    (e.g. an SSRF-blocked host, or a disallowed scheme). A subclass of
+    :class:`UploadError` so existing handlers still catch it.
+    """
+
+
 class QuotaExceededError(DagnamError):
     """Plan/usage limit reached: a storage quota (413) or a plan resource limit (402)."""
+
+
+class PayloadTooLargeError(QuotaExceededError):
+    """Upload rejected for exceeding the server's per-request size cap (413).
+
+    A subclass of :class:`QuotaExceededError` so existing ``except
+    QuotaExceededError`` handlers still catch it, while callers who care about
+    the size-cap case specifically can catch this narrower type.
+    """
 
 
 class TaskNotFoundError(DagnamError):

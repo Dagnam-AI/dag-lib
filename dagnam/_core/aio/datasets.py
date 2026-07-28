@@ -108,9 +108,12 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         visibility: str = "private",
         license: str | None = None,
     ) -> JsonObject:
+        # ``POST /api/v1/datasets/`` is the dataset-create endpoint; the file is
+        # an optional multipart part alongside the metadata form fields. The
+        # server binds them by name, so ``dataset_type`` must not be shortened.
         fields: dict[str, str] = {
             "name": name,
-            "type": dataset_type,
+            "dataset_type": dataset_type,
             "format": format,
             "visibility": visibility,
         }
@@ -124,7 +127,7 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
             files = {"file": (fp.name, fh, "application/octet-stream")}
             resp = await self._request(
                 "POST",
-                "/api/v1/datasets/upload",
+                "/api/v1/datasets/",
                 data=fields,
                 files=files,
                 timeout=None,
@@ -141,17 +144,18 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         description: str | None = None,
         visibility: str = "private",
     ) -> JsonObject:
-        body: JsonObject = {
+        # ``POST /api/v1/datasets/from-url`` takes form fields, not a JSON body.
+        fields: dict[str, str] = {
             "url": url,
             "name": name,
-            "type": dataset_type,
+            "dataset_type": dataset_type,
             "format": format,
             "visibility": visibility,
         }
         if description:
-            body["description"] = description
+            fields["description"] = description
         resp = await self._request(
-            "POST", "/api/v1/datasets/upload-url", json=body, raise_for=raise_for_upload
+            "POST", "/api/v1/datasets/from-url", data=fields, raise_for=raise_for_upload
         )
         return response_json_object(resp)
 

@@ -172,7 +172,7 @@ def test_projects_architecture_reads_json_inputs(
 def test_projects_architecture_json_flag_emits_full_json(
     run_cli: CliRunner, capsys: StrCapture
 ) -> None:
-    """``--json`` closes G007: the full architecture response reaches stdout."""
+    """``--json`` emits the full architecture response to stdout."""
     save = mock.Mock(return_value={"version_id": "v1"})
     fake = SimpleNamespace(save_architecture=save)
     with mock.patch("dagnam.projects", fake):

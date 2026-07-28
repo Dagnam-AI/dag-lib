@@ -12,6 +12,10 @@ All inherit from `DagnamError`:
   `HubError`, `UploadError`, `CheckpointError`, `ChecksumError`, `StreamError`.
 - `LROTimeoutError` / `LROFailedError` — a long-running op timed out or reached a failure state
   (`.state`, `.detail`). Catch these around `op.wait()` / `op.result()`.
+- `EmailNotVerifiedError` (`.verification_url`), `AccountSuspendedError`, `AccountLockedError`
+  (all `APIError` subclasses, so `.status_code` is set: 403/403/423),
+  `PayloadTooLargeError` (a `QuotaExceededError`), `InvalidURLError` (an `UploadError`) — see
+  `account.md`'s Security model for what triggers each.
 
 Catch the base when you just want "any Dagnam error":
 ```python

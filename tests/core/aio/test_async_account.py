@@ -86,7 +86,7 @@ async def test_async_account_500_raises_apierror(
         await client.get_entitlements()
 
 
-# ---------------------------------------------------------------- transient retry (Plan 03)
+# --------------------------------------------------------------------------- transient retry
 
 
 async def test_async_get_entitlements_retries_transient(

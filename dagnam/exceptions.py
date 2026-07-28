@@ -10,6 +10,8 @@ directly — never from the private ``dagnam._core.exceptions`` path.
 from __future__ import annotations
 
 from dagnam._core.exceptions import (
+    AccountLockedError,
+    AccountSuspendedError,
     APIError,
     ArchitectureValidationError,
     ArchitectureVersionNotFoundError,
@@ -24,10 +26,13 @@ from dagnam._core.exceptions import (
     DeploymentNotFoundError,
     DeploymentStateError,
     DeploymentValidationError,
+    EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    InvalidURLError,
     LROFailedError,
     LROTimeoutError,
+    PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -39,6 +44,8 @@ from dagnam._core.exceptions import (
 
 __all__ = [
     "APIError",
+    "AccountLockedError",
+    "AccountSuspendedError",
     "ArchitectureValidationError",
     "ArchitectureVersionNotFoundError",
     "AuthError",
@@ -52,10 +59,13 @@ __all__ = [
     "DeploymentNotFoundError",
     "DeploymentStateError",
     "DeploymentValidationError",
+    "EmailNotVerifiedError",
     "HubError",
     "HubModelNotFoundError",
+    "InvalidURLError",
     "LROFailedError",
     "LROTimeoutError",
+    "PayloadTooLargeError",
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",

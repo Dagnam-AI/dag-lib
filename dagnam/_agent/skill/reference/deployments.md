@@ -15,7 +15,7 @@ Serve a trained checkpoint as an inference endpoint. Create is a long-running op
 ## SDK (`import dagnam`)
 - `dagnam.deployments.create(name, project_id, checkpoint_path, platform, deployment_type, instance_type, num_instances=1, training_job_id=None, checkpoint_id=None, auto_scaling_enabled=None, min_instances=None, max_instances=None, region=None, config=None) -> LongRunningOperation` — **[guardrail]** `dep = op.wait(timeout=300).result()` (success state `running`).
 - `dagnam.deployments.list(...)`, `dagnam.deployments.get(id)`, `dagnam.deployments.health(id)`, `dagnam.deployments.metrics(id, ...)`, `dagnam.deployments.logs(id, ...)`.
-- `dagnam.deployments.pause(id) -> LRO`, `dagnam.deployments.resume(id) -> LRO`, `dagnam.deployments.scale(id, num_instances) -> LRO` — **[guardrail: scale is costly]**, `dagnam.deployments.rollback(id, checkpoint_path) -> LRO`.
+- `dagnam.deployments.pause(id) -> LRO`, `dagnam.deployments.resume(id) -> LRO`, `dagnam.deployments.scale(id, num_instances) -> LRO` — **[guardrail: scale is costly]**, `dagnam.deployments.rollback(id, checkpoint_id) -> LRO` — resolves and re-authorizes `checkpoint_id` server-side (checkpoint -> job -> project -> owner); a checkpoint you don't own returns 404.
 - `dagnam.deployments.update(id, ...)`, `dagnam.deployments.delete(id)` — **[guardrail: delete is irreversible]**.
 
 > `scale`, `rollback`, `health`, and `update` are SDK-only (no CLI subcommand).

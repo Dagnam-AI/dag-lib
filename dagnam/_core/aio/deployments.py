@@ -167,13 +167,13 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             )
         )
 
-    async def rollback_deployment(self, deployment_id: str, checkpoint_path: str) -> JsonObject:
+    async def rollback_deployment(self, deployment_id: str, checkpoint_id: str) -> JsonObject:
         return ensure_json_object(
             await self._deployment_req(
                 "POST",
                 f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
                 deployment_id=deployment_id,
-                params={"checkpoint_path": checkpoint_path},
+                params={"checkpoint_id": checkpoint_id},
             )
         )
 

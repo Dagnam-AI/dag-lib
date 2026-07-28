@@ -290,7 +290,7 @@ def test_create_training_job_posts_payload(client: DagnamClient, rmock: Requests
 def test_create_training_job_over_limit_maps_to_quota_exceeded(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    """A 402 plan-limit rejection surfaces as QuotaExceededError (see backend G088)."""
+    """A 402 plan-limit rejection surfaces as QuotaExceededError."""
     url = f"{API}/api/v1/training/jobs"
     rmock.post(url, status_code=402, json={"detail": "limit_exceeded"})
 

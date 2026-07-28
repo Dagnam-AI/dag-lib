@@ -13,7 +13,11 @@ from dagnam._core.client.base import (
     BaseDagnamClient,
     requests,
 )
-from dagnam._core.client.common import quote_path_segment, stream_query_params
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_deployment,
+    stream_query_params,
+)
 from dagnam._types import JsonArray, JsonObject
 
 
@@ -29,7 +33,7 @@ class InferenceClientMixin(BaseDagnamClient):
         resp = self._request(
             "POST",
             url,
-            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
             json=inputs,
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
@@ -45,7 +49,7 @@ class InferenceClientMixin(BaseDagnamClient):
         resp = self._request(
             "POST",
             url,
-            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
             json={"inputs": inputs},
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
@@ -62,7 +66,7 @@ class InferenceClientMixin(BaseDagnamClient):
         resp = self._request(
             "POST",
             url,
-            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return str(resp.json()["token"])
@@ -92,7 +96,7 @@ class InferenceClientMixin(BaseDagnamClient):
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
-        self._raise_for_deployment(resp, deployment_id)
+        raise_for_deployment(resp, deployment_id)
         return resp
 
     def deployment_health(self, deployment_id: str) -> JsonObject:
@@ -102,7 +106,7 @@ class InferenceClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return resp.json()
@@ -118,7 +122,7 @@ class InferenceClientMixin(BaseDagnamClient):
         resp = self._request(
             "GET",
             url,
-            raise_for=lambda r: self._raise_for_deployment(r, deployment_id),
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
         )

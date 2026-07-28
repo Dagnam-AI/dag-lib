@@ -113,7 +113,7 @@ def test_numpy_loader_integer_labels_are_1d_long(
 ) -> None:
     """Integer class labels must become a [B] long target (CrossEntropyLoss), not [B,1] float.
 
-    Regression for G091: `nn.CrossEntropyLoss` rejects a [B,1] float target with
+    Regression: `nn.CrossEntropyLoss` rejects a [B,1] float target with
     "0D or 1D target tensor expected, multi-target not supported", which failed
     every pytorch IMDB training job.
     """

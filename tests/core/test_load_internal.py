@@ -147,7 +147,7 @@ class TestInternalMode:
         # A system dataset has no real on-disk file (the relative file_path is a
         # codegen placeholder), so a native-loader failure must propagate its
         # real cause instead of being masked as a FileNotFoundError. This is the
-        # G033 observability fix.
+        # Observability fix.
         meta = {
             "id": "mnist-digits",
             "name": "MNIST",

@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Breaking: `deployments.rollback()` no longer accepts a filesystem path.**
+  `dagnam.deployments.rollback(deployment_id, checkpoint_path)` is now
+  `dagnam.deployments.rollback(deployment_id, checkpoint_id)`, and the CLI's
+  `dagnam deployments rollback --checkpoint-path` is now `--checkpoint-id`.
+  The previous `checkpoint_path` parameter let a caller point a deployment at
+  an arbitrary server-side filesystem path with no ownership check — a path
+  traversal vector, and (via the resulting error message) a way to probe
+  whether an arbitrary path existed on the server. The checkpoint is now
+  resolved and re-authorized server-side by id through the same
+  checkpoint -> training job -> project -> owner chain used elsewhere, and a
+  checkpoint you don't own returns a uniform 404. Callers must update
+  `rollback(...)` calls and the `dagnam deployments rollback` CLI invocation
+  to pass a checkpoint id instead of a path.
+
 ## [0.7.0] - 2026-07-13
 
 ### Added

@@ -356,16 +356,21 @@ def scale(
 
 def rollback(
     deployment_id: str,
-    checkpoint_path: str,
+    checkpoint_id: str | UUID,
     *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> LongRunningOperation:
-    """Roll the deployment back to ``checkpoint_path`` (returns an LRO)."""
+    """Roll the deployment back to ``checkpoint_id`` (returns an LRO).
+
+    The checkpoint is resolved and re-authorized server-side through the
+    checkpoint -> training job -> project -> owner ownership chain; a
+    checkpoint you don't own (or that doesn't exist) returns a 404.
+    """
     resolved = resolve_client(client, api_key, api_url)
     dep_id = _stringify_id(deployment_id)
-    initial = resolved.rollback_deployment(dep_id, checkpoint_path=checkpoint_path)
+    initial = resolved.rollback_deployment(dep_id, checkpoint_id=_stringify_id(checkpoint_id))
     return _lifecycle_lro(
         resolved,
         dep_id,

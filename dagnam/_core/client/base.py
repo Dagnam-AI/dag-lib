@@ -21,12 +21,8 @@ from dagnam._core.client.common import build_url, safe_response_text
 from dagnam._core.config import get_config_value
 from dagnam._core.exceptions import (
     APIError,
-    AuthError,
-    DatasetNotFoundError,
-    DeploymentNotFoundError,
     DownloadTooLargeError,
     ResponseError,
-    TrainingJobNotFoundError,
 )
 from dagnam._types import JsonArray, JsonObject, JsonValue, ResponseLike, StatusResponseLike
 
@@ -228,18 +224,6 @@ class BaseDagnamClient:
         raise TypeError(f"Expected JSON array, got {type(value).__name__}")
 
     @staticmethod
-    def _raise_for_status(response: requests.Response, dataset_id: str) -> None:
-        """Map HTTP error codes to library exceptions."""
-        if is_success_response(response):
-            return
-        code = response.status_code
-        if code == 401:
-            raise AuthError("Authentication failed: invalid or expired API key")
-        if code == 404:
-            raise DatasetNotFoundError(dataset_id)
-        raise APIError(code, safe_error_body_from_response(response))
-
-    @staticmethod
     def _stream_response_to_file(
         resp: requests.Response,
         dest: Path,
@@ -376,28 +360,6 @@ class BaseDagnamClient:
         except DownloadTooLargeError:
             dest.unlink(missing_ok=True)
             raise
-
-    @staticmethod
-    def _raise_for_deployment(response: requests.Response, deployment_id: str) -> None:
-        if is_success_response(response):
-            return
-        code = response.status_code
-        if code == 401:
-            raise AuthError("Authentication failed: invalid or expired API key")
-        if code == 404:
-            raise DeploymentNotFoundError(deployment_id)
-        raise APIError(code, safe_error_body_from_response(response))
-
-    @staticmethod
-    def raise_for_job_response(response: requests.Response, job_id: str) -> None:
-        if is_success_response(response):
-            return
-        code = response.status_code
-        if code == 401:
-            raise AuthError("Authentication failed: invalid or expired API key")
-        if code == 404:
-            raise TrainingJobNotFoundError(job_id)
-        raise APIError(code, safe_error_body_from_response(response))
 
 
 def _extract_content_disposition_raw(header: str | None) -> str | None:

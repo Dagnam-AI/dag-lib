@@ -150,8 +150,8 @@ class TestLifecycleLRO:
     def test_rollback_returns_lro(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.rollback_deployment.return_value = {"id": "dep-1", "status": "deploying"}
-        op = deployments.rollback("dep-1", "/ckpts/v2.pt", client=client)
-        client.rollback_deployment.assert_called_once_with("dep-1", checkpoint_path="/ckpts/v2.pt")
+        op = deployments.rollback("dep-1", "ckpt-v2", client=client)
+        client.rollback_deployment.assert_called_once_with("dep-1", checkpoint_id="ckpt-v2")
         assert isinstance(op, LongRunningOperation)
 
     def test_pause_success_state_is_paused(self) -> None:

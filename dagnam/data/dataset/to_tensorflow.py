@@ -81,7 +81,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
             num_words = vocab_size if vocab_size is not None else 20000
             maxlen = sequence_length if sequence_length is not None else 200
             if self._is_text_features(np.asarray(x_train)):
-                # Raw text -> fixed-length integer tokens (G078): a keras Embedding
+                # Raw text -> fixed-length integer tokens: a keras Embedding
                 # cannot cast strings ("Cast string to int32"). Tokenize so the TF
                 # model receives integer ids, matching flax/pytorch.
                 x_train = self._tokenize_text(list(x_train), maxlen=maxlen, num_words=num_words)
@@ -252,7 +252,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
         if ds is None:
             raise ValueError(f"No native TF dataset for split '{split}'")
 
-        # Tokenize raw-text features (G078): tfds text datasets (imdb_reviews,
+        # Tokenize raw-text features: tfds text datasets (imdb_reviews,
         # wikitext) yield a tf.data of (string, label); an integer Embedding can't
         # cast strings. Map each string to fixed-length int tokens (same crc32
         # scheme as flax/pytorch via _tokenize_text) when the feature dtype is

@@ -25,12 +25,12 @@ from dagnam._core.aio.base import (
     SSE_READ_TIMEOUT,
     BaseAsyncDagnamClient,
     content_disposition_safe_name,
-    raise_for_job_response,
 )
 from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
+    raise_for_training_job,
     response_json_object,
     response_json_value,
     stream_query_params,
@@ -342,7 +342,7 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
             "POST",
             f"/api/v1/training/jobs/{quote_path_segment(job_id)}/metrics/events",
             json=payload,
-            raise_for=lambda r: raise_for_job_response(r, job_id),
+            raise_for=lambda r: raise_for_training_job(r, job_id),
         )
         return response_json_object(resp)
 
@@ -378,7 +378,7 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 response = event_source.response
                 if not 200 <= response.status_code < 300:
                     await response.aread()
-                    raise_for_job_response(response, job_id)
+                    raise_for_training_job(response, job_id)
                 async for sse in event_source.aiter_sse():
                     yield parse_raw_event(sse)
         # The stream token rides in params, so scrub it out of the exception text.

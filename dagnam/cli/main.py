@@ -106,7 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from dagnam.cli.common import configure_console_encoding, run_command
 
     # Upgrade the console to UTF-8 before the banner is built so the branded art
-    # renders on capable terminals; it degrades to ASCII on cp1252 (G019).
+    # renders on capable terminals; it degrades to ASCII on cp1252.
     configure_console_encoding()
     parser = build_parser()
     tokens = list(sys.argv[1:] if argv is None else argv)
