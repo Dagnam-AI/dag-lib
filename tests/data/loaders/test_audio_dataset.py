@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, SupportsInt, cast
+from typing import TYPE_CHECKING, SupportsFloat, SupportsInt, cast
 import wave
 
 from tests.data.loaders._audio_helpers import (
@@ -16,7 +16,11 @@ from tests.data.loaders._audio_helpers import (
     torch_module,
 )
 
-from dagnam.data.loaders.audio.dataset import TorchTensor
+from dagnam.data.loaders.audio.dataset import (
+    AudioFolderDataset,
+    SampleTransform,
+    TorchTensor,
+)
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch
@@ -196,3 +200,76 @@ def testcollect_audio_files(tmp_path: Path) -> None:
     files, _labels, classes = collect_audio_files(tmp_path)
     assert ".hidden" not in classes
     assert len(files) == 4  # 2 per class
+
+
+def _write_wav(tmp_path: Path) -> Path:
+    audio_path = tmp_path / "yes" / "clip.wav"
+    audio_path.parent.mkdir()
+    with wave.open(str(audio_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\x00\x00" * 800)
+    return audio_path
+
+
+def _raw_dataset(
+    audio_path: Path,
+    labels: list[int],
+    target_transform: SampleTransform | None = None,
+) -> AudioFolderDataset:
+    return AudioFolderDataset(
+        file_paths=[audio_path],
+        labels=labels,
+        target_sample_rate=8000,
+        target_length=800,
+        max_duration_sec=5.0,
+        return_waveform=True,
+        target_transform=target_transform,
+    )
+
+
+def test_raw_waveform_mode_applies_the_target_transform(tmp_path: Path) -> None:
+    """`return_waveform=True` has its own label path, separate from the mel one.
+
+    The mel branch's target_transform was already covered; this one was not, so
+    a label transform silently doing nothing in raw-waveform mode would not have
+    been caught.
+    """
+    torch = torch_module()
+    ds = _raw_dataset(
+        _write_wav(tmp_path),
+        [0],
+        target_transform=lambda lbl: torch.tensor(
+            int(cast("SupportsInt", lbl)) + 5, dtype=torch.long
+        ),
+    )
+
+    waveform, label = ds[0]
+    label_tensor = cast("LabelTensor", label)
+    # 0 -> 5 proves the transform ran, not merely that a tensor came back.
+    assert int(label_tensor.item()) == 5
+    assert label_tensor.dtype == torch.long
+    assert tuple(waveform.shape) == (800,)
+
+
+def test_raw_waveform_mode_leaves_an_already_tensor_label_alone(tmp_path: Path) -> None:
+    """A target_transform that already returns a tensor must not be re-wrapped.
+
+    This is the branch that skips the `torch.tensor(...)` coercion entirely —
+    re-wrapping would flatten a deliberately non-long dtype (here float32) back
+    to long and silently corrupt a regression target.
+    """
+    torch = torch_module()
+    ds = _raw_dataset(
+        _write_wav(tmp_path),
+        [1],
+        target_transform=lambda lbl: torch.tensor(
+            float(cast("SupportsFloat", lbl)), dtype=torch.float32
+        ),
+    )
+
+    _waveform, label = ds[0]
+    label_tensor = cast("LabelTensor", label)
+    assert label_tensor.dtype == torch.float32
+    assert float(label_tensor.item()) == 1.0

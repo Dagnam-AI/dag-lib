@@ -60,7 +60,9 @@ dependencies = [
     # >=10.3.0 is a security floor: it excludes CVE-2023-50447 (ImageMath.eval
     # RCE, fixed 10.2) and CVE-2024-28219 (_imagingcms overflow, fixed 10.3),
     # and the SDK feeds dataset-supplied image bytes straight to the decoder.
-    "pillow>=10.3.0",
+    # 12.3.0 is the security floor: pillow 12.2.0 and below carry 13 known
+    # advisories (PYSEC-2026-2253..2257, -3451..3454, -3493..3496).
+    "pillow>=12.3.0",
     "polars>=1.0",
     "tqdm>=4.60",
     "typing_extensions>=4.12",
@@ -71,13 +73,13 @@ dependencies = [
 streaming = ["sseclient-py>=1.7"]
 # torchvision supplies ImageFolder + transforms for the PyTorch image loaders
 # (dagnam.data.loaders.image_folder); it is a real runtime dep of this extra.
-# torch>=2.12.1 is the validated security floor shared with the audio/all extras
-# (older torch carries known advisories); torchvision>=0.19 pairs with it.
-pytorch = ["torch>=2.12.1", "torchvision>=0.19"]
+# torch>=2.13.0 is the validated security floor shared with the audio/all extras
+# (2.12.1 and below carry GHSA-rrmf-rvhw-rf47); torchvision>=0.19 pairs with it.
+pytorch = ["torch>=2.13.0", "torchvision>=0.19"]
 # SoundFile decodes uploaded WAV/FLAC/MP3 files without a machine-global FFmpeg
 # shared-library install. Torchaudio remains the framework transform dependency
 # for generated MFCC/Mel nodes; TorchCodec is deliberately not a loader dep (G197).
-audio = ["torch>=2.12.1", "torchaudio>=2.0", "soundfile>=0.13"]
+audio = ["torch>=2.13.0", "torchaudio>=2.0", "soundfile>=0.13"]
 # TensorFlow added Python 3.12 support in 2.16 (2.12 tops out at 3.11), so the
 # floor must be >=2.16 to be installable on the supported interpreters.
 tensorflow = ["tensorflow>=2.16"]
@@ -87,7 +89,7 @@ flax = [
 ]
 aio = ["httpx>=0.27", "httpx-sse>=0.4"]
 all = [
-    "torch>=2.12.1",
+    "torch>=2.13.0",
     "torchvision>=0.19",
     "torchaudio>=2.0",
     "soundfile>=0.13",

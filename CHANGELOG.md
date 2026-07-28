@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-28
+
 ### Security
 
 - **Breaking: `deployments.rollback()` no longer accepts a filesystem path.**
@@ -22,6 +24,47 @@ and this project follows [Semantic Versioning](https://semver.org/).
   checkpoint you don't own returns a uniform 404. Callers must update
   `rollback(...)` calls and the `dagnam deployments rollback` CLI invocation
   to pass a checkpoint id instead of a path.
+
+- **Typed exceptions for server rejections that previously arrived
+  undifferentiated.** `EmailNotVerifiedError`, `AccountSuspendedError`,
+  `AccountLockedError`, `PayloadTooLargeError` and `InvalidURLError` are
+  exported at package top level and raised from the corresponding backend
+  markers. Each subclasses `APIError`, so existing `except APIError:` handlers
+  keep working unchanged — this widens what callers *can* catch without
+  narrowing what they already do. Every response mapper was updated, not only
+  the one that surfaced the problem: a partial fix would have left the same
+  rejection raising different types depending on which call path reached it.
+  A caller can now, for example, distinguish "verify your email" from "your
+  account is locked" and prompt correctly instead of showing a generic failure.
+
+### Fixed
+
+- Dataset upload pointed at endpoints that no longer exist; it now targets the
+  live routes.
+- **The test suite no longer segfaults when PyTorch and TensorFlow share a
+  process.** `import tensorflow` followed by `import torchvision` crashes the
+  interpreter (SIGSEGV); the reverse order is fine, and importing plain `torch`
+  first is not enough. The suite exercises all three framework loaders in one
+  process, so whichever imported first decided whether the run survived. The
+  root `conftest.py` now pins the order. This affects consumers too: an
+  application that mixes both frameworks should import the PyTorch side first.
+
+### Changed
+
+- Security floors raised on dependencies with known advisories: `pillow>=12.3.0`
+  (13 advisories), `torch>=2.13.0` (GHSA-rrmf-rvhw-rf47), and a resolution
+  constraint of `setuptools>=83.0.0` (PYSEC-2026-3447, reached only transitively
+  via chex/tensorboard/tensorflow/torch).
+
+### Compatibility
+
+- Python `>=3.12`.
+- Requires a Dagnam backend that resolves deployment rollbacks by checkpoint id
+  and emits the `email_not_verified` / `account_suspended` / `account_locked` /
+  `blocked_ip` / `invalid_url` markers this release maps to typed exceptions.
+  Against an older backend the new exception classes simply never surface, but
+  `deployments.rollback()` will fail — the id it now sends is not a path.
+
 
 ## [0.7.0] - 2026-07-13
 
