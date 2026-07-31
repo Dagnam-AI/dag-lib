@@ -88,6 +88,37 @@ sanctioned: (1) optional framework backends (`torch`, `tensorflow`, `jax`/`flax`
 "base-install isolation" job verifies these never leak into `import dagnam`; and
 (2) the CLI, which lazy-imports per-command to keep startup fast.
 
+## Branching
+
+`main` is the trunk and is always releasable. Work on a short-lived topic branch
+named `<type>/<slug>` — `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`,
+`test`, `sec`, `build`, `ci` or `revert` — and open a pull request:
+
+```bash
+git switch -c fix/dataset-cache-lock
+git push -u origin fix/dataset-cache-lock
+```
+
+Releases are cut by tag: pushing `dagnam/v*` builds, attests and publishes to
+PyPI. A `release/X.Y` branch exists only when a published minor needs a patch
+that `main` has already moved past. **Fixes land on `main` first**, then get
+cherry-picked onto the release branch — a fix that lives only on a release
+branch reappears as a regression at the next minor.
+
+## Pre-push Hook
+
+`.githooks/pre-push` refuses direct pushes to `main` (changes arrive by PR so CI
+runs first) and refuses force-pushes to or deletion of `main` and `release/*`.
+Install it after cloning:
+
+```bash
+cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
+
+It is installed into `.git/hooks/` rather than via `core.hooksPath`, because
+setting that would make Git search only that directory and silently disable the
+`pre-commit` framework's hook. `git push --no-verify` bypasses it.
+
 ## Pull Request Expectations
 
 - Explain the user-visible change and why it is needed.
