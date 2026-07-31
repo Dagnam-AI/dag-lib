@@ -442,10 +442,20 @@ Environment variables:
 | --- | --- |
 | `DAGNAM_API_KEY` | API key used by client and CLI calls |
 | `DAGNAM_API_URL` | API base URL override |
-| `DAGNAM_CACHE_DIR` | Shared cache root for native system dataset loaders |
+| `DAGNAM_DEBUG` | Any non-empty value re-raises the real traceback instead of the rendered error block (same as `--debug`) |
+| `DAGNAM_CACHE_LOCK_TIMEOUT` | Dataset cache-lock acquisition timeout in seconds; an unparseable value falls back to the default |
+
+Set by the platform inside training jobs — not intended for manual use:
+
+| Variable | Purpose |
+| --- | --- |
 | `DAGNAM_INTERNAL` | Internal server mode for platform training jobs |
 | `DAGNAM_META_DIR` | Sidecar metadata directory used in internal mode |
 | `DAGNAM_STORAGE_PATH` | Legacy internal dataset storage fallback |
+| `DAGNAM_METRICS_PATH` | Where the training run writes its metrics stream |
+| `DAGNAM_TRAINING_DIR` | Working directory of the running job |
+| `DAGNAM_TOTAL_EPOCHS` | Total epochs, used for progress reporting |
+| `DAGNAM_PROJECT_ID` | Project the running job belongs to |
 
 ## Compatibility
 
