@@ -1,0 +1,175 @@
+#!/bin/sh
+# Dagnam.AI pre-push hook -- the client-side stand-in for branch protection.
+#
+# The GitHub org is on the free plan, where branch protection and rulesets are
+# unavailable on private repositories. This hook enforces the same invariants
+# locally. It is bypassable with `git push --no-verify` and does not apply to
+# pushes made from the GitHub web UI, so it constrains habit and agents, not
+# adversaries. Replace it with server-side rulesets if the org ever upgrades.
+#
+# The logic here is generic. Every repo-specific decision lives in the sibling
+# `policy` file, so this script is byte-identical across all four repos and
+# `info/scripts/check_branch_hygiene.py` fails if any copy drifts.
+#
+# Policy variables (see .githooks/policy):
+#   TRUNK          the integration branch, normally `main`
+#   TRUNK_PUSH     `pr`     -- direct pushes refused, changes arrive by PR
+#                  `direct` -- direct pushes allowed, still fast-forward only
+#   FF_FROM_TRUNK  production pointer branches. A push is accepted only if it
+#                  fast-forwards AND the pushed commit is already contained in
+#                  the remote trunk, so what goes live is a commit that was
+#                  merged and tested on trunk first, never a commit that exists
+#                  only on the pointer.
+#   NO_FORCE       globs that may not be force-pushed or deleted, but do accept
+#                  direct fast-forward pushes (dag-lib's `release/X.Y` backport
+#                  branches, which legitimately diverge from trunk).
+
+set -u
+
+remote_name="$1"
+toplevel=$(git rev-parse --show-toplevel)
+policy="$toplevel/.githooks/policy"
+
+if [ ! -f "$policy" ]; then
+	echo "pre-push: no policy file at $policy" >&2
+	echo "pre-push: run \`python info/scripts/install_hooks.py\` to repair this clone." >&2
+	exit 1
+fi
+
+# shellcheck source=/dev/null
+. "$policy"
+
+: "${TRUNK:=main}"
+: "${TRUNK_PUSH:=pr}"
+: "${FF_FROM_TRUNK:=}"
+: "${NO_FORCE:=}"
+
+# Git for Windows runs hooks under MSYS2 bash, which strips CR when sourcing, so
+# a CRLF policy file is harmless there. A POSIX /bin/sh (dash on Debian and
+# Ubuntu) does not: `TRUNK` would be "main\r" and would stop matching the branch
+# it names, leaving the guard reporting success while guarding nothing.
+# .gitattributes pins the file to LF; this is the belt to that pin's braces.
+TRUNK=$(printf '%s' "$TRUNK" | tr -d '\r')
+TRUNK_PUSH=$(printf '%s' "$TRUNK_PUSH" | tr -d '\r')
+FF_FROM_TRUNK=$(printf '%s' "$FF_FROM_TRUNK" | tr -d '\r')
+NO_FORCE=$(printf '%s' "$NO_FORCE" | tr -d '\r')
+
+# Topic branches are advisory-only: a name outside this set is reported, never
+# refused. Blocking on a name would trade a real cost for a cosmetic one.
+NAMING='feat fix chore docs refactor perf test sec build ci revert'
+
+failed=0
+
+note() { echo "pre-push: $*" >&2; }
+
+refuse() {
+	failed=1
+	echo "" >&2
+	echo "  BLOCKED  $1" >&2
+	shift
+	for line in "$@"; do echo "           $line" >&2; done
+}
+
+is_zero() {
+	case "$1" in
+	*[!0]*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+matches_any() {
+	subject="$1"
+	shift
+	for pattern in "$@"; do
+		# Intentionally unquoted: $pattern is a glob such as `release/*`.
+		# shellcheck disable=SC2254
+		case "$subject" in
+		$pattern) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# `merge-base --is-ancestor X Y` is true when X is reachable from Y. Equal
+# commits count as ancestors of each other, which is what we want: re-pushing
+# the commit a pointer already sits on is a no-op, not a violation.
+contains() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null; }
+
+trunk_ref="refs/remotes/$remote_name/$TRUNK"
+fetched_trunk=0
+
+while read -r _local_ref local_sha remote_ref remote_sha; do
+	case "$remote_ref" in
+	refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+	*) continue ;;
+	esac
+
+	protected=0
+	if [ "$branch" = "$TRUNK" ]; then protected=1; fi
+	# shellcheck disable=SC2086
+	if matches_any "$branch" $FF_FROM_TRUNK $NO_FORCE; then protected=1; fi
+
+	if is_zero "$local_sha"; then
+		if [ "$protected" -eq 1 ]; then
+			refuse "deleting the protected branch '$branch'." \
+				"Protected branches are deleted deliberately, from the GitHub UI."
+		fi
+		continue
+	fi
+
+	# A non-fast-forward push to anything protected discards remote history.
+	if [ "$protected" -eq 1 ] && ! is_zero "$remote_sha"; then
+		if ! contains "$remote_sha" "$local_sha"; then
+			refuse "force-pushing '$branch' would discard commits on the remote." \
+				"Remote is at $(git rev-parse --short "$remote_sha" 2>/dev/null || echo "$remote_sha")," \
+				"which is not an ancestor of what you are pushing."
+			continue
+		fi
+	fi
+
+	if [ "$branch" = "$TRUNK" ] && [ "$TRUNK_PUSH" = "pr" ]; then
+		refuse "'$TRUNK' takes changes through pull requests in this repo." \
+			"Push a topic branch and open a PR so CI runs before the merge:" \
+			"" \
+			"    git switch -c feat/<slug>" \
+			"    git push -u $remote_name feat/<slug>" \
+			"    gh pr create --fill"
+		continue
+	fi
+
+	# shellcheck disable=SC2086
+	if matches_any "$branch" $FF_FROM_TRUNK; then
+		if [ "$fetched_trunk" -eq 0 ]; then
+			git fetch -q "$remote_name" "$TRUNK" 2>/dev/null || true
+			fetched_trunk=1
+		fi
+		if ! git rev-parse --verify -q "$trunk_ref" >/dev/null; then
+			refuse "cannot verify '$branch' against $trunk_ref (fetch failed?)." \
+				"'$branch' is the production pointer; refusing to advance it blind."
+			continue
+		fi
+		if ! contains "$local_sha" "$trunk_ref"; then
+			refuse "'$branch' may only point at a commit already merged to '$TRUNK'." \
+				"$(git rev-parse --short "$local_sha") is not contained in $trunk_ref." \
+				"Production runs commits that were reviewed and tested on trunk;" \
+				"promote with: python info/scripts/promote.py <repo> <sha>"
+			continue
+		fi
+	fi
+
+	if [ "$protected" -eq 0 ]; then
+		prefix=${branch%%/*}
+		if ! matches_any "$prefix" $NAMING && ! matches_any "$branch" 'dependabot/*' 'claude/*'; then
+			note "'$branch' is outside the naming convention (<type>/<slug>, type one of: $NAMING)."
+		fi
+	fi
+done
+
+if [ "$failed" -ne 0 ]; then
+	echo "" >&2
+	note "push refused. Override with --no-verify only if you know why this rule exists."
+	echo "" >&2
+	exit 1
+fi
+
+exit 0

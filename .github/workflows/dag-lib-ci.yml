@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - main
+      # Backport branches for a published minor. A cherry-pick onto release/0.8
+      # never passes through main, so without this the only commits that ship to
+      # PyPI as a patch release would be commits CI has never seen.
+      - "release/*"
 
 jobs:
   quality:
