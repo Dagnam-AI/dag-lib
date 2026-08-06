@@ -1,0 +1,15 @@
+# Code owners for the public `dagnam` SDK.
+#
+# GitHub auto-requests review from the owners of every changed path. This works
+# on public repositories regardless of plan, so unlike branch protection it is
+# real enforcement here rather than a client-side convention.
+#
+# Keep this in sync with the collaborator list; an entry naming a user who has
+# lost access silently stops requesting anyone.
+
+* @angadsinghsandhu
+
+# Release plumbing publishes to PyPI via Trusted Publishing — a change here can
+# redirect where the package is published from.
+/.github/workflows/ @angadsinghsandhu
+/pyproject.toml     @angadsinghsandhu

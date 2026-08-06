@@ -139,7 +139,10 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+# This repo is PUBLIC — a bare `.env` rule left `.env.production`, `.env.local`
+# and friends committable straight to a public history.
+.env*
+!.env.example
 .envrc
 .venv
 env/
