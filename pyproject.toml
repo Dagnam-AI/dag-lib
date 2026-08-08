@@ -87,7 +87,15 @@ pytorch = ["torch>=2.13.0", "torchvision>=0.19"]
 audio = ["torch>=2.13.0", "torchaudio>=2.0", "soundfile>=0.13"]
 # TensorFlow added Python 3.12 support in 2.16 (2.12 tops out at 3.11), so the
 # floor must be >=2.16 to be installable on the supported interpreters.
-tensorflow = ["tensorflow>=2.16"]
+# keras is TensorFlow's own dependency (tensorflow declares only keras>=3.12.0),
+# but it is named here as a security floor shared with the `all` extra: 3.15.0
+# is the first release clearing all six 2026 model-loading advisories
+# (GHSA-5gwj-m78q-7pq3 and GHSA-v2w2-w228-c444 code execution,
+# GHSA-m8wh-29wm-52mv / GHSA-26c4-7vv6-867j local-file disclosure,
+# GHSA-gh82-f9x8-5frx / GHSA-58hv-7753-xmfq path traversal). Those paths run
+# whenever a user of this extra loads a `.keras`/`.h5` artifact, so the floor
+# belongs in the published metadata rather than only in this repo's lockfile.
+tensorflow = ["tensorflow>=2.16", "keras>=3.15.0"]
 flax = [
     "jax>=0.4",
     "flax>=0.7",
@@ -99,6 +107,8 @@ all = [
     "torchaudio>=2.0",
     "soundfile>=0.13",
     "tensorflow>=2.16",
+    # Security floor, mirrors the `tensorflow` extra above.
+    "keras>=3.15.0",
     "jax>=0.4",
     "flax>=0.7",
     "httpx>=0.27",

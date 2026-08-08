@@ -62,9 +62,11 @@ jobs:
           print('Base import is clean; no optional ML extras leaked into sys.modules')
           "
       - name: Dependency audit
-        # torch advisories are allow-listed (it is an optional extra whose
-        # pinned version is CI-only; users resolve their own torch>=2.0). See
-        # the audit task comment in pyproject.toml for the rationale.
+        # No advisory is allow-listed: the audit task carries no --ignore-vuln
+        # flags, so any finding fails this job. Fix findings by raising the
+        # floor (a dependency/extra specifier in pyproject.toml, or a
+        # `constraint-dependencies` entry in uv.toml for a purely transitive
+        # package) rather than by suppressing them here.
         run: uv run poe audit
 
   tests:

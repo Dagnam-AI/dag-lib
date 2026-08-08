@@ -65,7 +65,12 @@ def test_ml_extras_have_installable_floors() -> None:
         "soundfile>=0.13",
     ]
     # TF 2.12 cannot install on Python 3.12; 2.16 is the first 3.12-capable release.
-    assert optional_dependencies["tensorflow"] == ["tensorflow>=2.16"]
+    # keras>=3.15.0 is a security floor on TensorFlow's own dependency (TF only
+    # asks for keras>=3.12.0): 3.15.0 is the first release clearing the six 2026
+    # model-loading advisories (GHSA-5gwj-m78q-7pq3, GHSA-v2w2-w228-c444,
+    # GHSA-m8wh-29wm-52mv, GHSA-26c4-7vv6-867j, GHSA-gh82-f9x8-5frx,
+    # GHSA-58hv-7753-xmfq). Keep it in step with pyproject and the `all` extra.
+    assert optional_dependencies["tensorflow"] == ["tensorflow>=2.16", "keras>=3.15.0"]
     assert optional_dependencies["flax"] == [
         "jax>=0.4",
         "flax>=0.7",
@@ -74,6 +79,7 @@ def test_ml_extras_have_installable_floors() -> None:
     assert "soundfile>=0.13" in optional_dependencies["all"]
     assert not any(req.startswith("torchcodec") for req in optional_dependencies["all"])
     assert "tensorflow>=2.16" in optional_dependencies["all"]
+    assert "keras>=3.15.0" in optional_dependencies["all"]
     assert "jax>=0.4" in optional_dependencies["all"]
     assert "flax>=0.7" in optional_dependencies["all"]
 

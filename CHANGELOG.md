@@ -7,6 +7,23 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`keras>=3.15.0` security floor added to the `tensorflow` and `all` extras.**
+  keras arrives only as TensorFlow's own dependency, and TensorFlow asks for
+  nothing newer than `keras>=3.12.0`, so the resolved 3.14.1 carried six open
+  advisories: arbitrary code execution via `Lambda` deserialization
+  (GHSA-5gwj-m78q-7pq3) and `TorchModuleWrapper.from_config`
+  (GHSA-v2w2-w228-c444), local-file disclosure via HDF5 ExternalLinks
+  (GHSA-m8wh-29wm-52mv) and virtual datasets (GHSA-26c4-7vv6-867j), and path
+  traversal via `DiskIOStore` layer names (GHSA-gh82-f9x8-5frx) and tar symlink
+  entries (GHSA-58hv-7753-xmfq). 3.15.0 is the first release clearing all six.
+  The SDK itself only calls `tf.keras.utils.image_dataset_from_directory`, so
+  none of the affected paths run inside `dagnam` — but every one of them is
+  reached by a user who loads a `.keras`/`.h5` artifact with the keras this
+  extra installs, so the floor is declared in the published metadata rather
+  than pinned only in this repo's lockfile.
+
 ## [0.8.0] - 2026-07-28
 
 ### Security
