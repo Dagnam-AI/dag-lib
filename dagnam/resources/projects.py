@@ -12,7 +12,7 @@ from __future__ import annotations
 from builtins import list as builtin_list
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Optional
 from uuid import UUID
 
 from dagnam_contracts import (
@@ -199,15 +199,15 @@ def save_architecture(
         if blocking:
             raise ArchitectureValidationError(blocking)
     resolved = resolve_client(client, api_key, api_url)
-    # ``dagnam_contracts`` annotates its normalizers with a NON-recursive
-    # ``JsonValue`` (``list[object]``/``dict[str, object]``) that denotes the same
-    # runtime domain as ours but is not assignable to it. Cast going in; coming
-    # out, re-narrow with a real runtime check rather than a promise — this is
-    # the last hop before the wire.
+    # ``ensure_json_value`` stays: it is a real runtime check on the last hop
+    # before the wire, not a type workaround. The ``cast("Any", ...)`` that used
+    # to wrap each argument is gone — dagnam-contracts 0.1.3 made its
+    # ``JsonValue`` recursive, so its normalizers now accept ours directly
+    # instead of denoting the same runtime domain through an unassignable type.
     payload: JsonObject = {
-        "diagram_state": ensure_json_value(normalize_diagram_state(cast("Any", diagram_state))),
+        "diagram_state": ensure_json_value(normalize_diagram_state(diagram_state)),
         "architecture_config": ensure_json_value(
-            normalize_architecture_config(cast("Any", architecture_config))
+            normalize_architecture_config(architecture_config)
         ),
     }
     if commit_message is not None:

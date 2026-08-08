@@ -71,7 +71,7 @@ dependencies = [
     # with the backend and the Studio so all three reach identical verdicts.
     # Has ZERO runtime dependencies by design, so it costs this SDK no
     # transitive deps.
-    "dagnam-contracts>=0.1.2",
+    "dagnam-contracts>=0.1.3",
 ]
 
 [project.optional-dependencies]
