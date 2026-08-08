@@ -67,6 +67,11 @@ dependencies = [
     "tqdm>=4.60",
     "typing_extensions>=4.12",
     "filelock>=3.13",
+    # The canonical component/parameter validation contract, shared verbatim
+    # with the backend and the Studio so all three reach identical verdicts.
+    # Has ZERO runtime dependencies by design, so it costs this SDK no
+    # transitive deps.
+    "dagnam-contracts>=0.1.2",
 ]
 
 [project.optional-dependencies]
@@ -150,9 +155,6 @@ include = [
     "dagnam/_agent/skill/**",
     "dagnam/_agent/claude/**",
     "dagnam/_agent/codex/**",
-    # Generated validation contract — read at runtime via importlib.resources by
-    # dagnam._contracts.normalize (SDK-local padding normalization).
-    "dagnam/_contracts/*.json",
 ]
 force-include = { "NOTICE" = "dagnam/NOTICE" }
 

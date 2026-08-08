@@ -1,6 +1,6 @@
 """Custom exception classes for the dagnam library."""
 
-from dagnam._contracts import ParamError
+from dagnam_contracts import ParamError
 
 
 class DagnamError(Exception):

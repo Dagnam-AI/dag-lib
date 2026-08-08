@@ -1,7 +1,7 @@
 """Cross-validator parity corpus — public SDK (param-tier) side.
 
-The bundled ``validation-corpus.json`` (a byte-identical copy of the shared
-cross-validator corpus) pins the reconciled cross-validator verdict for each
+The ``validation-corpus.json`` beside this test (a byte-identical copy of the
+shared cross-validator corpus) pins the reconciled cross-validator verdict for each
 diagram. The SDK is param-tier only — it has no graph or shape
 engine — so it cannot reproduce the structural ``is_valid`` flip or the
 shape/graph codes. What it CAN (and must) reproduce is the *parameter* slice of
@@ -21,11 +21,7 @@ import pytest
 
 from dagnam._contracts import normalize_diagram_state, validate_architecture
 
-_CORPUS = json.loads(
-    (
-        Path(__file__).resolve().parents[2] / "dagnam" / "_contracts" / "validation-corpus.json"
-    ).read_text(encoding="utf-8")
-)
+_CORPUS = json.loads(Path(__file__).with_name("validation-corpus.json").read_text(encoding="utf-8"))
 _CASES: list[dict[str, Any]] = _CORPUS["cases"]
 
 

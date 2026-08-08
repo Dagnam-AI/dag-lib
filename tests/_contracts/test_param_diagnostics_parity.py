@@ -10,11 +10,7 @@ from pathlib import Path
 
 from dagnam._contracts import validate_params
 
-_GOLDEN = json.loads(
-    (
-        Path(__file__).resolve().parents[2] / "dagnam" / "_contracts" / "param-diagnostics.json"
-    ).read_text("utf-8")
-)
+_GOLDEN = json.loads(Path(__file__).with_name("param-diagnostics.json").read_text("utf-8"))
 
 
 def test_sdk_reproduces_param_diagnostics_golden() -> None:

@@ -12,18 +12,19 @@ from __future__ import annotations
 from builtins import list as builtin_list
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
-from dagnam._contracts import validate_architecture
-from dagnam._contracts.normalize import (
+from dagnam_contracts import (
     normalize_architecture_config,
     normalize_diagram_state,
+    validate_architecture,
 )
+
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import ArchitectureValidationError
 from dagnam._core.resolver import resolve_client
-from dagnam._types import JsonObject, JsonValue, QueryValue
+from dagnam._types import JsonObject, JsonValue, QueryValue, ensure_json_value
 
 
 def _stringify_id(value: object) -> str:
@@ -198,9 +199,16 @@ def save_architecture(
         if blocking:
             raise ArchitectureValidationError(blocking)
     resolved = resolve_client(client, api_key, api_url)
+    # ``dagnam_contracts`` annotates its normalizers with a NON-recursive
+    # ``JsonValue`` (``list[object]``/``dict[str, object]``) that denotes the same
+    # runtime domain as ours but is not assignable to it. Cast going in; coming
+    # out, re-narrow with a real runtime check rather than a promise — this is
+    # the last hop before the wire.
     payload: JsonObject = {
-        "diagram_state": normalize_diagram_state(diagram_state),
-        "architecture_config": normalize_architecture_config(architecture_config),
+        "diagram_state": ensure_json_value(normalize_diagram_state(cast("Any", diagram_state))),
+        "architecture_config": ensure_json_value(
+            normalize_architecture_config(cast("Any", architecture_config))
+        ),
     }
     if commit_message is not None:
         payload["commit_message"] = commit_message

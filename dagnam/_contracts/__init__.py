@@ -1,20 +1,23 @@
-"""Generated validation contract + SDK-local interpreter/normalizers.
+"""Backwards-compatibility shim — the contract now ships as ``dagnam-contracts``.
 
-Ships GENERATED DATA (component-schema.json) plus a dependency-free interpreter
-that mirrors the backend's declarative param validator, and the SDK-local
-padding normalizers. No backend imports (spec §11).
+The interpreter, normalizers and generated ``component-schema.json`` that used
+to live here are the canonical :mod:`dagnam_contracts` distribution, shared
+verbatim with the platform backend and the Studio so all three reach identical
+verdicts. Every name below is re-exported unchanged; import
+``dagnam_contracts`` directly instead.
+
+REMOVE IN 0.10.0 (shipped deprecated for one minor release, 0.9.0).
 """
 
-from dagnam._contracts._architecture import validate_architecture
-from dagnam._contracts._interpret import ParamError, validate_params
-from dagnam._contracts._schema import (
+from dagnam_contracts import (
     COMPONENT_REGISTRY,
     LAYER_TYPE_TO_COMPONENT,
     SCHEMA_VERSION,
-)
-from dagnam._contracts.normalize import (
+    ParamError,
     normalize_architecture_config,
     normalize_diagram_state,
+    validate_architecture,
+    validate_params,
 )
 
 __all__ = [
