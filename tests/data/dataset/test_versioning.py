@@ -160,3 +160,127 @@ class TestVersionedCacheKey:
 
         assert ds._data_dir.name == dataset_id
         mock_download.assert_not_called()
+
+
+class TestRequestedSplit:
+    """Tests that `split=` is recorded as intent on the returned dataset.
+
+    `split` records intent only -- no loader here filters rows by it. It
+    must be set on the constructed `DagnamDataset`, never written into the
+    `meta` dict (which the download fall-through path persists to the
+    on-disk cache), or a later split-less load would read a poisoned cache
+    entry claiming a split was requested.
+    """
+
+    def test_split_recorded_on_cache_miss_download_fallthrough(self, tmp_path: Path) -> None:
+        """The download fall-through path records `split` on the dataset."""
+        body = b"a,b\n1,2\n"
+        checksum = "sha256:" + hashlib.sha256(body).hexdigest()
+        dataset_id = "550e8400-e29b-41d4-a716-446655440000"
+        meta: JsonObject = {
+            "id": dataset_id,
+            "name": "Split",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 1,
+            "num_classes": 1,
+            "checksum": checksum,
+            "filename": "split.csv",
+            "source_type": "uploaded",
+        }
+
+        def _fake_download(_ds_id: str, output_dir: Path, **_kwargs: object) -> Path:
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            staged = out / "split.csv"
+            staged.write_bytes(body)
+            return staged
+
+        with (
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
+            patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
+            patch.object(DagnamClient, "download_dataset", side_effect=_fake_download),
+        ):
+            ds = load_dataset(dataset_id, split="train", cache_dir=str(tmp_path))
+
+        assert ds.requested_split == "train"
+        # The on-disk cache must NOT be poisoned with the request-specific
+        # split -- it belongs on the returned object only.
+        cached_meta = cache.load_metadata(dataset_id, base_dir=tmp_path)
+        assert "requested_split" not in cached_meta
+
+    def test_split_recorded_on_cache_hit(self, tmp_path: Path) -> None:
+        """The cache-hit fast path records `split` on the dataset."""
+        body = b"a,b\n1,2\n"
+        checksum = "sha256:" + hashlib.sha256(body).hexdigest()
+        dataset_id = "550e8400-e29b-41d4-a716-446655440000"
+        meta: JsonObject = {
+            "id": dataset_id,
+            "name": "Split",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 1,
+            "num_classes": 1,
+            "checksum": checksum,
+            "source_type": "uploaded",
+        }
+
+        data_file = cache.get_cache_dir(dataset_id, tmp_path) / "data.csv"
+        data_file.write_bytes(body)
+        cache.save_metadata(dataset_id, meta, tmp_path, data_file=data_file)
+        cache.save_checksum(dataset_id, checksum, tmp_path)
+
+        with (
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
+            patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
+            patch.object(DagnamClient, "download_dataset") as mock_download,
+        ):
+            ds = load_dataset(dataset_id, split="val", cache_dir=str(tmp_path))
+
+        assert ds.requested_split == "val"
+        mock_download.assert_not_called()
+
+    def test_load_without_split_after_split_load_reports_none(self, tmp_path: Path) -> None:
+        """A subsequent split-less load must NOT report a stale requested split.
+
+        Regression test for cache poisoning: an earlier `split=` load
+        populates the cache via the download fall-through path; a later
+        load of the same dataset without `split=` reads that cached meta
+        back on the cache-hit path and must report no requested split.
+        """
+        body = b"a,b\n1,2\n"
+        checksum = "sha256:" + hashlib.sha256(body).hexdigest()
+        dataset_id = "550e8400-e29b-41d4-a716-446655440000"
+        meta: JsonObject = {
+            "id": dataset_id,
+            "name": "Split",
+            "format": "csv",
+            "dataset_type": "tabular",
+            "num_samples": 1,
+            "num_classes": 1,
+            "checksum": checksum,
+            "filename": "split.csv",
+            "source_type": "uploaded",
+        }
+
+        def _fake_download(_ds_id: str, output_dir: Path, **_kwargs: object) -> Path:
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            staged = out / "split.csv"
+            staged.write_bytes(body)
+            return staged
+
+        with (
+            patch("dagnam.data.load.get_api_key", return_value="key"),
+            patch("dagnam.data.load.get_api_url", return_value="https://api.test"),
+            patch.object(DagnamClient, "get_dataset_meta", return_value=meta),
+            patch.object(DagnamClient, "download_dataset", side_effect=_fake_download),
+        ):
+            first = load_dataset(dataset_id, split="train", cache_dir=str(tmp_path))
+            assert first.requested_split == "train"
+
+            second = load_dataset(dataset_id, cache_dir=str(tmp_path))
+
+        assert second.requested_split is None

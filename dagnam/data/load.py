@@ -85,12 +85,27 @@ def _resolve_cache_budget() -> int | None:
     return configured
 
 
+def _finalize(ds: DagnamDataset, split: str | None) -> DagnamDataset:
+    """Record the caller's requested split as intent-only metadata on *ds*.
+
+    Set on the constructed ``DagnamDataset`` object -- never on the ``meta``
+    dict, which may be persisted to the on-disk cache (see
+    ``save_metadata`` on the download fall-through path in ``load_dataset``).
+    Writing it into ``meta`` would bake a request-specific value into the
+    cache, so a later split-less load reading that cached meta back would
+    incorrectly report a requested split.
+    """
+    ds.requested_split = split
+    return ds
+
+
 def load_dataset(
     dataset_id: str,
     api_url: str | None = None,
     api_key: str | None = None,
     cache_dir: str | None = None,
     version: str | None = None,
+    split: str | None = None,
     presigned_url: str | None = None,
     download_url: str | None = None,
     resume: bool = True,
@@ -103,9 +118,14 @@ def load_dataset(
     In server mode (DAGNAM_INTERNAL=true), reads sidecar metadata from
     DAGNAM_META_DIR and loads directly from the filesystem. In client mode,
     resolves auth, checks cache, downloads if needed, and returns a dataset.
+
+    ``split`` records the caller's intended split (e.g. "train", "val",
+    "test") on the returned dataset's ``requested_split`` attribute. It is
+    intent only: nothing in this function or its loaders filters rows by it
+    yet -- that is out of scope for this slice.
     """
     if os.environ.get("DAGNAM_INTERNAL"):
-        return _load_internal(dataset_id, binding=binding)
+        return _finalize(_load_internal(dataset_id, binding=binding), split)
 
     resolved_key = get_api_key(override=api_key)
     resolved_url = get_api_url(override=api_url)
@@ -122,7 +142,7 @@ def load_dataset(
         try:
             from dagnam.data.loaders.system import load_system_dataset
 
-            return load_system_dataset(meta, binding=binding)
+            return _finalize(load_system_dataset(meta, binding=binding), split)
         except Exception as exc:
             # Native resolution is the preferred path; if it fails (e.g. the
             # framework library or tfds isn't installed) fall back to the
@@ -145,7 +165,7 @@ def load_dataset(
     if verify_cached(cache_key, checksum, base_dir=cache_dir_path, full=verify):
         cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
         ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
-        return DagnamDataset(cached_meta, ds_cache_dir)
+        return _finalize(DagnamDataset(cached_meta, ds_cache_dir), split)
 
     base = cache_dir_path if cache_dir_path is not None else DEFAULT_CACHE_DIR
     lock = dataset_lock(cache_key, base_dir=cache_dir_path)
@@ -163,7 +183,7 @@ def load_dataset(
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 cached_meta = load_metadata(cache_key, base_dir=cache_dir_path)
                 ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
-                return DagnamDataset(cached_meta, ds_cache_dir)
+                return _finalize(DagnamDataset(cached_meta, ds_cache_dir), split)
 
             staging_dir.parent.mkdir(parents=True, exist_ok=True)
             # verify_cached just said this entry is invalid (and its get_cache_dir
@@ -221,7 +241,7 @@ def load_dataset(
         _CACHE_LOG.debug("evicted %d cache dirs: %s", len(evicted), evicted)
 
     ds_cache_dir = get_cache_dir(cache_key, base_dir=cache_dir_path)
-    return DagnamDataset(meta, ds_cache_dir)
+    return _finalize(DagnamDataset(meta, ds_cache_dir), split)
 
 
 def _load_internal(
