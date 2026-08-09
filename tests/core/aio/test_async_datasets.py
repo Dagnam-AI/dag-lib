@@ -42,6 +42,16 @@ async def test_async_get_dataset_meta(client: AsyncDagnamClient, mock: RespxMock
     assert await client.get_dataset_meta("ds1") == {"id": "ds1"}
 
 
+async def test_async_get_dataset_meta_with_version(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/datasets/ds1/meta").mock(
+        return_value=httpx.Response(200, json={"id": "ds1"})
+    )
+    assert await client.get_dataset_meta("ds1", version="v2") == {"id": "ds1"}
+    assert "version=v2" in str(route.calls[0].request.url)
+
+
 async def test_async_dataset_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/missing/meta").mock(return_value=httpx.Response(404))
     with pytest.raises(DatasetNotFoundError):
@@ -64,6 +74,16 @@ async def test_async_get_system_dataset_meta(
     assert await client.get_system_dataset_meta("iris") == {"id": "iris"}
 
 
+async def test_async_get_system_dataset_meta_with_version(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/datasets/system/iris").mock(
+        return_value=httpx.Response(200, json={"id": "iris"})
+    )
+    assert await client.get_system_dataset_meta("iris", version="1.0") == {"id": "iris"}
+    assert "version=1.0" in str(route.calls[0].request.url)
+
+
 async def test_async_download_dataset(
     client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
 ) -> None:
@@ -76,6 +96,21 @@ async def test_async_download_dataset(
     )
     out = await client.download_dataset("ds1", tmp_path)
     assert out.read_bytes() == b"data"
+
+
+async def test_async_download_dataset_with_version(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    route = mock.get("/api/v1/datasets/ds1/download").mock(
+        return_value=httpx.Response(
+            200,
+            content=b"data",
+            headers={"content-disposition": 'attachment; filename="ds.bin"'},
+        )
+    )
+    out = await client.download_dataset("ds1", tmp_path, version="v3")
+    assert out.read_bytes() == b"data"
+    assert "version=v3" in str(route.calls[0].request.url)
 
 
 async def test_async_download_dataset_streams_to_disk(

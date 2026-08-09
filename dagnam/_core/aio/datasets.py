@@ -34,10 +34,16 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
-    async def get_dataset_meta(self, dataset_id: str) -> JsonObject:
+    async def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
+        """Fetch dataset metadata from the API.
+
+        GET /api/v1/datasets/{dataset_id}/meta[?version=...]
+        """
+        params = {"version": version} if version else None
         resp = await self._request(
             "GET",
             f"/api/v1/datasets/{quote_path_segment(dataset_id)}/meta",
+            params=params,
             raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
         return response_json_object(resp)
@@ -48,15 +54,26 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
-    async def get_system_dataset_meta(self, dataset_id: str) -> JsonObject:
+    async def get_system_dataset_meta(
+        self, dataset_id: str, version: str | None = None
+    ) -> JsonObject:
+        """GET /api/v1/datasets/system/{dataset_id} — Get system dataset metadata."""
+        params = {"version": version} if version else None
         resp = await self._request(
             "GET",
             f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}",
+            params=params,
             raise_for=lambda r: raise_for_dataset(r, dataset_id),
         )
         return response_json_object(resp)
 
-    async def _download_to_dir(self, path: str, output_dir: Path, dataset_id: str) -> Path:
+    async def _download_to_dir(
+        self,
+        path: str,
+        output_dir: Path,
+        dataset_id: str,
+        params: QueryParams | None = None,
+    ) -> Path:
         """Stream a dataset download to disk chunk by chunk.
 
         The whole body is never buffered in memory (``resp.content``) — large
@@ -66,7 +83,9 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         """
         url = f"{self.api_url}{path}"
         try:
-            async with self._client.stream("GET", url, headers=self._headers()) as resp:
+            async with self._client.stream(
+                "GET", url, headers=self._headers(), params=params
+            ) as resp:
                 if not resp.is_success:
                     await resp.aread()  # populate the body for the error message
                     raise_for_dataset(resp, dataset_id)
@@ -84,11 +103,15 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         except httpx.TimeoutException as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc
 
-    async def download_dataset(self, dataset_id: str, output_dir: Path) -> Path:
+    async def download_dataset(
+        self, dataset_id: str, output_dir: Path, *, version: str | None = None
+    ) -> Path:
+        params = {"version": version} if version else None
         return await self._download_to_dir(
             f"/api/v1/datasets/{quote_path_segment(dataset_id)}/download",
             output_dir,
             dataset_id,
+            params=params,
         )
 
     async def download_system_dataset(self, dataset_id: str, output_dir: Path) -> Path:
