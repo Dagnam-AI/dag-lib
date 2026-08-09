@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Async dataset methods gain `version=` parity with the sync client.**
+  `AsyncDagnamClient.get_dataset_meta`, `get_system_dataset_meta`, and
+  `download_dataset` previously had no `version` parameter at all, so pinning
+  a dataset version was only possible through the sync client. `version` is
+  now accepted on all three (keyword-only on `download_dataset`, matching the
+  sync signature) and forwarded as a `?version=` query parameter.
+
 ### Security
 
 - **`keras>=3.15.0` security floor added to the `tensorflow` and `all` extras.**
