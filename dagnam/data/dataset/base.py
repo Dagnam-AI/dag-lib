@@ -91,6 +91,9 @@ class DagnamDataset(
         self._native_test_flax = _native_test_flax
         self._raw_meta: JsonObject = meta
         self.raw_meta: JsonObject = meta
+        # The `split=` requested by the caller of `load_dataset`, if any.
+        # Recorded as intent only -- no loader here filters rows by it yet.
+        self.requested_split: str | None = None
 
     @staticmethod
     def _required_str(meta: JsonObject, key: str) -> str:
