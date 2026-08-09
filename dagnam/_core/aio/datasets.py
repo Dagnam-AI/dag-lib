@@ -48,6 +48,15 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         )
         return response_json_object(resp)
 
+    async def list_dataset_versions(self, dataset_id: str) -> list[JsonObject]:
+        """GET /api/v1/datasets/{dataset_id}/versions — List a dataset's versions."""
+        resp = await self._request(
+            "GET",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}/versions",
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+        )
+        return [item for item in response_json_array(resp) if isinstance(item, dict)]
+
     async def list_system_datasets(self) -> list[JsonObject]:
         resp = await self._request(
             "GET", "/api/v1/datasets/system", raise_for=lambda r: raise_for_dataset(r, "system")

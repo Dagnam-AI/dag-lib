@@ -47,6 +47,21 @@ def list(
     return resolved.list_datasets(type=type, search=search)
 
 
+def list_versions(
+    dataset_id: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> builtin_list[JsonObject]:
+    """List a dataset's versions (``GET /api/v1/datasets/{id}/versions``).
+
+    >>> dagnam.datasets.list_versions("ds-1")
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_dataset_versions(dataset_id)
+
+
 def list_system(
     *,
     client: Optional[DagnamClient] = None,
@@ -233,6 +248,7 @@ __all__ = [
     "get",
     "list",
     "list_system",
+    "list_versions",
     "preview_dataset",
     "update_dataset",
     "update_dataset_roles",

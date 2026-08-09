@@ -49,6 +49,21 @@ def _render_datasets(result: object) -> str:
     )
 
 
+def _render_dataset_versions(result: object) -> str:
+    versions = result if isinstance(result, list) else []
+    if not versions:
+        return "No dataset versions found."
+    rows = [version for version in versions if isinstance(version, dict)]
+    return render_table(
+        (
+            Column("Version", "version", 20),
+            Column("Created", "created_at", 25),
+            Column("Samples", "num_samples", 10, "right"),
+        ),
+        rows,
+    )
+
+
 def _redact_dataset_meta(meta: JsonObject, *, show_download_url: bool) -> JsonObject:
     result = deepcopy(meta)
     if "download_url" in result and not show_download_url:
@@ -71,6 +86,24 @@ def cmd_dataset_list(args: argparse.Namespace) -> None:
         output=args.output,
         json_stdout=args.json or args.verbose,
         render_human=_render_datasets,
+    )
+
+
+def cmd_dataset_versions(args: argparse.Namespace) -> None:
+    from dagnam._core.auth import get_api_key, get_api_url
+    from dagnam._core.client import DagnamClient
+
+    api_key = get_api_key()
+    api_url = args.api_url or get_api_url()
+
+    client = DagnamClient(api_url, api_key)
+    versions = client.list_dataset_versions(args.dataset_id)
+
+    emit_result(
+        versions,
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_dataset_versions,
     )
 
 
@@ -323,6 +356,13 @@ def register_dataset(subparsers: SubParsersAction) -> None:
     dataset_list.add_argument("--search", help="Filter by name/description substring.")
     add_collection_output_args(dataset_list)
     dataset_list.set_defaults(func=cmd_dataset_list)
+    dataset_versions = dataset_sub.add_parser(
+        "versions", help="List dataset versions.", description="List a dataset's versions."
+    )
+    dataset_versions.add_argument("dataset_id", help="ID of the dataset.")
+    dataset_versions.add_argument("--api-url", help="Override the API base URL.")
+    add_collection_output_args(dataset_versions)
+    dataset_versions.set_defaults(func=cmd_dataset_versions)
     dataset_info = dataset_sub.add_parser(
         "info", help="Show dataset metadata.", description="Show metadata for one dataset."
     )

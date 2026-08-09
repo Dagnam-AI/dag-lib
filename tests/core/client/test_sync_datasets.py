@@ -66,6 +66,25 @@ def test_get_dataset_meta_404_not_retried(client: DagnamClient, rmock: RequestsM
     assert rmock.call_count == 1
 
 
+def test_list_dataset_versions(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[{"version": "v1"}, {"version": "v2"}])
+    result = client.list_dataset_versions("ds1")
+    assert result == [{"version": "v1"}, {"version": "v2"}]
+
+
+def test_list_dataset_versions_filters_non_dict_items(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[{"version": "v1"}, "not-a-dict", None])
+    assert client.list_dataset_versions("ds1") == [{"version": "v1"}]
+
+
+def test_list_dataset_versions_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/datasets/missing/versions", status_code=404)
+    with pytest.raises(DatasetNotFoundError):
+        client.list_dataset_versions("missing")
+
+
 def test_list_system_datasets(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/datasets/system", json=[{"id": "iris"}])
     assert client.list_system_datasets() == [{"id": "iris"}]
