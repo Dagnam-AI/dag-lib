@@ -181,6 +181,14 @@ class TestListSystem:
         assert out == [{"id": "mnist"}]
 
 
+class TestListVersions:
+    def test_list_versions_delegates(self) -> None:
+        c = _client(list_dataset_versions=MagicMock(return_value=[{"version": "v1"}]))
+        out = datasets_upload.list_versions("ds1", client=c)
+        c.list_dataset_versions.assert_called_once_with("ds1")
+        assert out == [{"version": "v1"}]
+
+
 class TestGet:
     def test_get_delegates(self) -> None:
         c = _client(get_dataset_meta=MagicMock(return_value={"id": "ds1", "name": "n"}))

@@ -62,6 +62,18 @@ class DatasetsClientMixin(BaseDagnamClient):
         )
         return response_json_object(resp)
 
+    def list_dataset_versions(self, dataset_id: str) -> list[JsonObject]:
+        """GET /api/v1/datasets/{dataset_id}/versions — List a dataset's versions."""
+        dataset_path = quote_path_segment(dataset_id)
+        url = f"{self.api_url}/api/v1/datasets/{dataset_path}/versions"
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
+        return [item for item in response_json_array(resp) if isinstance(item, dict)]
+
     def list_system_datasets(self) -> list[JsonObject]:
         """GET /api/v1/datasets/system — List all system datasets."""
         url = f"{self.api_url}/api/v1/datasets/system"

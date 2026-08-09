@@ -58,6 +58,33 @@ async def test_async_dataset_404(client: AsyncDagnamClient, mock: RespxMockRoute
         await client.get_dataset_meta("missing")
 
 
+async def test_async_list_dataset_versions(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/datasets/ds1/versions").mock(
+        return_value=httpx.Response(200, json=[{"version": "v1"}, {"version": "v2"}])
+    )
+    result = await client.list_dataset_versions("ds1")
+    assert result == [{"version": "v1"}, {"version": "v2"}]
+
+
+async def test_async_list_dataset_versions_filters_non_dict_items(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/datasets/ds1/versions").mock(
+        return_value=httpx.Response(200, json=[{"version": "v1"}, "not-a-dict", None])
+    )
+    assert await client.list_dataset_versions("ds1") == [{"version": "v1"}]
+
+
+async def test_async_list_dataset_versions_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/datasets/missing/versions").mock(return_value=httpx.Response(404))
+    with pytest.raises(DatasetNotFoundError):
+        await client.list_dataset_versions("missing")
+
+
 async def test_async_list_system_datasets(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/datasets/system").mock(
         return_value=httpx.Response(200, json=[{"id": "iris"}])

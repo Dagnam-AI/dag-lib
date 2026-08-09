@@ -104,6 +104,60 @@ def test_dataset_list_apierror_exits(
     assert "boom" in err
 
 
+def test_dataset_versions_empty(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch("dagnam._core.client.DagnamClient.list_dataset_versions", return_value=[]):
+        run_cli(["dataset", "versions", "ds-1"])
+    assert "No dataset versions found" in capsys.readouterr().out
+
+
+def test_dataset_versions_with_rows(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.list_dataset_versions",
+        return_value=[
+            {"version": "v1", "created_at": "2026-01-01", "num_samples": 100},
+            {"version": "v2", "created_at": "2026-02-01", "num_samples": 150},
+        ],
+    ):
+        run_cli(["dataset", "versions", "ds-1"])
+    out = capsys.readouterr().out
+    assert "v1" in out
+    assert "v2" in out
+
+
+def test_dataset_versions_json(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    versions = mock.Mock(return_value=[{"version": "v1"}])
+    with mock.patch("dagnam._core.client.DagnamClient") as client:
+        client.return_value.list_dataset_versions = versions
+        run_cli(["dataset", "versions", "ds-1", "--json"])
+    versions.assert_called_once_with("ds-1")
+    assert json.loads(capsys.readouterr().out) == [{"version": "v1"}]
+
+
+def test_dataset_versions_apierror_exits(
+    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    from dagnam._core.exceptions import APIError
+
+    with mock.patch(
+        "dagnam._core.client.DagnamClient.list_dataset_versions",
+        side_effect=APIError(500, "boom"),
+    ):
+        assert run_cli(["dataset", "versions", "ds-1"]) == 1
+    err = capsys.readouterr().err
+    assert "Error: the Dagnam API had an internal error (HTTP 500)" in err
+    assert "boom" in err
+
+
 def test_dataset_info(
     run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
