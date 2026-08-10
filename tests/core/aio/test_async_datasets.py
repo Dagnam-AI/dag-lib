@@ -18,6 +18,8 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
@@ -59,22 +61,27 @@ async def test_async_dataset_404(client: AsyncDagnamClient, mock: RespxMockRoute
 
 
 async def test_async_list_dataset_versions(
-    client: AsyncDagnamClient, mock: RespxMockRouter
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    dataset_version_factory: Callable[..., dict[str, object]],
 ) -> None:
-    mock.get("/api/v1/datasets/ds1/versions").mock(
-        return_value=httpx.Response(200, json=[{"version": "v1"}, {"version": "v2"}])
-    )
+    v1 = dataset_version_factory(version_number=1)
+    v2 = dataset_version_factory(version_number=2, id="c2d3e4f5-6a7b-4c8d-9e0f-1a2b3c4d5e6f")
+    mock.get("/api/v1/datasets/ds1/versions").mock(return_value=httpx.Response(200, json=[v1, v2]))
     result = await client.list_dataset_versions("ds1")
-    assert result == [{"version": "v1"}, {"version": "v2"}]
+    assert result == [v1, v2]
 
 
 async def test_async_list_dataset_versions_filters_non_dict_items(
-    client: AsyncDagnamClient, mock: RespxMockRouter
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    dataset_version_factory: Callable[..., dict[str, object]],
 ) -> None:
+    v1 = dataset_version_factory(version_number=1)
     mock.get("/api/v1/datasets/ds1/versions").mock(
-        return_value=httpx.Response(200, json=[{"version": "v1"}, "not-a-dict", None])
+        return_value=httpx.Response(200, json=[v1, "not-a-dict", None])
     )
-    assert await client.list_dataset_versions("ds1") == [{"version": "v1"}]
+    assert await client.list_dataset_versions("ds1") == [v1]
 
 
 async def test_async_list_dataset_versions_404(

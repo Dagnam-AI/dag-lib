@@ -25,6 +25,7 @@ problem. Callers who mix both frameworks in one process need the same ordering;
 that is documented for them rather than forced on everyone.
 """
 
+from collections.abc import Callable
 import importlib
 import json
 from pathlib import Path
@@ -137,3 +138,39 @@ def sample_json_data():
         },
     ]
     return json.dumps(records, indent=2)
+
+
+@pytest.fixture
+def dataset_version_factory() -> Callable[..., dict[str, object]]:
+    """Build a dict matching the backend's `DatasetVersion` response model.
+
+    Mirrors `mvp-backend/src/datasets/schemas.py::DatasetVersion` field-for-field
+    (id, dataset_id, version_number, parent_version_id, operation,
+    operation_params, file_path, size_bytes, num_samples, content_hash,
+    data_format, rows_removed, rows_changed, is_pinned, created_at) so CLI/client
+    tests exercise the real wire shape instead of an invented `{"version": ...}`
+    payload. Pass keyword overrides to vary individual fields per test.
+    """
+
+    def _build(**overrides: object) -> dict[str, object]:
+        base: dict[str, object] = {
+            "id": "5b1f7e2a-0f3d-4a7a-9c2e-1a2b3c4d5e6f",
+            "dataset_id": "9d3c1a2b-4e5f-4a6b-8c7d-2e3f4a5b6c7d",
+            "version_number": 1,
+            "parent_version_id": None,
+            "operation": "upload",
+            "operation_params": {},
+            "file_path": "datasets/ds1/v1/data.csv",
+            "size_bytes": 4096,
+            "num_samples": 150,
+            "content_hash": "sha256:abc123def456",
+            "data_format": "csv",
+            "rows_removed": None,
+            "rows_changed": None,
+            "is_pinned": False,
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        base.update(overrides)
+        return base
+
+    return _build

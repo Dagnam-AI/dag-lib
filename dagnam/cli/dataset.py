@@ -56,9 +56,11 @@ def _render_dataset_versions(result: object) -> str:
     rows = [version for version in versions if isinstance(version, dict)]
     return render_table(
         (
-            Column("Version", "version", 20),
-            Column("Created", "created_at", 25),
+            Column("Version", "version_number", 8, "right"),
+            Column("ID", "id", 36),
+            Column("Operation", "operation", 16),
             Column("Samples", "num_samples", 10, "right"),
+            Column("Created", "created_at", 25),
         ),
         rows,
     )
