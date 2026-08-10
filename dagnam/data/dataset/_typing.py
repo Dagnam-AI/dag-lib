@@ -36,6 +36,7 @@ class DatasetMixinBase(Protocol):
     _native_test_tf: TensorflowDataset | None
     _native_train_flax: list[FlaxBatch] | None
     _native_test_flax: list[FlaxBatch] | None
+    split_membership: dict[str, list[int]]
     _raw_meta: JsonObject
     raw_meta: JsonObject
 

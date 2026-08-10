@@ -56,6 +56,7 @@ def create_tensorflow_dataset(
         val_ratio=val_ratio,
         test_ratio=test_ratio,
         seed=seed,
+        membership=dagnam_ds.split_membership or None,
     )
 
     split_features = features[split_indices]

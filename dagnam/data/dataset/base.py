@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-import random
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -24,6 +23,7 @@ from dagnam.data.dataset.to_flax import FlaxDatasetMixin
 from dagnam.data.dataset.to_polars import PolarsDatasetMixin
 from dagnam.data.dataset.to_pytorch import PytorchDatasetMixin
 from dagnam.data.dataset.to_tensorflow import TensorflowDatasetMixin
+from dagnam.data.loaders.media import select_split_indices
 
 if TYPE_CHECKING:
     from dagnam.data.loaders.flax import FlaxBatch
@@ -92,8 +92,66 @@ class DagnamDataset(
         self._raw_meta: JsonObject = meta
         self.raw_meta: JsonObject = meta
         # The `split=` requested by the caller of `load_dataset`, if any.
-        # Recorded as intent only -- no loader here filters rows by it yet.
         self.requested_split: str | None = None
+        # Server-declared split membership: the exact rows each named split
+        # contains. Present for any dataset whose splits were created through
+        # the platform; empty for a legacy or unsplit dataset, where the
+        # loaders fall back to their deterministic ratio partition.
+        self.split_membership: dict[str, list[int]] = self._parse_split_membership(meta)
+
+    @staticmethod
+    def _parse_split_membership(meta: JsonObject) -> dict[str, list[int]]:
+        """Extract ``{split_name: [row indices]}`` from the ``/meta`` payload.
+
+        Only splits that actually carry membership are included; a split
+        serving ``member_row_indices: null`` (a legacy row written before
+        versioning) is deliberately absent, which is what makes the loaders
+        fall back to the ratio partition for it.
+
+        Tolerant of a server that has not been upgraded yet, or of a
+        malformed entry: anything unrecognized is skipped rather than raising,
+        because a metadata surprise must not make a dataset unloadable.
+        """
+        raw_splits = meta.get("splits")
+        if not isinstance(raw_splits, list):
+            return {}
+
+        membership: dict[str, list[int]] = {}
+        for entry in raw_splits:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("split_name")
+            indices = entry.get("member_row_indices")
+            if not isinstance(name, str) or not isinstance(indices, list):
+                continue
+            membership[name] = [
+                index for index in indices if isinstance(index, int) and not isinstance(index, bool)
+            ]
+        return membership
+
+    def indices_for_split(
+        self,
+        n: int,
+        split: str,
+        val_ratio: float,
+        test_ratio: float,
+        seed: int,
+    ) -> list[int]:
+        """Resolve `split` to row indices, preferring server-declared membership.
+
+        The one place this dataset's rows are partitioned. Both the server
+        membership path and the ratio fallback live in
+        `dagnam.data.loaders.media.select_split_indices`, so the file-based
+        loaders and this class cannot drift apart on what ``"train"`` means.
+        """
+        return select_split_indices(
+            n,
+            split,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+            membership=self.split_membership or None,
+        )
 
     @staticmethod
     def _required_str(meta: JsonObject, key: str) -> str:
@@ -351,9 +409,9 @@ class DagnamDataset(
         numeric_cols = numeric_columns(df, feature_cols)
         features = df.select(numeric_cols).to_numpy()
 
-        indices = self._split_indices(
+        indices = self.indices_for_split(
             df.height,
-            split=split,
+            split,
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
@@ -393,29 +451,20 @@ class DagnamDataset(
     ) -> list[int]:
         """Compute deterministic index ranges for train/val/test splits.
 
-        Uses the same shuffle behavior as ``csv_loader`` / ``json_loader``
-        so that ``to_arrays()`` and ``to_pytorch_loader()`` produce identical
-        splits with the same seed.
+        Delegates to `dagnam.data.loaders.media.select_split_indices`, which is
+        the single implementation the file-based loaders also use, so
+        ``to_arrays()`` and ``to_pytorch_loader()` cannot disagree about what
+        ``"train"`` means for a given seed.
+
+        Ratio-only: this is the static entry point, so it has no dataset to
+        read server-declared membership from. Use `indices_for_split` on an
+        instance to honour a platform-created split.
 
         Contract: split order is defined by Python's stdlib
         ``random.Random(seed).shuffle``. Keep all framework loaders on this
         RNG unless the split contract is intentionally versioned.
         """
-        n_test = int(n * test_ratio)
-        n_val = int(n * val_ratio)
-        n_train = n - n_val - n_test
-
-        indices = list(range(n))
-        # Always shuffle for determinism parity with file-based loaders,
-        # which shuffle unconditionally regardless of val/test ratios.
-        random.Random(seed).shuffle(indices)
-
-        split_map = {
-            "train": indices[:n_train],
-            "val": indices[n_train : n_train + n_val],
-            "test": indices[n_train + n_val :],
-        }
-        return split_map[split]
+        return select_split_indices(n, split, val_ratio=val_ratio, test_ratio=test_ratio, seed=seed)
 
     @staticmethod
     def split_indices(

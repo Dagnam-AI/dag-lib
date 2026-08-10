@@ -196,3 +196,42 @@ class TestGroupingDrift:
             f"missing from COMMAND_GROUPS: {registered - grouped}; "
             f"stale in COMMAND_GROUPS: {grouped - registered}"
         )
+
+
+class TestChoiceCandidateRecovery:
+    """argparse's error *message* is not a stable interface.
+
+    It renders ``(choose from 'a', 'b')`` on some Python versions and
+    ``(choose from a, b)`` on others. Scraping only the quoted form yielded no
+    candidates on an unquoted build, which silently dropped the
+    "Did you mean ...?" line from every unknown-command error while the rest
+    of the message still looked correct — a suggestion feature that had
+    stopped suggesting.
+    """
+
+    def test_prefers_the_real_subparser_choices_over_the_message(self) -> None:
+        parser = _root()
+        # Deliberately unparseable as a choices list: the real answer must
+        # come from the subparsers action, not from this string.
+        assert "training" in parser._choice_candidates("<<garbage>>")
+
+    def test_unquoted_message_rendering_is_parsed(self) -> None:
+        parser = _parser.DagnamArgumentParser(prog="dagnam thing")
+        assert parser._choice_candidates("alpha, beta") == ["alpha", "beta"]
+
+    def test_quoted_message_rendering_is_parsed(self) -> None:
+        parser = _parser.DagnamArgumentParser(prog="dagnam thing")
+        assert parser._choice_candidates("'alpha', 'beta'") == ["alpha", "beta"]
+
+    def test_empty_choices_yield_no_candidates(self) -> None:
+        parser = _parser.DagnamArgumentParser(prog="dagnam thing")
+        assert parser._choice_candidates("") == []
+
+    def test_a_plain_choices_argument_still_suggests(self, capsys: object) -> None:
+        # No subparsers action at all, so the message is the only source.
+        parser = _parser.DagnamArgumentParser(prog="dagnam thing")
+        parser.add_argument("mode", choices=["alpha", "beta"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(["alpah"])
+        err = capsys.readouterr().err  # type: ignore[attr-defined]
+        assert "Did you mean 'alpha'?" in err

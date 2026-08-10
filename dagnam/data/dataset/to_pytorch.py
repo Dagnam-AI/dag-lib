@@ -105,9 +105,17 @@ class PytorchDatasetMixin(DatasetMixinBase):
             ImportError: If PyTorch is not installed.
             ValueError: For unsupported formats or invalid split names.
         """
+        # A dataset with server-declared splits defines its own valid names
+        # (`eval_holdout`, say). Rejecting them here would make a platform
+        # split unloadable; `select_split_indices` is what validates the name
+        # against the declared membership, and raises if it cannot resolve it.
         valid_splits = ("train", "val", "test")
-        if split not in valid_splits:
-            raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'.")
+        if split not in valid_splits and split not in self.split_membership:
+            declared = sorted(self.split_membership)
+            raise ValueError(
+                f"Unknown split: {split}. Use 'train', 'val', or 'test'"
+                + (f", or one of this dataset's splits: {declared}." if declared else ".")
+            )
 
         try:
             import torch

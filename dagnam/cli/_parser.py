@@ -190,7 +190,7 @@ class DagnamArgumentParser(argparse.ArgumentParser):
         choice = _INVALID_CHOICE.search(message)
         if choice is not None:
             kind = "command" if is_root else "subcommand"
-            candidates = re.findall(r"'([^']*)'", choice.group("choices"))
+            candidates = self._choice_candidates(choice.group("choices"))
             return self._suggestion_block(choice.group("bad"), kind, candidates)
         unrecognized = _UNRECOGNIZED.search(message)
         if unrecognized is not None:
@@ -199,6 +199,29 @@ class DagnamArgumentParser(argparse.ArgumentParser):
             return self._suggestion_block(bad, "option", candidates)
         label = styled_error_label()
         return f"{label} {message}\n\nRun '{self.prog} --help' for usage.\nDocs: {DOCS_URL}\n"
+
+    def _choice_candidates(self, message_choices: str) -> list[str]:
+        """Recover the valid choices behind an argparse "invalid choice" error.
+
+        Prefers the subparsers action's own ``choices``, because argparse's
+        *message* formatting is not a stable interface: it renders
+        ``(choose from 'a', 'b')`` on some Python versions and
+        ``(choose from a, b)`` on others. Scraping only the quoted form
+        silently yielded no candidates on an unquoted build, which dropped the
+        "Did you mean ...?" line from every unknown-command error while the
+        rest of the message still looked right.
+
+        Falls back to parsing the message for a plain ``choices=`` argument
+        that has no subparsers action behind it, accepting either rendering.
+        """
+        action = _subparsers_action(self)
+        if action is not None and action.choices:
+            return list(action.choices)
+
+        quoted = re.findall(r"'([^']*)'", message_choices)
+        if quoted:
+            return quoted
+        return [choice.strip() for choice in message_choices.split(",") if choice.strip()]
 
     def _suggestion_block(self, bad: str, kind: str, candidates: list[str]) -> str:
         match = suggest(bad, candidates)
