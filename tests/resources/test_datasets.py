@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,9 @@ from dagnam import datasets as datasets_upload
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import LROFailedError, UploadError
 from dagnam._core.lro import LongRunningOperation
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _client(**overrides: object) -> MagicMock:
@@ -182,11 +186,14 @@ class TestListSystem:
 
 
 class TestListVersions:
-    def test_list_versions_delegates(self) -> None:
-        c = _client(list_dataset_versions=MagicMock(return_value=[{"version": "v1"}]))
+    def test_list_versions_delegates(
+        self, dataset_version_factory: Callable[..., dict[str, object]]
+    ) -> None:
+        version = dataset_version_factory(version_number=1)
+        c = _client(list_dataset_versions=MagicMock(return_value=[version]))
         out = datasets_upload.list_versions("ds1", client=c)
         c.list_dataset_versions.assert_called_once_with("ds1")
-        assert out == [{"version": "v1"}]
+        assert out == [version]
 
 
 class TestGet:

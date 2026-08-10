@@ -10,6 +10,8 @@ from unittest import mock
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
 
@@ -114,32 +116,47 @@ def test_dataset_versions_empty(
 
 
 def test_dataset_versions_with_rows(
-    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+    run_cli: CliRunner,
+    capsys: StrCapture,
+    monkeypatch: PytestMonkeyPatch,
+    dataset_version_factory: Callable[..., dict[str, object]],
 ) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    v1 = dataset_version_factory(version_number=1, created_at="2026-01-01T00:00:00Z")
+    v2 = dataset_version_factory(
+        version_number=2,
+        id="c2d3e4f5-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+        created_at="2026-02-01T00:00:00Z",
+        num_samples=150,
+    )
     with mock.patch(
         "dagnam._core.client.DagnamClient.list_dataset_versions",
-        return_value=[
-            {"version": "v1", "created_at": "2026-01-01", "num_samples": 100},
-            {"version": "v2", "created_at": "2026-02-01", "num_samples": 150},
-        ],
+        return_value=[v1, v2],
     ):
         run_cli(["dataset", "versions", "ds-1"])
     out = capsys.readouterr().out
-    assert "v1" in out
-    assert "v2" in out
+    # The rendered table must surface the real addressable identifiers ---
+    # version_number and id --- not just exit cleanly on a fabricated shape.
+    assert str(v1["version_number"]) in out
+    assert str(v2["version_number"]) in out
+    assert str(v1["id"]) in out
+    assert str(v2["id"]) in out
 
 
 def test_dataset_versions_json(
-    run_cli: CliRunner, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+    run_cli: CliRunner,
+    capsys: StrCapture,
+    monkeypatch: PytestMonkeyPatch,
+    dataset_version_factory: Callable[..., dict[str, object]],
 ) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
-    versions = mock.Mock(return_value=[{"version": "v1"}])
+    version = dataset_version_factory()
+    versions = mock.Mock(return_value=[version])
     with mock.patch("dagnam._core.client.DagnamClient") as client:
         client.return_value.list_dataset_versions = versions
         run_cli(["dataset", "versions", "ds-1", "--json"])
     versions.assert_called_once_with("ds-1")
-    assert json.loads(capsys.readouterr().out) == [{"version": "v1"}]
+    assert json.loads(capsys.readouterr().out) == [version]
 
 
 def test_dataset_versions_apierror_exits(

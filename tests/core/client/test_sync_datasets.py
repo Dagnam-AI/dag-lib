@@ -19,6 +19,8 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 API = "https://api.test"
@@ -66,17 +68,26 @@ def test_get_dataset_meta_404_not_retried(client: DagnamClient, rmock: RequestsM
     assert rmock.call_count == 1
 
 
-def test_list_dataset_versions(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[{"version": "v1"}, {"version": "v2"}])
+def test_list_dataset_versions(
+    client: DagnamClient,
+    rmock: RequestsMocker,
+    dataset_version_factory: Callable[..., dict[str, object]],
+) -> None:
+    v1 = dataset_version_factory(version_number=1)
+    v2 = dataset_version_factory(version_number=2, id="c2d3e4f5-6a7b-4c8d-9e0f-1a2b3c4d5e6f")
+    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[v1, v2])
     result = client.list_dataset_versions("ds1")
-    assert result == [{"version": "v1"}, {"version": "v2"}]
+    assert result == [v1, v2]
 
 
 def test_list_dataset_versions_filters_non_dict_items(
-    client: DagnamClient, rmock: RequestsMocker
+    client: DagnamClient,
+    rmock: RequestsMocker,
+    dataset_version_factory: Callable[..., dict[str, object]],
 ) -> None:
-    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[{"version": "v1"}, "not-a-dict", None])
-    assert client.list_dataset_versions("ds1") == [{"version": "v1"}]
+    v1 = dataset_version_factory(version_number=1)
+    rmock.get(f"{API}/api/v1/datasets/ds1/versions", json=[v1, "not-a-dict", None])
+    assert client.list_dataset_versions("ds1") == [v1]
 
 
 def test_list_dataset_versions_404(client: DagnamClient, rmock: RequestsMocker) -> None:
