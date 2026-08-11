@@ -86,7 +86,7 @@ def _resolve_cache_budget() -> int | None:
 
 
 def _finalize(ds: DagnamDataset, split: str | None) -> DagnamDataset:
-    """Record the caller's requested split as intent-only metadata on *ds*.
+    """Record the caller's requested split on *ds*.
 
     Set on the constructed ``DagnamDataset`` object -- never on the ``meta``
     dict, which may be persisted to the on-disk cache (see
@@ -120,9 +120,12 @@ def load_dataset(
     resolves auth, checks cache, downloads if needed, and returns a dataset.
 
     ``split`` records the caller's intended split (e.g. "train", "val",
-    "test") on the returned dataset's ``requested_split`` attribute. It is
-    intent only: nothing in this function or its loaders filters rows by it
-    yet -- that is out of scope for this slice.
+    "test") on the returned dataset's ``requested_split`` attribute. Row
+    selection itself happens where the rows are read: the converters take
+    their own ``split=`` argument and resolve it against the dataset's
+    server-declared ``split_membership`` (falling back to the deterministic
+    ratio partition when the dataset has none), so a run pulls exactly the
+    rows the platform put in that split.
     """
     if os.environ.get("DAGNAM_INTERNAL"):
         return _finalize(_load_internal(dataset_id, binding=binding), split)

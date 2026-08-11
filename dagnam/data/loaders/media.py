@@ -6,7 +6,7 @@ split helpers used by image_folder_loader and audio_loader.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -266,22 +266,100 @@ def resolve_split_dir(root: Path, split: str, available: list[str]) -> Path:
     )
 
 
+# Which loaders pass `membership=` and which deliberately do not:
+#
+# Row-indexed loaders (csv/json_array, tf, flax, and `DagnamDataset`'s own
+# tabular iteration) DO, because a platform split is a list of row indices
+# into a JSONL/CSV file and those loaders read exactly that file.
+#
+# Folder-backed loaders (image_folder, audio) do NOT. Their samples come from
+# a directory walk whose order the server never saw, so a server row index
+# does not name a sample there; honouring one would silently select the wrong
+# files. Those datasets keep the deterministic ratio partition, and a
+# folder-with-explicit-split-directories dataset uses `resolve_split_dir`
+# instead. If folder datasets ever need server splits, the server has to
+# record file paths rather than indices.
+
+
+#: Split names that mean the same thing to a caller and to the server.
+#: A generated training script asks for ``train``/``val``/``test`` because that
+#: is what the framework templates emit; a platform split is named from
+#: `DatasetSplitName`, where the evaluation split is ``eval_holdout``. Without
+#: this mapping, a run over a train/eval_holdout dataset would resolve ``train``
+#: from membership and ``val`` from a ratio slice — mixing the two partitions
+#: and leaking training rows into evaluation. Mirrors the same aliasing
+#: `resolve_split_dir` already applies to split *directories*.
+SPLIT_ALIASES: dict[str, tuple[str, ...]] = {
+    "train": ("training",),
+    "val": ("validation", "eval_holdout", "eval", "dev"),
+    "validation": ("val", "eval_holdout", "eval", "dev"),
+    "test": ("eval_holdout", "eval", "dev", "val", "validation"),
+    "eval_holdout": ("val", "validation", "eval", "test"),
+}
+
+
+def resolve_membership_name(split: str, membership: Mapping[str, Sequence[int]]) -> str | None:
+    """Resolve `split` to a key of `membership`, honouring `SPLIT_ALIASES`.
+
+    Returns `None` when neither the name nor any of its aliases is declared —
+    the caller must then refuse rather than silently partition by ratio.
+    """
+    if split in membership:
+        return split
+    for alias in SPLIT_ALIASES.get(split, ()):
+        if alias in membership:
+            return alias
+    return None
+
+
 def select_split_indices(
     n: int,
     split: str,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     seed: int = 42,
+    *,
+    membership: Mapping[str, Sequence[int]] | None = None,
 ) -> list[int]:
-    """Return only the requested split's indices from a deterministic partition.
+    """Return only the requested split's indices.
 
-    Thin selector over the memoized permutation so loaders never rebuild the
-    ``{"train": ..., "val": ..., "test": ...}[split]`` map by hand and never
+    When the server declared explicit membership for `split`, those exact rows
+    are the split — that is the whole point of persisting membership. A ratio
+    alone is not consumable: re-deriving "the first 80% of a client-side
+    shuffle" produces a partition with no relationship to the split the user
+    created, so the eval holdout a contamination guard cleared would not be the
+    one a run evaluates against.
+
+    Falls back to the deterministic ratio partition when `membership` has
+    nothing for `split` (no versioned splits, or a legacy split row). That
+    fallback is a thin selector over the memoized permutation, so loaders never
+    rebuild the ``{"train", "val", "test"}[split]`` map by hand and never
     materialize the two splits they did not ask for.
+
+    Indices outside ``range(n)`` are dropped: membership is recorded against a
+    specific `DatasetVersion`, and a stale cached file can be shorter than the
+    version it was recorded for. Silently indexing past the end would be an
+    `IndexError` deep inside a framework loader.
     """
+    if membership:
+        resolved = resolve_membership_name(split, membership)
+        if resolved is None:
+            raise ValueError(
+                f"Split {split!r} is not declared by this dataset, which defines "
+                f"{sorted(membership)}. Refusing to fall back to a ratio partition: "
+                "it would hand back rows the declared splits already own, which is "
+                "exactly the train/eval leakage server-side splits exist to prevent."
+            )
+        return [index for index in membership[resolved] if 0 <= index < n]
+
     indices = _shuffled_indices(n, seed)
     train_end, val_end = _split_bounds(n, val_ratio, test_ratio)
     spans = {"train": (0, train_end), "val": (train_end, val_end), "test": (val_end, n)}
+    if split not in spans:
+        raise ValueError(
+            f"Unknown split {split!r}: this dataset declares no server-side splits, "
+            f"and the ratio fallback only defines {sorted(spans)}."
+        )
     start, stop = spans[split]
     return list(indices[start:stop])
 

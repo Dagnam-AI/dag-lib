@@ -99,13 +99,16 @@ def create_pytorch_loader(
     feature_dtype = torch.long if np.issubdtype(feature_matrix.dtype, np.integer) else torch.float32
     features = torch.tensor(feature_matrix, dtype=feature_dtype)
 
-    # ---- deterministic split ----
+    # ---- split selection ----
+    # Server-declared membership wins when the dataset has any; the ratio
+    # partition is the fallback for a dataset the platform never split.
     split_indices = select_split_indices(
         df.height,
         split,
         val_ratio=val_ratio,
         test_ratio=test_ratio,
         seed=seed,
+        membership=dagnam_ds.split_membership or None,
     )
 
     # ---- build dataset & loader ----

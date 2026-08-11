@@ -125,6 +125,7 @@ def create_flax_dataset(
         val_ratio=val_ratio,
         test_ratio=test_ratio,
         seed=seed,
+        membership=dagnam_ds.split_membership or None,
     )
 
     if shuffle:

@@ -142,7 +142,10 @@ class TestSelectSplitIndicesLazy:
         assert info.hits == 2
 
     def test_unknown_split_raises(self) -> None:
-        with pytest.raises(KeyError):
+        # A ValueError naming the valid splits, not a bare KeyError leaking the
+        # internal span dict -- the message is what tells a caller that
+        # "holdout" needs server-declared membership to mean anything.
+        with pytest.raises(ValueError, match="declares no server-side splits"):
             select_split_indices(10, "holdout")
 
 

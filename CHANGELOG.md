@@ -16,6 +16,37 @@ and this project follows [Semantic Versioning](https://semver.org/).
   now accepted on all three (keyword-only on `download_dataset`, matching the
   sync signature) and forwarded as a `?version=` query parameter.
 
+### Changed
+
+- **Generated training scripts now pull the exact rows a platform split
+  contains.** `/meta` serves each split's `member_row_indices`, and the
+  converters resolve `split="train"` against that membership instead of
+  re-deriving it from a client-side seeded shuffle. A percentage was never a
+  consumable split: the eval holdout a contamination guard had cleared was not
+  the one a run evaluated against. Datasets with no server-declared splits are
+  unaffected and keep the deterministic ratio partition. `train`/`val`/`test`
+  alias onto a platform `eval_holdout` split; a split that resolves to nothing
+  now raises rather than quietly ratio-slicing rows the declared splits
+  already own. Folder-backed image/audio loaders keep the ratio partition by
+  design — a server row index does not name a file in a directory walk.
+- **`dagnam <typo>` suggests the intended command again.** argparse renders
+  its "invalid choice" message with or without quotes depending on the Python
+  version, and the parser only scraped the quoted form — so on an unquoted
+  build every unknown-command error silently lost its "Did you mean ...?"
+  line. Candidates now come from the subparser's real `choices`, with a
+  message fallback that accepts either rendering.
+
+- **`version=` now resolves against real dataset versions, not only the legacy
+  metadata map.** The backend previously resolved `?version=` solely against a
+  string-keyed map in the dataset's metadata, so a numeric key like `"1"` only
+  worked if someone had explicitly registered it there. With server-side
+  `DatasetVersion` records, `"1"` (and any `version_number`, and a version's
+  UUID) now resolves to that version's stored file — and every pre-existing
+  dataset was backfilled as version 1. A call that passed `version="1"` and
+  previously 404'd will now succeed and return the backfilled v1 content;
+  legacy metadata-map keys keep resolving exactly as before, and are still
+  tried when a numeric/UUID lookup finds nothing.
+
 ### Security
 
 - **`keras>=3.15.0` security floor added to the `tensorflow` and `all` extras.**
