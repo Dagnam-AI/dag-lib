@@ -5,10 +5,31 @@ All notable changes to the `dagnam` Python SDK are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.9.0] - 2026-08-10
+
+### Removed
+
+- **The 1.18 MB validation corpus no longer ships in the wheel.** Every
+  `pip install dagnam` carried `dagnam/_contracts/validation-corpus.json`, which
+  has no runtime consumer — it is test data for the validators. It moves to
+  `tests/_contracts/`, where a fixture belongs. The built wheel drops from
+  390,680 to 311,723 bytes compressed, and `dagnam/_contracts/` is now the
+  deprecation shim alone.
+  `dagnam._contracts` still re-exports every public name from
+  `dagnam_contracts` unchanged, so no import breaks in this release. **That
+  shim is removed in 0.10.0** — import `dagnam_contracts` directly.
 
 ### Added
 
+- **Video / 3-D data path.** New `dagnam.data.loaders.video` provides a
+  `resize_frames` loader, driven by the dataset's declared metadata rather than
+  by its name, so a video dataset can feed a `Conv3d`-style model. `"video"`
+  joins the existing `apply_transform` dispatch and `_KIND_TO_MODALITY` tables,
+  and the PyTorch-native loader applies its channels-first transpose to 5-D
+  batches exactly as it already did for 2-D images (TensorFlow and Flax already
+  matched, being channels-last). Clips are a plain numeric `.npz` read by the
+  existing `ArrayDecoder` with `allow_pickle=False` — no new decoder and no
+  relaxation of the deserialization defense.
 - **Async dataset methods gain `version=` parity with the sync client.**
   `AsyncDagnamClient.get_dataset_meta`, `get_system_dataset_meta`, and
   `download_dataset` previously had no `version` parameter at all, so pinning
