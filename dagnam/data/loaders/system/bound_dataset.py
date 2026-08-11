@@ -14,11 +14,16 @@ if TYPE_CHECKING:
 # Roles that mark a column as the architecture's input / target. Used to resolve a
 # column by intent when the binding's literal name does not match the dataset's
 # actual column names (e.g. binding "text" vs descriptor "review").
-_INPUT_ROLES = ("image_input", "text_input", "audio_input")
+_INPUT_ROLES = ("image_input", "text_input", "audio_input", "video_input")
 _TARGET_ROLES = ("target", "text_target")
 # Input modality inferred from the input transform's kind, so a framework converter
 # can apply its layout (pytorch transposes images to channels-first).
-_KIND_TO_MODALITY = {"image_resize": "image", "tokenize": "text", "audio": "audio"}
+_KIND_TO_MODALITY = {
+    "image_resize": "image",
+    "tokenize": "text",
+    "audio": "audio",
+    "video": "video",
+}
 
 
 class BoundNativeDataset:

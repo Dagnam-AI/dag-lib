@@ -10,7 +10,7 @@ import numpy as np
 from dagnam.data._polars_utils import clamp_token_ids, column_roles_from_binding
 from dagnam.data.dataset._typing import DatasetMixinBase
 from dagnam.data.dataset.hooks import (
-    _ChannelsFirstImageDataset,
+    _ChannelsFirstDataset,
     _TransformDataset,
     _with_collate,
     _wrap_collate,
@@ -20,6 +20,10 @@ from dagnam.data.loaders.torch_utils import should_pin_memory
 if TYPE_CHECKING:
     from torch import Tensor
     from torch.utils.data import DataLoader, Dataset
+
+# Bound-input modalities whose canonical layout is channels-LAST and therefore
+# needs the channels-first move for PyTorch (see BoundNativeDataset.input_kind).
+_CHANNELS_LAST_MODALITIES = frozenset({"image", "video"})
 
 TransformFn = Callable[[object], object]
 CollateFn = Callable[[object], object]
@@ -290,10 +294,11 @@ class PytorchDatasetMixin(DatasetMixinBase):
         if transform is not None or target_transform is not None:
             ds = _TransformDataset(ds, transform, target_transform)
 
-        # Canonical decoded images are channels-last [H, W, C]; PyTorch convs need
-        # channels-first [C, H, W]. Transpose only when the bound input is an image.
-        if getattr(native_train, "input_kind", None) == "image":
-            ds = _ChannelsFirstImageDataset(ds)
+        # Canonical decoded samples are channels-last ([H, W, C] images,
+        # [T, H, W, C] video clips); PyTorch convs need the channel axis first.
+        # Transpose only for the modalities that carry a trailing channel axis.
+        if getattr(native_train, "input_kind", None) in _CHANNELS_LAST_MODALITIES:
+            ds = _ChannelsFirstDataset(ds)
 
         return DataLoader(
             ds,

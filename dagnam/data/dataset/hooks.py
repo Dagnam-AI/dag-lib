@@ -153,12 +153,15 @@ class _TransformDataset(_TorchDataset[object]):
         return item
 
 
-class _ChannelsFirstImageDataset(_TorchDataset[object]):
-    """Transpose an image sample from channels-last to channels-first for PyTorch.
+class _ChannelsFirstDataset(_TorchDataset[object]):
+    """Transpose a sample from channels-last to channels-first for PyTorch.
 
-    The decoder + transform pipeline produces canonical channels-last ``[H, W, C]``
-    images (numpy/PIL convention, which TF/Flax consume as-is); only PyTorch needs
-    ``[C, H, W]``, applied here per item before the default collate stacks the batch.
+    The decoder + transform pipeline produces canonical channels-last samples
+    (numpy/PIL convention, which TF/Flax consume as-is): ``[H, W, C]`` images and
+    ``[T, H, W, C]`` video clips. Only PyTorch needs the channel axis first —
+    ``[C, H, W]`` for ``nn.Conv2d``, ``[C, T, H, W]`` for ``nn.Conv3d`` — and the
+    same trailing-axis move produces both, applied here per item before the
+    default collate stacks the batch.
     """
 
     def __init__(self, dataset: _TorchDataset[object] | Sequence[object]) -> None:
@@ -179,7 +182,7 @@ class _ChannelsFirstImageDataset(_TorchDataset[object]):
 
 
 __all__ = [
-    "_ChannelsFirstImageDataset",
+    "_ChannelsFirstDataset",
     "_TransformDataset",
     "_with_collate",
     "_wrap_collate",

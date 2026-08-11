@@ -8,6 +8,8 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image
 
+from dagnam.data.loaders.video import resize_frames
+
 
 def _hw(size: object) -> tuple[int, int]:
     if not isinstance(size, (list, tuple)) or len(size) != 2:
@@ -70,6 +72,24 @@ def _remap_contiguous(
     )
 
 
+def _fit_frame_count(clip: npt.NDArray[np.float32], frame_count: object) -> npt.NDArray[np.float32]:
+    """Trim/zero-pad a clip's leading time axis to the declared ``frame_count``.
+
+    The binding declares the architecture's clip length; a dataset whose clips
+    are longer or shorter would otherwise reach ``Conv3d`` with the wrong depth.
+    Mirrors the ``audio`` branch's ``target_length`` handling; a missing or
+    non-positive declaration leaves the clip untouched.
+    """
+    if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count <= 0:
+        return clip
+    if clip.shape[0] > frame_count:
+        return clip[:frame_count]
+    if clip.shape[0] < frame_count:
+        padding = [(0, frame_count - clip.shape[0]), *[(0, 0)] * (clip.ndim - 1)]
+        return np.pad(clip, padding).astype(np.float32)
+    return clip
+
+
 def apply_transform(
     value: npt.ArrayLike,
     transform: dict[str, Any],
@@ -87,6 +107,15 @@ def apply_transform(
         if image.ndim == 2:
             image = image[..., np.newaxis]
         return _normalize(image, normalize)
+    if kind == "video":
+        frames = resize_frames(value, _hw(params["size"])) if params.get("size") else value
+        clip = np.asarray(frames, dtype=np.float32) / 255.0
+        # Canonical channels-last [T, H, W, C]: a grayscale [T, H, W] clip gains an
+        # explicit channel axis so every framework converter sees the same rank
+        # (pytorch then moves it to [C, T, H, W] for Conv3d; tf/flax keep it last).
+        if clip.ndim == 3:
+            clip = clip[..., np.newaxis]
+        return _normalize(_fit_frame_count(clip, params.get("frame_count")), normalize)
     if kind == "mask":
         mask = _resize(value, params["resize"], nearest=True) if params.get("resize") else value
         mask_array = np.asarray(mask)

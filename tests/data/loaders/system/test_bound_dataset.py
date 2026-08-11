@@ -133,3 +133,32 @@ def test_system_bound_dataset_applies_descriptor_normalize_to_input_column() -> 
     x, y = dataset[0]
     assert np.allclose(x, 0.0)
     assert int(y) == 1
+
+
+def test_system_bound_dataset_input_kind_video_and_role_fallback() -> None:
+    # The binding carries the architecture-side name "video" while the dataset's
+    # column is "clip": resolution falls back to the declared video_input role.
+    store = ColumnStore(
+        {
+            "clip": Column.eager(np.zeros((2, 8, 4, 4, 3), np.uint8)),
+            "label": Column.eager(np.arange(2, dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "video",
+        "target_column": "label",
+        "input_transform": {"kind": "video", "params": {"size": [4, 4]}},
+        "target_transform": {"kind": "class_index", "params": {}},
+    }
+
+    dataset = BoundNativeDataset(
+        store,
+        binding,
+        descriptor_columns=[{"name": "clip"}, {"name": "label"}],
+        column_roles={"clip": "video_input", "label": "target"},
+    )
+
+    assert dataset.input_kind == "video"
+    x, y = dataset[0]
+    assert x.shape == (8, 4, 4, 3)  # channels-last [T, H, W, C]
+    assert int(y) == 0
