@@ -648,3 +648,40 @@ def test_to_tensorflow_audio_folder_dispatches(
     result = ds.to_tensorflow_dataset(split="train", batch_size=2, shuffle=False)
     assert result == "audio-tf"
     assert calls["split"] == "train"
+
+
+def test_native_tensorflow_dataset_keeps_video_channels_last() -> None:
+    """TF's Conv3D defaults to channels-last, so the clip must NOT be transposed.
+
+    Pins correctness, not merely "no crash": the same video-bound native dataset
+    the PyTorch converter turns into NCDHW must reach TF as NDHWC.
+    """
+    from dagnam.data.loaders.system.bound_dataset import BoundNativeDataset
+    from dagnam.data.loaders.system.column_store import Column, ColumnStore
+
+    store = ColumnStore(
+        {
+            "clip": Column.eager(np.zeros((6, 8, 8, 8, 3), np.uint8)),
+            "label": Column.eager(np.arange(6, dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "clip",
+        "target_column": "label",
+        "input_transform": {"kind": "video", "params": {"size": [8, 8]}},
+        "target_transform": {"kind": "class_index", "params": {}},
+    }
+    bound = BoundNativeDataset(store, binding, [{"name": "clip"}])
+    meta: JsonObject = {
+        "id": "vid",
+        "name": "vid",
+        "format": "array",
+        "dataset_type": "video",
+        "num_samples": 6,
+        "num_classes": 3,
+    }
+    ds = DagnamDataset(meta, None, _native_train=bound, _native_test=bound)
+
+    tf_ds = ds.to_tensorflow_dataset(split="train", batch_size=2, shuffle=False, binding=binding)
+    features, _y = cast("tuple[_HasShape, _TensorBatch]", next(iter(tf_ds)))
+    assert tuple(features.shape) == (2, 8, 8, 8, 3)

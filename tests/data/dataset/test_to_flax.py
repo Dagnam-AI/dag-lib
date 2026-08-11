@@ -21,7 +21,7 @@ from tests.data.dataset._native_helpers import (
     make_native_obj_ds,
 )
 
-from dagnam._types import NativeSplit
+from dagnam._types import JsonObject, NativeSplit
 from dagnam.data.dataset import DagnamDataset
 from dagnam.data.dataset.to_flax import _LazyFlaxBatchStream
 from dagnam.data.loaders.flax import FlaxBatch
@@ -549,3 +549,40 @@ def test_to_flax_native_flax_val_without_train_raises(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError, match="No native FLAX"):
         ds.native_flax_dataset(split="val", batch_size=2, shuffle=False)
+
+
+def test_native_flax_dataset_keeps_video_channels_last() -> None:
+    """Flax's ``nn.Conv`` is channels-last, so the clip must NOT be transposed.
+
+    Pins correctness, not merely "no crash": the same video-bound native dataset
+    the PyTorch converter turns into NCDHW must reach Flax as NDHWC.
+    """
+    from dagnam.data.loaders.system.bound_dataset import BoundNativeDataset
+    from dagnam.data.loaders.system.column_store import Column, ColumnStore
+
+    store = ColumnStore(
+        {
+            "clip": Column.eager(np.zeros((6, 8, 8, 8, 3), np.uint8)),
+            "label": Column.eager(np.arange(6, dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "clip",
+        "target_column": "label",
+        "input_transform": {"kind": "video", "params": {"size": [8, 8]}},
+        "target_transform": {"kind": "class_index", "params": {}},
+    }
+    bound = BoundNativeDataset(store, binding, [{"name": "clip"}])
+    meta = {
+        "id": "vid",
+        "name": "vid",
+        "format": "array",
+        "dataset_type": "video",
+        "num_samples": 6,
+        "num_classes": 3,
+    }
+    ds = DagnamDataset(cast("JsonObject", meta), None, _native_train=bound, _native_test=bound)
+
+    batches = ds.to_flax_dataset(split="train", batch_size=2, shuffle=False, binding=binding)
+    batch = batches[0]
+    assert tuple(cast("Any", batch.features).shape) == (2, 8, 8, 8, 3)

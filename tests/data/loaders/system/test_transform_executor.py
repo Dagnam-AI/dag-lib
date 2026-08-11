@@ -149,3 +149,80 @@ def test_system_transform_executor_audio_equal_length_returns_waveform() -> None
 
     assert out.shape == (50,)
     assert out.tolist() == waveform.tolist()
+
+
+def test_system_transform_executor_video_resizes_and_rescales_frames() -> None:
+    clip = np.full((4, 16, 16, 3), 255, np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {"size": [8, 8]}}, None)
+
+    assert out.shape == (4, 8, 8, 3)
+    assert out.dtype == np.float32
+    assert out.max() <= 1.0
+
+
+def test_system_transform_executor_video_without_size_returns_rescaled_original() -> None:
+    clip = np.full((2, 4, 4, 3), 255, np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {}}, None)
+
+    assert out.shape == (2, 4, 4, 3)
+    assert out.dtype == np.float32
+    assert out.max() <= 1.0
+
+
+def test_system_transform_executor_video_adds_channel_axis_to_grayscale_clip() -> None:
+    # Canonical clip rank is [T, H, W, C]; a decoded [T, H, W] grayscale clip
+    # gains the explicit channel axis (mirrors the image branch's [H, W] case)
+    # so the pytorch converter's channels-first move has a channel to move.
+    clip = np.zeros((3, 10, 10), np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {"size": [5, 5]}}, None)
+
+    assert out.shape == (3, 5, 5, 1)
+
+
+def test_system_transform_executor_video_applies_normalize() -> None:
+    clip = np.full((2, 4, 4, 3), 255, np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {}}, {"mean": [1.0], "std": [2.0]})
+
+    assert out.shape == (2, 4, 4, 3)
+    assert bool(np.allclose(out, 0.0))
+
+
+def test_system_transform_executor_video_trims_clip_to_declared_frame_count() -> None:
+    # The binding declares the architecture's frame_count; a longer clip is
+    # trimmed so the tensor matches the model instead of crashing at Conv3d
+    # (mirrors the audio branch's target_length pad/trim).
+    clip = np.zeros((12, 4, 4, 3), np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {"frame_count": 8}}, None)
+
+    assert out.shape == (8, 4, 4, 3)
+
+
+def test_system_transform_executor_video_pads_short_clip_to_declared_frame_count() -> None:
+    clip = np.full((3, 4, 4, 3), 255, np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {"frame_count": 5}}, None)
+
+    assert out.shape == (5, 4, 4, 3)
+    assert bool(np.all(out[3:] == 0.0))  # zero-padded tail
+    assert bool(np.all(out[:3] == 1.0))
+
+
+def test_system_transform_executor_video_ignores_a_non_positive_frame_count() -> None:
+    clip = np.zeros((6, 4, 4, 3), np.uint8)
+
+    for frame_count in (0, -1, None, True, "8"):
+        out = apply_transform(clip, {"kind": "video", "params": {"frame_count": frame_count}}, None)
+        assert out.shape == (6, 4, 4, 3)
+
+
+def test_system_transform_executor_video_leaves_a_matching_frame_count_alone() -> None:
+    clip = np.zeros((6, 4, 4, 3), np.uint8)
+
+    out = apply_transform(clip, {"kind": "video", "params": {"frame_count": 6}}, None)
+
+    assert out.shape == (6, 4, 4, 3)

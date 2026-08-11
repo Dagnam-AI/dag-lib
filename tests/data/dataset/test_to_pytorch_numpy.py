@@ -445,11 +445,11 @@ def test_transform_dataset_no_transforms_returns_item() -> None:
     assert wrapped[0] == "raw"
 
 
-def test_channels_first_image_dataset_transposes_hwc_to_chw() -> None:
-    from dagnam.data.dataset.hooks import _ChannelsFirstImageDataset
+def test_channels_first_dataset_transposes_image_hwc_to_chw() -> None:
+    from dagnam.data.dataset.hooks import _ChannelsFirstDataset
 
     base = [(np.zeros((4, 5, 3), np.float32), 1), (np.ones((4, 5, 3), np.float32), 0)]
-    ds = _ChannelsFirstImageDataset(cast("Sequence[object]", base))
+    ds = _ChannelsFirstDataset(cast("Sequence[object]", base))
 
     assert len(ds) == 2
     item = cast("tuple[object, object]", ds[0])
@@ -458,15 +458,15 @@ def test_channels_first_image_dataset_transposes_hwc_to_chw() -> None:
     assert item[1] == 1
 
 
-def test_channels_first_image_dataset_passes_short_and_non_tuple_through() -> None:
-    from dagnam.data.dataset.hooks import _ChannelsFirstImageDataset
+def test_channels_first_dataset_passes_short_and_non_tuple_through() -> None:
+    from dagnam.data.dataset.hooks import _ChannelsFirstDataset
 
-    one_tuple = _ChannelsFirstImageDataset(cast("Sequence[object]", [(np.zeros((2, 2, 3)),)]))
+    one_tuple = _ChannelsFirstDataset(cast("Sequence[object]", [(np.zeros((2, 2, 3)),)]))
     short_item = one_tuple[0]
     assert isinstance(short_item, tuple)
     assert len(cast("tuple[object, ...]", short_item)) == 1
 
-    non_tuple = _ChannelsFirstImageDataset(cast("Sequence[object]", ["raw"]))
+    non_tuple = _ChannelsFirstDataset(cast("Sequence[object]", ["raw"]))
     assert non_tuple[0] == "raw"
 
 
@@ -502,6 +502,55 @@ def test_native_pytorch_loader_transposes_bound_image_to_channels_first() -> Non
     batch = next(iter(loader))
     x = cast("tuple[object, object]", batch)[0]
     assert tuple(cast("Any", x).shape) == (2, 3, 8, 8)  # channels-first
+    del torch
+
+
+def test_channels_first_dataset_transposes_video_thwc_to_cthw() -> None:
+    from dagnam.data.dataset.hooks import _ChannelsFirstDataset
+
+    # The same channels-last -> channels-first move serves a [T, H, W, C] clip
+    # (Conv3d needs [C, T, H, W]) as it does an [H, W, C] image.
+    base = [(np.zeros((8, 4, 5, 3), np.float32), 1)]
+    ds = _ChannelsFirstDataset(cast("Sequence[object]", base))
+
+    item = cast("tuple[object, object]", ds[0])
+    data = cast("npt.NDArray[np.float32]", item[0])
+    assert data.shape == (3, 8, 4, 5)
+    assert item[1] == 1
+
+
+def test_native_pytorch_loader_transposes_bound_video_to_channels_first() -> None:
+    from dagnam.data.loaders.system.bound_dataset import BoundNativeDataset
+    from dagnam.data.loaders.system.column_store import Column, ColumnStore
+
+    store = ColumnStore(
+        {
+            "clip": Column.eager(np.zeros((6, 8, 8, 8, 3), np.uint8)),
+            "label": Column.eager(np.arange(6, dtype=np.int64)),
+        }
+    )
+    binding = {
+        "input_column": "clip",
+        "target_column": "label",
+        "input_transform": {"kind": "video", "params": {"size": [8, 8]}},
+        "target_transform": {"kind": "class_index", "params": {}},
+    }
+    bound = BoundNativeDataset(store, binding, [{"name": "clip"}])
+    meta: JsonObject = {
+        "id": "vid",
+        "name": "vid",
+        "format": "array",
+        "dataset_type": "video",
+        "num_samples": 6,
+        "num_classes": 3,
+    }
+    ds = DagnamDataset(meta, None, _native_train=bound, _native_test=bound)
+
+    loader = ds.to_pytorch_loader(split="train", batch_size=2, num_workers=0, binding=binding)
+    torch = _torch()
+    batch = next(iter(loader))
+    x = cast("tuple[object, object]", batch)[0]
+    assert tuple(cast("Any", x).shape) == (2, 3, 8, 8, 8)  # channels-first NCDHW
     del torch
 
 
