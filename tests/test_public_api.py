@@ -40,6 +40,8 @@ EXCEPTION_EXPORTS = [
     "InvalidURLError",
     "LROFailedError",
     "LROTimeoutError",
+    "ModelError",
+    "ModelNotFoundError",
     "PayloadTooLargeError",
     "ProjectNotFoundError",
     "QuotaExceededError",

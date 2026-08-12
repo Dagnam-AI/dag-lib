@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Auth", ("login", "register", "logout", "whoami")),
     ("Data", ("dataset", "cache")),
-    ("Models", ("projects", "codegen", "hub", "checkpoint", "inference", "deployments")),
+    ("Models", ("projects", "codegen", "hub", "models", "checkpoint", "inference", "deployments")),
     ("Training", ("training", "stream")),
     ("Account", ("usage", "account", "profile", "keys", "config", "version", "agent")),
 )
@@ -44,6 +44,7 @@ COMMAND_DESCRIPTIONS: dict[str, str] = {
     "projects": "Manage projects.",
     "codegen": "Generate model code from a project.",
     "hub": "Browse the model hub.",
+    "models": "Model registry: push, get, list, download, lineage.",
     "checkpoint": "List and download training checkpoints.",
     "inference": "Run inference against a deployment.",
     "deployments": "Manage model deployments.",
