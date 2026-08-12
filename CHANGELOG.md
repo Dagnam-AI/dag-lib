@@ -5,6 +5,25 @@ All notable changes to the `dagnam` Python SDK are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Model registry SDK: `dagnam.models`.** `push` creates a model entry and
+  draft version, uploads every artifact file (its registry `artifact_type`
+  inferred from the filename), and finalizes the version in one call.
+  `resolve`, `get_lineage`, and `get_task_contract` fetch version metadata,
+  lineage, and task contracts. `download` caches artifacts locally under
+  `~/.dagnam/models/`, named from the artifact's real `filename` (or
+  `logical_key`) when the server provides one, with the same checksum
+  verification, atomic promotion, and LRU eviction discipline as
+  `download_checkpoint` — eviction only runs once a `max_model_cache_size`
+  (or shared `max_cache_size`) budget is configured, and never evicts the
+  entry a call just wrote. New `ModelError` / `ModelNotFoundError`
+  exceptions join the top-level `dagnam` and `dagnam.exceptions` exports.
+  A `dagnam models` CLI group (`push`, `get`, `list`, `download`, `lineage`,
+  `task-contract`) is also available.
+
 ## [0.9.0] - 2026-08-10
 
 ### Removed

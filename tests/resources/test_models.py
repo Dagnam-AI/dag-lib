@@ -18,6 +18,7 @@ from dagnam._core.exceptions import (
     ModelError,
     ModelNotFoundError,
 )
+from dagnam.data.cache import get_cache_dir, touch_cache
 from dagnam.resources import models
 
 
@@ -417,6 +418,12 @@ class TestDownload:
         client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
         client.download_model_artifact_stream.side_effect = side
 
+        # Open the C1 eviction gate (a budget must be explicitly configured)
+        # so the eviction attempt below is actually reached.
+        monkeypatch.setattr(
+            models, "get_config_value", lambda key, default=None: 1024, raising=False
+        )
+
         def _boom(*_a: object, **_kw: object) -> list[str]:
             raise OSError("disk full")
 
@@ -427,6 +434,79 @@ class TestDownload:
 
         assert path.read_bytes() == body
         assert any("eviction" in record.message.lower() for record in caplog.records)
+
+    def test_real_eviction_never_deletes_the_just_written_entry(
+        self, model_cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """C1 / M6: a REAL (unmocked) eviction sweep must never delete the
+        artifact ``download()`` just returned, even when that artifact alone
+        exceeds the configured budget -- only a stale, older entry is fair
+        game.
+
+        Without the fix, ``download()`` called ``evict_lru_locked(base_dir=...)``
+        with no ``max_size_bytes``, which falls back inside ``evict_lru`` to
+        the DATASET budget key (``max_cache_size``) and evicts oldest-first
+        including the entry it just wrote, if that entry alone busts the
+        budget. This must FAIL on unfixed code: the just-downloaded artifact
+        (200 bytes) is deleted along with the stale one once the 100-byte
+        budget is applied, so ``path.exists()`` is False afterward.
+        """
+        # A pre-existing, stale cache entry for a DIFFERENT version, sized
+        # above the budget on its own so it is guaranteed eviction fodder.
+        old_dir = get_cache_dir("old-version", base_dir=model_cache)
+        (old_dir / "stale.bin").write_bytes(b"0" * 150)
+        touch_cache("old-version", base_dir=model_cache)
+        # Force it to sort before the fresh download regardless of wall-clock
+        # timing (touch_cache always stamps "now").
+        (old_dir / ".last_access").write_text("1")
+
+        # Patch BOTH the module-level import (post-fix code reads
+        # models.get_config_value directly) and the deep source (pre-fix code
+        # only reaches evict_lru's OWN internal fallback import) so this one
+        # test is a faithful repro against unfixed code AND a real assertion
+        # against the fix.
+        monkeypatch.setattr("dagnam._core.config.get_config_value", lambda key, default=None: 100)
+        monkeypatch.setattr(
+            models, "get_config_value", lambda key, default=None: 100, raising=False
+        )
+
+        body = b"1" * 200  # bigger than the 100-byte budget on its own
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.exists(), "the just-downloaded artifact must survive its own eviction sweep"
+        assert path.read_bytes() == body
+        assert not old_dir.exists(), "the stale entry should have been evicted"
+
+    def test_lru_marker_lands_in_the_same_dir_as_the_artifact(self, model_cache: Path) -> None:
+        """I2: a slug-shaped id (containing "/") is percent-encoded once for
+        its cache directory; the LRU marker must land in that SAME directory,
+        not a double-encoded phantom sibling.
+        """
+        version_id = "org/tiny-chat@v2"
+        body = b"weights"
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download(version_id, "a1", client=client, cache_dir=model_cache)
+
+        assert (path.parent / ".last_access").exists()
+        assert list(model_cache.iterdir()) == [path.parent]  # no phantom double-encoded sibling
+
+        # Re-download (now a cache hit) exercises the OTHER touch_cache call
+        # site -- the marker must still land in the same directory.
+        client.download_model_artifact_stream.reset_mock()
+        path_again = models.download(version_id, "a1", client=client, cache_dir=model_cache)
+        assert path_again == path
+        client.download_model_artifact_stream.assert_not_called()
+        assert (path.parent / ".last_access").exists()
+        assert list(model_cache.iterdir()) == [path.parent]
 
     def test_uses_default_cache_dir_when_omitted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -442,3 +522,85 @@ class TestDownload:
         path = models.download("v1", "a1", client=client)
 
         assert path == default_root / "v1" / "a1.bin"
+
+
+class TestDownloadArtifactFilename:
+    """I5: the local filename comes from the artifact's real name, not always
+    ``{artifact_id}.bin`` -- so a HuggingFace-shaped multi-file release stays
+    reconstructable under its real filenames.
+    """
+
+    def test_prefers_filename_field(self, model_cache: Path) -> None:
+        body = b"weights"
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [
+            {"id": "a1", "sha256": sha, "filename": "adapter_model.safetensors"}
+        ]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.name == "adapter_model.safetensors"
+
+    def test_falls_back_to_logical_key_last_segment(self, model_cache: Path) -> None:
+        body = b"{}"
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [
+            {"id": "a1", "sha256": sha, "logical_key": "architecture_config/config.json"}
+        ]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.name == "config.json"
+
+    def test_hostile_filename_is_sanitized_to_a_bare_basename(self, model_cache: Path) -> None:
+        body = b"weights"
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [
+            {"id": "a1", "sha256": sha, "filename": "../../etc/passwd"}
+        ]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.parent == model_cache / "v1"
+        assert path.name == "passwd"
+
+    def test_huggingface_shaped_set_lands_under_real_names_in_one_dir(
+        self, model_cache: Path
+    ) -> None:
+        # config.json, tokenizer.json, adapter_model.safetensors must each get
+        # their own real name inside the SAME version dir -- reconstructable
+        # as a real HF-shaped local directory, not all colliding on <id>.bin.
+        specs = [
+            ("a-config", "config.json", b"{}"),
+            ("a-tok", "tokenizer.json", b'{"vocab": []}'),
+            ("a-weights", "adapter_model.safetensors", b"weights"),
+        ]
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [
+            {"id": artifact_id, "sha256": _sha256(body), "filename": filename}
+            for artifact_id, filename, body in specs
+        ]
+
+        paths: dict[str, Path] = {}
+        for artifact_id, filename, body in specs:
+            side, _ = _fake_download(body)
+            client.download_model_artifact_stream.side_effect = side
+            paths[filename] = models.download(
+                "v1", artifact_id, client=client, cache_dir=model_cache
+            )
+
+        assert {p.name for p in paths.values()} == {
+            "config.json",
+            "tokenizer.json",
+            "adapter_model.safetensors",
+        }
+        assert len({p.parent for p in paths.values()}) == 1  # one shared version dir
+        bodies = {filename: body for _artifact_id, filename, body in specs}
+        for filename, path in paths.items():
+            assert path.read_bytes() == bodies[filename]

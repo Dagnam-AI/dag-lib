@@ -39,6 +39,14 @@ async def test_async_create_model_entry(client: AsyncDagnamClient, mock: RespxMo
     assert result == {"id": "m1", "slug": "tiny-chat"}
 
 
+async def test_async_create_model_entry_sends_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/models").mock(return_value=httpx.Response(201, json={"id": "m1"}))
+    await client.create_model_entry({"name": "x", "slug": "x"})
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
+
+
 async def test_async_create_model_entry_409_duplicate_slug(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
@@ -142,6 +150,16 @@ async def test_async_create_model_version(client: AsyncDagnamClient, mock: Respx
     assert await client.create_model_version("m1", {"origin": "trained"}) == {"id": "v1"}
 
 
+async def test_async_create_model_version_sends_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/models/m1/versions").mock(
+        return_value=httpx.Response(201, json={"id": "v1"})
+    )
+    await client.create_model_version("m1", {"origin": "trained"})
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
+
+
 async def test_async_create_model_version_404(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
@@ -207,6 +225,18 @@ async def test_async_initiate_model_artifact(
         "v1", {"logical_key": "weights", "size_bytes": 10}
     )
     assert result["artifact_id"] == "a1"
+
+
+async def test_async_initiate_model_artifact_sends_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/model-versions/v1/artifacts:initiate").mock(
+        return_value=httpx.Response(
+            201, json={"artifact_id": "a1", "upload_method": "POST", "upload_url": "/x"}
+        )
+    )
+    await client.initiate_model_artifact("v1", {"logical_key": "weights", "size_bytes": 10})
+    assert route.calls[-1].request.headers.get("Idempotency-Key")
 
 
 async def test_async_initiate_model_artifact_404_not_draft(

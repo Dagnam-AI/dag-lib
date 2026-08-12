@@ -304,6 +304,28 @@ The SDK exposes project CRUD, architecture save/import, dataset linking, model
 hub search and publishing, code preview/validation/download, and async codegen
 jobs through `LongRunningOperation`.
 
+## Model Registry
+
+```python
+version = dagnam.models.push(
+    name="tiny-chat",
+    slug="tiny-chat",
+    description="A tiny fine-tuned chat model",
+    files=["adapter_model.safetensors", "adapter_config.json"],
+)
+
+info = dagnam.models.resolve(version["id"])
+lineage = dagnam.models.get_lineage(version["id"])
+path = dagnam.models.download(version["id"], "artifact_abc123")
+```
+
+`push` creates a model entry and draft version, uploads every file (each
+artifact's registry type inferred from its filename), and finalizes the
+version in one call. `resolve` and `get_lineage` fetch version metadata and
+lineage; `download` caches artifacts under `~/.dagnam/models/`, named from
+the artifact's real filename when the server provides one, with the same
+checksum verification as checkpoints.
+
 ## Async Client
 
 Install the async extra:
@@ -341,6 +363,9 @@ dagnam stream <job-id>
 
 dagnam deployments list
 dagnam hub search --search resnet
+dagnam models push --name tiny-chat --slug tiny-chat --description "..." --file weights.safetensors
+dagnam models list
+dagnam models download <version-id> <artifact-id>
 dagnam projects list
 dagnam codegen preview <project-id>
 

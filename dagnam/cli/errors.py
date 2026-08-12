@@ -401,6 +401,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.DeploymentNotFoundError, _not_found_report("dagnam deployments list")),
         (m.HubModelNotFoundError, _not_found_report("dagnam hub list")),
         (m.CheckpointNotFoundError, _not_found_report("dagnam checkpoint list <job-id>")),
+        (m.ModelNotFoundError, _not_found_report("dagnam models list")),
         (m.StreamError, _stream_report),
         (m.LROTimeoutError, _lro_timeout_report),
         (m.LROFailedError, _lro_failed_report),

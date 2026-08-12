@@ -37,13 +37,21 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
         model_id: str | None = None,
         params: QueryParams | None = None,
         json_body: JsonValue = None,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
+        """Issue an authenticated request against a registry route.
+
+        ``idempotent=True`` mints an ``Idempotency-Key`` so a transient
+        failure on a create POST (entry/version/artifact-initiate) retries
+        into a server-side replay instead of orphaning a duplicate draft.
+        """
         resp = await self._request(
             method,
             path,
             params=params,
             json=json_body,
             raise_for=lambda r: raise_for_model(r, model_id),
+            idempotent=idempotent,
         )
         if not resp.content:
             return None
@@ -56,7 +64,7 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
 
     async def create_model_entry(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
-            await self._registry_req("POST", "/api/v1/models", json_body=payload)
+            await self._registry_req("POST", "/api/v1/models", json_body=payload, idempotent=True)
         )
 
     async def get_model_entry(self, model_id: str) -> JsonObject:
@@ -95,6 +103,7 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/models/{quote_path_segment(model_id)}/versions",
                 model_id=model_id,
                 json_body=payload,
+                idempotent=True,
             )
         )
 
@@ -132,6 +141,7 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/model-versions/{quote_path_segment(version_id)}/artifacts:initiate",
                 model_id=version_id,
                 json_body=payload,
+                idempotent=True,
             )
         )
 

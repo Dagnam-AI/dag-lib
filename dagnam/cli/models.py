@@ -6,7 +6,7 @@ import argparse
 import json
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args
+from dagnam.cli.common import add_collection_output_args, print_json
 from dagnam.cli.presentation import emit_result
 from dagnam.resources import models
 
@@ -24,7 +24,7 @@ def cmd_models_push(args: argparse.Namespace) -> None:
         license=args.license,
         visibility=args.visibility,
     )
-    print(json.dumps(result, indent=2) if args.json else result)
+    print_json(result)
 
 
 def cmd_models_get(args: argparse.Namespace) -> None:
@@ -32,7 +32,7 @@ def cmd_models_get(args: argparse.Namespace) -> None:
 
     client = resolve_client(None, None, None)
     result = client.get_model_entry(args.model_id)
-    print(json.dumps(result, indent=2) if args.json else result)
+    print_json(result)
 
 
 def cmd_models_list(args: argparse.Namespace) -> None:
@@ -50,17 +50,17 @@ def cmd_models_list(args: argparse.Namespace) -> None:
 
 def cmd_models_download(args: argparse.Namespace) -> None:
     path = models.download(args.version_id, args.artifact_id, cache_dir=args.output_dir)
-    print(json.dumps({"path": str(path)}, indent=2) if args.json else path)
+    print_json({"path": str(path)})
 
 
 def cmd_models_lineage(args: argparse.Namespace) -> None:
     result = models.get_lineage(args.version_id)
-    print(json.dumps(result, indent=2) if args.json else result)
+    print_json(result)
 
 
 def cmd_models_task_contract(args: argparse.Namespace) -> None:
     result = models.get_task_contract(args.key, args.version)
-    print(json.dumps(result, indent=2) if args.json else result)
+    print_json(result)
 
 
 def register_models(subparsers: SubParsersAction) -> None:

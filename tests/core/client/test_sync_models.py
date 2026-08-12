@@ -33,6 +33,14 @@ def test_create_model_entry(client: DagnamClient, rmock: RequestsMocker) -> None
     assert result == {"id": "m1", "slug": "tiny-chat"}
 
 
+def test_create_model_entry_sends_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/models", json={"id": "m1"}, status_code=201)
+    client.create_model_entry({"name": "x", "slug": "x"})
+    assert rmock.last_request.headers.get("Idempotency-Key")
+
+
 def test_create_model_entry_409_duplicate_slug(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/models", status_code=409, text="slug already exists")
     with pytest.raises(ModelError):
@@ -127,6 +135,14 @@ def test_create_model_version(client: DagnamClient, rmock: RequestsMocker) -> No
     assert result == {"id": "v1", "status": "draft"}
 
 
+def test_create_model_version_sends_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/models/m1/versions", json={"id": "v1"}, status_code=201)
+    client.create_model_version("m1", {"origin": "trained"})
+    assert rmock.last_request.headers.get("Idempotency-Key")
+
+
 def test_create_model_version_404(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/models/missing/versions", status_code=404)
     with pytest.raises(ModelNotFoundError):
@@ -174,6 +190,18 @@ def test_initiate_model_artifact(client: DagnamClient, rmock: RequestsMocker) ->
     )
     result = client.initiate_model_artifact("v1", {"logical_key": "weights", "size_bytes": 10})
     assert result["artifact_id"] == "a1"
+
+
+def test_initiate_model_artifact_sends_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/model-versions/v1/artifacts:initiate",
+        json={"artifact_id": "a1", "upload_method": "POST", "upload_url": "/x"},
+        status_code=201,
+    )
+    client.initiate_model_artifact("v1", {"logical_key": "weights", "size_bytes": 10})
+    assert rmock.last_request.headers.get("Idempotency-Key")
 
 
 def test_initiate_model_artifact_404_not_draft(client: DagnamClient, rmock: RequestsMocker) -> None:
