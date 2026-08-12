@@ -33,6 +33,7 @@ _ALLOWED_SITES = {
     ("account.py", "upload_profile_photo"),  # multipart files={"file": ...}
     ("projects.py", "upload_project_thumbnail"),  # multipart files={"file": ...}
     ("hub.py", "upload_model_file"),  # multipart files={"file": ...}
+    ("models.py", "upload_model_artifact_direct"),  # multipart files={"file": ...}
     # Unauthenticated bootstrap POSTs — _request always attaches the bearer
     # auth header these two must NOT send.
     ("account.py", "register"),

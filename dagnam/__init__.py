@@ -51,6 +51,8 @@ from dagnam.exceptions import (
     InvalidURLError,
     LROFailedError,
     LROTimeoutError,
+    ModelError,
+    ModelNotFoundError,
     PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
@@ -60,7 +62,7 @@ from dagnam.exceptions import (
     TrainingJobNotFoundError,
     UploadError,
 )
-from dagnam.resources import account, codegen, datasets, deployments, hub, projects, studio
+from dagnam.resources import account, codegen, datasets, deployments, hub, models, projects, studio
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.datasets import (
     delete_dataset,
@@ -149,6 +151,8 @@ __all__ = [
     "LROFailedError",
     "LROTimeoutError",
     "LongRunningOperation",
+    "ModelError",
+    "ModelNotFoundError",
     "PayloadTooLargeError",
     "ProjectNotFoundError",
     "QuotaExceededError",
@@ -193,6 +197,7 @@ __all__ = [
     "list_training_jobs",
     "load_dataset",
     "load_metadata",
+    "models",
     "preview_dataset",
     "projects",
     "report_error",

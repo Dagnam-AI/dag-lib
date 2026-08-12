@@ -10,6 +10,7 @@ from dagnam._core.aio.datasets import AsyncDatasetsMixin
 from dagnam._core.aio.deployments import AsyncDeploymentsMixin
 from dagnam._core.aio.hub import AsyncHubMixin
 from dagnam._core.aio.inference import AsyncInferenceMixin
+from dagnam._core.aio.models import AsyncModelsMixin
 from dagnam._core.aio.projects import AsyncProjectsMixin
 from dagnam._core.aio.training import AsyncTrainingMixin
 
@@ -21,6 +22,7 @@ class AsyncDagnamClient(
     AsyncCheckpointsMixin,
     AsyncDeploymentsMixin,
     AsyncHubMixin,
+    AsyncModelsMixin,
     AsyncProjectsMixin,
     AsyncCodegenMixin,
     AsyncTrainingMixin,

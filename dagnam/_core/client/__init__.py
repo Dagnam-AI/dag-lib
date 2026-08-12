@@ -10,6 +10,7 @@ from dagnam._core.client.datasets import DatasetsClientMixin
 from dagnam._core.client.deployments import DeploymentsClientMixin
 from dagnam._core.client.hub import HubClientMixin
 from dagnam._core.client.inference import InferenceClientMixin
+from dagnam._core.client.models import ModelsClientMixin
 from dagnam._core.client.projects import ProjectsClientMixin
 from dagnam._core.client.training import TrainingClientMixin
 
@@ -21,6 +22,7 @@ class DagnamClient(
     CheckpointsClientMixin,
     DeploymentsClientMixin,
     HubClientMixin,
+    ModelsClientMixin,
     ProjectsClientMixin,
     CodegenClientMixin,
     TrainingClientMixin,

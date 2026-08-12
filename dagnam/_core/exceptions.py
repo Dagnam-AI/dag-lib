@@ -142,6 +142,18 @@ class HubModelNotFoundError(DagnamError):
         super().__init__(f"Hub model '{model_id}' not found")
 
 
+class ModelError(DagnamError):
+    """Generic registry model operation failure."""
+
+
+class ModelNotFoundError(DagnamError):
+    """Registry model entry, version, or artifact ID not found (404)."""
+
+    def __init__(self, model_id: str):
+        self.model_id = model_id
+        super().__init__(f"Model '{model_id}' not found")
+
+
 class ProjectNotFoundError(DagnamError):
     """Project ID not found (404)."""
 

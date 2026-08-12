@@ -28,6 +28,8 @@ from dagnam._core.exceptions import (
     HubError,
     HubModelNotFoundError,
     InvalidURLError,
+    ModelError,
+    ModelNotFoundError,
     PayloadTooLargeError,
     ProjectNotFoundError,
     QuotaExceededError,
@@ -475,6 +477,28 @@ def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
         raise HubError(_text(resp))
     if code in (400, 422):
         raise HubError(_text(resp))
+    raise APIError(code, _text(resp))
+
+
+def raise_for_model(resp: ResponseLike, model_id: str | None = None) -> None:
+    """Map a registry model-entry/version/artifact response to its typed error.
+
+    Mirrors ``raise_for_hub`` exactly, with one addition: 409 (a duplicate
+    ``slug`` on ``create_model_entry``) joins 400/422 as a ``ModelError`` since
+    the registry API uses it for that one conflict case.
+    """
+    if _ok(resp):
+        return
+    _check_common(resp)
+    code = _status_code(resp)
+    if code == 401:
+        raise AuthError("Authentication failed: invalid or expired API key")
+    if code == 404:
+        if model_id:
+            raise ModelNotFoundError(model_id)
+        raise ModelError(_text(resp))
+    if code in (400, 409, 422):
+        raise ModelError(_text(resp))
     raise APIError(code, _text(resp))
 
 

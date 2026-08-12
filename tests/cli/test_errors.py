@@ -25,6 +25,7 @@ from dagnam._core.exceptions import (
     HubModelNotFoundError,
     LROFailedError,
     LROTimeoutError,
+    ModelNotFoundError,
     ProjectNotFoundError,
     QuotaExceededError,
     StreamError,
@@ -316,6 +317,7 @@ def test_deployment_state_error() -> None:
         (DeploymentNotFoundError("dep1"), "dagnam deployments list"),
         (HubModelNotFoundError("h1"), "dagnam hub list"),
         (CheckpointNotFoundError("c1"), "dagnam checkpoint list <job-id>"),
+        (ModelNotFoundError("md1"), "dagnam models list"),
     ],
 )
 def test_not_found_errors_suggest_list_command(exc: DagnamError, list_command: str) -> None:
