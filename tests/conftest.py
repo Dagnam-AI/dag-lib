@@ -42,6 +42,21 @@ except ImportError:  # pragma: no cover - torch-less installs skip those tests a
     pass
 
 
+@pytest.fixture(autouse=True)
+def unforced_colour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin colour off suite-wide so stderr assertions ignore the caller's shell.
+
+    `dagnam.cli.errors` resolves colour from `FORCE_COLOR` *before* `NO_COLOR`
+    and tty detection, so a developer or CI image that exports `FORCE_COLOR`
+    wraps every `Error:` in ANSI codes and reddens ~28 plain-substring
+    assertions that have nothing to do with their change. Setting `NO_COLOR`
+    here would not help — it loses to `FORCE_COLOR`. Deleting the variable is
+    what makes the decision hermetic. `tests/cli/test_errors.py` already did
+    this locally; this generalizes it to every test that asserts on stderr.
+    """
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
 @pytest.fixture
 def cache_dir(tmp_path: Path):
     """Temporary cache directory for dataset storage during tests."""
@@ -144,7 +159,7 @@ def sample_json_data():
 def dataset_version_factory() -> Callable[..., dict[str, object]]:
     """Build a dict matching the backend's `DatasetVersion` response model.
 
-    Mirrors `mvp-backend/src/datasets/schemas.py::DatasetVersion` field-for-field
+    Mirrors the API's `DatasetVersion` schema field-for-field
     (id, dataset_id, version_number, parent_version_id, operation,
     operation_params, file_path, size_bytes, num_samples, content_hash,
     data_format, rows_removed, rows_changed, is_pinned, created_at) so CLI/client
