@@ -188,6 +188,7 @@ def test_deployments_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
         ["deployments", "delete", "x"],
         ["deployments", "logs", "x"],
         ["deployments", "metrics", "x"],
+        ["deployments", "revisions", "x"],
         ["deployments", "platforms"],
         ["deployments", "estimate-cost", "--platform", "aws", "--instance-type", "s"],
         [
@@ -223,6 +224,7 @@ def test_deployments_apierrors_exit(
         delete=mock.Mock(side_effect=APIError(500, "boom")),
         logs=mock.Mock(side_effect=APIError(500, "boom")),
         metrics=mock.Mock(side_effect=APIError(500, "boom")),
+        revisions=mock.Mock(side_effect=APIError(500, "boom")),
         platforms=mock.Mock(side_effect=APIError(500, "boom")),
         estimate_cost=mock.Mock(side_effect=APIError(500, "boom")),
         validate=mock.Mock(side_effect=APIError(500, "boom")),
@@ -444,3 +446,11 @@ def test_deployments_rollback_no_wait(run_cli: CliRunner, capsys: StrCapture) ->
         )
     op.wait.assert_not_called()
     assert json.loads(capsys.readouterr().out)["status"] == "rolling_back"
+
+
+def test_deployments_revisions(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(revisions=mock.Mock(return_value=[{"id": "rev1"}]))
+    with mock.patch("dagnam.deployments", fake):
+        run_cli(["deployments", "revisions", "dep-1", "--page", "2", "--limit", "5"])
+    assert "rev1" in capsys.readouterr().out
+    fake.revisions.assert_called_once_with("dep-1", page=2, limit=5)

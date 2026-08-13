@@ -244,6 +244,19 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             )
         )
 
+    async def get_deployment_revisions(
+        self, deployment_id: str, *, page: int = 1, limit: int = 50
+    ) -> JsonArray:
+        """GET /api/v1/deployments/{id}/revisions — revision history, newest first."""
+        return ensure_json_array(
+            await self._deployment_req(
+                "GET",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/revisions",
+                deployment_id=deployment_id,
+                params={"page": page, "limit": limit},
+            )
+        )
+
     async def get_deployment_health_full(self, deployment_id: str) -> JsonObject:
         return ensure_json_object(
             await self._deployment_req(

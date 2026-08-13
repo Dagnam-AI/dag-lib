@@ -346,3 +346,13 @@ def test_create_deployment_domain_409_raises_immediately(
     with pytest.raises(DeploymentStateError):
         client.create_deployment({"project_id": "p1"})
     assert rmock.call_count == 1  # domain 409 is terminal, no retry
+
+
+def test_get_deployment_revisions(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/deployments/dep1/revisions",
+        json=[{"id": "rev1", "revision_number": 2, "is_active": True}],
+    )
+    result = client.get_deployment_revisions("dep1", page=2, limit=5)
+    assert result == [{"id": "rev1", "revision_number": 2, "is_active": True}]
+    assert rmock.last_request.qs == {"page": ["2"], "limit": ["5"]}
