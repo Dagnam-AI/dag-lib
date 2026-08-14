@@ -240,7 +240,7 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
             # Presigned redirect: stream the object-storage URL without auth
             # (the signature is in the query string, never a forwarded header).
             async with self._client.stream("GET", location) as resp:
-                expected_checksum = resp.headers.get("x-checksum-sha256") or expected_checksum
+                expected_checksum = expected_checksum or resp.headers.get("x-checksum-sha256")
                 if not resp.is_success:
                     await self._raise_for_model_artifact(resp, artifact_id)
                 await self._stream_response_to_file(resp, dest)

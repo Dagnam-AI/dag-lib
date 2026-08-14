@@ -28,7 +28,7 @@ from dagnam._core.client.base import (
     safe_error_body_from_response,
     scrub_secret_params,
 )
-from dagnam._core.config import get_config_value
+from dagnam._core.config import load_config
 from dagnam._core.exceptions import APIError, ChecksumError, ModelError, ModelNotFoundError
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject, JsonValue
@@ -88,6 +88,19 @@ def _artifact_filename(artifact: JsonObject, artifact_id: str) -> str:
     if isinstance(logical_key, str) and logical_key:
         return safe_download_basename(logical_key, default=default)
     return default
+
+
+def _resolve_model_cache_budget() -> int | None:
+    """Return the positive configured model-cache budget, if any."""
+    config = load_config()
+    configured = (
+        config["max_model_cache_size"]
+        if "max_model_cache_size" in config
+        else config.get("max_cache_size")
+    )
+    if isinstance(configured, bool) or not isinstance(configured, int) or configured <= 0:
+        return None
+    return configured
 
 
 def _put_to_presigned_url(url: str, file_path: Path, headers: JsonValue | None) -> None:
@@ -317,8 +330,14 @@ def download(
         written, server_sha = resolved.download_model_artifact_stream(
             version_id, artifact_id, staging_path
         )
+        if expected_sha is not None and server_sha is not None and expected_sha != server_sha:
+            written.unlink(missing_ok=True)
+            raise ChecksumError(
+                f"Artifact '{artifact_id}' checksum disagreement: authenticated metadata "
+                f"reported {expected_sha}, download response reported {server_sha}"
+            )
         actual_sha = compute_file_checksum(written)
-        verify_sha = server_sha or expected_sha
+        verify_sha = expected_sha or server_sha
         if verify_sha is None:
             written.unlink(missing_ok=True)
             raise ChecksumError(
@@ -340,10 +359,8 @@ def download(
     # explicitly configured (never falls back to evict_lru's default dataset
     # budget; see C1). Padding the budget by the fresh entry's own size means
     # the sweep can evict every older entry but never this one.
-    max_bytes = get_config_value("max_model_cache_size", None) or get_config_value(
-        "max_cache_size", None
-    )
-    if isinstance(max_bytes, int):
+    max_bytes = _resolve_model_cache_budget()
+    if max_bytes is not None:
         try:
             evict_lru_locked(
                 max_size_bytes=max_bytes + get_cache_size(version_dir), base_dir=base_dir

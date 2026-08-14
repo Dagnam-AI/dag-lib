@@ -383,6 +383,28 @@ def test_download_model_artifact_stream_redirect_to_presigned(
     assert "Authorization" not in rmock.last_request.headers
 
 
+def test_download_model_artifact_stream_redirect_preserves_api_checksum(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """An unauthenticated redirect target cannot replace the API checksum."""
+    url = f"{API}/api/v1/model-versions/v1/artifacts/a1/download"
+    presigned = "https://bucket.s3.example.com/a1?sig=untrusted"
+    rmock.get(
+        url,
+        status_code=307,
+        headers={"Location": presigned, "X-Checksum-SHA256": "authenticated-sha"},
+    )
+    rmock.get(
+        presigned,
+        content=b"substituted-weights",
+        headers={"X-Checksum-SHA256": "attacker-controlled-sha"},
+    )
+
+    _written, expected_sha = client.download_model_artifact_stream("v1", "a1", tmp_path / "a1.bin")
+
+    assert expected_sha == "authenticated-sha"
+
+
 def test_download_model_artifact_stream_401(
     client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
 ) -> None:

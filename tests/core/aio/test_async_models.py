@@ -395,6 +395,31 @@ async def test_async_download_model_artifact_307_redirect_to_presigned(
     assert "authorization" not in presigned_req.headers
 
 
+async def test_async_download_model_artifact_redirect_preserves_api_checksum(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    """An unauthenticated redirect target cannot replace the API checksum."""
+    url = "/api/v1/model-versions/v1/artifacts/a1/download"
+    presigned = "https://bucket.s3.example.com/a1?sig=untrusted"
+    mock.get(url).mock(
+        return_value=httpx.Response(
+            307,
+            headers={"location": presigned, "x-checksum-sha256": "authenticated-sha"},
+        )
+    )
+    mock.get(presigned).mock(
+        return_value=httpx.Response(
+            200,
+            content=b"substituted-weights",
+            headers={"x-checksum-sha256": "attacker-controlled-sha"},
+        )
+    )
+
+    _written, checksum = await client.download_model_artifact("v1", "a1", tmp_path / "a1.bin")
+
+    assert checksum == "authenticated-sha"
+
+
 async def test_async_download_model_artifact_308_redirect(
     client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
 ) -> None:

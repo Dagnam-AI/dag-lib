@@ -8,6 +8,9 @@ Serve a trained checkpoint as an inference endpoint. Create is a long-running op
 - `dagnam deployments get <deployment_id>` — deployment detail.
 - `dagnam deployments create --project-id ID --name NAME --checkpoint-path PATH --platform P --deployment-type T --instance-type IT [--num-instances 1]` — create. All except `--num-instances` are required. **[guardrail: costly]**
 - `dagnam deployments pause <deployment_id>` / `dagnam deployments resume <deployment_id>` — lifecycle.
+- `dagnam deployments update <deployment_id> [--name NAME] [--instance-type TYPE] [--num-instances N] [--min-instances N] [--max-instances N] [--auto-scaling | --no-auto-scaling]` — at least one update flag is required; instance type and capacity changes can change cost. **[guardrail: costly]**
+- `dagnam deployments scale <deployment_id> --num-instances N [--no-wait]` — `--num-instances` is required. **[guardrail: costly]**
+- `dagnam deployments rollback <deployment_id> --checkpoint-id ID [--no-wait]` — `--checkpoint-id` is required and names a registered checkpoint, not a filesystem path; this changes the live served revision. **[guardrail: confirm target]**
 - `dagnam deployments delete <deployment_id>` — **[guardrail: irreversible]**.
 - `dagnam deployments logs <deployment_id> [--level] [--search] [--limit 100]`.
 - `dagnam deployments metrics <deployment_id> [--time-range 24h]`.
@@ -20,7 +23,7 @@ Serve a trained checkpoint as an inference endpoint. Create is a long-running op
 - `dagnam.deployments.pause(id) -> LRO`, `dagnam.deployments.resume(id) -> LRO`, `dagnam.deployments.scale(id, num_instances) -> LRO` — **[guardrail: scale is costly]**, `dagnam.deployments.rollback(id, checkpoint_id) -> LRO` — resolves and re-authorizes `checkpoint_id` server-side (checkpoint -> job -> project -> owner); a checkpoint you don't own returns 404.
 - `dagnam.deployments.update(id, ...)`, `dagnam.deployments.delete(id)` — **[guardrail: delete is irreversible]**.
 
-> `scale`, `rollback`, `health`, and `update` are SDK-only (no CLI subcommand).
+> `health` is SDK-only (no CLI subcommand).
 
 ## Recipe
 ```python
