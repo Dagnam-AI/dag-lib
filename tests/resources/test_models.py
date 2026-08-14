@@ -397,11 +397,44 @@ class TestDownload:
             return dest, "wrong" * 12
 
         client = MagicMock(spec=DagnamClient)
-        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": "irrelevant"}]
+        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": "wrong" * 12}]
         client.download_model_artifact_stream.side_effect = side_effect
 
         with pytest.raises(ChecksumError, match="checksum mismatch"):
             models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert not (model_cache / "v1" / "a1.bin").exists()
+        assert not (model_cache / "v1" / "a1.bin.partial").exists()
+
+    def test_authenticated_metadata_rejects_substituted_redirect_body_and_header(
+        self, model_cache: Path
+    ) -> None:
+        """A matching body/header from object storage cannot override registry metadata."""
+        trusted_sha = _sha256(b"trusted-weights")
+        substituted = b"substituted-weights"
+        substituted_sha = _sha256(substituted)
+        api = "https://api.test"
+        presigned = "https://bucket.s3.example.com/a1?sig=untrusted"
+        client = DagnamClient(api, "key")
+
+        with rm_module.Mocker() as mock:
+            mock.get(
+                f"{api}/api/v1/model-versions/v1/artifacts",
+                json=[{"id": "a1", "sha256": trusted_sha}],
+            )
+            mock.get(
+                f"{api}/api/v1/model-versions/v1/artifacts/a1/download",
+                status_code=307,
+                headers={"Location": presigned},
+            )
+            mock.get(
+                presigned,
+                content=substituted,
+                headers={"X-Checksum-SHA256": substituted_sha},
+            )
+
+            with pytest.raises(ChecksumError, match="checksum"):
+                models.download("v1", "a1", client=client, cache_dir=model_cache)
 
         assert not (model_cache / "v1" / "a1.bin").exists()
         assert not (model_cache / "v1" / "a1.bin.partial").exists()
@@ -421,7 +454,7 @@ class TestDownload:
         # Open the C1 eviction gate (a budget must be explicitly configured)
         # so the eviction attempt below is actually reached.
         monkeypatch.setattr(
-            models, "get_config_value", lambda key, default=None: 1024, raising=False
+            models, "load_config", lambda: {"max_model_cache_size": 1024}, raising=False
         )
 
         def _boom(*_a: object, **_kw: object) -> list[str]:
@@ -460,14 +493,8 @@ class TestDownload:
         # timing (touch_cache always stamps "now").
         (old_dir / ".last_access").write_text("1")
 
-        # Patch BOTH the module-level import (post-fix code reads
-        # models.get_config_value directly) and the deep source (pre-fix code
-        # only reaches evict_lru's OWN internal fallback import) so this one
-        # test is a faithful repro against unfixed code AND a real assertion
-        # against the fix.
-        monkeypatch.setattr("dagnam._core.config.get_config_value", lambda key, default=None: 100)
         monkeypatch.setattr(
-            models, "get_config_value", lambda key, default=None: 100, raising=False
+            models, "load_config", lambda: {"max_model_cache_size": 100}, raising=False
         )
 
         body = b"1" * 200  # bigger than the 100-byte budget on its own
@@ -481,6 +508,53 @@ class TestDownload:
         assert path.exists(), "the just-downloaded artifact must survive its own eviction sweep"
         assert path.read_bytes() == body
         assert not old_dir.exists(), "the stale entry should have been evicted"
+
+    def test_shared_model_cache_budget_is_used_when_primary_is_absent(
+        self, model_cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        old_dir = get_cache_dir("old-version", base_dir=model_cache)
+        (old_dir / "stale.bin").write_bytes(b"0" * 150)
+        touch_cache("old-version", base_dir=model_cache)
+        (old_dir / ".last_access").write_text("1")
+        monkeypatch.setattr(models, "load_config", lambda: {"max_cache_size": 1}, raising=False)
+
+        body = b"1" * 200
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.exists()
+        assert not old_dir.exists(), "the shared budget applies when the primary key is absent"
+
+    @pytest.mark.parametrize("invalid_budget", [-1, 0, True, "100"])
+    def test_invalid_model_cache_budget_skips_real_eviction(
+        self,
+        invalid_budget: object,
+        model_cache: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid model-specific budgets disable eviction, including explicit zero."""
+        old_dir = get_cache_dir("old-version", base_dir=model_cache)
+        (old_dir / "stale.bin").write_bytes(b"0" * 150)
+        touch_cache("old-version", base_dir=model_cache)
+        (old_dir / ".last_access").write_text("1")
+
+        config = {"max_model_cache_size": invalid_budget, "max_cache_size": 1}
+        monkeypatch.setattr(models, "load_config", lambda: config, raising=False)
+
+        body = b"1" * 200
+        side, sha = _fake_download(body)
+        client = MagicMock(spec=DagnamClient)
+        client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
+        client.download_model_artifact_stream.side_effect = side
+
+        path = models.download("v1", "a1", client=client, cache_dir=model_cache)
+
+        assert path.exists()
+        assert old_dir.exists(), "invalid budget must not trigger an eviction sweep"
 
     def test_lru_marker_lands_in_the_same_dir_as_the_artifact(self, model_cache: Path) -> None:
         """I2: a slug-shaped id (containing "/") is percent-encoded once for

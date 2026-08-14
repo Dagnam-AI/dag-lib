@@ -88,6 +88,13 @@ class TestReadDelegation:
             limit=25,
         )
 
+    def test_revisions_delegates(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.get_deployment_revisions.return_value = [{"id": "rev1", "is_active": True}]
+        result = deployments.revisions("dep-1", page=2, limit=5, client=client)
+        assert result == [{"id": "rev1", "is_active": True}]
+        client.get_deployment_revisions.assert_called_once_with("dep-1", page=2, limit=5)
+
 
 class TestLifecycleLRO:
     def test_create_returns_lro_with_initial_payload(self) -> None:

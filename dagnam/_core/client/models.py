@@ -238,7 +238,7 @@ class ModelsClientMixin(BaseDagnamClient):
             location = resp.headers["Location"]
             resp.close()
             resp = self._get_stream_no_auth(location)
-            expected_checksum = resp.headers.get("X-Checksum-SHA256") or expected_checksum
+            expected_checksum = expected_checksum or resp.headers.get("X-Checksum-SHA256")
 
         if not is_success_response(resp):
             code = resp.status_code

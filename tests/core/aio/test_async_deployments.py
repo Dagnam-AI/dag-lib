@@ -321,3 +321,16 @@ async def test_async_create_deployment_retries_transient_with_same_key(
     keys = {c.request.headers.get("Idempotency-Key") for c in route.calls}
     assert len(keys) == 1
     assert next(iter(keys))
+
+
+async def test_async_get_deployment_revisions(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/deployments/dep1/revisions").mock(
+        return_value=httpx.Response(200, json=[{"id": "rev1", "is_active": True}])
+    )
+    result = await client.get_deployment_revisions("dep1")
+    assert result == [{"id": "rev1", "is_active": True}]
+    url = str(route.calls[0].request.url)
+    assert "page=1" in url
+    assert "limit=50" in url

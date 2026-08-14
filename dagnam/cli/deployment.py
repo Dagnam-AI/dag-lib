@@ -154,6 +154,13 @@ def cmd_deployments_logs(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_deployments_revisions(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.deployments.revisions(args.deployment_id, page=args.page, limit=args.limit)
+    print_json(result)
+
+
 def cmd_deployments_metrics(args: argparse.Namespace) -> None:
     import dagnam
 
@@ -313,6 +320,7 @@ def register_deployments(subparsers: SubParsersAction) -> None:
         "delete": ("Delete a deployment.", "Delete a deployment permanently."),
         "logs": ("Show deployment logs.", "Fetch logs for a deployment."),
         "metrics": ("Show deployment metrics.", "Fetch metrics for a deployment."),
+        "revisions": ("Show revision history.", "List a deployment's revisions, newest first."),
     }
     for command_name, handler in {
         "pause": cmd_deployments_pause,
@@ -321,6 +329,7 @@ def register_deployments(subparsers: SubParsersAction) -> None:
         "delete": cmd_deployments_delete,
         "logs": cmd_deployments_logs,
         "metrics": cmd_deployments_metrics,
+        "revisions": cmd_deployments_revisions,
     }.items():
         short_help, long_help = deployment_help[command_name]
         command = deployment_sub.add_parser(command_name, help=short_help, description=long_help)
@@ -334,6 +343,11 @@ def register_deployments(subparsers: SubParsersAction) -> None:
         if command_name == "metrics":
             command.add_argument(
                 "--time-range", default="24h", help="Window, e.g. 24h (default: 24h)."
+            )
+        if command_name == "revisions":
+            command.add_argument("--page", type=int, default=1, help="Page number (default: 1).")
+            command.add_argument(
+                "--limit", type=int, default=50, help="Results per page (default: 50)."
             )
         command.set_defaults(func=handler)
 

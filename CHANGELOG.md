@@ -23,6 +23,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
   exceptions join the top-level `dagnam` and `dagnam.exceptions` exports.
   A `dagnam models` CLI group (`push`, `get`, `list`, `download`, `lineage`,
   `task-contract`) is also available.
+- **Deployment revision history: `dagnam.deployments.revisions`.** Lists a
+  deployment's revisions newest first — revision number, model version,
+  serving engine, capacity mode, status, failure reason, creation time, and
+  which one is currently serving. Paged via `page` / `limit` (the server caps
+  a page at 200). Available on the sync and async clients as
+  `get_deployment_revisions`, and as a `dagnam deployments revisions <id>`
+  CLI subcommand.
 
 ## [0.9.0] - 2026-08-10
 

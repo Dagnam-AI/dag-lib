@@ -172,6 +172,20 @@ def logs(
     )
 
 
+def revisions(
+    deployment_id: str,
+    *,
+    page: int = 1,
+    limit: int = 50,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonArray:
+    """Fetch a deployment's revision history, newest first."""
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_deployment_revisions(_stringify_id(deployment_id), page=page, limit=limit)
+
+
 # ---------------------------------------------------------------------------
 # Write operations — LRO on lifecycle transitions
 # ---------------------------------------------------------------------------
@@ -561,6 +575,7 @@ __all__ = [
     "predict_stream",
     "resume",
     "retry",
+    "revisions",
     "rollback",
     "scale",
     "stream_events",
