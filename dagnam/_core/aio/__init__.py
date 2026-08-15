@@ -8,6 +8,7 @@ from dagnam._core.aio.checkpoints import AsyncCheckpointsMixin
 from dagnam._core.aio.codegen import AsyncCodegenMixin
 from dagnam._core.aio.datasets import AsyncDatasetsMixin
 from dagnam._core.aio.deployments import AsyncDeploymentsMixin
+from dagnam._core.aio.foundation import AsyncFoundationMixin
 from dagnam._core.aio.hub import AsyncHubMixin
 from dagnam._core.aio.inference import AsyncInferenceMixin
 from dagnam._core.aio.models import AsyncModelsMixin
@@ -26,6 +27,7 @@ class AsyncDagnamClient(
     AsyncProjectsMixin,
     AsyncCodegenMixin,
     AsyncTrainingMixin,
+    AsyncFoundationMixin,
     BaseAsyncDagnamClient,
 ):
     """Async wrapper around the Dagnam.AI REST API using ``httpx``."""

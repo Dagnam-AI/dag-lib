@@ -46,6 +46,7 @@ from dagnam.exceptions import (
     DeploymentStateError,
     DeploymentValidationError,
     EmailNotVerifiedError,
+    FoundationRunNotFoundError,
     HubError,
     HubModelNotFoundError,
     InvalidURLError,
@@ -62,7 +63,17 @@ from dagnam.exceptions import (
     TrainingJobNotFoundError,
     UploadError,
 )
-from dagnam.resources import account, codegen, datasets, deployments, hub, models, projects, studio
+from dagnam.resources import (
+    account,
+    codegen,
+    datasets,
+    deployments,
+    foundation,
+    hub,
+    models,
+    projects,
+    studio,
+)
 from dagnam.resources.checkpoints import download_checkpoint
 from dagnam.resources.datasets import (
     delete_dataset,
@@ -145,6 +156,7 @@ __all__ = [
     "DeploymentStateError",
     "DeploymentValidationError",
     "EmailNotVerifiedError",
+    "FoundationRunNotFoundError",
     "HubError",
     "HubModelNotFoundError",
     "InvalidURLError",
@@ -182,6 +194,7 @@ __all__ = [
     "enable_debug_logging",
     "estimate_resources",
     "evict_lru",
+    "foundation",
     "get_api_key",
     "get_api_url",
     "get_cache_dir",
