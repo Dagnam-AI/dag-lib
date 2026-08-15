@@ -17,9 +17,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dagnam_contracts import normalize_diagram_state, validate_architecture
 import pytest
-
-from dagnam._contracts import normalize_diagram_state, validate_architecture
 
 _CORPUS = json.loads(Path(__file__).with_name("validation-corpus.json").read_text(encoding="utf-8"))
 _CASES: list[dict[str, Any]] = _CORPUS["cases"]

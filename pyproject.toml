@@ -442,7 +442,10 @@ release-check = { sequence = ["check", "audit", "build"], help = "Run quality ga
 root_package = "dagnam"
 
 [[tool.importlinter.contracts]]
-name = "layered SDK: _contracts <- _core <- data <- resources/cli"
+name = "layered SDK: _core <- data <- resources/cli"
 type = "layers"
-layers = ["cli", "resources", "data", "_core", "_contracts"]
+# `_contracts` was the deepest layer until 0.10.0 removed it — the contract now
+# ships as the separate `dagnam-contracts` distribution, which is a third-party
+# dependency from this package's point of view and so is not a layer here.
+layers = ["cli", "resources", "data", "_core"]
 containers = ["dagnam"]

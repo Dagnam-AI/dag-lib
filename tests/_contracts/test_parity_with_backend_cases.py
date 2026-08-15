@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+from dagnam_contracts import validate_params
 import pytest
 
 from dagnam import projects
-from dagnam._contracts import validate_params
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import ArchitectureValidationError
 from dagnam._types import JsonValue

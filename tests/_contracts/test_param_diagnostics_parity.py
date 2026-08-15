@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dagnam._contracts import validate_params
+from dagnam_contracts import validate_params
 
 _GOLDEN = json.loads(Path(__file__).with_name("param-diagnostics.json").read_text("utf-8"))
 

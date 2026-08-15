@@ -5,10 +5,10 @@ from __future__ import annotations
 import socket
 from typing import TYPE_CHECKING
 
+from dagnam_contracts import ParamError
 import pytest
 import requests
 
-from dagnam._contracts import ParamError
 from dagnam._core.exceptions import (
     APIError,
     ArchitectureValidationError,
