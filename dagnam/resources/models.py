@@ -31,7 +31,7 @@ from dagnam._core.client.base import (
 from dagnam._core.config import load_config
 from dagnam._core.exceptions import APIError, ChecksumError, ModelError, ModelNotFoundError
 from dagnam._core.resolver import resolve_client
-from dagnam._types import JsonObject, JsonValue
+from dagnam._types import JsonObject, JsonValue, ensure_json_array, ensure_json_object
 from dagnam.data.cache import (
     cache_dir_name,
     compute_file_checksum,
@@ -208,6 +208,110 @@ def push(
     return resolved.finalize_model_version(version_id)
 
 
+def push_run_artifacts(
+    *,
+    files: Sequence[str],
+    job_id: str | None = None,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonObject:
+    """Publish a training run's own output to the registry, from inside the run.
+
+    The narrow counterpart to :func:`push`: the caller declares only the files
+    it produced, and the server derives the registry entry, the version, each
+    artifact's type and its storage key from the training job itself. So an
+    off-host or local run can hand back its weights with nothing but the
+    run-scoped credential it already has, which can write artifacts for its own
+    job and nothing else — it can neither name what it writes to nor reach any
+    other run. Use :func:`push` when the caller legitimately chooses the name
+    and slug of a model it is importing.
+
+    ``job_id`` defaults to ``DAGNAM_JOB_ID`` (set in the run's environment
+    alongside the ``DAGNAM_API_KEY`` run token), so a run pushes its own output
+    without being told which run it is.
+
+    The whole call is safely re-runnable, because version resolution is keyed
+    on the job and every entry of the push response says whether its bytes are
+    already in: an entry marked ``committed`` is skipped outright — not
+    re-uploaded, not re-completed — and carries no upload capability, since a
+    verified artifact's bytes are frozen and the version's digest is computed
+    over them. So an interrupted push uploads only what is left, a finished one
+    comes back with an empty artifact list and ``status == "ready"``, and
+    finalize is the single commit point: until it succeeds nothing downstream
+    resolves the version.
+
+    Returns the finalized version (``{"version_id", "status": "ready", ...}``).
+
+    Every leg surfaces: a push that dies part-way never reports success, and
+    never leaves a finalized version behind. **A caller that must survive a
+    failed push — a training run whose compute is already spent — should catch
+    ``DagnamError``, never ``APIError`` alone**, because the object-storage
+    upload leg (the production path) raises ``ModelError``, which is not an
+    ``APIError``. Only ``FileNotFoundError``/``OSError`` fall outside
+    ``DagnamError``, and both are raised before any network call.
+
+    Raises:
+        FileNotFoundError: a path in ``files`` does not exist. Checked up
+            front, before any network call, so a typo never leaves an orphaned
+            draft version on the server. (``OSError`` if a file is unreadable
+            or disappears between that check and being sized.)
+        ModelError: no job id was given and none is in the environment, or an
+            upload to a presigned object-storage URL was rejected (e.g. an
+            expired signature).
+        AuthError: no credential was resolved, or the server rejected it.
+        TrainingJobNotFoundError: no such job, not this credential's, or no
+            version to push to — one uniform answer for all three.
+        QuotaExceededError: a plan limit or size ceiling refused the upload.
+        APIError: any other rejection, a transport failure on an API leg, or a
+            malformed response body (``ResponseError``).
+    """
+    paths = [Path(file_str) for file_str in files]
+    for path in paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"artifact file not found: {path}")
+
+    run_id = job_id if job_id is not None else os.environ.get("DAGNAM_JOB_ID")
+    if not run_id:
+        raise ModelError(
+            "no training job id: pass job_id=... or set DAGNAM_JOB_ID in the run's environment"
+        )
+
+    resolved = resolve_client(client, api_key, api_url)
+    payload: JsonObject = {
+        "files": [{"filename": p.name, "size_bytes": p.stat().st_size} for p in paths]
+    }
+    opened = resolved.initiate_run_artifacts(run_id, payload)
+
+    by_name = {p.name: p for p in paths}
+    for entry in ensure_json_array(opened.get("artifacts") or []):
+        target = ensure_json_object(entry)
+        if target.get("committed"):
+            # Already uploaded and verified by an earlier attempt. The entry
+            # carries no write capability at all — no route, and on object
+            # storage no presigned URL — because those bytes are frozen: the
+            # version's digest is computed over them at finalize.
+            continue
+        file_path = by_name[str(target["filename"])]
+        artifact_id = str(target["artifact_id"])
+        if target["upload_method"] == "PUT":
+            _put_to_presigned_url(str(target["upload_url"]), file_path, target.get("headers"))
+        elif not resolved.upload_run_artifact(run_id, artifact_id, file_path):
+            # An earlier attempt already committed these bytes; the registry
+            # freezes a verified artifact, so resuming skips it.
+            continue
+        resolved.complete_run_artifact(
+            run_id,
+            artifact_id,
+            {
+                "sha256": compute_file_checksum(file_path),
+                "size_bytes": file_path.stat().st_size,
+            },
+        )
+
+    return resolved.finalize_run_artifacts(run_id)
+
+
 def resolve(
     version_id: str,
     *,
@@ -375,5 +479,6 @@ __all__ = [
     "get_lineage",
     "get_task_contract",
     "push",
+    "push_run_artifacts",
     "resolve",
 ]

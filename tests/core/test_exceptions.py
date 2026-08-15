@@ -1,9 +1,9 @@
 """Unit tests for dagnam exception hierarchy."""
 
+from dagnam_contracts import ParamError
 import pytest
 
 import dagnam
-from dagnam._contracts import ParamError
 from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
     AccountLockedError,

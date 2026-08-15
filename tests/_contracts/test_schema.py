@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dagnam._contracts import COMPONENT_REGISTRY, LAYER_TYPE_TO_COMPONENT, SCHEMA_VERSION
+from dagnam_contracts import COMPONENT_REGISTRY, LAYER_TYPE_TO_COMPONENT, SCHEMA_VERSION
 
 
 def test_schema_loads_and_indexes_padding_components() -> None:

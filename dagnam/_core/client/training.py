@@ -175,6 +175,105 @@ class TrainingClientMixin(BaseDagnamClient):
             )
         )
 
+    # ------------------------------------------------------- run artifacts
+
+    def initiate_run_artifacts(self, job_id: str, payload: JsonObject) -> JsonObject:
+        """Open (or resume) this run's registry version and one upload per file.
+
+        ``POST /api/v1/training/jobs/{job_id}/artifacts``. ``payload`` declares
+        ``{"files": [{"filename": ..., "size_bytes": ...}]}`` and nothing else:
+        the entry, the version, each artifact's type and its storage key are all
+        derived server-side from the job, so a run token can never name where its
+        own output lands. Resolution is get-or-create keyed on the job, so a
+        retry converges on the same version instead of minting a second one.
+
+        Returns ``{"version_id", "status", "artifacts": [...]}``, one entry per
+        requested file. Each entry's ``committed`` flag is the authoritative
+        resume signal: ``true`` means the bytes are already uploaded and
+        verified, ``upload_url``/``upload_method`` are ``null``, and the caller
+        must neither re-upload nor complete it; ``false`` means both are set and
+        it is uploaded exactly as on a first push. A ``ready`` status with an
+        empty artifact list means the whole push already finished.
+        """
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/artifacts",
+                job_id=job_id,
+                json_body=payload,
+                idempotent=True,
+            )
+        )
+
+    def upload_run_artifact(self, job_id: str, artifact_id: str, file_path: Path) -> bool:
+        """POST one artifact's bytes to the run-scoped upload route.
+
+        Returns ``False`` when the server answers 409 — this artifact's bytes
+        are already committed and frozen, so the caller skips it rather than
+        failing. That is a backstop for a race, not the resume mechanism: the
+        push response's ``committed`` flag is the authoritative signal and is
+        the only one that works on an object-storage backend, where the upload
+        never reaches the API and there is no 409 to observe. Every other
+        non-2xx raises.
+
+        Uses raw ``requests.post`` (not ``self._request``) for the same reason
+        ``ModelsClientMixin.upload_model_artifact_direct`` does: ``requests``
+        must set its own multipart boundary Content-Type, which a JSON-oriented
+        ``self._request`` would override. The generous read timeout matches
+        ``resources.models._put_to_presigned_url`` — the server hashes a
+        multi-GB weights blob before it answers.
+        """
+        path = Path(file_path)
+        url = (
+            f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}"
+            f"/artifacts/{quote_path_segment(artifact_id)}/upload"
+        )
+        try:
+            with path.open("rb") as fh:
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    files={"file": (path.name, fh)},
+                    timeout=(10, 3600),
+                    allow_redirects=ALLOW_REDIRECTS,
+                )
+        except requests.ConnectionError as exc:
+            raise APIError(0, f"Connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise APIError(0, f"Request timed out: {exc}") from exc
+        if resp.status_code == 409:
+            return False
+        raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+        return True
+
+    def complete_run_artifact(
+        self, job_id: str, artifact_id: str, payload: JsonObject
+    ) -> JsonObject:
+        """Verify one uploaded artifact against its declared digest and size."""
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}"
+                f"/artifacts/{quote_path_segment(artifact_id)}/complete",
+                job_id=job_id,
+                json_body=payload,
+            )
+        )
+
+    def finalize_run_artifacts(self, job_id: str) -> JsonObject:
+        """Commit this run's registry version. Until this succeeds it resolves nowhere.
+
+        ``POST /api/v1/training/jobs/{job_id}/artifacts:finalize``. Idempotent:
+        an already-finalized version is returned as-is.
+        """
+        return self._expect_object(
+            self._training_request(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/artifacts:finalize",
+                job_id=job_id,
+            )
+        )
+
     def estimate_training_resources(self, config: JsonObject) -> JsonObject:
         """Estimate compute cost for a training config.
 
