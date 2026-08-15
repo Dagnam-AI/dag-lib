@@ -192,6 +192,65 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
             )
         )
 
+    # ------------------------------------------------------- run artifacts
+
+    async def initiate_run_artifacts(self, job_id: str, payload: JsonObject) -> JsonObject:
+        """Async mirror of ``TrainingClientMixin.initiate_run_artifacts``."""
+        return ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/artifacts",
+                job_id=job_id,
+                json_body=payload,
+                idempotent=True,
+            )
+        )
+
+    async def upload_run_artifact(self, job_id: str, artifact_id: str, file_path: Path) -> bool:
+        """Async mirror of ``TrainingClientMixin.upload_run_artifact``.
+
+        ``httpx`` sets its own multipart boundary Content-Type even through
+        ``self._request`` (see ``AsyncModelsMixin.upload_model_artifact_direct``),
+        so no raw-client workaround is needed here. ``raise_for`` is applied by
+        hand because a 409 is not a failure: it means an earlier attempt already
+        committed these bytes, so the caller skips the file.
+        """
+        path = Path(file_path)
+        route = (
+            f"/api/v1/training/jobs/{quote_path_segment(job_id)}"
+            f"/artifacts/{quote_path_segment(artifact_id)}/upload"
+        )
+        with path.open("rb") as fh:
+            resp = await self._request("POST", route, files={"file": (path.name, fh)})
+        if resp.status_code == 409:
+            return False
+        raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+        return True
+
+    async def complete_run_artifact(
+        self, job_id: str, artifact_id: str, payload: JsonObject
+    ) -> JsonObject:
+        """Async mirror of ``TrainingClientMixin.complete_run_artifact``."""
+        return ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}"
+                f"/artifacts/{quote_path_segment(artifact_id)}/complete",
+                job_id=job_id,
+                json_body=payload,
+            )
+        )
+
+    async def finalize_run_artifacts(self, job_id: str) -> JsonObject:
+        """Async mirror of ``TrainingClientMixin.finalize_run_artifacts``."""
+        return ensure_json_object(
+            await self._training_req(
+                "POST",
+                f"/api/v1/training/jobs/{quote_path_segment(job_id)}/artifacts:finalize",
+                job_id=job_id,
+            )
+        )
+
     async def estimate_training_resources(self, config: JsonObject) -> JsonObject:
         """Estimate compute cost for a training config.
 
