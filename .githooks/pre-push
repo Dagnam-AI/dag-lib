@@ -8,8 +8,10 @@
 # adversaries. Replace it with server-side rulesets if the org ever upgrades.
 #
 # The logic here is generic. Every repo-specific decision lives in the sibling
-# `policy` file, so this script is byte-identical across all four repos and
-# `info/scripts/check_branch_hygiene.py` fails if any copy drifts.
+# `policy` file, so this script is byte-identical across every Dagnam.AI repo
+# and a drift check fails if any copy diverges. That genericity is also what
+# keeps this file publishable: a public repo's hook names no path that only
+# exists inside a private one.
 #
 # Policy variables (see .githooks/policy):
 #   TRUNK          the integration branch, normally `main`
@@ -21,8 +23,12 @@
 #                  merged and tested on trunk first, never a commit that exists
 #                  only on the pointer.
 #   NO_FORCE       globs that may not be force-pushed or deleted, but do accept
-#                  direct fast-forward pushes (dag-lib's `release/X.Y` backport
-#                  branches, which legitimately diverge from trunk).
+#                  direct fast-forward pushes (`release/X.Y` backport branches
+#                  on the published libraries, which diverge from trunk by
+#                  design).
+#   PROMOTE        optional command that advances a production pointer the
+#                  supported way. Empty when the repo has no such tooling, and
+#                  the hint is then simply omitted.
 
 set -u
 
@@ -32,7 +38,7 @@ policy="$toplevel/.githooks/policy"
 
 if [ ! -f "$policy" ]; then
 	echo "pre-push: no policy file at $policy" >&2
-	echo "pre-push: run \`python info/scripts/install_hooks.py\` to repair this clone." >&2
+	echo "pre-push: it is tracked -- restore it with \`git checkout .githooks/policy\`." >&2
 	exit 1
 fi
 
@@ -43,6 +49,7 @@ fi
 : "${TRUNK_PUSH:=pr}"
 : "${FF_FROM_TRUNK:=}"
 : "${NO_FORCE:=}"
+: "${PROMOTE:=}"
 
 # Git for Windows runs hooks under MSYS2 bash, which strips CR when sourcing, so
 # a CRLF policy file is harmless there. A POSIX /bin/sh (dash on Debian and
@@ -53,6 +60,7 @@ TRUNK=$(printf '%s' "$TRUNK" | tr -d '\r')
 TRUNK_PUSH=$(printf '%s' "$TRUNK_PUSH" | tr -d '\r')
 FF_FROM_TRUNK=$(printf '%s' "$FF_FROM_TRUNK" | tr -d '\r')
 NO_FORCE=$(printf '%s' "$NO_FORCE" | tr -d '\r')
+PROMOTE=$(printf '%s' "$PROMOTE" | tr -d '\r')
 
 # Topic branches are advisory-only: a name outside this set is reported, never
 # refused. Blocking on a name would trade a real cost for a cosmetic one.
@@ -151,8 +159,8 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
 		if ! contains "$local_sha" "$trunk_ref"; then
 			refuse "'$branch' may only point at a commit already merged to '$TRUNK'." \
 				"$(git rev-parse --short "$local_sha") is not contained in $trunk_ref." \
-				"Production runs commits that were reviewed and tested on trunk;" \
-				"promote with: python info/scripts/promote.py <repo> <sha>"
+				"Production runs commits that were reviewed and tested on trunk."
+			[ -n "$PROMOTE" ] && echo "           promote with: $PROMOTE" >&2
 			continue
 		fi
 	fi
