@@ -137,4 +137,98 @@ def get_run(
     return resolved.get_foundation_run(run_id)
 
 
-__all__ = ["get_run", "list_bases", "list_recipes", "submit"]
+def evaluate(
+    *,
+    project_id: str,
+    subject_version_id: str,
+    dataset_version_id: str,
+    dataset_split: str,
+    scorer_keys: list[str],
+    baseline_version_id: str | None = None,
+    scorer_params: JsonObject | None = None,
+    confirm_resource_warning: bool = False,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonObject:
+    """Score a registry model version against a held-out dataset split.
+
+    Each entry in ``scorer_keys`` must appear in the subject's (and, when
+    given, the baseline's) task contract compatibility list -- the API
+    verifies this at submit time rather than silently skipping an
+    incompatible scorer. Pass ``baseline_version_id`` to compare the subject
+    against a second, contract-compatible version in the same run.
+
+    Returns the created run: ``run_id``, ``training_job_id`` (follow the job
+    with the training APIs), and the ``resolved_params`` each scorer was
+    frozen with.
+
+    Raises:
+        APIError: an id in the request did not resolve to something this
+            caller may use (404, uniform for every id so it cannot be used to
+            probe for other people's projects, versions, or datasets), or the
+            specification did not bind -- an unready subject/baseline, a
+            baseline on a different task contract, an unsupported scorer, or
+            a dataset that does not satisfy the evaluation's requirements
+            (400).
+        QuotaExceededError: the account is at its concurrent-training limit.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    payload: JsonObject = {
+        "project_id": project_id,
+        "subject_version_id": subject_version_id,
+        "baseline_version_id": baseline_version_id,
+        "dataset_version_id": dataset_version_id,
+        "dataset_split": dataset_split,
+        "scorer_keys": [str(key) for key in scorer_keys],
+        "scorer_params": scorer_params or {},
+        "confirm_resource_warning": confirm_resource_warning,
+    }
+    return resolved.create_evaluation(payload)
+
+
+def get_evaluation(
+    run_id: str,
+    *,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonObject:
+    """Read back a frozen evaluation specification.
+
+    Raises:
+        EvaluationRunNotFoundError: no such run for this caller. The API
+            answers the same 404 for a run that does not exist and one that
+            belongs to someone else.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.get_evaluation(run_id)
+
+
+def list_evaluations(
+    version_id: str,
+    *,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonArray:
+    """List every scorer result recorded against a registry model version.
+
+    One entry per ``(evaluation_run_id, scorer_key)`` pair that has ever been
+    recorded for this version, across every run that scored it -- not just
+    the most recent. A version with no recorded evaluations returns an empty
+    list, not an error.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_version_evaluations(version_id)
+
+
+__all__ = [
+    "evaluate",
+    "get_evaluation",
+    "get_run",
+    "list_bases",
+    "list_evaluations",
+    "list_recipes",
+    "submit",
+]
