@@ -121,3 +121,91 @@ def test_get_run_delegates() -> None:
     c = MagicMock(spec=DagnamClient, get_foundation_run=MagicMock(return_value=body))
     assert foundation.get_run("r1", client=c) == body
     c.get_foundation_run.assert_called_once_with("r1")
+
+
+# ------------------------------------------------------------------ evaluate
+
+EVALUATION_RUN: dict[str, Any] = {
+    "run_id": "e1",
+    "training_job_id": "j1",
+    "resolved_params": {"accuracy@1": {}},
+}
+
+
+def test_evaluate_builds_the_request_body() -> None:
+    c = MagicMock(spec=DagnamClient, create_evaluation=MagicMock(return_value=EVALUATION_RUN))
+    assert (
+        foundation.evaluate(
+            project_id="p1",
+            subject_version_id="v1",
+            baseline_version_id="v0",
+            dataset_version_id="dv1",
+            dataset_split="test",
+            scorer_keys=["accuracy@1", "macro-f1@1"],
+            scorer_params={"macro-f1@1": {"average": "macro"}},
+            confirm_resource_warning=True,
+            client=c,
+        )
+        == EVALUATION_RUN
+    )
+    c.create_evaluation.assert_called_once_with(
+        {
+            "project_id": "p1",
+            "subject_version_id": "v1",
+            "baseline_version_id": "v0",
+            "dataset_version_id": "dv1",
+            "dataset_split": "test",
+            "scorer_keys": ["accuracy@1", "macro-f1@1"],
+            "scorer_params": {"macro-f1@1": {"average": "macro"}},
+            "confirm_resource_warning": True,
+        }
+    )
+
+
+def test_evaluate_omitted_optionals_use_their_declared_defaults() -> None:
+    """``baseline_version_id`` stays ``None`` (the API's own optional default);
+    ``scorer_params`` becomes ``{}`` (the API declares it as an object, so
+    ``null`` would be rejected); ``confirm_resource_warning`` defaults False."""
+    c = MagicMock(spec=DagnamClient, create_evaluation=MagicMock(return_value={}))
+    foundation.evaluate(
+        project_id="p1",
+        subject_version_id="v1",
+        dataset_version_id="dv1",
+        dataset_split="test",
+        scorer_keys=["accuracy@1"],
+        client=c,
+    )
+    sent = c.create_evaluation.call_args.args[0]
+    assert sent["baseline_version_id"] is None
+    assert sent["scorer_params"] == {}
+    assert sent["confirm_resource_warning"] is False
+
+
+def test_evaluate_passes_scorer_params_through_verbatim() -> None:
+    """A scorer's params are declared by the scorer, not this layer -- an
+    unrecognised key must still reach the API, which owns the verdict."""
+    c = MagicMock(spec=DagnamClient, create_evaluation=MagicMock(return_value={}))
+    foundation.evaluate(
+        project_id="p1",
+        subject_version_id="v1",
+        dataset_version_id="dv1",
+        dataset_split="test",
+        scorer_keys=["accuracy@1"],
+        scorer_params={"accuracy@1": {"a_param_added_after_this_release": 7}},
+        client=c,
+    )
+    sent = c.create_evaluation.call_args.args[0]
+    assert sent["scorer_params"] == {"accuracy@1": {"a_param_added_after_this_release": 7}}
+
+
+def test_get_evaluation_delegates() -> None:
+    c = MagicMock(spec=DagnamClient, get_evaluation=MagicMock(return_value=EVALUATION_RUN))
+    assert foundation.get_evaluation("e1", client=c) == EVALUATION_RUN
+    c.get_evaluation.assert_called_once_with("e1")
+
+
+def test_list_evaluations_delegates() -> None:
+    results = [{"scorer_key": "accuracy@1", "value": 0.9}]
+    c = MagicMock(spec=DagnamClient, list_version_evaluations=MagicMock(return_value=results))
+    assert foundation.list_evaluations("v1", client=c) == results
+    c.list_version_evaluations.assert_called_once_with("v1")

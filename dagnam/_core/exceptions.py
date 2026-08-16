@@ -53,6 +53,19 @@ class FoundationRunNotFoundError(DagnamError):
         super().__init__(f"Foundation run '{run_id}' not found")
 
 
+class EvaluationRunNotFoundError(DagnamError):
+    """Evaluation run ID not found (404).
+
+    Also raised for a run that exists but belongs to someone else: the API
+    answers one 404 for both, so a caller cannot use this error to learn that
+    an id is real.
+    """
+
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        super().__init__(f"Evaluation run '{run_id}' not found")
+
+
 class CheckpointNotFoundError(DagnamError):
     """Checkpoint ID not found (404)."""
 
