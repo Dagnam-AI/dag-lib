@@ -9,6 +9,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Foundation fine-tuning SDK: `dagnam.foundation`.** `list_bases` pages the
+  curated base models the platform will fine-tune, `list_recipes` returns the
+  shipped training recipes, `submit` starts a run against a dataset version,
+  and `get_run` reads the run's frozen specification plus its job's live
+  status. Each recipe carries its hyperparameter **JSON Schema** and is
+  returned exactly as served -- the SDK never re-declares a hyperparameter or
+  filters an unrecognised key, so a form rendered from the schema and the
+  validation the API performs read the same declaration and cannot drift.
+  Submitting sends an `Idempotency-Key`, so a retry replays rather than
+  starting a second paid run. Available on the sync and async clients as
+  `list_foundation_catalog`, `list_training_recipes`, `create_foundation_run`
+  and `get_foundation_run`. New `FoundationRunNotFoundError` joins the
+  top-level `dagnam` and `dagnam.exceptions` exports.
+
 - **Model registry SDK: `dagnam.models`.** `push` creates a model entry and
   draft version, uploads every artifact file (its registry `artifact_type`
   inferred from the filename), and finalizes the version in one call.

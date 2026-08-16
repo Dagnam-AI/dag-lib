@@ -8,6 +8,7 @@ from dagnam._core.client.checkpoints import CheckpointsClientMixin
 from dagnam._core.client.codegen import CodegenClientMixin
 from dagnam._core.client.datasets import DatasetsClientMixin
 from dagnam._core.client.deployments import DeploymentsClientMixin
+from dagnam._core.client.foundation import FoundationClientMixin
 from dagnam._core.client.hub import HubClientMixin
 from dagnam._core.client.inference import InferenceClientMixin
 from dagnam._core.client.models import ModelsClientMixin
@@ -26,6 +27,7 @@ class DagnamClient(
     ProjectsClientMixin,
     CodegenClientMixin,
     TrainingClientMixin,
+    FoundationClientMixin,
     BaseDagnamClient,
 ):
     """Thin wrapper around the Dagnam.AI REST API."""
