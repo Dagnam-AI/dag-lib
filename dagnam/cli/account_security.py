@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 # so it is gated behind confirm_or_abort rather than a bare y/N prompt.
 _REVOKE_ALL_PROMPT = "This will revoke ALL active sessions for your account."
 
+# Disabling 2FA removes a security factor, so it is gated the same way
+# revoke-all is: a typed confirmation, not a y/N keypress.
+_DISABLE_2FA_PROMPT = "This will REMOVE two-factor authentication from your account."
+
 
 def cmd_change_password(args: argparse.Namespace) -> None:
     """Prompt for the current and a confirmed new password, then change it.
@@ -129,6 +133,103 @@ def cmd_sessions_revoke_all(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_2fa_status(args: argparse.Namespace) -> None:
+    """Report whether two-factor authentication is active."""
+    import dagnam
+
+    enabled = dagnam.account.two_factor_enabled()
+    emit_result(
+        {"two_factor_enabled": enabled},
+        output=args.output,
+        json_stdout=args.json,
+        render_human=lambda _payload: (
+            "Two-factor authentication is ENABLED."
+            if enabled
+            else "Two-factor authentication is DISABLED."
+        ),
+    )
+
+
+def _render_enrollment(payload: object) -> str:
+    """Format the one-time enrollment material.
+
+    Unlike ``change-password``, this command MUST print the response body: the
+    secret and backup codes are the whole point of the call and the server will
+    never return them again. The warning is part of the output, not a docstring,
+    because a caller who scrolls past it has lost their recovery codes.
+    """
+    if not isinstance(payload, dict):
+        return str(payload)
+    lines = [
+        "Two-factor enrollment started. NOT yet active -- run `dagnam account 2fa verify`.",
+        "",
+        "Save these now. They are shown ONCE and cannot be retrieved again:",
+        "",
+        f"  Secret:  {payload.get('secret', '')}",
+    ]
+    uri = payload.get("qr_code_uri")
+    if uri:
+        lines.append(f"  QR URI:  {uri}")
+    codes = payload.get("backup_codes")
+    if isinstance(codes, list) and codes:
+        lines.append("")
+        lines.append("  Backup codes (each usable once):")
+        lines.extend(f"    {code}" for code in codes)
+    return "\n".join(lines)
+
+
+def cmd_2fa_enable(args: argparse.Namespace) -> None:
+    """Begin enrollment and print the one-time secret and backup codes.
+
+    The password is read via ``getpass`` rather than taken as an argument:
+    an argv value lands in shell history and in every process listing on the
+    machine.
+    """
+    password = getpass.getpass("Current password: ")
+    if not password:
+        error("Password cannot be empty.")
+
+    import dagnam
+
+    emit_result(
+        dagnam.account.enable_two_factor(password),
+        output=args.output,
+        json_stdout=args.json,
+        render_human=_render_enrollment,
+    )
+
+
+def cmd_2fa_verify(args: argparse.Namespace) -> None:
+    """Confirm enrollment with a TOTP code, activating 2FA.
+
+    The code MAY be passed as an argument: it is single-use and expires within
+    seconds, so it is not a durable secret the way the password is, and
+    accepting it in argv is what makes the command scriptable.
+    """
+    code = args.code or input("Authentication code: ").strip()
+    if not code:
+        error("Authentication code cannot be empty.")
+
+    import dagnam
+
+    dagnam.account.verify_two_factor(code)
+    print("Two-factor authentication is now enabled.")
+
+
+def cmd_2fa_disable(args: argparse.Namespace) -> None:
+    """Turn 2FA off, behind a typed confirmation and the account password."""
+    confirm_or_abort(_DISABLE_2FA_PROMPT, assume_yes=args.yes)
+
+    password = getpass.getpass("Current password: ")
+    if not password:
+        error("Password cannot be empty.")
+
+    import dagnam
+
+    dagnam.account.disable_two_factor(password)
+    print("Two-factor authentication disabled.")
+
+
 def _add_output_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Print raw JSON.")
     parser.add_argument("--output", help="Write the raw JSON to this path.")
@@ -165,3 +266,41 @@ def register_account_security(account_sub: SubParsersAction) -> None:
     )
     _add_output_flags(sessions_revoke_all)
     sessions_revoke_all.set_defaults(func=cmd_sessions_revoke_all)
+
+    twofa_cmd = account_sub.add_parser(
+        "2fa",
+        help="Inspect and manage two-factor authentication.",
+        description=(
+            "Enrollment is two steps: `enable` returns the secret and backup "
+            "codes, and `verify` activates 2FA with a code from the "
+            "authenticator you just enrolled. Enrollment that is never verified "
+            "leaves 2FA inactive, so a mistyped authenticator cannot lock you out."
+        ),
+    )
+    twofa_sub = twofa_cmd.add_subparsers(dest="twofa_command", required=True)
+
+    twofa_status = twofa_sub.add_parser("status", help="Report whether 2FA is active.")
+    _add_output_flags(twofa_status)
+    twofa_status.set_defaults(func=cmd_2fa_status)
+
+    twofa_enable = twofa_sub.add_parser(
+        "enable",
+        help="Start enrollment; prints the one-time secret and backup codes.",
+        description=(
+            "Prompts for your account password. The secret and backup codes are "
+            "shown ONCE and cannot be retrieved again. 2FA is not active until "
+            "`dagnam account 2fa verify` succeeds."
+        ),
+    )
+    _add_output_flags(twofa_enable)
+    twofa_enable.set_defaults(func=cmd_2fa_enable)
+
+    twofa_verify = twofa_sub.add_parser(
+        "verify", help="Activate 2FA with a code from your authenticator."
+    )
+    twofa_verify.add_argument("code", nargs="?", help="6-digit code. Prompted for when omitted.")
+    twofa_verify.set_defaults(func=cmd_2fa_verify)
+
+    twofa_disable = twofa_sub.add_parser("disable", help="Turn 2FA off.")
+    twofa_disable.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
+    twofa_disable.set_defaults(func=cmd_2fa_disable)

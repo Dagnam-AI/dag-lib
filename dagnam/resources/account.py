@@ -297,6 +297,72 @@ def revoke_all_sessions(
     return resolved.revoke_all_sessions()
 
 
+def two_factor_enabled(
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> bool:
+    """Whether two-factor authentication is active for the caller.
+
+    >>> dagnam.account.two_factor_enabled()
+    False
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.two_factor_enabled()
+
+
+def enable_two_factor(
+    password: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Begin two-factor enrollment and return the enrollment material.
+
+    The returned ``secret``, ``qr_code_uri`` and ``backup_codes`` are shown
+    EXACTLY ONCE and cannot be fetched again -- store them before continuing.
+    2FA is not active until :func:`verify_two_factor` succeeds with a code from
+    the authenticator you just enrolled.
+
+    >>> setup = dagnam.account.enable_two_factor(password)
+    >>> dagnam.account.verify_two_factor("123456")
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.enable_two_factor(password)
+
+
+def verify_two_factor(
+    code: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Confirm enrollment with a TOTP code, activating two-factor auth.
+
+    >>> dagnam.account.verify_two_factor("123456")
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.verify_two_factor(code)
+
+
+def disable_two_factor(
+    password: str,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Turn two-factor authentication off.
+
+    >>> dagnam.account.disable_two_factor(password)
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.disable_two_factor(password)
+
+
 def export_data(
     *,
     client: Optional[DagnamClient] = None,

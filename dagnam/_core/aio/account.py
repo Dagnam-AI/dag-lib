@@ -214,6 +214,62 @@ class AsyncAccountMixin(BaseAsyncDagnamClient):
             await self._account_get(f"/api/v1/users/{quote_path_segment(username)}/profile")
         )
 
+    # ---- Two-factor authentication ------------------------------------------
+    #
+    # There is no dedicated status endpoint: 2FA state is one field on the
+    # caller's profile, so `two_factor_enabled()` reads `get_profile()` rather
+    # than adding a second route that would have to be kept in agreement with
+    # it. One source, so the two can never disagree.
+
+    async def two_factor_enabled(self) -> bool:
+        """Whether 2FA is currently active for the caller.
+
+        Reads ``two_factor_enabled`` off ``GET /api/v1/users/me/profile``.
+        A profile that omits the field is reported as ``False``: an unknown
+        state must not read as "protected".
+        """
+        return bool((await self.get_profile()).get("two_factor_enabled", False))
+
+    async def enable_two_factor(self, password: str) -> JsonObject:
+        """Begin 2FA enrollment. ``POST /api/v1/users/me/2fa/enable``.
+
+        Requires the account password, so a stolen session token alone cannot
+        enroll a new factor.
+
+        Returns the enrollment material -- ``secret``, ``qr_code_uri`` and
+        ``backup_codes``. These plaintext values are returned EXACTLY ONCE and
+        are not retrievable afterwards, so a caller that discards them has to
+        restart enrollment. 2FA is not active until :meth:`verify_two_factor`
+        succeeds.
+        """
+        return ensure_json_object(
+            await self._account_write("POST", "/api/v1/users/me/2fa/enable", {"password": password})
+        )
+
+    async def verify_two_factor(self, code: str) -> JsonObject:
+        """Confirm enrollment with a TOTP code, activating 2FA.
+
+        ``POST /api/v1/users/me/2fa/verify``. The second half of
+        :meth:`enable_two_factor`: enrollment that is never verified leaves 2FA
+        inactive, which is what stops a mistyped authenticator from locking the
+        caller out of their own account.
+        """
+        return ensure_json_object(
+            await self._account_write("POST", "/api/v1/users/me/2fa/verify", {"code": code})
+        )
+
+    async def disable_two_factor(self, password: str) -> JsonObject:
+        """Turn 2FA off. ``POST /api/v1/users/me/2fa/disable``.
+
+        Password-gated for the same reason enabling is: removing a factor is as
+        security-relevant as adding one.
+        """
+        return ensure_json_object(
+            await self._account_write(
+                "POST", "/api/v1/users/me/2fa/disable", {"password": password}
+            )
+        )
+
     async def change_password(self, current_password: str, new_password: str) -> JsonObject:
         """Change the caller's password. ``POST /api/v1/users/me/change-password``.
 
