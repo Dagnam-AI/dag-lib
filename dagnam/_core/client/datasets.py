@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 import re
 
@@ -24,7 +25,20 @@ from dagnam._core.client.common import (
     response_json_array,
     response_json_object,
 )
-from dagnam._types import JsonObject, ensure_json_object
+from dagnam._types import JsonObject, JsonValue, ensure_json_object
+
+
+def explicit_splits_body(memberships: Mapping[str, Sequence[int]]) -> JsonObject:
+    """Body of ``POST .../splits/explicit``: split name -> owned row indices."""
+    member_row_indices: dict[str, JsonValue] = {
+        name: list(rows) for name, rows in memberships.items()
+    }
+    return {"member_row_indices": member_row_indices}
+
+
+def pii_scan_body(policy: Mapping[str, str] | None) -> JsonObject:
+    """Body of ``POST .../pii-scan``; an empty policy scans and reports only."""
+    return {"policy": dict[str, JsonValue](policy or {})}
 
 
 class DatasetsClientMixin(BaseDagnamClient):
@@ -348,6 +362,50 @@ class DatasetsClientMixin(BaseDagnamClient):
             allow_redirects=ALLOW_REDIRECTS,
         )
         return response_json_object(resp)
+
+    def _post_version_task(
+        self, dataset_id: str, version_id: str, action: str, body: JsonObject
+    ) -> JsonObject:
+        """POST /api/v1/datasets/{id}/versions/{vid}/{action} — 202 + ``task_id``.
+
+        No ``Idempotency-Key``: these routes do not accept one, so a retried
+        POST would enqueue a second task rather than replay the first.
+        """
+        url = (
+            f"{self.api_url}/api/v1/datasets/{quote_path_segment(dataset_id)}"
+            f"/versions/{quote_path_segment(version_id)}/{action}"
+        )
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+            json=body,
+            allow_redirects=ALLOW_REDIRECTS,
+        )
+        return response_json_object(resp)
+
+    def create_explicit_splits(
+        self, dataset_id: str, version_id: str, memberships: Mapping[str, Sequence[int]]
+    ) -> JsonObject:
+        """Enqueue an explicit-membership split of a version's rows.
+
+        ``memberships`` maps a split name (``train``/``validation``/``test``)
+        to the row indices it owns. Poll ``get_dataset_task_status`` with the
+        returned ``task_id`` until it settles.
+        """
+        return self._post_version_task(
+            dataset_id, version_id, "splits/explicit", explicit_splits_body(memberships)
+        )
+
+    def scan_pii(
+        self, dataset_id: str, version_id: str, policy: Mapping[str, str] | None = None
+    ) -> JsonObject:
+        """Enqueue a PII scan of a version.
+
+        ``policy`` maps a finding class to ``redact``/``drop``/``ignore``; an
+        empty policy scans and reports only.
+        """
+        return self._post_version_task(dataset_id, version_id, "pii-scan", pii_scan_body(policy))
 
     def preview_dataset(self, dataset_id: str, rows: int = 10) -> JsonObject:
         """Preview a dataset's samples and statistics.

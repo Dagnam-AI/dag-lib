@@ -47,6 +47,7 @@ EXCEPTION_EXPORTS = [
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",
+    "RunFailedError",
     "StreamError",
     "TaskNotFoundError",
     "TrainingJobNotFoundError",

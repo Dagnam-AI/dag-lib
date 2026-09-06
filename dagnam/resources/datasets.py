@@ -9,6 +9,7 @@ server-side ingestion completes.
 from __future__ import annotations
 
 from builtins import list as builtin_list
+from collections.abc import Mapping, Sequence
 from typing import Callable, Optional
 
 from dagnam._core.client import DagnamClient
@@ -24,6 +25,22 @@ _SUCCESS_STATES = frozenset({"completed", "ready", "success", "SUCCESS"})
 _FAILURE_STATES = frozenset({"failed", "failure", "FAILURE", "cancelled", "revoked", "REVOKED"})
 # The failure detail is ``error``; ``error_message`` is kept as a fallback.
 _ERROR_KEYS = ("error", "error_message")
+
+
+def _task_lro(client: DagnamClient, initial: JsonObject, name: str) -> LongRunningOperation:
+    """Wrap a 202 ``{"task_id": ...}`` response as an LRO over the task status route."""
+    task_id_value = initial.get("task_id")
+    if not isinstance(task_id_value, str):
+        raise ValueError(f"datasets.{name} response did not include a string task_id")
+    return LongRunningOperation(
+        poll=lambda: client.get_dataset_task_status(task_id_value),
+        success_states=_SUCCESS_STATES,
+        failure_states=_FAILURE_STATES,
+        state_key="status",
+        error_key=_ERROR_KEYS,
+        name=f"datasets.{name}({task_id_value})",
+        initial=initial,
+    )
 
 
 def list(
@@ -162,18 +179,50 @@ def upload_from_url(
         description=description,
         visibility=visibility,
     )
-    task_id_value = initial.get("task_id")
-    if not isinstance(task_id_value, str):
-        raise ValueError("Dataset upload response did not include a string task_id")
-    return LongRunningOperation(
-        poll=lambda: resolved.get_dataset_task_status(task_id_value),
-        success_states=_SUCCESS_STATES,
-        failure_states=_FAILURE_STATES,
-        state_key="status",
-        error_key=_ERROR_KEYS,
-        name=f"datasets.upload_from_url({task_id_value})",
-        initial=initial,
-    )
+    return _task_lro(resolved, initial, "upload_from_url")
+
+
+def create_explicit_splits(
+    dataset_id: str,
+    version_id: str,
+    memberships: Mapping[str, Sequence[int]],
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> LongRunningOperation:
+    """Split a dataset version by explicit row membership and return an LRO.
+
+    ``memberships`` maps a split name to the row indices it owns, e.g.
+    ``{"train": [0, 1, 2], "test": [3]}``. The server preflights the indices
+    against the version's row count (a 422 surfaces immediately) and then
+    materializes the splits in a task the LRO polls.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    initial = resolved.create_explicit_splits(dataset_id, version_id, memberships)
+    return _task_lro(resolved, initial, "create_explicit_splits")
+
+
+def scan_pii(
+    dataset_id: str,
+    version_id: str,
+    policy: Optional[Mapping[str, str]] = None,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> LongRunningOperation:
+    """Scan a dataset version for PII and return an LRO over the scan task.
+
+    With no ``policy`` (the default) the scan only reports. A policy maps a
+    finding class to ``redact``, ``drop`` or ``ignore``; classes left out are
+    ignored. The task result carries the findings plus ``pass_list`` — the
+    classes that were looked for — so a clean report is never read as more
+    than it is.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    initial = resolved.scan_pii(dataset_id, version_id, policy)
+    return _task_lro(resolved, initial, "scan_pii")
 
 
 def preview_dataset(

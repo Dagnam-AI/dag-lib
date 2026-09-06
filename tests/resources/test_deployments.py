@@ -413,3 +413,38 @@ def test_predict_stream_is_inference_stream_alias(monkeypatch) -> None:
     result = deployments_mod.predict_stream("dep1", {"text": "x"}, client="C")  # pyright: ignore[reportArgumentType]
     assert list(result) == []
     assert calls["args"] == ("dep1", {"text": "x"}, False, "C")
+
+
+class TestCreateFromTrainingJob:
+    def test_supplies_the_modal_chat_defaults(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.create_deployment.return_value = {"id": "dep-1", "status": "deploying"}
+        op = deployments.create_from_training_job(
+            name="chat", project_id="p1", training_job_id="job-1", client=client
+        )
+        assert isinstance(op, LongRunningOperation)
+        initial = op.initial()
+        assert initial is not None
+        assert initial["id"] == "dep-1"
+        sent = client.create_deployment.call_args.args[0]
+        assert sent["name"] == "chat"
+        assert sent["project_id"] == "p1"
+        assert sent["training_job_id"] == "job-1"
+        assert sent["platform"] == "vllm"
+        assert sent["deployment_type"] == "text"
+        assert sent["instance_type"] == "modal-serverless"
+        # ``checkpoint_path`` is required by the API but the weights come from
+        # the job; it must be non-empty and traversal-free, nothing more.
+        assert sent["checkpoint_path"]
+        assert "../" not in sent["checkpoint_path"]
+        assert "checkpoint_id" not in sent
+
+    def test_lro_polls_the_new_deployment(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.create_deployment.return_value = {"id": "dep-1", "status": "deploying"}
+        client.get_deployment.return_value = {"id": "dep-1", "status": "running"}
+        op = deployments.create_from_training_job(
+            name="chat", project_id="p1", training_job_id="job-1", client=client
+        )
+        assert op.wait(timeout=1, sleep=lambda _s: None).result()["status"] == "running"
+        client.get_deployment.assert_called_with("dep-1")
