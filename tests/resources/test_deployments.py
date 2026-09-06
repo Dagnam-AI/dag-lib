@@ -96,6 +96,48 @@ class TestReadDelegation:
         client.get_deployment_revisions.assert_called_once_with("dep-1", page=2, limit=5)
 
 
+class TestCreateRevision:
+    def test_defaults_capacity_policy_and_omits_nulls(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.create_deployment_revision.return_value = {"id": "rev2", "is_active": False}
+        result = deployments.create_revision("dep-1", model_version_id="mv1", client=client)
+        assert result == {"id": "rev2", "is_active": False}
+        client.create_deployment_revision.assert_called_once_with(
+            "dep-1",
+            {
+                "model_version_id": "mv1",
+                "capacity_mode": "serverless",
+                "capacity_policy": {"min_replicas": 0, "max_replicas": 1},
+            },
+            idempotency_key=None,
+        )
+
+    def test_passes_every_field_through(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.create_deployment_revision.return_value = {"id": "rev3"}
+        deployments.create_revision(
+            "dep-1",
+            model_version_id="mv1",
+            capacity_mode="dedicated",
+            capacity_policy={"min_replicas": 1, "max_replicas": 3},
+            region="eu-west-1",
+            engine_override="vllm",
+            idempotency_key="key-9",
+            client=client,
+        )
+        client.create_deployment_revision.assert_called_once_with(
+            "dep-1",
+            {
+                "model_version_id": "mv1",
+                "capacity_mode": "dedicated",
+                "capacity_policy": {"min_replicas": 1, "max_replicas": 3},
+                "region": "eu-west-1",
+                "engine_override": "vllm",
+            },
+            idempotency_key="key-9",
+        )
+
+
 class TestLifecycleLRO:
     def test_create_returns_lro_with_initial_payload(self) -> None:
         client = MagicMock(spec=DagnamClient)

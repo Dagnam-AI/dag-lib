@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import cast
 
 import polars as pl
 from typing_extensions import override
@@ -33,7 +32,8 @@ class PolarsDatasetMixin(DatasetMixinBase):
         """Load the dataset as a polars DataFrame.
 
         The result is cached after the first call.  Supports CSV, TSV,
-        JSON, and JSONL formats.
+        JSON, and JSONL formats; a ``json``-declared dataset whose data file
+        carries the ``.jsonl`` suffix is read as line-delimited JSON.
 
         Raises:
             ValueError: If the format is not supported.
@@ -54,11 +54,11 @@ class PolarsDatasetMixin(DatasetMixinBase):
             self._data = _read_csv_with_detected_separator(data_file)
         elif fmt == "tsv":
             self._data = pl.read_csv(data_file, separator="\t")
-        elif fmt == "json":
-            self._data = pl.read_json(data_file)
-        elif (
-            fmt == "jsonl"
-        ):  # pragma: no branch -- the L48 guard limits fmt to csv/tsv/json/jsonl; csv/tsv/json are handled above, so reaching this elif means fmt=="jsonl" and the false-leg is unreachable
+        elif data_file.suffix == ".jsonl":
+            # The one decision point for JSON vs JSONL: a ``json``-declared
+            # dataset whose file is ``.jsonl`` is line-delimited all the same.
             self._data = pl.read_ndjson(data_file)
+        else:
+            self._data = pl.read_json(data_file)
 
-        return cast("pl.DataFrame", self._data)
+        return self._data

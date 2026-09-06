@@ -45,6 +45,7 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         json_body: JsonValue = None,
         timeout: int | None = None,
         idempotent: bool = False,
+        idempotency_key: str | None = None,
     ) -> JsonValue | str | None:
         resp = await self._request(
             method,
@@ -54,6 +55,7 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             timeout=timeout,
             raise_for=lambda r: raise_for_deployment(r, deployment_id or "deployment"),
             idempotent=idempotent,
+            idempotency_key=idempotency_key,
         )
         if not resp.content:
             return None
@@ -254,6 +256,28 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/deployments/{quote_path_segment(deployment_id)}/revisions",
                 deployment_id=deployment_id,
                 params={"page": page, "limit": limit},
+            )
+        )
+
+    async def create_deployment_revision(
+        self,
+        deployment_id: str,
+        payload: JsonObject,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """POST /api/v1/deployments/{id}/revisions — roll out a new model version.
+
+        An ``Idempotency-Key`` is required by the route and minted when absent.
+        """
+        return ensure_json_object(
+            await self._deployment_req(
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/revisions",
+                deployment_id=deployment_id,
+                json_body=payload,
+                idempotent=True,
+                idempotency_key=idempotency_key,
             )
         )
 

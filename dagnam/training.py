@@ -16,6 +16,7 @@ reporting must not crash a training script.
 from __future__ import annotations
 
 import atexit
+from collections.abc import Callable
 import datetime
 import json
 import os
@@ -262,8 +263,14 @@ def write_training_state(
 
 
 def _online_context() -> bool:
-    """Return whether this local process can register an online run."""
-    if os.environ.get("DAGNAM_INTERNAL") or not _project_id:
+    """Return whether this process can register (or attach to) an online run.
+
+    A platform worker sets ``DAGNAM_JOB_ID`` and needs no project id: it
+    attaches to the job that already exists rather than registering a new run.
+    """
+    if os.environ.get("DAGNAM_INTERNAL"):
+        return False
+    if not _project_id and not os.environ.get("DAGNAM_JOB_ID"):
         return False
     try:
         auth_mod = __import__("dagnam._core.auth", fromlist=["get_api_key"])
@@ -288,7 +295,14 @@ def _sdk_version() -> str:
 
 
 def _start_uploader(project_id: str, framework: str, name: str) -> None:
-    """Register a local run and start its daemon uploader."""
+    """Register a local run (or attach to a platform job) and start its uploader.
+
+    With ``DAGNAM_JOB_ID`` set the script runs inside a platform worker: the
+    job already exists and the API key is a short-lived run token scoped to
+    it. That token can neither register a run nor mint another token, and its
+    holder cannot refresh it, so the uploader attaches with the key as-is and
+    an expired token surfaces through the terminal-error path.
+    """
     global _stream_finalized, _uploader_stop, _uploader_thread, _finalize_registered
 
     auth_mod = __import__("dagnam._core.auth", fromlist=["get_api_key", "get_api_url"])
@@ -303,62 +317,75 @@ def _start_uploader(project_id: str, framework: str, name: str) -> None:
         return
 
     api_url = auth_mod.get_api_url()
-    machine_client = client_class(api_url, auth_mod.get_api_key())
-    # The producer doesn't know the real hyperparameters — generated train.py
-    # only emits metrics. These are schema-satisfying placeholders for the
-    # backend's TrainingConfig (learning_rate must be >0, batch_size >=1); the
-    # platform never trains a local run, so they have no compute effect.
-    config = {
-        "epochs": int(os.environ.get("DAGNAM_TOTAL_EPOCHS", "1") or 1),
-        "batch_size": 1,
-        "learning_rate": 0.001,
-        "optimizer": "adam",
-        "loss_function": "unknown",
-        "dataset_config": {
-            "training_dataset_id": os.environ.get(
-                "DAGNAM_DATASET_ID",
-                "00000000-0000-0000-0000-000000000000",
-            ),
-            "train_split": 0.8,
-            "val_split": 0.1,
-            "test_split": 0.1,
-        },
-        "run_name": name,
-    }
-    try:
-        run = machine_client.register_local_run(
-            project_id=project_id,
-            framework=framework,
-            config=config,
-        )
-        run_id = str(run["id"])
-        token = str(machine_client.mint_run_token(run_id)["token"])
-    except Exception as exc:
-        sys.stderr.write(
-            f"Dagnam: could not register local run ({exc}); "
-            "streaming disabled, metrics still saved locally.\n"
-        )
-        return
+    api_key = auth_mod.get_api_key()
+    attached_job_id = os.environ.get("DAGNAM_JOB_ID")
+    refresh_client: Callable[[], Any] | None = None
+    if attached_job_id:
+        run_id = attached_job_id
+        token = api_key
+        # "local_attach" is the kind the platform's ingest already accepts for
+        # an attached run; an unknown kind is refused with a 422.
+        source_kind = "local_attach"
+    else:
+        machine_client = client_class(api_url, api_key)
+        # The producer doesn't know the real hyperparameters — generated train.py
+        # only emits metrics. These are schema-satisfying placeholders for the
+        # backend's TrainingConfig (learning_rate must be >0, batch_size >=1); the
+        # platform never trains a local run, so they have no compute effect.
+        config = {
+            "epochs": int(os.environ.get("DAGNAM_TOTAL_EPOCHS", "1") or 1),
+            "batch_size": 1,
+            "learning_rate": 0.001,
+            "optimizer": "adam",
+            "loss_function": "unknown",
+            "dataset_config": {
+                "training_dataset_id": os.environ.get(
+                    "DAGNAM_DATASET_ID",
+                    "00000000-0000-0000-0000-000000000000",
+                ),
+                "train_split": 0.8,
+                "val_split": 0.1,
+                "test_split": 0.1,
+            },
+            "run_name": name,
+        }
+        try:
+            run = machine_client.register_local_run(
+                project_id=project_id,
+                framework=framework,
+                config=config,
+            )
+            run_id = str(run["id"])
+            token = str(machine_client.mint_run_token(run_id)["token"])
+        except Exception as exc:
+            sys.stderr.write(
+                f"Dagnam: could not register local run ({exc}); "
+                "streaming disabled, metrics still saved locally.\n"
+            )
+            return
+
+        def _refresh_upload_client() -> Any:
+            refreshed_token = str(machine_client.mint_run_token(run_id)["token"])
+            return client_class(api_url, refreshed_token)
+
+        refresh_client = _refresh_upload_client
+        source_kind = "local_stream"
 
     stop = threading.Event()
     _uploader_stop = stop
     _stream_finalized = False
 
     def _loop() -> None:
-        def _refresh_upload_client():
-            refreshed_token = str(machine_client.mint_run_token(run_id)["token"])
-            return client_class(api_url, refreshed_token)
-
         upload_client = client_class(api_url, token)
         sink = uploader_mod.HTTPSink(
             upload_client,
             run_id,
             source={
-                "kind": "local_stream",
+                "kind": source_kind,
                 "sdk_version": _sdk_version(),
                 "schema_version": SCHEMA_VERSION,
             },
-            refresh_client=_refresh_upload_client,
+            refresh_client=refresh_client,
         )
         try:
             uploader_mod.run_upload_loop(
@@ -381,7 +408,10 @@ def _start_uploader(project_id: str, framework: str, name: str) -> None:
 
     _uploader_thread = threading.Thread(target=_loop, name="dagnam-uploader", daemon=True)
     _uploader_thread.start()
-    sys.stdout.write(f"Dagnam: streaming local run '{name}' live to the platform.\n")
+    if attached_job_id:
+        sys.stdout.write(f"Dagnam: attached to platform job '{run_id}'; streaming metrics live.\n")
+    else:
+        sys.stdout.write(f"Dagnam: streaming local run '{name}' live to the platform.\n")
     # Register the at-exit terminal flush only once per process; re-running init()
     # (e.g. after a previous uploader finished) must not stack duplicate handlers.
     if not _finalize_registered:

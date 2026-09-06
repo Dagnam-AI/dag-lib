@@ -156,6 +156,23 @@ def test_to_polars_jsonl_branch(tmp_path: Path) -> None:
     assert df.height == 2
 
 
+def test_to_polars_json_declared_dataset_reads_jsonl_file(tmp_path: Path) -> None:
+    # Older metadata declares ``json`` while the downloaded file is ``.jsonl``:
+    # the suffix decides the parser, so the rows load line-delimited.
+    (tmp_path / "rows.jsonl").write_text('{"a": 1}\n{"a": 2}\n{"a": 3}\n', encoding="utf-8")
+    ds = DagnamDataset(_base_meta(format="json"), tmp_path)
+    df = ds.to_polars()
+    assert df.to_dict(as_series=False) == {"a": [1, 2, 3]}
+
+
+def test_json_declared_dataset_prefers_json_document_over_jsonl(tmp_path: Path) -> None:
+    (tmp_path / "data.json").write_text('[{"a": 1}]', encoding="utf-8")
+    (tmp_path / "rows.jsonl").write_text('{"a": 1}\n{"a": 2}\n', encoding="utf-8")
+    ds = DagnamDataset(_base_meta(format="json"), tmp_path)
+    assert ds.find_data_file().name == "data.json"
+    assert ds.to_polars().height == 1
+
+
 # ---------------------------------------------------------------- _TransformDataset hooks
 
 

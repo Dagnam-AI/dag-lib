@@ -13,10 +13,11 @@ from dagnam._core.exceptions import (
     AuthError,
     DeploymentNotFoundError,
     DeploymentStateError,
+    DeploymentValidationError,
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
+    from tests.typing_helpers import JsonObject, PytestMonkeyPatch, RequestsMocker
 
 API = "https://api.test"
 
@@ -346,6 +347,50 @@ def test_create_deployment_domain_409_raises_immediately(
     with pytest.raises(DeploymentStateError):
         client.create_deployment({"project_id": "p1"})
     assert rmock.call_count == 1  # domain 409 is terminal, no retry
+
+
+def test_create_deployment_revision_posts_body_and_explicit_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/dep1/revisions",
+        status_code=201,
+        json={"id": "rev2", "revision_number": 2, "status": "pending", "is_active": False},
+    )
+    payload: JsonObject = {
+        "model_version_id": "mv1",
+        "capacity_mode": "serverless",
+        "capacity_policy": {"min_replicas": 0, "max_replicas": 1},
+    }
+    result = client.create_deployment_revision("dep1", payload, idempotency_key="key-123")
+    assert result["id"] == "rev2"
+    assert rmock.last_request.json() == payload
+    assert rmock.last_request.headers["Idempotency-Key"] == "key-123"
+
+
+def test_create_deployment_revision_mints_key_when_absent(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/revisions", json={"id": "rev2"})
+    client.create_deployment_revision("dep1", {"model_version_id": "mv1"})
+    key = rmock.last_request.headers["Idempotency-Key"]
+    assert 1 <= len(key) <= 255
+
+
+def test_create_deployment_revision_404_maps_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/missing/revisions", status_code=404)
+    with pytest.raises(DeploymentNotFoundError):
+        client.create_deployment_revision("missing", {"model_version_id": "mv1"})
+
+
+def test_create_deployment_revision_422_maps_validation(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/revisions", status_code=422, text="bad")
+    with pytest.raises(DeploymentValidationError):
+        client.create_deployment_revision("dep1", {"model_version_id": ""})
 
 
 def test_get_deployment_revisions(client: DagnamClient, rmock: RequestsMocker) -> None:

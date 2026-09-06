@@ -186,6 +186,47 @@ def revisions(
     return resolved.get_deployment_revisions(_stringify_id(deployment_id), page=page, limit=limit)
 
 
+def create_revision(
+    deployment_id: str,
+    *,
+    model_version_id: str,
+    capacity_mode: str = "serverless",
+    capacity_policy: Optional[JsonMapping] = None,
+    region: Optional[str] = None,
+    engine_override: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Roll a deployment to a new model version by creating a revision.
+
+    Returns the revision object as created (``id``, ``revision_number``,
+    ``status``, ``is_active``, ...) — a plain object, not an LRO. The platform
+    activates the revision asynchronously, so poll :func:`revisions` until the
+    new one reports ``is_active``. ``capacity_policy`` defaults to
+    ``{"min_replicas": 0, "max_replicas": 1}``; ``region`` and
+    ``engine_override`` are only sent when given. An ``idempotency_key`` makes
+    a retried call replay the same revision; one is minted when omitted.
+    """
+    policy: JsonMapping = (
+        capacity_policy if capacity_policy is not None else {"min_replicas": 0, "max_replicas": 1}
+    )
+    payload: JsonObject = {
+        "model_version_id": model_version_id,
+        "capacity_mode": capacity_mode,
+        "capacity_policy": _json_object_from_mapping(policy),
+    }
+    if region is not None:
+        payload["region"] = region
+    if engine_override is not None:
+        payload["engine_override"] = engine_override
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.create_deployment_revision(
+        _stringify_id(deployment_id), payload, idempotency_key=idempotency_key
+    )
+
+
 # ---------------------------------------------------------------------------
 # Write operations — LRO on lifecycle transitions
 # ---------------------------------------------------------------------------
@@ -563,6 +604,7 @@ def predict_stream(
 __all__ = [
     "collect_metrics",
     "create",
+    "create_revision",
     "delete",
     "estimate_cost",
     "get",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import httpx
@@ -14,7 +15,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
+    from tests.typing_helpers import JsonObject, PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
 
@@ -321,6 +322,33 @@ async def test_async_create_deployment_retries_transient_with_same_key(
     keys = {c.request.headers.get("Idempotency-Key") for c in route.calls}
     assert len(keys) == 1
     assert next(iter(keys))
+
+
+async def test_async_create_deployment_revision(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments/dep1/revisions").mock(
+        return_value=httpx.Response(201, json={"id": "rev2", "is_active": False})
+    )
+    payload: JsonObject = {"model_version_id": "mv1", "capacity_mode": "serverless"}
+    result = await client.create_deployment_revision("dep1", payload, idempotency_key="key-1")
+    assert result == {"id": "rev2", "is_active": False}
+    request = route.calls[0].request
+    assert json.loads(request.content) == payload
+    assert request.headers["Idempotency-Key"] == "key-1"
+
+
+async def test_async_create_deployment_revision_mints_key_and_maps_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    ok = mock.post("/api/v1/deployments/dep1/revisions").mock(
+        return_value=httpx.Response(200, json={"id": "rev2"})
+    )
+    await client.create_deployment_revision("dep1", {"model_version_id": "mv1"})
+    assert ok.calls[0].request.headers["Idempotency-Key"]
+    mock.post("/api/v1/deployments/missing/revisions").mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        await client.create_deployment_revision("missing", {"model_version_id": "mv1"})
 
 
 async def test_async_get_deployment_revisions(

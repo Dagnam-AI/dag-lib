@@ -568,6 +568,136 @@ def test_loop_refresh_client_mints_token(training_mod, monkeypatch):
     assert isinstance(refreshed, _FakeClient)
 
 
+# ---------------------------------------------------------------- attach mode (platform worker)
+
+
+def test_online_context_attached_needs_no_project_id(training_mod, monkeypatch):
+    from dagnam._core import auth
+
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.setenv("DAGNAM_JOB_ID", "job-9")
+    monkeypatch.setattr(auth, "get_api_key", lambda: "run_token")
+    training_mod._project_id = None
+    assert training_mod._online_context() is True
+
+
+def test_online_context_attached_still_requires_key(training_mod, monkeypatch):
+    from dagnam._core import auth
+    from dagnam._core.exceptions import AuthError
+
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.setenv("DAGNAM_JOB_ID", "job-9")
+
+    def no_key():
+        raise AuthError("no key")
+
+    monkeypatch.setattr(auth, "get_api_key", no_key)
+    training_mod._project_id = None
+    assert training_mod._online_context() is False
+
+
+def test_online_context_offline_without_project_or_job_id(training_mod, monkeypatch):
+    from dagnam._core import auth
+
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.delenv("DAGNAM_JOB_ID", raising=False)
+    monkeypatch.setattr(auth, "get_api_key", lambda: "sk_test")
+    training_mod._project_id = ""
+    assert training_mod._online_context() is False
+
+
+def test_online_context_internal_wins_over_job_id(training_mod, monkeypatch):
+    monkeypatch.setenv("DAGNAM_INTERNAL", "1")
+    monkeypatch.setenv("DAGNAM_JOB_ID", "job-9")
+    training_mod._project_id = "p1"
+    assert training_mod._online_context() is False
+
+
+def test_init_attached_starts_uploader_without_project_id(training_mod, monkeypatch):
+    from dagnam._core import auth
+
+    started: list[tuple[object, ...]] = []
+    monkeypatch.setattr(training_mod, "_start_uploader", lambda *args: started.append(args))
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.delenv("DAGNAM_PROJECT_ID", raising=False)
+    monkeypatch.setenv("DAGNAM_JOB_ID", "job-9")
+    monkeypatch.setattr(auth, "get_api_key", lambda: "run_token")
+
+    training_mod.init(project_id="", name="run-fixed")
+
+    assert started == [("", "pytorch", "run-fixed")]
+
+
+def test_start_uploader_attaches_to_platform_job(training_mod, monkeypatch, capsys):
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.setenv("DAGNAM_JOB_ID", "job-9")
+    import dagnam._core.auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "get_api_url", lambda: "https://api.test")
+    monkeypatch.setattr(auth_mod, "get_api_key", lambda: "run_token")
+
+    constructed: list[tuple[str, str]] = []
+
+    class _RunTokenClient:
+        def __init__(self, url, key):
+            constructed.append((url, key))
+
+        def register_local_run(self, **_kw):
+            raise AssertionError("attach mode must never register a run")
+
+        def mint_run_token(self, _run_id):
+            raise AssertionError("attach mode must never mint a token")
+
+    import dagnam._core.client as client_mod
+
+    monkeypatch.setattr(client_mod, "DagnamClient", _RunTokenClient)
+    import dagnam._core.metrics_uploader as up_mod
+
+    sink_args: dict[str, object] = {}
+
+    class _CapturingSink:
+        def __init__(self, client, run_id, *, source=None, refresh_client=None):
+            sink_args.update(
+                client=client, run_id=run_id, source=source, refresh_client=refresh_client
+            )
+
+    loop_args: dict[str, object] = {}
+
+    def _loop(**kw):
+        loop_args.update(kw)
+        return 0
+
+    monkeypatch.setattr(up_mod, "HTTPSink", _CapturingSink)
+    monkeypatch.setattr(up_mod, "run_upload_loop", _loop)
+    monkeypatch.setattr(up_mod, "is_terminal_upload_error", lambda _e: True)
+
+    training_mod._start_uploader("", "pytorch", "run-x")
+    training_mod._uploader_thread.join(timeout=5.0)
+
+    assert constructed == [("https://api.test", "run_token")]
+    assert isinstance(sink_args["client"], _RunTokenClient)
+    assert sink_args["run_id"] == "job-9"
+    assert sink_args["refresh_client"] is None
+    source = sink_args["source"]
+    assert isinstance(source, dict)
+    assert source["kind"] == "local_attach"
+    assert loop_args["job_id"] == "job-9"
+    assert isinstance(loop_args["sink"], _CapturingSink)
+    out = capsys.readouterr().out
+    assert "attached to platform job 'job-9'" in out
+    assert "streaming local run" not in out
+    assert training_mod._finalize_registered is True
+
+
+def test_start_uploader_local_mode_unaffected_by_missing_job_id(training_mod, monkeypatch, capsys):
+    monkeypatch.delenv("DAGNAM_INTERNAL", raising=False)
+    monkeypatch.delenv("DAGNAM_JOB_ID", raising=False)
+    _wire_uploader_deps(training_mod, monkeypatch)
+    training_mod._start_uploader("p1", "pytorch", "run-x")
+    training_mod._uploader_thread.join(timeout=5.0)
+    assert "streaming local run 'run-x'" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------- _finalize_stream guards
 
 
