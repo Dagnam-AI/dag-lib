@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-06
+
 ### Added
 
 - **`dagnam audit` CLI.** `audit scan <export> --source ... [--map field=column]
@@ -33,6 +35,54 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `SecretStore.forget`, `serving_cost_usd_month`, `select_workloads`; the
   scan report now carries each derived workload's `dataset` numbers and
   applies the `MIN_HOLDOUT` rule; a workload's `models` are in its JSON.
+
+- **`dagnam.audit` workload discovery.** `discover_workloads` groups trace
+  records by the blake2b hash of their normalized system-prompt template
+  (`normalize_template` / `template_hash` mask ids, numbers, dates, quoted
+  context and `{{placeholders}}`), classifies each group's output structure
+  (`classify_outputs` -> `StructureClass`: label, short span, JSON object,
+  free text) and summarizes it as a `Workload`. Pure and deterministic: the
+  same records in any order give the same workloads in the same order.
+
+- **`dagnam.audit` economics and price tables.** `replaceability` applies the
+  break-even rule (teacher $/month over student $/month plus maintenance,
+  thresholds in `dagnam.audit.thresholds`) and returns a `Verdict` whose
+  status is `candidate`, `marginal`, `not_worth_it`, or the reason a workload
+  is not priced (`not_audited` for free text, `too_few_samples`,
+  `unknown_cost`). `PriceTable` loads a
+  versioned vendor price table bundled under `dagnam/audit/prices/` (the
+  newest is the default; a model without a row prices to `None`, never a
+  guess) plus the platform's estimated serving rates. `build_scan_report` /
+  `write_scan_report` produce `scan-report.json`.
+
+- **`dagnam.audit` candidate datasets.** `derive_rows` turns a workload's
+  records into training rows in the recipe's row format, `redact_rows`
+  applies every PII class the shared `dagnam_contracts.hygiene` contract
+  detects (`PII_POLICY`, counted in `RedactStats`) before a row touches
+  disk, `dedup_rows` drops exact duplicates, and `time_split` makes the
+  time-ordered train / `eval_holdout` split (`HOLDOUT_SHARE` = 20%), snapped
+  so no session straddles the boundary. `build_dataset` / `write_workload`
+  write the workspace (`WorkloadDataset`, `DeriveStats`, `DedupStats`).
+
+- **`dagnam.audit` orchestration and scoring.** `run_audit` runs the
+  resumable frontier over workloads x `CANDIDATES`: the `AuditState` is
+  saved after every step, so an interrupt or crash resumes from the last
+  completed step, and a `KeyboardInterrupt` is never caught. `replay_holdout`
+  replays the holdout through a served candidate over the OpenAI-compatible
+  route with a deployment-scoped key that `SecretStore` keeps in the OS
+  keyring (the `audit` extra), else a `0600` file under the audit dir;
+  `score_labels` / `score_json` compute client-side agreement with a 95%
+  Wilson interval, and `frontier` picks the cheapest candidate whose
+  agreement *lower bound* clears the floor (`Winner`, `CandidateResult`).
+
+### Changed
+
+- The `dagnam-contracts` floor rises from `0.1.3` to `0.2.0`, which ships the
+  `hygiene` PII contract the audit redaction step is built on.
+
+## [0.11.0] - 2026-09-06
+
+### Added
 
 - **`dagnam.audit` trace readers.** `read_traces(path, source=...)` streams a
   Langfuse observation export, a LangSmith run export (JSONL or Parquet), an
@@ -72,13 +122,6 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `cancelled` or `timeout`, and `TimeoutError` past `timeout`. `sleep`/`now`
   are injectable.
 
-### Fixed
-
-- A dataset whose metadata declares format `json` but whose data file is
-  `.jsonl` now loads as line-delimited JSON through every converter
-  (`to_polars`, the tabular sample iterator, and the framework loaders).
-  Previously the file was not found at all, or parsed as a JSON document.
-
 - **Foundation fine-tuning SDK: `dagnam.foundation`.** `list_bases` pages the
   curated base models the platform will fine-tune, `list_recipes` returns the
   shipped training recipes, `submit` starts a run against a dataset version,
@@ -92,6 +135,36 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `list_foundation_catalog`, `list_training_recipes`, `create_foundation_run`
   and `get_foundation_run`. New `FoundationRunNotFoundError` joins the
   top-level `dagnam` and `dagnam.exceptions` exports.
+
+- **Foundation evaluation runs.** `dagnam.foundation.evaluate` starts an
+  evaluation run, `get_evaluation` reads one, and `list_evaluations` lists a
+  model version's runs. New `EvaluationRunNotFoundError` joins the top-level `dagnam` and
+  `dagnam.exceptions` exports; as with every other lookup, a run that belongs
+  to someone else answers the same 404.
+
+- **Two-factor authentication.** `dagnam.account.two_factor_enabled` /
+  `enable_two_factor` / `verify_two_factor` / `disable_two_factor`, on the
+  sync and async clients too, and a `dagnam account 2fa` command group.
+  Enrollment is two steps: `enable` returns the secret and backup codes but
+  activates nothing until `verify` confirms a code. The password is read via
+  `getpass`, never from argv; `disable` asks for a typed confirmation.
+
+### Fixed
+
+- A dataset whose metadata declares format `json` but whose data file is
+  `.jsonl` now loads as line-delimited JSON through every converter
+  (`to_polars`, the tabular sample iterator, and the framework loaders).
+  Previously the file was not found at all, or parsed as a JSON document.
+
+### Changed
+
+- Wheels are built with `hatchling>=1.27,<1.32` so their core metadata stays
+  at version 2.4; hatchling 1.32 defaults to 2.5, which the publish action's
+  twine still rejects.
+
+## [0.10.0] - 2026-08-14
+
+### Added
 
 - **Model registry SDK: `dagnam.models`.** `push` creates a model entry and
   draft version, uploads every artifact file (its registry `artifact_type`
@@ -107,6 +180,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   exceptions join the top-level `dagnam` and `dagnam.exceptions` exports.
   A `dagnam models` CLI group (`push`, `get`, `list`, `download`, `lineage`,
   `task-contract`) is also available.
+
 - **Deployment revision history: `dagnam.deployments.revisions`.** Lists a
   deployment's revisions newest first — revision number, model version,
   serving engine, capacity mode, status, failure reason, creation time, and
@@ -114,6 +188,21 @@ and this project follows [Semantic Versioning](https://semver.org/).
   a page at 200). Available on the sync and async clients as
   `get_deployment_revisions`, and as a `dagnam deployments revisions <id>`
   CLI subcommand.
+
+- **`dagnam.models.push_run_artifacts`.** The client a platform-run training
+  job pushes its weights with: it resolves the job from `DAGNAM_JOB_ID` and
+  the credential from the run token already in the worker's environment, and
+  lets the server decide where the artifacts land, so a run token never
+  chooses a model name or slug. Completion is driven by the server's
+  per-artifact `committed` flag, so an artifact the server has already
+  verified is never re-uploaded. Raises `ModelError` (a sibling of
+  `APIError`, not a subclass) for a rejected upload.
+
+### Removed
+
+- **Breaking:** the deprecated `dagnam._contracts` shim, as 0.9.0 announced.
+  It re-exported `dagnam_contracts` unchanged and had no consumers in the
+  package; import `dagnam_contracts` directly.
 
 ## [0.9.0] - 2026-08-10
 
