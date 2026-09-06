@@ -7,6 +7,8 @@ records by system-prompt template and output structure into :class:`Workload`
 summaries, most monthly spend first. :func:`build_dataset` turns one
 workload's records into redacted, deduplicated, time-split training rows and
 :func:`write_workload` puts them on disk.
+summaries, most monthly spend first; :func:`replaceability` judges each one
+by the design's economics and :func:`build_scan_report` assembles the report.
 """
 
 from __future__ import annotations
@@ -22,7 +24,9 @@ from dagnam.audit.derive import (
     normalize_label,
 )
 from dagnam.audit.discover import Workload, discover_workloads
+from dagnam.audit.economics import Verdict, replaceability
 from dagnam.audit.normalize import normalize_template, template_hash
+from dagnam.audit.prices import PriceTable, PriceTableError
 from dagnam.audit.readers import (
     MALFORMED_FATAL_SHARE,
     MalformedExportError,
@@ -32,6 +36,7 @@ from dagnam.audit.readers import (
 )
 from dagnam.audit.record import Message, TraceRecord
 from dagnam.audit.redact import PII_POLICY, RedactStats, redact_rows
+from dagnam.audit.scan_report import ScanReport, Window, build_scan_report, write_scan_report
 from dagnam.audit.split import HOLDOUT_SHARE, split_boundary, time_split
 from dagnam.audit.structure import StructureClass, classify_outputs
 from dagnam.audit.workspace import SCHEMA, write_workload
@@ -46,14 +51,20 @@ __all__ = [
     "DeriveStats",
     "MalformedExportError",
     "Message",
+    "PriceTable",
+    "PriceTableError",
     "ReadStats",
     "RedactStats",
+    "ScanReport",
     "StructureClass",
     "TraceRecord",
     "UnsupportedExportError",
+    "Verdict",
+    "Window",
     "Workload",
     "WorkloadDataset",
     "build_dataset",
+    "build_scan_report",
     "classify_outputs",
     "dedup_rows",
     "derive_rows",
@@ -62,8 +73,10 @@ __all__ = [
     "normalize_template",
     "read_traces",
     "redact_rows",
+    "replaceability",
     "split_boundary",
     "template_hash",
     "time_split",
+    "write_scan_report",
     "write_workload",
 ]
