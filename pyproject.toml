@@ -145,7 +145,11 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# hatchling 1.32 (2026-08-11) made core metadata 2.5 the default, which the
+# publish action's twine still rejects ("'2.5' is not a valid metadata
+# version") -- the 0.11.0 release died on that check. Held below 1.32 (2.4)
+# until pypa/gh-action-pypi-publish ships a twine that accepts 2.5.
+requires = ["hatchling>=1.27,<1.32"]
 build-backend = "hatchling.build"
 
 # Single source of truth for the version: hatchling reads ``__version__`` from
