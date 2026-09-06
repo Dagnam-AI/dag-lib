@@ -19,7 +19,8 @@ from dagnam._core.client.datasets import explicit_splits_body
 SCHEMA = "dagnam.audit.workload/1"
 
 
-def _write_atomic(path: Path, text: str) -> None:
+def write_atomic(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` through a same-directory ``.tmp`` promoted with ``os.replace``."""
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
@@ -47,11 +48,11 @@ def write_workload(
 
     workload_dir = out_dir / "workloads" / workload_id
     workload_dir.mkdir(parents=True, exist_ok=True)
-    _write_atomic(
+    write_atomic(
         workload_dir / "dataset.jsonl",
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
     )
-    _write_atomic(workload_dir / "split.json", json.dumps(explicit_splits_body(members), indent=2))
+    write_atomic(workload_dir / "split.json", json.dumps(explicit_splits_body(members), indent=2))
     meta = {
         "schema": SCHEMA,
         "workload_id": workload_id,
@@ -59,8 +60,8 @@ def write_workload(
         "splits": {name: len(indices) for name, indices in members.items()},
         "stats": dict(stats),
     }
-    _write_atomic(workload_dir / "meta.json", json.dumps(meta, indent=2, ensure_ascii=False))
+    write_atomic(workload_dir / "meta.json", json.dumps(meta, indent=2, ensure_ascii=False))
     return workload_dir
 
 
-__all__ = ["SCHEMA", "write_workload"]
+__all__ = ["SCHEMA", "write_atomic", "write_workload"]
