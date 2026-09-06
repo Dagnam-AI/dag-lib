@@ -9,6 +9,31 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`dagnam audit` CLI.** `audit scan <export> --source ... [--map field=column]
+  [--window 30d] [--price-table P] [--out DIR] [--json]` discovers and prices
+  the workloads in a trace export and derives redacted rows for the ones worth
+  auditing, opening no network connection (test-enforced). `audit run DIR
+  [--workloads w1,w2] [--floor F] [--max-credits N] [--yes] [--no-wait]
+  [--json]` prints exactly what will be uploaded -- workload ids, row counts,
+  redaction counts per class, the target project, the credit ceiling -- and
+  refuses without `--yes` on a non-interactive terminal, then trains, serves
+  and scores the candidates and writes `audit-report.{json,md}` (schema
+  `dagnam.audit.report/1`: the scan plus candidates, the frontier's winner
+  and the switch values per workload; the Markdown opens with the KEEP rows
+  and shows an OpenAI-client switch snippet that names a `key_ref`, never a
+  key). `audit status DIR` tables every candidate with its job, endpoint and
+  the endpoint's 7-day request count; `audit cancel DIR` cancels in-flight
+  jobs and pauses deployments and nothing else; `audit delete DIR [--yes]`
+  deletes every recorded deployment, model version, dataset and the project,
+  re-reads each id expecting not-found, writes `deleted.json`
+  (`dagnam.audit.deleted/1`, `already_absent` for ids already gone), then
+  removes the local rows and forgets the deployment keys. New helpers:
+  `dagnam.audit.build_audit_report` / `write_audit_report` /
+  `render_switch_snippet`, `dagnam.audit.delete_audit`,
+  `SecretStore.forget`, `serving_cost_usd_month`, `select_workloads`; the
+  scan report now carries each derived workload's `dataset` numbers and
+  applies the `MIN_HOLDOUT` rule; a workload's `models` are in its JSON.
+
 - **`dagnam.audit` trace readers.** `read_traces(path, source=...)` streams a
   Langfuse observation export, a LangSmith run export (JSONL or Parquet), an
   OpenAI batch/stored-completion JSONL, or any JSONL/CSV file described by a

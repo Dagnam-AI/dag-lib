@@ -84,3 +84,29 @@ def test_file_mode_tightens_an_existing_wide_file(
     path.chmod(0o644)
     SecretStore(tmp_path).store("k", "v")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_forget_removes_the_key_from_both_backends(
+    tmp_path: Path, fake_keyring: dict[tuple[str, str], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from keyring.errors import PasswordDeleteError
+
+    def delete_password(service: str, user: str) -> None:
+        if (service, user) not in fake_keyring:
+            raise PasswordDeleteError(user)
+        del fake_keyring[(service, user)]
+
+    monkeypatch.setattr(keyring, "delete_password", delete_password)
+    store = SecretStore(tmp_path)
+    store.store("w1/head_tune", "sk-secret")
+    store.forget("w1/head_tune")
+    store.forget("w1/head_tune")  # already gone in the keyring: not an error
+    assert fake_keyring == {}
+    assert store.load("w1/head_tune") is None
+
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    store.store("w1/sft_small", "sk-file")
+    store.store("w2/sft_small", "sk-file-2")
+    store.forget("w1/sft_small")
+    store.forget("never-stored")
+    assert json.loads((tmp_path / SECRETS_FILE).read_text()) == {"w2/sft_small": "sk-file-2"}

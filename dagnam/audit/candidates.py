@@ -12,8 +12,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 from dagnam.audit.structure import StructureClass
+
+StudentKind = Literal["cpu-classifier", "gpu-small-llm"]
+"""The two serving shapes a student is priced as (rows of Task 5's ``SERVING_RATES``)."""
 
 
 class CandidateKind(StrEnum):
@@ -39,7 +43,7 @@ class CandidateSpec:
     recipe_key: str | None
     base_family: str | None
     max_params: int | None
-    serving_rate_key: str | None
+    serving_rate_key: StudentKind | None
 
 
 HOSTED_FLOOR = CandidateSpec(CandidateKind.HOSTED_FLOOR, None, None, None, None)
@@ -58,4 +62,12 @@ CANDIDATES: Mapping[StructureClass, tuple[CandidateSpec, ...]] = {
 }
 """Candidates per structure class, in the order the frontier runs them."""
 
-__all__ = ["CANDIDATES", "HEAD_TUNE", "HOSTED_FLOOR", "SFT_SMALL", "CandidateKind", "CandidateSpec"]
+__all__ = [
+    "CANDIDATES",
+    "HEAD_TUNE",
+    "HOSTED_FLOOR",
+    "SFT_SMALL",
+    "CandidateKind",
+    "CandidateSpec",
+    "StudentKind",
+]

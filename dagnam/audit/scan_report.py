@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from dagnam.audit.discover import Workload
-from dagnam.audit.economics import customer_verdict, price_workload, replaceability
+from dagnam.audit.economics import Verdict, customer_verdict, price_workload, replaceability
 from dagnam.audit.prices import PriceTable
-from dagnam.audit.thresholds import MAX_UNSTRUCTURED_SHARE, PRICE_TABLE_STALE_DAYS
+from dagnam.audit.thresholds import MAX_UNSTRUCTURED_SHARE, MIN_HOLDOUT, PRICE_TABLE_STALE_DAYS
 
 SCHEMA = "dagnam.audit.scan/1"
 
@@ -68,12 +68,20 @@ def build_scan_report(
     price_table: PriceTable,
     pii_pass_list: Sequence[str],
     pii_counts: Mapping[str, int],
+    datasets: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ScanReport:
-    """Price what the export did not, judge every workload, and assemble the report."""
+    """Price what the export did not, judge every workload, and assemble the report.
+
+    ``datasets`` carries the derived dataset's numbers per workload id (the
+    contract's ``dataset`` object); a holdout under :data:`MIN_HOLDOUT` turns
+    that workload's verdict into ``too_few_samples``.
+    """
     now = datetime.now(UTC)
     priced = [price_workload(w, price_table) for w in workloads]
     entries = tuple(
-        {**w.to_json(), "verdict": asdict(replaceability(w)), "dataset": None} for w in priced
+        {**w.to_json(), "verdict": asdict(_verdict(w, dataset)), "dataset": dataset}
+        for w in priced
+        for dataset in [(datasets or {}).get(w.id)]
     )
     warnings: list[str] = []
     age = price_table.age_days(now.date())
@@ -108,6 +116,15 @@ def build_scan_report(
         workloads=entries,
         warnings=tuple(warnings),
     )
+
+
+def _verdict(w: Workload, dataset: Mapping[str, Any] | None) -> Verdict:
+    verdict = replaceability(w)
+    holdout = dataset["split"].get("eval_holdout", 0) if dataset is not None else None
+    if holdout is not None and holdout < MIN_HOLDOUT:
+        reason = f"{holdout} holdout rows after the split; {MIN_HOLDOUT} needed"
+        return Verdict("too_few_samples", None, None, reason)
+    return verdict
 
 
 def write_scan_report(report: ScanReport, out_dir: Path) -> None:

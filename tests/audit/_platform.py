@@ -18,7 +18,15 @@ from typing import Any
 from dagnam_contracts.prompts import render_chat_prompt
 from tests.typing_helpers import RequestsMocker
 
+from dagnam._core.exceptions import (
+    DagnamError,
+    DatasetNotFoundError,
+    DeploymentNotFoundError,
+    ModelNotFoundError,
+    ProjectNotFoundError,
+)
 from dagnam._types import JsonArray, JsonObject, QueryValue
+from dagnam.audit.cleanup import CleanupClient
 from dagnam.audit.steps import PlatformClient
 
 CHAT_URL = "https://x/v1/chat/completions"
@@ -245,6 +253,73 @@ class FakePlatform:
         self._log("pause_deployment")
         self.paused.append(deployment_id)
         return {"id": deployment_id, "status": "paused"}
+
+
+class FakeCleanup:
+    """A platform holding ids to delete: each ``get`` raises not-found once its id is gone."""
+
+    def __init__(self, **present: list[str]) -> None:
+        self.present: dict[str, set[str]] = {
+            kind: set(present.get(kind, []))
+            for kind in ("deployment", "model", "dataset", "project")
+        }
+        self.entry_of: dict[str, str] = {}
+        """model version id -> entry id (a deleted entry takes its versions with it)."""
+        self.call_log: list[tuple[str, str]] = []
+        self.sticky: set[str] = set()
+        """Ids whose delete succeeds but which a re-read still finds (a server bug to surface)."""
+
+    def _take(self, kind: str, item_id: str, absent: type[DagnamError]) -> None:
+        if item_id not in self.present[kind]:
+            raise absent(item_id)
+        if item_id not in self.sticky:
+            self.present[kind].discard(item_id)
+
+    def _need(self, kind: str, item_id: str, absent: type[DagnamError]) -> JsonObject:
+        if item_id not in self.present[kind]:
+            raise absent(item_id)
+        return {"id": item_id}
+
+    def get_deployment(self, deployment_id: str) -> JsonObject:
+        self.call_log.append(("get_deployment", deployment_id))
+        return self._need("deployment", deployment_id, DeploymentNotFoundError)
+
+    def delete_deployment(self, deployment_id: str) -> JsonObject | None:
+        self.call_log.append(("delete_deployment", deployment_id))
+        self._take("deployment", deployment_id, DeploymentNotFoundError)
+        return None
+
+    def get_model_version(self, version_id: str) -> JsonObject:
+        self.call_log.append(("get_model_version", version_id))
+        entry = self.entry_of.get(version_id)
+        if entry is None or entry not in self.present["model"]:
+            raise ModelNotFoundError(version_id)
+        return {"id": version_id, "entry_id": entry}
+
+    def delete_model_entry(self, model_id: str) -> None:
+        self.call_log.append(("delete_model_entry", model_id))
+        self._take("model", model_id, ModelNotFoundError)
+
+    def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
+        self.call_log.append(("get_dataset_meta", dataset_id))
+        return self._need("dataset", dataset_id, DatasetNotFoundError)
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        self.call_log.append(("delete_dataset", dataset_id))
+        self._take("dataset", dataset_id, DatasetNotFoundError)
+
+    def get_project(self, project_id: str) -> JsonObject:
+        self.call_log.append(("get_project", project_id))
+        return self._need("project", project_id, ProjectNotFoundError)
+
+    def delete_project(self, project_id: str) -> None:
+        self.call_log.append(("delete_project", project_id))
+        self._take("project", project_id, ProjectNotFoundError)
+
+
+def as_cleanup_client(platform: FakeCleanup) -> CleanupClient:
+    """The cleanup fake, typed as the protocol ``delete_audit`` takes."""
+    return platform
 
 
 def as_client(platform: FakePlatform) -> PlatformClient:

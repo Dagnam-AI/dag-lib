@@ -95,5 +95,19 @@ class SecretStore:
                 return found
         return self._read_file().get(key_ref)
 
+    def forget(self, key_ref: str) -> None:
+        """Remove ``key_ref`` from both backends; absent in either is fine."""
+        backend = _keyring()
+        if backend is not None:
+            module, error = backend
+            try:
+                module.delete_password(SERVICE, self._user(key_ref))
+            except error:
+                pass
+        secrets = self._read_file()
+        if key_ref in secrets:
+            del secrets[key_ref]
+            self._write_file(secrets)
+
 
 __all__ = ["SECRETS_FILE", "SERVICE", "SecretStore"]
