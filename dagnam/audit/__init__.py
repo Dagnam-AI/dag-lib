@@ -9,7 +9,9 @@ workload's records into redacted, deduplicated, time-split training rows and
 :func:`write_workload` puts them on disk. :func:`run_audit` then drives the
 platform through the :data:`CANDIDATES` per workload -- upload, split, train,
 serve, replay the holdout -- keeping a resumable :class:`AuditState`, and
-:func:`frontier` names the cheapest candidate whose agreement clears the floor.
+:func:`frontier` names the cheapest candidate whose agreement clears the
+floor. :func:`replaceability` judges each workload by the design's economics
+and :func:`build_scan_report` assembles the report.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from dagnam.audit.derive import (
     normalize_label,
 )
 from dagnam.audit.discover import Workload, discover_workloads
+from dagnam.audit.economics import Verdict, replaceability
 from dagnam.audit.frontier import (
     CandidateResult,
     Endpoint,
@@ -36,6 +39,7 @@ from dagnam.audit.frontier import (
 )
 from dagnam.audit.normalize import normalize_template, template_hash
 from dagnam.audit.orchestrate import run_audit
+from dagnam.audit.prices import PriceTable, PriceTableError
 from dagnam.audit.readers import (
     MALFORMED_FATAL_SHARE,
     MalformedExportError,
@@ -45,6 +49,7 @@ from dagnam.audit.readers import (
 )
 from dagnam.audit.record import Message, TraceRecord
 from dagnam.audit.redact import PII_POLICY, RedactStats, redact_rows
+from dagnam.audit.scan_report import ScanReport, Window, build_scan_report, write_scan_report
 from dagnam.audit.scoring import Agreement, score_json, score_labels
 from dagnam.audit.secrets import SecretStore
 from dagnam.audit.split import HOLDOUT_SHARE, split_boundary, time_split
@@ -70,17 +75,23 @@ __all__ = [
     "Latency",
     "MalformedExportError",
     "Message",
+    "PriceTable",
+    "PriceTableError",
     "ReadStats",
     "RedactStats",
+    "ScanReport",
     "SecretStore",
     "StepState",
     "StructureClass",
     "TraceRecord",
     "UnsupportedExportError",
+    "Verdict",
+    "Window",
     "Winner",
     "Workload",
     "WorkloadDataset",
     "build_dataset",
+    "build_scan_report",
     "classify_outputs",
     "dedup_rows",
     "derive_rows",
@@ -91,6 +102,7 @@ __all__ = [
     "normalize_template",
     "read_traces",
     "redact_rows",
+    "replaceability",
     "replay_holdout",
     "run_audit",
     "save_state",
@@ -99,5 +111,6 @@ __all__ = [
     "split_boundary",
     "template_hash",
     "time_split",
+    "write_scan_report",
     "write_workload",
 ]

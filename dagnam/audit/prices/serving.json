@@ -1,0 +1,16 @@
+{
+  "basis": "estimated",
+  "note": "Serving rates for the two student kinds, derived from the platform's deployment cost planner (USD per instance-hour: t3.medium 0.0416 and g4dn.xlarge 0.526). Labelled 'estimated' in every report until billing exists; measured latency is reported beside them. Formula: hourly_rate / (throughput_per_second * 3600 * utilization) * unit.",
+  "rates": {
+    "cpu-classifier": {
+      "usd_per_1k_requests": 0.0023,
+      "basis": "estimated",
+      "assumptions": "t3.medium at $0.0416/h serving a small encoder classifier at 20 requests/s sustained with 25% average utilization: 0.0416 / (20 * 3600 * 0.25) * 1000 = 0.00231"
+    },
+    "gpu-small-llm": {
+      "usd_per_m_output_tokens": 1.95,
+      "basis": "estimated",
+      "assumptions": "g4dn.xlarge (one T4) at $0.526/h serving a <=3B-parameter model at 300 output tokens/s aggregate with batching and 25% average utilization: 0.526 / (300 * 3600 * 0.25) * 1e6 = 1.948"
+    }
+  }
+}
