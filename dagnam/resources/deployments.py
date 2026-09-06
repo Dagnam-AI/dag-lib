@@ -304,6 +304,37 @@ def create(
     )
 
 
+def create_from_training_job(
+    *,
+    name: str,
+    project_id: str,
+    training_job_id: str,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> LongRunningOperation:
+    """Serve a finished training job as a serverless chat model.
+
+    A thin wrapper over :func:`create` supplying the platform defaults a
+    Modal-served text model expects (``vllm`` / ``text`` /
+    ``modal-serverless``). The API resolves the weights from the job, so the
+    required ``checkpoint_path`` is a label naming the job, not a location.
+    Returns the same LRO as :func:`create`.
+    """
+    return create(
+        name=name,
+        project_id=project_id,
+        training_job_id=training_job_id,
+        checkpoint_path=f"training-job://{_stringify_id(training_job_id)}",
+        platform="vllm",
+        deployment_type="text",
+        instance_type="modal-serverless",
+        client=client,
+        api_key=api_key,
+        api_url=api_url,
+    )
+
+
 def update(
     deployment_id: str,
     *,

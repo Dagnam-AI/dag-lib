@@ -53,6 +53,23 @@ class FoundationRunNotFoundError(DagnamError):
         super().__init__(f"Foundation run '{run_id}' not found")
 
 
+class RunFailedError(DagnamError):
+    """A foundation run reached a terminal state other than ``completed``.
+
+    ``status`` is the server's terminal value (``failed``, ``cancelled`` or
+    ``timeout``) and ``reason`` its ``error_message`` when it gave one.
+    """
+
+    def __init__(self, run_id: str, status: str, reason: str | None = None):
+        self.run_id = run_id
+        self.status = status
+        self.reason = reason
+        msg = f"Foundation run '{run_id}' {status}"
+        if reason:
+            msg = f"{msg}: {reason}"
+        super().__init__(msg)
+
+
 class EvaluationRunNotFoundError(DagnamError):
     """Evaluation run ID not found (404).
 

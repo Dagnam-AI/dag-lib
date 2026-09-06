@@ -31,9 +31,17 @@ partly unusable. The API owns the verdict; this module owns the round trip.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+import time
+
 from dagnam._core.client import DagnamClient
+from dagnam._core.exceptions import RunFailedError
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonArray, JsonObject
+
+# The job status values a run can settle on; everything else is still moving.
+_COMPLETED = "completed"
+_FAILED_STATES = frozenset({"failed", "cancelled", "timeout"})
 
 
 def list_bases(
@@ -135,6 +143,46 @@ def get_run(
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.get_foundation_run(run_id)
+
+
+def wait_run(
+    run_id: str,
+    *,
+    poll_seconds: float = 15.0,
+    timeout: float = 7200.0,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonObject:
+    """Poll :func:`get_run` every ``poll_seconds`` until the run settles.
+
+    Returns the completed run. ``sleep``/``now`` are injectable so a caller
+    (or a test) can drive the clock.
+
+    Raises:
+        RunFailedError: the run ended ``failed``, ``cancelled`` or ``timeout``;
+            carries the server's ``error_message`` as ``reason``.
+        TimeoutError: ``timeout`` seconds elapsed with the run still moving.
+        FoundationRunNotFoundError: no such run for this caller.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    deadline = now() + timeout
+    while True:
+        run = resolved.get_foundation_run(run_id)
+        status = str(run.get("status") or "")
+        if status == _COMPLETED:
+            return run
+        if status in _FAILED_STATES:
+            reason = run.get("error_message")
+            raise RunFailedError(run_id, status, reason if isinstance(reason, str) else None)
+        remaining = deadline - now()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"Foundation run '{run_id}' still {status or 'unknown'!r} after {timeout:.0f}s"
+            )
+        sleep(min(poll_seconds, remaining))
 
 
 def evaluate(

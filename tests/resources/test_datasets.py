@@ -233,3 +233,42 @@ class TestErrorPropagation:
                 format="csv",
                 client=c,
             )
+
+
+_TASK: dict[str, object] = {"dataset_id": "ds1", "version_id": "v1", "task_id": "t9"}
+
+
+class TestVersionTasks:
+    """``create_explicit_splits`` / ``scan_pii`` — 202 + task id, wrapped as an LRO."""
+
+    def test_create_explicit_splits_returns_task_lro(self) -> None:
+        c = _client(
+            create_explicit_splits=MagicMock(return_value=dict(_TASK)),
+            get_dataset_task_status=MagicMock(return_value={"status": "completed"}),
+        )
+        op = datasets_upload.create_explicit_splits("ds1", "v1", {"train": [0, 1]}, client=c)
+        assert isinstance(op, LongRunningOperation)
+        assert op.initial() == _TASK
+        c.create_explicit_splits.assert_called_once_with("ds1", "v1", {"train": [0, 1]})
+        assert op.wait(timeout=1, sleep=lambda _s: None).result() == {"status": "completed"}
+        c.get_dataset_task_status.assert_called_once_with("t9")
+
+    def test_scan_pii_returns_task_lro(self) -> None:
+        c = _client(
+            scan_pii=MagicMock(return_value=dict(_TASK)),
+            get_dataset_task_status=MagicMock(return_value={"status": "FAILURE", "error": "boom"}),
+        )
+        op = datasets_upload.scan_pii("ds1", "v1", client=c)
+        c.scan_pii.assert_called_once_with("ds1", "v1", None)
+        with pytest.raises(LROFailedError, match="boom"):
+            op.wait(timeout=1, sleep=lambda _s: None).result()
+
+    def test_scan_pii_forwards_policy(self) -> None:
+        c = _client(scan_pii=MagicMock(return_value=dict(_TASK)))
+        datasets_upload.scan_pii("ds1", "v1", {"PII_EMAIL": "redact"}, client=c)
+        c.scan_pii.assert_called_once_with("ds1", "v1", {"PII_EMAIL": "redact"})
+
+    def test_missing_task_id_raises(self) -> None:
+        c = _client(scan_pii=MagicMock(return_value={"status": "pending"}))
+        with pytest.raises(ValueError, match="did not include a string task_id"):
+            datasets_upload.scan_pii("ds1", "v1", client=c)

@@ -22,6 +22,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
   activation is asynchronous, so poll `revisions()` for `is_active`. Available
   on the sync and async clients as `create_deployment_revision`.
 
+- **`dagnam.datasets.create_explicit_splits` / `scan_pii`.** Enqueue an
+  explicit-membership split (`POST /datasets/{id}/versions/{vid}/splits/explicit`)
+  or a PII scan (`POST .../pii-scan`; an empty policy reports only) and get
+  back a `LongRunningOperation` over the dataset task, like `upload_from_url`.
+  Available on the sync and async clients under the same names.
+
+- **`dagnam.deployments.create_from_training_job`.** `create()` with the
+  serverless chat-model defaults (`vllm` / `text` / `modal-serverless`)
+  filled in, so serving a finished job takes a name, a project and the job id.
+
+- **`dagnam.foundation.wait_run` and `dagnam.RunFailedError`.** Polls a
+  fine-tuning run until it settles; returns the completed run, raises
+  `RunFailedError` (with the server's `error_message` as `reason`) on `failed`,
+  `cancelled` or `timeout`, and `TimeoutError` past `timeout`. `sleep`/`now`
+  are injectable.
+
 ### Fixed
 
 - A dataset whose metadata declares format `json` but whose data file is

@@ -447,3 +447,66 @@ def test_browse_blocked_ip_403_raises_auth_error(
     )
     with pytest.raises(AuthError, match=r"IP not permitted\."):
         client.list_datasets()
+
+
+# ---------------------------------------------------------------- version tasks
+
+_VERSION_TASK = {"dataset_id": "ds1", "version_id": "v1", "task_id": "t9", "status": "pending"}
+
+
+def test_create_explicit_splits_posts_memberships(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/datasets/ds1/versions/v1/splits/explicit",
+        status_code=202,
+        json=_VERSION_TASK,
+    )
+    result = client.create_explicit_splits("ds1", "v1", {"train": (0, 1), "test": [2]})
+    assert result == _VERSION_TASK
+    assert rmock.last_request.json() == {"member_row_indices": {"train": [0, 1], "test": [2]}}
+    # The route has no idempotency support; the request must not pretend otherwise.
+    assert "Idempotency-Key" not in rmock.last_request.headers
+
+
+def test_create_explicit_splits_404_maps_dataset(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/datasets/missing/versions/v1/splits/explicit", status_code=404)
+    with pytest.raises(DatasetNotFoundError):
+        client.create_explicit_splits("missing", "v1", {"train": [0]})
+
+
+def test_create_explicit_splits_422_surfaces_server_text(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/datasets/ds1/versions/v1/splits/explicit",
+        status_code=422,
+        text="row index 7 out of range",
+    )
+    with pytest.raises(APIError, match="out of range"):
+        client.create_explicit_splits("ds1", "v1", {"train": [7]})
+
+
+def test_scan_pii_defaults_to_report_only(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/datasets/ds1/versions/v1/pii-scan", status_code=202, json=_VERSION_TASK
+    )
+    assert client.scan_pii("ds1", "v1") == _VERSION_TASK
+    assert rmock.last_request.json() == {"policy": {}}
+    assert "Idempotency-Key" not in rmock.last_request.headers
+
+
+def test_scan_pii_sends_policy(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(
+        f"{API}/api/v1/datasets/ds1/versions/v1/pii-scan", status_code=202, json=_VERSION_TASK
+    )
+    client.scan_pii("ds1", "v1", {"PII_EMAIL": "redact"})
+    assert rmock.last_request.json() == {"policy": {"PII_EMAIL": "redact"}}
+
+
+def test_scan_pii_404_maps_dataset(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/datasets/ds1/versions/gone/pii-scan", status_code=404)
+    with pytest.raises(DatasetNotFoundError):
+        client.scan_pii("ds1", "gone")

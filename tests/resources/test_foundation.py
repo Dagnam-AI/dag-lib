@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from dagnam import foundation
 from dagnam._core.client import DagnamClient
+from dagnam._core.exceptions import DagnamError, RunFailedError
 
 # The served recipe document, schema and all. Reused by the pass-through test
 # below, which asserts deep equality so a dropped bound or a filtered key is a
@@ -209,3 +212,73 @@ def test_list_evaluations_delegates() -> None:
     c = MagicMock(spec=DagnamClient, list_version_evaluations=MagicMock(return_value=results))
     assert foundation.list_evaluations("v1", client=c) == results
     c.list_version_evaluations.assert_called_once_with("v1")
+
+
+# ------------------------------------------------------------------ wait_run
+
+
+class _Clock:
+    """Deterministic ``now``/``sleep`` pair: sleeping advances the clock."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.sleeps: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.t += seconds
+
+
+def _run_client(*statuses: dict[str, Any]) -> MagicMock:
+    return MagicMock(spec=DagnamClient, get_foundation_run=MagicMock(side_effect=list(statuses)))
+
+
+def test_wait_run_returns_the_completed_run() -> None:
+    clock = _Clock()
+    c = _run_client({"status": "pending"}, {"status": "running"}, {"status": "completed", "x": 1})
+    run = foundation.wait_run("r1", poll_seconds=15, client=c, sleep=clock.sleep, now=clock.now)
+    assert run == {"status": "completed", "x": 1}
+    assert clock.sleeps == [15, 15]
+    c.get_foundation_run.assert_called_with("r1")
+
+
+def test_wait_run_returns_immediately_when_already_terminal() -> None:
+    clock = _Clock()
+    c = _run_client({"status": "completed"})
+    foundation.wait_run("r1", client=c, sleep=clock.sleep, now=clock.now)
+    assert clock.sleeps == []
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
+def test_wait_run_raises_run_failed_with_the_server_reason(status: str) -> None:
+    c = _run_client({"status": status, "error_message": "OOM on step 3"})
+    with pytest.raises(RunFailedError, match="OOM on step 3") as exc_info:
+        foundation.wait_run("r1", client=c, sleep=lambda _s: None, now=lambda: 0.0)
+    assert exc_info.value.run_id == "r1"
+    assert exc_info.value.status == status
+    assert exc_info.value.reason == "OOM on step 3"
+    assert isinstance(exc_info.value, DagnamError)
+
+
+def test_wait_run_failed_without_a_reason_still_names_the_status() -> None:
+    c = _run_client({"status": "cancelled", "error_message": None})
+    with pytest.raises(RunFailedError, match="cancelled") as exc_info:
+        foundation.wait_run("r1", client=c, sleep=lambda _s: None, now=lambda: 0.0)
+    assert exc_info.value.reason is None
+
+
+def test_wait_run_times_out_without_oversleeping() -> None:
+    clock = _Clock()
+    c = MagicMock(
+        spec=DagnamClient, get_foundation_run=MagicMock(return_value={"status": "running"})
+    )
+    with pytest.raises(TimeoutError, match="r1"):
+        foundation.wait_run(
+            "r1", poll_seconds=15, timeout=40, client=c, sleep=clock.sleep, now=clock.now
+        )
+    # 15 + 15 + the 10s remainder, then one last poll at the deadline.
+    assert clock.sleeps == [15, 15, 10]
+    assert c.get_foundation_run.call_count == 4

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,7 @@ from dagnam._core.client.common import (
     response_json_array,
     response_json_object,
 )
+from dagnam._core.client.datasets import explicit_splits_body, pii_scan_body
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject, QueryParams, ensure_json_object
 
@@ -198,6 +200,33 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
             raise_for=lambda r: raise_for_task(r, task_id),
         )
         return response_json_object(resp)
+
+    async def _post_version_task(
+        self, dataset_id: str, version_id: str, action: str, body: JsonObject
+    ) -> JsonObject:
+        # No Idempotency-Key: the version-task routes do not accept one.
+        resp = await self._request(
+            "POST",
+            f"/api/v1/datasets/{quote_path_segment(dataset_id)}"
+            f"/versions/{quote_path_segment(version_id)}/{action}",
+            json=body,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+        )
+        return response_json_object(resp)
+
+    async def create_explicit_splits(
+        self, dataset_id: str, version_id: str, memberships: Mapping[str, Sequence[int]]
+    ) -> JsonObject:
+        return await self._post_version_task(
+            dataset_id, version_id, "splits/explicit", explicit_splits_body(memberships)
+        )
+
+    async def scan_pii(
+        self, dataset_id: str, version_id: str, policy: Mapping[str, str] | None = None
+    ) -> JsonObject:
+        return await self._post_version_task(
+            dataset_id, version_id, "pii-scan", pii_scan_body(policy)
+        )
 
     async def preview_dataset(self, dataset_id: str, rows: int = 10) -> JsonObject:
         """Preview a dataset's samples and statistics.

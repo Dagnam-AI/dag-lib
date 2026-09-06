@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
@@ -375,3 +376,49 @@ async def test_async_browse_blocked_ip_403_raises_auth_error(
     )
     with pytest.raises(AuthError, match=r"IP not permitted\."):
         await client.list_datasets()
+
+
+# ---------------------------------------------------------------- version tasks
+
+_VERSION_TASK = {"dataset_id": "ds1", "version_id": "v1", "task_id": "t9", "status": "pending"}
+
+
+async def test_async_create_explicit_splits(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/datasets/ds1/versions/v1/splits/explicit").mock(
+        return_value=httpx.Response(202, json=_VERSION_TASK)
+    )
+    result = await client.create_explicit_splits("ds1", "v1", {"train": (0, 1), "test": [2]})
+    assert result == _VERSION_TASK
+    request = route.calls[0].request
+    assert json.loads(request.content) == {"member_row_indices": {"train": [0, 1], "test": [2]}}
+    assert "Idempotency-Key" not in request.headers
+
+
+async def test_async_create_explicit_splits_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/datasets/missing/versions/v1/splits/explicit").mock(
+        return_value=httpx.Response(404)
+    )
+    with pytest.raises(DatasetNotFoundError):
+        await client.create_explicit_splits("missing", "v1", {"train": [0]})
+
+
+async def test_async_scan_pii_report_only_and_policy(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/datasets/ds1/versions/v1/pii-scan").mock(
+        return_value=httpx.Response(202, json=_VERSION_TASK)
+    )
+    assert await client.scan_pii("ds1", "v1") == _VERSION_TASK
+    assert json.loads(route.calls[0].request.content) == {"policy": {}}
+    await client.scan_pii("ds1", "v1", {"PII_EMAIL": "drop"})
+    assert json.loads(route.calls[1].request.content) == {"policy": {"PII_EMAIL": "drop"}}
+
+
+async def test_async_scan_pii_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.post("/api/v1/datasets/ds1/versions/gone/pii-scan").mock(return_value=httpx.Response(404))
+    with pytest.raises(DatasetNotFoundError):
+        await client.scan_pii("ds1", "gone")
