@@ -42,3 +42,5 @@ EXCERPT_CHARS = 200
 """Length cap of the masked template excerpt a report may show."""
 DAYS_PER_MONTH = 30
 """Monthly figures are per-day rates times this."""
+PRICE_TABLE_STALE_DAYS = 60
+"""A price table older than this (days since its ``as_of`` date) puts a warning in the report."""
