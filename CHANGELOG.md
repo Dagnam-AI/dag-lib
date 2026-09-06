@@ -9,6 +9,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`dagnam.audit` trace readers.** `read_traces(path, source=...)` streams a
+  Langfuse observation export, a LangSmith run export (JSONL or Parquet), an
+  OpenAI batch/stored-completion JSONL, or any JSONL/CSV file described by a
+  `column_map`, into the canonical `TraceRecord`. Rows stream through polars in
+  batches; malformed rows are counted in `ReadStats` and skipped, and a share
+  above 5% ends the read with `MalformedExportError` naming the first three
+  offending rows. A new `audit` extra (`pip install dagnam[audit]`) declares
+  the keychain dependency the audit CLI will use.
+
 - **Attach mode for platform-run training scripts.** When `DAGNAM_JOB_ID` is
   set, `dagnam.training.init` attaches the metrics uploader to that existing
   job instead of registering a new local run: the resolved API key (a
