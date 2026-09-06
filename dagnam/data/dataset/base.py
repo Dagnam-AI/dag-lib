@@ -489,7 +489,9 @@ class DagnamDataset(
         pattern_map: dict[str, list[str]] = {
             "csv": ["*.csv"],
             "tsv": ["*.tsv"],
-            "json": ["*.json"],
+            # A ``json``-declared dataset may have been uploaded as line-delimited
+            # ``.jsonl``; ``to_polars`` picks the parser from the file's suffix.
+            "json": ["*.json", "*.jsonl"],
             "jsonl": ["*.jsonl"],
         }
 

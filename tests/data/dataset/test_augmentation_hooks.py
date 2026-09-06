@@ -321,6 +321,26 @@ def test_iter_samples_reads_file_backed_jsonl_dataset(tmp_path: Path) -> None:
     assert sorted(samples) == [([1.5], 0), ([2.5], 1)]
 
 
+def test_iter_samples_reads_jsonl_file_of_json_declared_dataset(tmp_path: Path) -> None:
+    (tmp_path / "rows.jsonl").write_text(
+        '{"feat": 1.5, "label": "cat"}\n{"feat": 2.5, "label": "dog"}\n',
+        encoding="utf-8",
+    )
+    dataset = DagnamDataset(
+        {
+            **_meta("json", "JSON", "json", "tabular", num_samples=2),
+            "class_names": ["cat", "dog"],
+        },
+        tmp_path,
+    )
+
+    samples = cast(
+        "list[tuple[list[float], int]]",
+        list(dataset.iter_samples(split="train", val_ratio=0, test_ratio=0)),
+    )
+    assert sorted(samples) == [([1.5], 0), ([2.5], 1)]
+
+
 def test_tabular_pytorch_loader_applies_batch_transform(tmp_path: Path) -> None:
     (tmp_path / "data.csv").write_text(
         "feat,label\n1.0,cat\n2.0,dog\n",

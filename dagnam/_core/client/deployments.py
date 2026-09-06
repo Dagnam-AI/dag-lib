@@ -35,6 +35,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
         idempotent: bool = False,
+        idempotency_key: str | None = None,
     ) -> JsonValue | str | None:
         """Issue an authenticated request against a deployment route.
 
@@ -42,9 +43,9 @@ class DeploymentsClientMixin(BaseDagnamClient):
         codes through :func:`_common.raise_for_deployment`, and decodes
         JSON on success.  Returns ``None`` for empty bodies (e.g. 204).
 
-        ``idempotent=True`` mints an ``Idempotency-Key`` so a transient failure
-        on a create POST retries into a server-side replay instead of a
-        duplicate deployment.
+        ``idempotent=True`` mints an ``Idempotency-Key`` (unless an explicit
+        ``idempotency_key`` is given) so a transient failure on a create POST
+        retries into a server-side replay instead of a duplicate deployment.
         """
         url = f"{self.api_url}{path}"
         resp = self._request(
@@ -56,6 +57,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=idempotent,
+            idempotency_key=idempotency_key,
         )
         if not resp.content:
             return None
@@ -74,6 +76,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
         idempotent: bool = False,
+        idempotency_key: str | None = None,
     ) -> JsonObject:
         value = self._deployment_request(
             method,
@@ -83,6 +86,7 @@ class DeploymentsClientMixin(BaseDagnamClient):
             json_body=json_body,
             timeout=timeout,
             idempotent=idempotent,
+            idempotency_key=idempotency_key,
         )
         if isinstance(value, dict):
             return value
@@ -270,6 +274,29 @@ class DeploymentsClientMixin(BaseDagnamClient):
                 deployment_id=deployment_id,
                 params={"page": page, "limit": limit},
             )
+        )
+
+    def create_deployment_revision(
+        self,
+        deployment_id: str,
+        payload: JsonObject,
+        *,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """POST /api/v1/deployments/{id}/revisions — roll out a new model version.
+
+        The route requires an ``Idempotency-Key``; one is minted when the
+        caller gives none, so a retried request replays instead of creating a
+        second revision. Returns the revision as created (its activation is
+        asynchronous — poll :meth:`get_deployment_revisions`).
+        """
+        return self._deployment_object(
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/revisions",
+            deployment_id=deployment_id,
+            json_body=payload,
+            idempotent=True,
+            idempotency_key=idempotency_key,
         )
 
     def get_deployment_health_full(self, deployment_id: str) -> JsonObject:

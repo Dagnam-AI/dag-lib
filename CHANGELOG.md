@@ -9,6 +9,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Attach mode for platform-run training scripts.** When `DAGNAM_JOB_ID` is
+  set, `dagnam.training.init` attaches the metrics uploader to that existing
+  job instead of registering a new local run: the resolved API key (a
+  short-lived run token) is used directly as the upload credential, no project
+  id is required, and events are tagged `source.kind = "local_attach"`, the kind the platform
+  already accepts for an attached run, rather than `local_stream`.
+
+- **`dagnam.deployments.create_revision`.** Rolls a deployment to a new model
+  version via `POST /deployments/{id}/revisions`, sending the required
+  `Idempotency-Key` (minted when omitted). Returns the revision as created;
+  activation is asynchronous, so poll `revisions()` for `is_active`. Available
+  on the sync and async clients as `create_deployment_revision`.
+
+### Fixed
+
+- A dataset whose metadata declares format `json` but whose data file is
+  `.jsonl` now loads as line-delimited JSON through every converter
+  (`to_polars`, the tabular sample iterator, and the framework loaders).
+  Previously the file was not found at all, or parsed as a JSON document.
+
 - **Foundation fine-tuning SDK: `dagnam.foundation`.** `list_bases` pages the
   curated base models the platform will fine-tune, `list_recipes` returns the
   shipped training recipes, `submit` starts a run against a dataset version,
