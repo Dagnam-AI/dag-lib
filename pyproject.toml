@@ -76,6 +76,9 @@ dependencies = [
 
 [project.optional-dependencies]
 streaming = ["sseclient-py>=1.7"]
+# The workload audit stores the customer's read-only observability key in the
+# OS keychain; the readers themselves need nothing beyond polars.
+audit = ["keyring>=25"]
 # torchvision supplies ImageFolder + transforms for the PyTorch image loaders
 # (dagnam.data.loaders.image_folder); it is a real runtime dep of this extra.
 # torch>=2.13.0 is the validated security floor shared with the audio/all extras
@@ -436,16 +439,18 @@ check = { sequence = [
 release-check = { sequence = ["check", "audit", "build"], help = "Run quality gates, dependency audit, and package build" }
 
 # Layer-first import contract for the SDK. The package keeps its layer-first
-# layout by design: cli -> resources -> data -> _core, where a layer may import
+# layout by design: cli -> resources -> audit -> data -> _core, where a layer may import
 # only the layers below it. Enforced (blocking) in CI via `uv run lint-imports`.
 [tool.importlinter]
 root_package = "dagnam"
 
 [[tool.importlinter.contracts]]
-name = "layered SDK: _core <- data <- resources/cli"
+name = "layered SDK: _core <- data <- audit <- resources/cli"
 type = "layers"
 # `_contracts` was the deepest layer until 0.10.0 removed it — the contract now
 # ships as the separate `dagnam-contracts` distribution, which is a third-party
 # dependency from this package's point of view and so is not a layer here.
-layers = ["cli", "resources", "data", "_core"]
+# `audit` sits just above `data`: it imports `_core` (and may import `data`),
+# and only `cli` reaches down into it.
+layers = ["cli", "resources", "audit", "data", "_core"]
 containers = ["dagnam"]
