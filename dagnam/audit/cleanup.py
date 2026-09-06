@@ -2,9 +2,11 @@
 
 Each recorded id goes through the same three moves -- delete, re-read
 expecting not-found, record -- driven by :data:`KINDS`, never by a branch per
-artifact. A delete that answers not-found is ``already_absent``, so running
-the command twice is safe. Local workload files and the secret store go last,
-after the platform has confirmed every id is gone.
+artifact. Every id ends in one of three receipt states: ``deleted``,
+``already_absent`` (nothing there, so running the command twice is safe) or
+``blocked`` with the platform's ``reason`` for refusing. Local workload files
+and the secret store go last, and only when nothing is blocked -- they are
+what a second ``audit delete`` needs to finish the job.
 """
 
 from __future__ import annotations
@@ -17,11 +19,13 @@ import shutil
 from typing import Any, Protocol
 
 from dagnam._core.exceptions import (
+    APIError,
     DagnamError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
     ModelNotFoundError,
     ProjectNotFoundError,
+    TrainingJobNotFoundError,
 )
 from dagnam._types import JsonObject
 from dagnam.audit.secrets import SecretStore
@@ -30,6 +34,12 @@ from dagnam.audit.workspace import write_atomic
 
 SCHEMA = "dagnam.audit.deleted/1"
 DELETED_FILE = "deleted.json"
+CONFLICT_STATUS = 409
+"""A refusal, not a failure: the id is recorded ``blocked``, the rest still runs."""
+
+
+class CleanupBlockedError(DagnamError):
+    """The platform refused a delete; the message is the reason put in the receipt."""
 
 
 class CleanupClient(Protocol):
@@ -49,6 +59,14 @@ class CleanupClient(Protocol):
 
     def delete_model_entry(self, model_id: str) -> None:
         """``DELETE /api/v1/models/{id}`` (every version with it)."""
+        ...
+
+    def get_training_job(self, job_id: str) -> JsonObject:
+        """``GET /api/v1/training/jobs/{id}``; raises ``TrainingJobNotFoundError``."""
+        ...
+
+    def bulk_delete_training_jobs(self, job_ids: list[str]) -> JsonObject:
+        """``POST /api/v1/training/jobs/bulk-delete``; ``{"deleted": n, "errors": [...]}``."""
         ...
 
     def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
@@ -74,6 +92,22 @@ def _delete_model_version(client: CleanupClient, version_id: str) -> None:
     client.delete_model_entry(str(entry_id))
 
 
+def _delete_training_job(client: CleanupClient, job_id: str) -> None:
+    """A job is deleted through the bulk route (the platform has no per-job ``DELETE``).
+
+    This is what frees the dataset: the run specification the audit submitted
+    (``PostTrainingRun``) points at the job with ``ON DELETE CASCADE`` and at
+    the dataset version with ``NO ACTION``, so while the job stands the
+    dataset delete answers 409 "referenced by a training run". The route
+    answers 200 with a per-id ``errors`` list rather than a status code, so a
+    refusal -- the platform deletes terminal jobs only -- surfaces here as
+    :class:`CleanupBlockedError` carrying the server's own wording.
+    """
+    errors = client.bulk_delete_training_jobs([job_id]).get("errors")
+    if isinstance(errors, list) and errors:
+        raise CleanupBlockedError(f"the platform refused the delete: {json.dumps(errors)}")
+
+
 type Delete = Callable[[CleanupClient, str], object]
 type Get = Callable[[CleanupClient, str], object]
 
@@ -91,6 +125,12 @@ KINDS: tuple[tuple[str, Delete, Get, type[DagnamError]], ...] = (
         ModelNotFoundError,
     ),
     (
+        "training_job",
+        _delete_training_job,
+        lambda c, i: c.get_training_job(i),
+        TrainingJobNotFoundError,
+    ),
+    (
         "dataset",
         lambda c, i: c.delete_dataset(i),
         lambda c, i: c.get_dataset_meta(i),
@@ -103,7 +143,12 @@ KINDS: tuple[tuple[str, Delete, Get, type[DagnamError]], ...] = (
         ProjectNotFoundError,
     ),
 )
-"""Deletion order (children before the project): kind, delete, re-read, its not-found error."""
+"""Deletion order (children before the project): kind, delete, re-read, its not-found error.
+
+The training job sits before the dataset because it is what references it: a
+dataset a run names cannot be deleted while that run exists. The run itself
+needs no entry -- it is the job's ``ON DELETE CASCADE`` child.
+"""
 
 
 def recorded_ids(state: AuditState) -> dict[str, list[str]]:
@@ -114,6 +159,7 @@ def recorded_ids(state: AuditState) -> dict[str, list[str]]:
             for kind, value in (
                 ("deployment", step.deployment_id),
                 ("model_version", step.model_version_id),
+                ("training_job", step.training_job_id),
                 ("dataset", step.dataset_id),
             ):
                 if value is not None and value not in ids[kind]:
@@ -130,36 +176,58 @@ def _delete_one(
     get: Get,
     absent: type[DagnamError],
     item_id: str,
-) -> str:
+) -> dict[str, Any]:
+    """One id's receipt row: ``deleted``, ``already_absent``, or ``blocked`` with a reason.
+
+    A refusal (``CleanupBlockedError``, or a 409 -- the dataset the run holds) is
+    recorded rather than raised, so one blocked id does not cost the receipt
+    for every other one. The re-read still decides: a refusal for an id that
+    is in fact gone is ``already_absent``, not ``blocked``.
+    """
+    item: dict[str, Any] = {"kind": kind, "id": item_id}
+    reason: str | None = None
     try:
         delete(client, item_id)
     except absent:
-        return "already_absent"
+        return {**item, "status": "already_absent"}
+    except CleanupBlockedError as refusal:
+        reason = str(refusal)
+    except APIError as exc:
+        if exc.status_code != CONFLICT_STATUS:
+            raise
+        reason = exc.message
     try:
         get(client, item_id)
     except absent:
-        return "deleted"
+        return {**item, "status": "already_absent" if reason else "deleted"}
+    if reason is not None:
+        return {**item, "status": "blocked", "reason": reason}
     raise RuntimeError(f"{kind} {item_id} still exists after delete")
 
 
 def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
     """Delete every recorded artifact, write ``deleted.json``, then drop local rows and secrets.
 
-    Returns the receipt. Raises ``RuntimeError`` when a deleted id can still
-    be read back; the receipt is only written once every id is confirmed gone.
+    Returns the receipt: one item per recorded id, each ``deleted``,
+    ``already_absent`` or ``blocked`` with the platform's ``reason``. Local
+    workload rows and the deployment keys are dropped only when nothing is
+    blocked -- they are what a later ``audit delete`` needs to finish. Raises
+    ``RuntimeError`` when a delete reports success and the id still reads back.
     """
     state = load_state(audit_dir)
-    items: list[dict[str, Any]] = []
-    for kind, delete, get, absent in KINDS:
-        for item_id in recorded_ids(state)[kind]:
-            status = _delete_one(client, kind, delete, get, absent, item_id)
-            items.append({"kind": kind, "id": item_id, "status": status})
+    items = [
+        _delete_one(client, kind, delete, get, absent, item_id)
+        for kind, delete, get, absent in KINDS
+        for item_id in recorded_ids(state)[kind]
+    ]
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
         "deleted_at": datetime.now(UTC).isoformat(),
         "items": items,
     }
     write_atomic(audit_dir / DELETED_FILE, json.dumps(receipt, indent=2))
+    if any(item["status"] == "blocked" for item in items):
+        return receipt
     secrets = SecretStore(audit_dir)
     for steps in state.workloads.values():
         for step in steps.values():
@@ -169,4 +237,12 @@ def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
     return receipt
 
 
-__all__ = ["DELETED_FILE", "KINDS", "SCHEMA", "CleanupClient", "delete_audit", "recorded_ids"]
+__all__ = [
+    "DELETED_FILE",
+    "KINDS",
+    "SCHEMA",
+    "CleanupBlockedError",
+    "CleanupClient",
+    "delete_audit",
+    "recorded_ids",
+]

@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dagnam audit delete` now deletes the training runs it created**, before the
+  datasets they name. It previously stopped at `HTTP 409: Dataset is referenced
+  by a training run and cannot be deleted`, because a run's specification pins
+  the dataset version it trained on and the platform refuses to destroy the data
+  under it; deleting the job takes that specification with it. A platform
+  refusal is no longer an abort either: the id is recorded in `deleted.json` as
+  `{"status": "blocked", "reason": ...}` (e.g. a job that is not yet terminal,
+  which the platform will not delete), every other id is still deleted and
+  recorded, and the local workload rows and deployment keys are kept so a later
+  `audit delete` can finish the job.
+
 ## [0.12.0] - 2026-09-06
 
 ### Added

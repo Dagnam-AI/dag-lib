@@ -318,6 +318,7 @@ def cleanup(monkeypatch: PytestMonkeyPatch) -> FakeCleanup:
     fake = FakeCleanup(
         deployment=["dep-1", "dep-2"],
         model=["entry-2"],
+        job=["job-1", "job-2"],
         dataset=["ds-1", "ds-2"],
         project=["proj-1"],
     )
@@ -334,6 +335,7 @@ def test_delete_asks_first_and_writes_the_receipt(
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert "deployment: dep-1, dep-2" in captured.out
+    assert "training_job: job-1, job-2" in captured.out
     assert "project: proj-1" in captured.out
     assert "confirmation not received" in captured.err
     assert cleanup.call_log == []
@@ -351,6 +353,20 @@ def test_delete_asks_first_and_writes_the_receipt(
     assert run_cli(["audit", "delete", str(audit_dir), "--yes", "--json"]) == 0
     again = json.loads(capsys.readouterr().out)
     assert {i["status"] for i in again["items"]} == {"already_absent"}
+
+
+def test_delete_names_the_reason_an_artifact_is_blocked(
+    run_cli: CliRunner, audit_dir: Path, cleanup: FakeCleanup, capsys: StrCapture
+) -> None:
+    cleanup.running = {"job-1"}  # w1 is still training, so its dataset is still referenced
+    cleanup.held_by_job = {"ds-1": "job-1"}
+
+    assert run_cli(["audit", "delete", str(audit_dir), "--yes"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Cannot delete job with status running" in out
+    assert "dataset ds-1: blocked (Dataset is referenced by a training run" in out
+    assert "dataset ds-2: deleted" in out
 
 
 def test_audit_is_grouped_and_described() -> None:
