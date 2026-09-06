@@ -33,6 +33,7 @@ pip install "dagnam[tensorflow]"   # tensorflow
 pip install "dagnam[flax]"         # jax + flax
 pip install "dagnam[streaming]"    # SSE training/deployment streams
 pip install "dagnam[aio]"          # async client
+pip install "dagnam[audit]"        # workload audit: OS-keyring storage for deployment keys
 pip install "dagnam[all]"          # all optional integrations
 ```
 
@@ -368,6 +369,9 @@ dagnam models list
 dagnam models download <version-id> <artifact-id>
 dagnam projects list
 dagnam codegen preview <project-id>
+
+dagnam audit scan traces.jsonl --source langfuse --out ./audit   # offline: discover + price workloads
+dagnam audit run ./audit      # train, serve and score the candidates; also status / cancel / delete
 
 dagnam agent install          # install the Agent Skill into Claude Code / Codex
 dagnam agent uninstall --all
