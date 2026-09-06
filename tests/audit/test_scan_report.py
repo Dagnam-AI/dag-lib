@@ -160,3 +160,42 @@ def test_markdown_carries_the_warnings_and_unknown_costs(tmp_path: Path) -> None
     assert "## Warnings" in md
     assert "stale" in md
     assert "| unknown |" in md
+
+
+def test_dataset_numbers_ride_along_and_a_thin_holdout_is_too_few_samples() -> None:
+    dataset = {
+        "rows": 4_000,
+        "dedup_removed": 10,
+        "redactions": 3,
+        "truncated": 0,
+        "split": {"train": 3_200, "eval_holdout": 800},
+    }
+    thin = {**dataset, "split": {"train": 3_900, "eval_holdout": 100}}
+    workloads = [make_workload(calls_per_day=5_000, cost_month=4_000.0)] * 2
+    js = build_scan_report(
+        workloads,
+        source="langfuse",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": dataset},
+    ).to_json()
+    assert js["workloads"][0]["dataset"] == dataset
+    assert js["workloads"][0]["verdict"]["status"] == "candidate"
+
+    js = build_scan_report(
+        workloads,
+        source="langfuse",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": thin},
+    ).to_json()
+    assert js["workloads"][0]["verdict"] == {
+        "status": "too_few_samples",
+        "ratio": None,
+        "savings_usd_month": None,
+        "reason": "100 holdout rows after the split; 200 needed",
+    }

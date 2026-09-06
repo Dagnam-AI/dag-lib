@@ -53,6 +53,8 @@ class TestFormatRootHelp:
             "  Data:",
             "    dataset      Browse and download datasets.",
             "    cache        Inspect and clear the local dataset cache.",
+            "    audit        Audit exported LLM traces: find replaceable workloads,"
+            " train and serve owned candidates.",
             "  Models:",
             "    projects     Manage projects.",
             "    codegen      Generate model code from a project.",

@@ -10,13 +10,16 @@ workload's records into redacted, deduplicated, time-split training rows and
 platform through the :data:`CANDIDATES` per workload -- upload, split, train,
 serve, replay the holdout -- keeping a resumable :class:`AuditState`, and
 :func:`frontier` names the cheapest candidate whose agreement clears the
-floor. :func:`replaceability` judges each workload by the design's economics
-and :func:`build_scan_report` assembles the report.
+floor. :func:`replaceability` judges each workload by the design's economics,
+:func:`build_scan_report` assembles the scan report and
+:func:`build_audit_report` the audit report; :func:`delete_audit` removes
+everything a run created and writes the receipt.
 """
 
 from __future__ import annotations
 
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
+from dagnam.audit.cleanup import delete_audit
 from dagnam.audit.derive import (
     FORMAT_BY_STRUCTURE,
     DedupStats,
@@ -49,6 +52,7 @@ from dagnam.audit.readers import (
 )
 from dagnam.audit.record import Message, TraceRecord
 from dagnam.audit.redact import PII_POLICY, RedactStats, redact_rows
+from dagnam.audit.report import build_audit_report, render_switch_snippet, write_audit_report
 from dagnam.audit.scan_report import ScanReport, Window, build_scan_report, write_scan_report
 from dagnam.audit.scoring import Agreement, score_json, score_labels
 from dagnam.audit.secrets import SecretStore
@@ -90,10 +94,12 @@ __all__ = [
     "Winner",
     "Workload",
     "WorkloadDataset",
+    "build_audit_report",
     "build_dataset",
     "build_scan_report",
     "classify_outputs",
     "dedup_rows",
+    "delete_audit",
     "derive_rows",
     "discover_workloads",
     "frontier",
@@ -102,6 +108,7 @@ __all__ = [
     "normalize_template",
     "read_traces",
     "redact_rows",
+    "render_switch_snippet",
     "replaceability",
     "replay_holdout",
     "run_audit",
@@ -111,6 +118,7 @@ __all__ = [
     "split_boundary",
     "template_hash",
     "time_split",
+    "write_audit_report",
     "write_scan_report",
     "write_workload",
 ]

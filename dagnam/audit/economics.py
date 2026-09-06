@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from dagnam.audit.candidates import StudentKind
 from dagnam.audit.discover import Workload
 from dagnam.audit.prices import SERVING_RATES, PriceTable
 from dagnam.audit.structure import StructureClass
@@ -24,7 +25,6 @@ from dagnam.audit.thresholds import (
     RATIO_NOT_WORTH_IT,
 )
 
-StudentKind = Literal["cpu-classifier", "gpu-small-llm"]
 VerdictStatus = Literal[
     "candidate", "marginal", "not_worth_it", "not_audited", "too_few_samples", "unknown_cost"
 ]
@@ -50,13 +50,25 @@ class Verdict:
     reason: str
 
 
-def student_cost_usd_month(w: Workload, kind: StudentKind) -> float:
-    """Monthly serving cost of the student at the workload's volume, from :data:`SERVING_RATES`."""
-    calls_month = w.calls_per_day * DAYS_PER_MONTH
+def serving_cost_usd_month(
+    kind: StudentKind, *, calls_per_day: float, completion_tokens: int, calls: int
+) -> float:
+    """Monthly serving cost of a student at this volume, from :data:`SERVING_RATES`."""
+    calls_month = calls_per_day * DAYS_PER_MONTH
     if kind == "cpu-classifier":
         return calls_month / 1_000 * SERVING_RATES[kind]["usd_per_1k_requests"]
-    output_tokens_month = calls_month * w.completion_tokens / w.calls
+    output_tokens_month = calls_month * completion_tokens / calls
     return output_tokens_month / 1_000_000 * SERVING_RATES[kind]["usd_per_m_output_tokens"]
+
+
+def student_cost_usd_month(w: Workload, kind: StudentKind) -> float:
+    """:func:`serving_cost_usd_month` at the workload's own volume."""
+    return serving_cost_usd_month(
+        kind,
+        calls_per_day=w.calls_per_day,
+        completion_tokens=w.completion_tokens,
+        calls=w.calls,
+    )
 
 
 def replaceability(w: Workload) -> Verdict:

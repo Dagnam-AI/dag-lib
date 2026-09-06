@@ -74,6 +74,7 @@ class Workload:
             "latency_ms": {"p50": self.latency_p50_ms, "p95": self.latency_p95_ms},
             "distinct_outputs": self.distinct_outputs,
             "entropy": self.entropy_bits,
+            "models": list(self.models),
         }
 
 

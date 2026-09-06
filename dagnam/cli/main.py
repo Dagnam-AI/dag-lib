@@ -46,6 +46,7 @@ def build_parser() -> DagnamArgumentParser:
     from dagnam.cli.account_keys import register_keys
     from dagnam.cli.account_profile import register_profile
     from dagnam.cli.agent import register_agent
+    from dagnam.cli.audit import register_audit
     from dagnam.cli.cache import register_cache
     from dagnam.cli.checkpoint import register_checkpoint
     from dagnam.cli.codegen import register_codegen
@@ -86,6 +87,7 @@ def build_parser() -> DagnamArgumentParser:
     register_register(subparsers)
     register_dataset(subparsers)
     register_cache(subparsers)
+    register_audit(subparsers)
     register_projects(subparsers)
     register_deployments(subparsers)
     register_inference(subparsers)

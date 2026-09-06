@@ -8,7 +8,7 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize("args", [["dataset"], ["cache"], ["projects"], ["training"]])
+@pytest.mark.parametrize("args", [["dataset"], ["cache"], ["audit"], ["projects"], ["training"]])
 def test_missing_subcommand_exits_two(args: list[str]) -> None:
     completed = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "dagnam.cli.main", *args],

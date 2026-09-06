@@ -186,7 +186,9 @@ def test_to_json_uses_the_report_field_names() -> None:
         "latency_ms",
         "distinct_outputs",
         "entropy",
+        "models",
     ]
+    assert payload["models"] == ["gpt-4o-mini"]
     assert payload["structure_class"] == "enum_label"
     assert payload["tokens"] == {"prompt": 200, "completion": 4}
     assert payload["latency_ms"] == {"p50": 500.0, "p95": 500.0}

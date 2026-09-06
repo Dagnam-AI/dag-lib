@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # in tests/cli/test_parser.py asserts membership both ways.
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Auth", ("login", "register", "logout", "whoami")),
-    ("Data", ("dataset", "cache")),
+    ("Data", ("dataset", "cache", "audit")),
     ("Models", ("projects", "codegen", "hub", "models", "checkpoint", "inference", "deployments")),
     ("Training", ("training", "stream")),
     ("Account", ("usage", "account", "profile", "keys", "config", "version", "agent")),
@@ -41,6 +41,7 @@ COMMAND_DESCRIPTIONS: dict[str, str] = {
     "whoami": "Show the current authenticated identity.",
     "dataset": "Browse and download datasets.",
     "cache": "Inspect and clear the local dataset cache.",
+    "audit": "Audit exported LLM traces: find replaceable workloads, train and serve owned candidates.",
     "projects": "Manage projects.",
     "codegen": "Generate model code from a project.",
     "hub": "Browse the model hub.",
@@ -63,6 +64,7 @@ EXAMPLES: tuple[str, ...] = (
     "  dagnam login                         Authenticate with an API key",
     "  dagnam register                      Create an account and store an API key",
     "  dagnam dataset list --search mnist   Search available datasets",
+    "  dagnam audit scan traces.jsonl --source langfuse   Find replaceable LLM workloads",
     "  dagnam projects create --title X     Create a new project",
     "  dagnam training create <pid> ...     Start a training job",
     "  dagnam training attach <jid> -- ...  Attach local metrics to a child process",

@@ -120,6 +120,13 @@ def _select(
     return [(workload_id, by_id[workload_id]) for workload_id in chosen]
 
 
+def select_workloads(
+    audit_dir: Path, workloads: Sequence[str] | None
+) -> list[tuple[str, StructureClass]]:
+    """The workloads ``run_audit`` would run for ``workloads``, from ``scan-report.json``."""
+    return _select(audit_dir, _scan(audit_dir)[1], workloads)
+
+
 def run_audit(
     audit_dir: Path,
     *,
@@ -216,4 +223,5 @@ __all__ = [
     "STEPS",
     "WORKLOAD_STOPPING",
     "run_audit",
+    "select_workloads",
 ]
