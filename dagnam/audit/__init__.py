@@ -11,7 +11,9 @@ platform through the :data:`CANDIDATES` per workload -- upload, split, train,
 serve, replay the holdout -- keeping a resumable :class:`AuditState`, and
 :func:`frontier` names the cheapest candidate whose agreement clears the
 floor. :func:`replaceability` judges each workload by the design's economics
-and :func:`build_scan_report` assembles the report.
+and :func:`build_scan_report` assembles the report. :func:`replaceability` judges each
+workload by the design's economics and :func:`build_scan_report` assembles
+the report.
 """
 
 from __future__ import annotations
