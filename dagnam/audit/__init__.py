@@ -6,9 +6,9 @@ JSONL/CSV file through a column map. :func:`discover_workloads` groups the
 records by system-prompt template and output structure into :class:`Workload`
 summaries, most monthly spend first. :func:`build_dataset` turns one
 workload's records into redacted, deduplicated, time-split training rows and
-:func:`write_workload` puts them on disk.
-summaries, most monthly spend first; :func:`replaceability` judges each one
-by the design's economics and :func:`build_scan_report` assembles the report.
+:func:`write_workload` puts them on disk. :func:`replaceability` judges each
+workload by the design's economics and :func:`build_scan_report` assembles
+the report.
 """
 
 from __future__ import annotations
