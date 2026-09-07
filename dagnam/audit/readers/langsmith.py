@@ -12,11 +12,11 @@ Field mapping, from the run data format reference
 | ``session_id`` | ``extra.metadata.session_id`` / ``extra.metadata.thread_id`` (the documented thread keys), else ``trace_id``. LangSmith's own top-level ``session_id`` is the tracing *project* id and is deliberately not used |
 | ``ts`` | ``start_time`` |
 | ``latency_ms`` | ``end_time - start_time``; 0 when ``end_time`` is absent |
-| ``model`` | ``extra.invocation_params.model`` / ``extra.metadata.ls_model_name`` / ``outputs.model`` |
-| ``system`` / ``messages`` | ``inputs.messages``: OpenAI-style ``{role, content}`` dicts (the ``wrap_openai`` shape) or LangChain-serialized messages (``{"lc": 1, "id": [..., "HumanMessage"], "kwargs": {"content"}}``, possibly nested one list deep); a bare ``inputs.prompt`` / ``inputs.input`` string is one user turn |
-| ``response`` | ``outputs.choices[0].message`` / ``outputs.messages[-1]`` / ``outputs.generations[0][0]`` (``text`` or its serialized ``message``) / ``outputs.output`` |
-| ``prompt_tokens`` | ``prompt_tokens`` / ``outputs.usage.prompt_tokens`` / ``outputs.llm_output.token_usage.prompt_tokens`` |
-| ``completion_tokens`` | ``completion_tokens`` / ``outputs.usage.completion_tokens`` / ``outputs.llm_output.token_usage.completion_tokens`` |
+| ``model`` | ``extra.invocation_params.model`` / ``extra.invocation_params.model_name`` / ``extra.metadata.ls_model_name`` / ``outputs.model`` |
+| ``system`` / ``messages`` | ``inputs.messages`` / ``inputs.contents``: OpenAI-style ``{role, content}`` dicts (the ``wrap_openai`` shape, and what ``wrap_anthropic`` produces once it folds its ``system`` kwarg in as a system turn), LangChain-serialized messages (``{"lc": 1, "id": [..., "HumanMessage"], "kwargs": {"content"}}``, possibly nested one list deep), or Gemini ``{role, parts: [{text}]}`` turns; a bare ``inputs.prompt`` / ``inputs.input`` string is one user turn |
+| ``response`` | ``outputs.choices[0].message`` / ``outputs.messages[-1]`` / ``outputs.generations[0][0]`` (``text`` or its serialized ``message``) / ``outputs`` itself when it carries ``content`` (the ``wrap_anthropic`` / ``wrap_gemini`` shape: a string, or typed blocks whose ``text`` is joined) / ``outputs.output`` |
+| ``prompt_tokens`` | any vendor spelling at the top level or under ``usage_metadata`` / ``outputs.usage`` / ``outputs.usage_metadata`` / ``outputs.llm_output.token_usage`` (see :func:`~dagnam.audit.readers.base.prompt_tokens`) |
+| ``completion_tokens`` | the same, for the completion count |
 | ``cost_usd`` | ``total_cost`` |
 | ``outcome`` | ``extra.metadata.outcome`` (a convention, not a LangSmith field) |
 | ``workload_hint`` | ``extra.metadata.workload`` (a convention, not a LangSmith field) |
@@ -34,10 +34,12 @@ from dagnam.audit.readers.base import (
     MalformedRowError,
     Reader,
     Row,
-    as_int,
+    completion_tokens,
+    content_text,
     get,
     optional_float,
     parse_ts,
+    prompt_tokens,
     require,
     split_prompt,
     text,
@@ -48,10 +50,23 @@ from dagnam.audit.record import TraceRecord
 REQUIRED_FIELDS = ("id", "run_type", "start_time", "inputs", "outputs")
 
 _LC_ROLES = {"SystemMessage": "system", "HumanMessage": "user", "AIMessage": "assistant"}
+# The run's own counts first, then LangChain's ``usage_metadata`` and the
+# per-provider usage blocks the run carries through from the response.
+_USAGE_ROOTS = (
+    "",
+    "usage_metadata",
+    "outputs.usage",
+    "outputs.usage_metadata",
+    "outputs.llm_output.token_usage",
+)
 
 
 def _plain_message(message: object) -> Any:
-    """Turn a LangChain-serialized message into ``{role, content}``; pass others through."""
+    """Turn a LangChain-serialized or Gemini ``parts`` message into ``{role, content}``.
+
+    Anything else passes through: OpenAI-style ``{role, content}`` dicts are
+    already in the target shape.
+    """
     if isinstance(message, Mapping) and "kwargs" in message:
         kind = text(message.get("id", ["?"])[-1])
         return {
@@ -59,18 +74,37 @@ def _plain_message(message: object) -> Any:
             "content": get(message, "kwargs.content"),
             "tool_calls": get(message, "kwargs.tool_calls"),
         }
+    if isinstance(message, Mapping) and "parts" in message:
+        return {"role": message.get("role", "user"), "content": message["parts"]}
     return message
 
 
 def _messages(inputs: Mapping[str, Any]) -> list[Any] | str:
-    raw = get(inputs, "messages")
+    # ``wrap_gemini`` normalizes ``contents`` to ``messages``; a run that kept the
+    # raw Gemini request carries ``contents`` instead.
+    raw = get(inputs, "messages", "contents")
     if raw is None:
         return text(require(inputs, "prompt", "input"))
     if not isinstance(raw, list):
         raise MalformedRowError(f"inputs.messages is not a list: {raw!r}")
     if raw and isinstance(raw[0], list):  # LangChain nests one batch of messages per prompt
         raw = raw[0]
-    return [_plain_message(m) for m in raw]
+    messages = [_plain_message(m) for m in raw]
+    # ``wrap_gemini`` leaves the system prompt in ``config.system_instruction``
+    # rather than as a turn; without it every step of an agent hashes to the
+    # same template and collapses into one workload.
+    system = get(inputs, "config.system_instruction")
+    if system is not None:
+        messages.insert(
+            0,
+            {
+                "role": "system",
+                "content": _plain_message(system)["content"]
+                if isinstance(system, Mapping) and "parts" in system
+                else system,
+            },
+        )
+    return messages
 
 
 def _response(outputs: Mapping[str, Any]) -> Any:
@@ -86,6 +120,10 @@ def _response(outputs: Mapping[str, Any]) -> Any:
         first = generations[0][0] if isinstance(generations[0], list) else generations[0]
         message = get(first, "message")
         return _plain_message(message) if message is not None else get(first, "text")
+    if get(outputs, "content") is not None:
+        # ``wrap_anthropic`` / ``wrap_gemini`` dump the reply message straight into
+        # ``outputs``: ``content`` (a string or typed blocks) beside ``tool_calls``.
+        return outputs
     return get(outputs, "output")
 
 
@@ -98,7 +136,8 @@ def to_record(row: Row) -> TraceRecord | None:
     system, messages = split_prompt(_messages(inputs))
     reply = _response(outputs)
     if isinstance(reply, Mapping):
-        response, calls = text(reply.get("content")), tool_calls(reply.get("tool_calls"))
+        response = content_text(reply.get("content"))
+        calls = tool_calls(reply.get("tool_calls"))
     else:
         response, calls = text(reply), ()
     end = get(row, "end_time")
@@ -109,6 +148,7 @@ def to_record(row: Row) -> TraceRecord | None:
             get(
                 row,
                 "extra.invocation_params.model",
+                "extra.invocation_params.model_name",
                 "extra.metadata.ls_model_name",
                 "outputs.model",
             )
@@ -118,24 +158,8 @@ def to_record(row: Row) -> TraceRecord | None:
         messages=messages,
         response=response,
         response_tool_calls=calls,
-        prompt_tokens=as_int(
-            get(
-                row,
-                "prompt_tokens",
-                "outputs.usage.prompt_tokens",
-                "outputs.llm_output.token_usage.prompt_tokens",
-            )
-            or 0
-        ),
-        completion_tokens=as_int(
-            get(
-                row,
-                "completion_tokens",
-                "outputs.usage.completion_tokens",
-                "outputs.llm_output.token_usage.completion_tokens",
-            )
-            or 0
-        ),
+        prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
+        completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
         latency_ms=0.0 if end is None else (parse_ts(end) - ts).total_seconds() * 1000.0,
         cost_usd=optional_float(get(row, "total_cost")),
         session_id=text(

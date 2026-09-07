@@ -7,7 +7,10 @@ from datetime import UTC
 import json
 from pathlib import Path
 
+import pytest
+
 from dagnam.audit import read_traces
+from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers import langfuse
 
 # Row counts of ``fixtures/langfuse_sample.jsonl`` (see fixtures/README.md).
@@ -128,3 +131,57 @@ def test_outcome_from_metadata() -> None:
     record = langfuse.to_record({**_generation(), "metadata": {"outcome": "0.5"}})
     assert record is not None
     assert record.outcome == 0.5
+
+
+def test_anthropic_usage_shape_counts_cached_prompt_tokens_and_prices() -> None:
+    row = _generation()
+    del row["usage"], row["calculatedTotalCost"]
+    row.update(
+        {
+            "model": "anthropic/claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 40,
+                "cache_read_input_tokens": 800,
+                "cache_creation_input_tokens": 100,
+            },
+        }
+    )
+
+    record = langfuse.to_record(row)
+
+    assert record is not None
+    assert (record.prompt_tokens, record.completion_tokens) == (1000, 40)
+    assert PriceTable.load(None).cost(
+        record.model, record.prompt_tokens, record.completion_tokens
+    ) == pytest.approx(0.0036)
+
+
+def test_gemini_usage_shape_is_read_and_priced() -> None:
+    row = _generation()
+    del row["usage"]
+    row.update(
+        {
+            "model": "models/gemini-2.5-flash",
+            "usageMetadata": {"promptTokenCount": 1_000, "candidatesTokenCount": 200},
+        }
+    )
+
+    record = langfuse.to_record(row)
+
+    assert record is not None
+    assert (record.prompt_tokens, record.completion_tokens) == (1000, 200)
+    assert PriceTable.load(None).cost(
+        record.model, record.prompt_tokens, record.completion_tokens
+    ) == pytest.approx(0.0008)
+
+
+def test_snake_case_gemini_usage_details_are_read() -> None:
+    row = _generation()
+    del row["usage"]
+    row["usageDetails"] = {"prompt_token_count": 12, "candidates_token_count": 3}
+
+    record = langfuse.to_record(row)
+
+    assert record is not None
+    assert (record.prompt_tokens, record.completion_tokens) == (12, 3)

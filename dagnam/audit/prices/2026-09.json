@@ -18,6 +18,26 @@
       "url": "https://ai.google.dev/gemini-api/docs/pricing",
       "date": "2026-09-06",
       "note": "Paid tier; pro rows are the <=200K-token prompt tier; gemini-3.6/3.7/3.8-flash prices are promotional through 2026-12-31"
+    },
+    "mistral": {
+      "url": "https://mistral.ai/pricing/api",
+      "date": "2026-09-07",
+      "note": "API pricing table; keyed without the vendor's floating '-latest' suffix (mistral-medium-latest -> mistral-medium), which canonical_model_id strips. cached_input_per_m is left null: the page states a 90% input discount for cached tokens but prices no cached rate"
+    },
+    "deepseek": {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "date": "2026-09-07",
+      "note": "Standard (peak) rates; off-peak is half. cached_input_per_m is the cache-hit input rate. The vision-preview model is not listed here"
+    },
+    "xai": {
+      "url": "https://docs.x.ai/docs/models",
+      "date": "2026-09-07",
+      "note": "Text API models at the <200K-token prompt tier; above it xAI doubles both rates. Image, video and voice models are not text models and are not listed"
+    },
+    "cohere": {
+      "url": "https://cohere.com/pricing",
+      "date": "2026-09-07",
+      "note": "The only generative rows the page prices, which it labels legacy; it publishes no per-token rate for command-a-03-2025 or the other current Command models, so they have no row"
     }
   },
   "rows": {
@@ -71,6 +91,29 @@
     "gemini-3.1-pro-preview": {"input_per_m": 2.00, "output_per_m": 12.00, "cached_input_per_m": 0.20, "cheaper_variant": "gemini-3.1-flash-lite"},
     "gemini-2.5-pro": {"input_per_m": 1.25, "output_per_m": 10.00, "cached_input_per_m": 0.125, "cheaper_variant": "gemini-2.5-flash"},
     "gemini-2.5-flash": {"input_per_m": 0.30, "output_per_m": 2.50, "cached_input_per_m": 0.03, "cheaper_variant": "gemini-2.5-flash-lite"},
-    "gemini-2.5-flash-lite": {"input_per_m": 0.10, "output_per_m": 0.40, "cached_input_per_m": 0.01, "cheaper_variant": null}
+    "gemini-2.5-flash-lite": {"input_per_m": 0.10, "output_per_m": 0.40, "cached_input_per_m": 0.01, "cheaper_variant": null},
+
+    "mistral-medium": {"input_per_m": 1.50, "output_per_m": 7.50, "cached_input_per_m": null, "cheaper_variant": "mistral-small"},
+    "mistral-large": {"input_per_m": 0.50, "output_per_m": 1.50, "cached_input_per_m": null, "cheaper_variant": "mistral-small"},
+    "mistral-small": {"input_per_m": 0.15, "output_per_m": 0.60, "cached_input_per_m": null, "cheaper_variant": null},
+    "codestral": {"input_per_m": 0.30, "output_per_m": 0.90, "cached_input_per_m": null, "cheaper_variant": null},
+    "ministral-14b": {"input_per_m": 0.20, "output_per_m": 0.20, "cached_input_per_m": null, "cheaper_variant": "ministral-8b"},
+    "ministral-8b": {"input_per_m": 0.15, "output_per_m": 0.15, "cached_input_per_m": null, "cheaper_variant": "ministral-3b"},
+    "ministral-3b": {"input_per_m": 0.10, "output_per_m": 0.10, "cached_input_per_m": null, "cheaper_variant": null},
+
+    "deepseek-v4-pro": {"input_per_m": 1.32, "output_per_m": 3.96, "cached_input_per_m": 0.044, "cheaper_variant": "deepseek-v4-flash"},
+    "deepseek-v4-flash": {"input_per_m": 0.44, "output_per_m": 1.32, "cached_input_per_m": 0.014, "cheaper_variant": null},
+
+    "grok-4.6": {"input_per_m": 2.00, "output_per_m": 6.00, "cached_input_per_m": 0.50, "cheaper_variant": "grok-4.3"},
+    "grok-4.5": {"input_per_m": 2.00, "output_per_m": 6.00, "cached_input_per_m": 0.30, "cheaper_variant": "grok-4.3"},
+    "grok-4.3": {"input_per_m": 1.25, "output_per_m": 2.50, "cached_input_per_m": 0.20, "cheaper_variant": null},
+    "grok-4.20-0309-reasoning": {"input_per_m": 1.25, "output_per_m": 2.50, "cached_input_per_m": 0.20, "cheaper_variant": null},
+    "grok-4.20-0309-non-reasoning": {"input_per_m": 1.25, "output_per_m": 2.50, "cached_input_per_m": 0.20, "cheaper_variant": null},
+
+    "command": {"input_per_m": 1.00, "output_per_m": 2.00, "cached_input_per_m": null, "cheaper_variant": "command-light"},
+    "command-light": {"input_per_m": 0.30, "output_per_m": 0.60, "cached_input_per_m": null, "cheaper_variant": null},
+    "command-r-03-2024": {"input_per_m": 0.50, "output_per_m": 1.50, "cached_input_per_m": null, "cheaper_variant": null},
+    "command-r-plus-04-2024": {"input_per_m": 3.00, "output_per_m": 15.00, "cached_input_per_m": null, "cheaper_variant": "command-r-plus-08-2024"},
+    "command-r-plus-08-2024": {"input_per_m": 2.50, "output_per_m": 10.00, "cached_input_per_m": null, "cheaper_variant": "command-r-03-2024"}
   }
 }

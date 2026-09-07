@@ -11,6 +11,7 @@ import polars as pl
 import pytest
 
 from dagnam.audit import Message, read_traces
+from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers import langsmith
 
 # Row counts of ``fixtures/langsmith_sample.jsonl`` (see fixtures/README.md).
@@ -174,3 +175,139 @@ def test_missing_end_time_gives_zero_latency() -> None:
     record = langsmith.to_record(row)
     assert record is not None
     assert record.latency_ms == 0.0
+
+
+def test_anthropic_run_with_usage_metadata_is_read_and_priced() -> None:
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "extra": {
+                "invocation_params": {"model_name": "claude-sonnet-4-5-20250929"},
+                "metadata": {"ls_provider": "anthropic"},
+            },
+            "usage_metadata": {"input_tokens": 900, "output_tokens": 120},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.model == "claude-sonnet-4-5-20250929"
+    assert (record.prompt_tokens, record.completion_tokens) == (900, 120)
+    assert PriceTable.load(None).cost(
+        record.model, record.prompt_tokens, record.completion_tokens
+    ) == pytest.approx(0.0045)
+
+
+def test_usage_metadata_on_the_outputs_is_read() -> None:
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row["outputs"] = {
+        **row["outputs"],  # type: ignore[dict-item]
+        "usage_metadata": {"input_tokens": 7, "output_tokens": 2},
+    }
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert (record.prompt_tokens, record.completion_tokens) == (7, 2)
+
+
+def test_wrap_anthropic_run_reads_its_content_blocks() -> None:
+    """``wrap_anthropic`` dumps the Message into ``outputs``: content blocks, folded system."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "name": "ChatAnthropic",
+            # ``_strip_not_given`` folds the ``system`` kwarg in as a system turn.
+            "inputs": {
+                "messages": [
+                    {"role": "system", "content": "be brief"},
+                    {"role": "user", "content": "hi"},
+                ]
+            },
+            "outputs": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-5-20250929",
+                "content": [
+                    {"type": "thinking", "thinking": "hmm"},  # non-text block: ignored
+                    {"type": "text", "text": "hello "},
+                    {"type": "text", "text": "there"},
+                ],
+                "usage_metadata": {"input_tokens": 900, "output_tokens": 120},
+            },
+            "extra": {"metadata": {"ls_provider": "anthropic"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system == "be brief"
+    assert record.messages == (Message("user", "hi"),)
+    assert record.response == "hello there"
+    assert (record.prompt_tokens, record.completion_tokens) == (900, 120)
+    assert record.model == "claude-sonnet-4-5-20250929"
+
+
+def test_wrap_gemini_run_reads_its_contents_and_content() -> None:
+    """A raw Gemini request/response: ``inputs.contents`` parts, string ``outputs.content``."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "inputs": {"contents": [{"role": "user", "parts": [{"text": "what is AI?"}]}]},
+            "outputs": {
+                "role": "assistant",
+                "content": "a field of study",
+                "usage_metadata": {"prompt_token_count": 12, "candidates_token_count": 4},
+            },
+            "extra": {"metadata": {"ls_model_name": "gemini-2.5-flash"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system is None
+    assert record.messages == (Message("user", "what is AI?"),)
+    assert record.response == "a field of study"
+    assert (record.prompt_tokens, record.completion_tokens) == (12, 4)
+    assert record.model == "gemini-2.5-flash"
+
+
+def test_wrap_gemini_run_lifts_the_system_instruction_into_a_system_turn() -> None:
+    """``wrap_gemini`` keeps the system prompt in ``config.system_instruction``; it becomes turn 0."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "inputs": {
+                "messages": [{"role": "user", "content": "cancelling order"}],
+                "config": {"system_instruction": "Classify the intent."},
+            },
+            "outputs": {
+                "role": "assistant",
+                "content": "cancel_order",
+                "usage_metadata": {"input_tokens": 85, "output_tokens": 1},
+            },
+            "extra": {"metadata": {"ls_model_name": "gemini-2.5-flash-lite"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system == "Classify the intent."
+    assert record.messages == (Message("user", "cancelling order"),)
+    assert record.response == "cancel_order"
+
+    row["inputs"] = {
+        "messages": [{"role": "user", "content": "cancelling order"}],
+        "config": {"system_instruction": {"parts": [{"text": "Be terse."}]}},
+    }
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.system == "Be terse."

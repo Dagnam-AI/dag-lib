@@ -14,6 +14,7 @@ from dagnam.audit.prices import (
     PriceRow,
     PriceTable,
     PriceTableError,
+    canonical_model_id,
 )
 from dagnam.audit.thresholds import PRICE_TABLE_STALE_DAYS
 
@@ -38,7 +39,15 @@ def test_every_row_is_well_formed_and_every_cheaper_variant_is_a_row() -> None:
     table = PriceTable.load(None)
     raw = json.loads((PRICES_DIR / "2026-09.json").read_text())
 
-    assert set(raw["_sources"]) == {"openai", "anthropic", "google"}
+    assert set(raw["_sources"]) == {
+        "openai",
+        "anthropic",
+        "google",
+        "mistral",
+        "deepseek",
+        "xai",
+        "cohere",
+    }
     assert all({"url", "date"} <= set(src) for src in raw["_sources"].values())
     for model, row in table.rows.items():
         assert row.model == model
@@ -47,6 +56,71 @@ def test_every_row_is_well_formed_and_every_cheaper_variant_is_a_row() -> None:
         if row.cheaper_variant is not None:
             cheaper = table.rows[row.cheaper_variant]
             assert cheaper.input_per_m < row.input_per_m
+
+
+@pytest.mark.parametrize(
+    ("model", "canonical"),
+    [
+        ("gpt-4o-mini", "gpt-4o-mini"),
+        ("GPT-4o-Mini", "gpt-4o-mini"),
+        (" openai/gpt-4o-mini ", "gpt-4o-mini"),
+        ("anthropic/claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("openrouter:anthropic/claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("models/gemini-2.5-flash", "gemini-2.5-flash"),
+        ("google/gemini-2.5-flash", "gemini-2.5-flash"),
+        ("vertex_ai/gemini-2.5-flash", "gemini-2.5-flash"),
+        ("azure/gpt-4o", "gpt-4o"),
+        ("bedrock/us.anthropic.claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("eu.anthropic.claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("mistral/mistral-medium-latest", "mistral-medium"),
+        ("deepseek/deepseek-v4-pro", "deepseek-v4-pro"),
+        ("xai:grok-4.6", "grok-4.6"),
+        ("cohere/command-r-plus-08-2024", "command-r-plus-08-2024"),
+        ("groq/llama-3.3-70b", "llama-3.3-70b"),
+        ("together/qwen", "qwen"),
+        ("meta/llama-4", "llama-4"),
+        ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"),
+        ("some-vendor/unlisted-model", "some-vendor/unlisted-model"),
+    ],
+)
+def test_canonical_model_id_strips_only_the_decoration(model: str, canonical: str) -> None:
+    assert canonical_model_id(model) == canonical
+
+
+def test_canonical_model_id_is_the_identity_on_every_row_of_the_table() -> None:
+    for model in PriceTable.load(None).rows:
+        assert canonical_model_id(model) == model
+
+
+@pytest.mark.parametrize(
+    ("model", "priced_like"),
+    [
+        ("anthropic/claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("ANTHROPIC/Claude-Sonnet-4-5", "claude-sonnet-4-5"),
+        ("models/gemini-2.5-flash", "gemini-2.5-flash"),
+        ("mistral-medium-latest", "mistral-medium"),
+        ("openrouter:mistral/mistral-large-latest", "mistral-large"),
+        # A dated id the table does not list falls back to the undated row...
+        ("gpt-4o-2024-08-06", "gpt-4o"),
+        ("claude-haiku-4-5-2025-10-01", "claude-haiku-4-5"),
+        ("us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        ("bedrock/anthropic.claude-haiku-4-5:0", "claude-haiku-4-5"),
+    ],
+)
+def test_a_decorated_id_prices_as_its_table_row(model: str, priced_like: str) -> None:
+    table = PriceTable.load(None)
+
+    assert table.cost(model, ONE_MILLION, ONE_MILLION) == table.cost(
+        priced_like, ONE_MILLION, ONE_MILLION
+    )
+
+
+def test_a_dated_row_keeps_its_own_price_rather_than_the_undated_one() -> None:
+    table = PriceTable.load(None)
+
+    # ...but never over a row the vendor prices separately.
+    assert table.cost("gpt-4o-2024-05-13", ONE_MILLION, 0) == 5.0
+    assert table.cost("gpt-4o", ONE_MILLION, 0) == 2.50
 
 
 def test_cost_is_per_million_tokens_and_none_for_an_unknown_model() -> None:
