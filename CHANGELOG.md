@@ -37,6 +37,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
   window instead of spending every attempt inside the one window it already
   exhausted. The reported latency is the successful attempt's alone, so the waits
   never show up as the endpoint's p50/p95.
+- **`dagnam audit status` no longer crashes on a deployment that is already
+  gone.** A state file that still names a deployment the platform has since
+  deleted made the command exit with `Error: Deployment '...' not found`; the
+  row now simply reports no `requests_7d` and everything else is unchanged.
 
 ## [0.12.0] - 2026-09-06
 
