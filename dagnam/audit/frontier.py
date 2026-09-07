@@ -18,11 +18,18 @@ from typing import Any
 
 import requests
 
+from dagnam._core._retry import parse_retry_after
 from dagnam._types import JsonValue
 from dagnam.audit.candidates import CandidateKind
 
 CHAT_TIMEOUT_SECONDS = 180.0
 """Per-call ceiling; a serverless replica's cold start is inside it."""
+RATE_LIMIT_RETRIES = 8
+"""Attempts one replay call gets; the gateway's 429s are not the candidate's failure."""
+RATE_LIMIT_SLEEP_SECONDS = 1.0
+"""Wait before retrying a 429 whose ``Retry-After`` is absent or unparseable."""
+RATE_LIMIT_SLEEP_MAX_SECONDS = 65.0
+"""Cap on an honored ``Retry-After``: one full per-minute window, and a little slack."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,19 +63,39 @@ def percentile(values: Sequence[float], q: float) -> float | None:
     return ordered[min(len(ordered) - 1, max(0, math.ceil(q * len(ordered)) - 1))]
 
 
-def _completion(endpoint: Endpoint, messages: JsonValue, timeout: float) -> str | None:
-    try:
-        response = requests.post(
-            f"{endpoint.base_url}/v1/chat/completions",
-            json={"model": endpoint.model, "messages": messages},
-            headers={"Authorization": f"Bearer {endpoint.api_key}"},
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        content: Any = response.json()["choices"][0]["message"]["content"]
-    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
-        return None
-    return content if isinstance(content, str) else None
+def _completion(
+    endpoint: Endpoint, messages: JsonValue, timeout: float
+) -> tuple[str | None, float]:
+    """The answer, and the milliseconds the round trip that produced it took.
+
+    A 429 is the gateway's rate limit refusing the *replay*, not the candidate
+    failing it, so the same request is retried after the ``Retry-After`` the
+    refusal names; only an exhausted attempt budget is an error. The reported
+    time is that one successful attempt's -- the waits are nobody's latency.
+    """
+    for attempt in range(RATE_LIMIT_RETRIES):
+        started = time.perf_counter()
+        try:
+            response = requests.post(
+                f"{endpoint.base_url}/v1/chat/completions",
+                json={"model": endpoint.model, "messages": messages},
+                headers={"Authorization": f"Bearer {endpoint.api_key}"},
+                timeout=timeout,
+            )
+            if response.status_code == 429:
+                if attempt + 1 < RATE_LIMIT_RETRIES:
+                    wait = parse_retry_after(
+                        response.headers.get("Retry-After"), cap=RATE_LIMIT_SLEEP_MAX_SECONDS
+                    )
+                    time.sleep(RATE_LIMIT_SLEEP_SECONDS if wait is None else wait)
+                continue
+            response.raise_for_status()
+            content: Any = response.json()["choices"][0]["message"]["content"]
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
+            return None, 0.0
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        return (content if isinstance(content, str) else None), elapsed_ms
+    return None, 0.0
 
 
 def replay_holdout(
@@ -85,9 +112,7 @@ def replay_holdout(
     """
 
     def call(row: Mapping[str, Any]) -> tuple[str | None, float]:
-        started = time.perf_counter()
-        content = _completion(endpoint, row["messages"], timeout)
-        return content, (time.perf_counter() - started) * 1000
+        return _completion(endpoint, row["messages"], timeout)
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         results = list(pool.map(call, rows))
@@ -136,6 +161,9 @@ def frontier(points: Sequence[CandidateResult], *, floor: float) -> Winner | Non
 
 __all__ = [
     "CHAT_TIMEOUT_SECONDS",
+    "RATE_LIMIT_RETRIES",
+    "RATE_LIMIT_SLEEP_MAX_SECONDS",
+    "RATE_LIMIT_SLEEP_SECONDS",
     "CandidateResult",
     "Endpoint",
     "Latency",

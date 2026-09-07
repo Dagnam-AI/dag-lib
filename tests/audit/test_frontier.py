@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
 import requests
-from tests.typing_helpers import RequestsMocker
+from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.frontier import (
+    RATE_LIMIT_RETRIES,
+    RATE_LIMIT_SLEEP_MAX_SECONDS,
+    RATE_LIMIT_SLEEP_SECONDS,
     CandidateResult,
     Endpoint,
     Latency,
@@ -134,3 +138,85 @@ def test_replay_concurrency_does_not_change_results(
     _serve(requests_mock)
     answers, _ = replay_holdout(ENDPOINT, _rows(9), concurrency=concurrency)
     assert answers == [f"a:q{i}" for i in range(9)]
+
+
+CHAT_URL = "https://x/v1/chat/completions"
+OK_RESPONSE = {"json": {"choices": [{"message": {"content": "ok"}}]}}
+
+
+@pytest.fixture
+def slept(monkeypatch: PytestMonkeyPatch) -> list[float]:
+    """Every second the replay waits, without waiting any of them."""
+    recorded: list[float] = []
+    # ``frontier`` calls ``time.sleep`` through this same module object.
+    monkeypatch.setattr(time, "sleep", recorded.append)
+    return recorded
+
+
+def _rate_limited(retry_after: str | None = None) -> dict[str, Any]:
+    headers = {} if retry_after is None else {"Retry-After": retry_after}
+    return {"status_code": 429, "headers": headers, "json": {"error": "rate limited"}}
+
+
+def test_a_429_is_waited_out_and_the_same_request_retried(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited("2"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [2.0]
+    sent = [json.loads(r.text or "") for r in requests_mock.request_history]
+    assert sent == [{"model": "dep-1", "messages": [{"role": "user", "content": "q0"}]}] * 2
+
+
+def test_a_429_without_a_usable_retry_after_waits_the_default(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited(), OK_RESPONSE, _rate_limited("soon"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=1)
+
+    assert answers == ["ok", "ok"]
+    assert latency.errors == 0
+    assert slept == [RATE_LIMIT_SLEEP_SECONDS, RATE_LIMIT_SLEEP_SECONDS]
+
+
+def test_an_outsized_retry_after_is_capped(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited("600"), OK_RESPONSE])
+
+    answers, _ = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert slept == [RATE_LIMIT_SLEEP_MAX_SECONDS]
+
+
+def test_a_429_on_every_attempt_exhausts_the_budget_and_counts_one_error(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited("1")] * RATE_LIMIT_RETRIES)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == RATE_LIMIT_RETRIES
+    # No wait after the attempt that gives up.
+    assert slept == [1.0] * (RATE_LIMIT_RETRIES - 1)
+
+
+def test_a_non_429_http_error_fails_the_call_without_waiting(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, status_code=500)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == 1
+    assert slept == []
