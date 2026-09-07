@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
 from typing import Any
 
 import pytest
 import requests
-from tests.typing_helpers import RequestsMocker
+from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.frontier import (
+    RATE_LIMIT_RETRIES,
+    RATE_LIMIT_SLEEP_MAX_SECONDS,
+    RATE_LIMIT_SLEEP_SECONDS,
+    TRANSIENT_STATUSES,
     CandidateResult,
     Endpoint,
     Latency,
@@ -84,7 +90,7 @@ def test_replay_treats_malformed_bodies_and_transport_errors_as_none(
 
 
 def test_replay_with_nothing_succeeding_has_no_latency(requests_mock: RequestsMocker) -> None:
-    requests_mock.post("https://x/v1/chat/completions", status_code=503)
+    requests_mock.post("https://x/v1/chat/completions", status_code=500)
     answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=0)
     assert answers == [None, None]
     assert latency == Latency(p50_ms=None, p95_ms=None, calls=2, errors=2)
@@ -134,3 +140,162 @@ def test_replay_concurrency_does_not_change_results(
     _serve(requests_mock)
     answers, _ = replay_holdout(ENDPOINT, _rows(9), concurrency=concurrency)
     assert answers == [f"a:q{i}" for i in range(9)]
+
+
+CHAT_URL = "https://x/v1/chat/completions"
+OK_RESPONSE = {"json": {"choices": [{"message": {"content": "ok"}}]}}
+
+
+@pytest.fixture
+def slept(monkeypatch: PytestMonkeyPatch) -> list[float]:
+    """Every second the replay waits, without waiting any of them."""
+    recorded: list[float] = []
+    # ``frontier`` calls ``time.sleep`` through this same module object.
+    monkeypatch.setattr(time, "sleep", recorded.append)
+    return recorded
+
+
+def _refused(status: int, retry_after: str | None = None) -> dict[str, Any]:
+    headers = {} if retry_after is None else {"Retry-After": retry_after}
+    return {"status_code": status, "headers": headers, "json": {"error": "refused"}}
+
+
+def _rate_limited(retry_after: str | None = None) -> dict[str, Any]:
+    return _refused(429, retry_after)
+
+
+def test_a_429_is_waited_out_and_the_same_request_retried(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited("2"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [2.0]
+    sent = [json.loads(r.text or "") for r in requests_mock.request_history]
+    assert sent == [{"model": "dep-1", "messages": [{"role": "user", "content": "q0"}]}] * 2
+
+
+def test_a_429_without_a_usable_retry_after_waits_the_default(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited(), OK_RESPONSE, _rate_limited("soon"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=1)
+
+    assert answers == ["ok", "ok"]
+    assert latency.errors == 0
+    # Each call starts its own backoff, so both first refusals wait the base.
+    assert slept == [RATE_LIMIT_SLEEP_SECONDS, RATE_LIMIT_SLEEP_SECONDS]
+
+
+def test_consecutive_429s_without_a_header_double_the_wait(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited()] * 4 + [OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_the_computed_backoff_is_capped_too(
+    requests_mock: RequestsMocker, slept: list[float], monkeypatch: PytestMonkeyPatch
+) -> None:
+    # Not by dotted path: ``dagnam.audit`` re-exports the ``frontier`` *function*
+    # over its own submodule, so the attribute walk lands on the wrong object.
+    module = sys.modules["dagnam.audit.frontier"]
+    monkeypatch.setattr(module, "RATE_LIMIT_SLEEP_SECONDS", 100.0)
+    requests_mock.post(CHAT_URL, [_rate_limited(), OK_RESPONSE])
+
+    answers, _ = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert slept == [RATE_LIMIT_SLEEP_MAX_SECONDS]
+
+
+def test_an_outsized_retry_after_is_capped(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited("600"), OK_RESPONSE])
+
+    answers, _ = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert slept == [RATE_LIMIT_SLEEP_MAX_SECONDS]
+
+
+def test_a_429_on_every_attempt_exhausts_the_budget_and_counts_one_error(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited()] * RATE_LIMIT_RETRIES)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == RATE_LIMIT_RETRIES
+    # The full doubling sequence, and no wait after the attempt that gives up.
+    assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    assert len(slept) == RATE_LIMIT_RETRIES - 1
+    assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
+
+
+def test_a_non_transient_http_error_fails_the_call_without_waiting(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    # A 500 is the candidate answering badly, not the gateway refusing to ask it.
+    assert 500 not in TRANSIENT_STATUSES
+    requests_mock.post(CHAT_URL, status_code=500)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == 1
+    assert slept == []
+
+
+def test_a_transient_502_is_waited_out_and_the_same_request_retried(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(502), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [RATE_LIMIT_SLEEP_SECONDS]
+    sent = [json.loads(r.text or "") for r in requests_mock.request_history]
+    assert sent == [{"model": "dep-1", "messages": [{"role": "user", "content": "q0"}]}] * 2
+
+
+def test_a_503_that_names_a_retry_after_waits_exactly_that_long(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(503, "3"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [3.0]
+
+
+def test_a_504_on_every_attempt_exhausts_the_budget_and_counts_one_error(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(504)] * RATE_LIMIT_RETRIES)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == RATE_LIMIT_RETRIES
+    # The full doubling sequence, and no wait after the attempt that gives up.
+    assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
