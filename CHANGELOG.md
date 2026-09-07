@@ -7,50 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-
-- **`dagnam audit delete` now deletes the training runs it created**, before the
-  datasets they name. It previously stopped at `HTTP 409: Dataset is referenced
-  by a training run and cannot be deleted`, because a run's specification pins
-  the dataset version it trained on and the platform refuses to destroy the data
-  under it; deleting the job takes that specification with it. A platform
-  refusal is no longer an abort either: the id is recorded in `deleted.json` as
-  `{"status": "blocked", "reason": ...}` (e.g. a job that is not yet terminal,
-  which the platform will not delete), every other id is still deleted and
-  recorded, and the local workload rows and deployment keys are kept so a later
-  `audit delete` can finish the job.
-
-- **`dagnam audit run`'s holdout replay waits out a transient gateway refusal.**
-  Four workers replaying a holdout outrun the inference route's per-minute rate
-  limit, and every `HTTP 429` counted as a failed call -- a 396-row holdout came
-  back `unreliable: 276 of 396 replay calls failed` with no agreement measured.
-  A `502`, `503` or `504` counted the same way, and one of them (the gateway
-  forwarding to a scale-to-zero replica that hiccupped) was enough to score 395
-  of 396 rows and fail an identity check on the row count alone. Every status in
-  `TRANSIENT_STATUSES` -- `429`, `502`, `503`, `504` -- is now waited out and the
-  same request retried, sharing one budget of `RATE_LIMIT_RETRIES` attempts; only
-  an exhausted budget is an error, and every other status (a `500` included)
-  still fails its call at once. The wait is the seconds the refusal's
-  `Retry-After` names, and when it names none -- the gateway currently sends no
-  such header on a 429 -- a doubling backoff (1, 2, 4, 8, 16, 32, 64 s, each
-  capped at `RATE_LIMIT_SLEEP_MAX_SECONDS`), so a call outlasts a full per-minute
-  window instead of spending every attempt inside the one window it already
-  exhausted. The reported latency is the successful attempt's alone, so the waits
-  never show up as the endpoint's p50/p95.
-- **`dagnam audit cancel` no longer aborts on a deployment the platform refuses
-  to pause.** A revision that never activated leaves its deployment in
-  `not_provisioned`, and the pause came back `HTTP 409: Invalid status
-  transition from not_provisioned to paused`, which stopped the cancel before it
-  reached the remaining candidates. The refusal is now recorded as
-  `{"action": "pause_refused", "reason": ...}`, every other job is still
-  cancelled, and the audit is still halted. The `audit run` deploy wait tolerates
-  the same refusal when it pauses a deployment that timed out.
-- **`dagnam audit status` no longer crashes on a deployment that is already
-  gone.** A state file that still names a deployment the platform has since
-  deleted made the command exit with `Error: Deployment '...' not found`; the
-  row now simply reports no `requests_7d` and everything else is unchanged.
-
-## [0.12.0] - 2026-09-06
+## [0.12.0] - 2026-09-07
 
 ### Added
 
@@ -122,6 +79,49 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 - The `dagnam-contracts` floor rises from `0.1.3` to `0.2.0`, which ships the
   `hygiene` PII contract the audit redaction step is built on.
+
+### Fixed
+
+- **`dagnam audit delete` now deletes the training runs it created**, before the
+  datasets they name. It previously stopped at `HTTP 409: Dataset is referenced
+  by a training run and cannot be deleted`, because a run's specification pins
+  the dataset version it trained on and the platform refuses to destroy the data
+  under it; deleting the job takes that specification with it. A platform
+  refusal is no longer an abort either: the id is recorded in `deleted.json` as
+  `{"status": "blocked", "reason": ...}` (e.g. a job that is not yet terminal,
+  which the platform will not delete), every other id is still deleted and
+  recorded, and the local workload rows and deployment keys are kept so a later
+  `audit delete` can finish the job.
+
+- **`dagnam audit run`'s holdout replay waits out a transient gateway refusal.**
+  Four workers replaying a holdout outrun the inference route's per-minute rate
+  limit, and every `HTTP 429` counted as a failed call -- a 396-row holdout came
+  back `unreliable: 276 of 396 replay calls failed` with no agreement measured.
+  A `502`, `503` or `504` counted the same way, and one of them (the gateway
+  forwarding to a scale-to-zero replica that hiccupped) was enough to score 395
+  of 396 rows and fail an identity check on the row count alone. Every status in
+  `TRANSIENT_STATUSES` -- `429`, `502`, `503`, `504` -- is now waited out and the
+  same request retried, sharing one budget of `RATE_LIMIT_RETRIES` attempts; only
+  an exhausted budget is an error, and every other status (a `500` included)
+  still fails its call at once. The wait is the seconds the refusal's
+  `Retry-After` names, and when it names none -- the gateway currently sends no
+  such header on a 429 -- a doubling backoff (1, 2, 4, 8, 16, 32, 64 s, each
+  capped at `RATE_LIMIT_SLEEP_MAX_SECONDS`), so a call outlasts a full per-minute
+  window instead of spending every attempt inside the one window it already
+  exhausted. The reported latency is the successful attempt's alone, so the waits
+  never show up as the endpoint's p50/p95.
+- **`dagnam audit cancel` no longer aborts on a deployment the platform refuses
+  to pause.** A revision that never activated leaves its deployment in
+  `not_provisioned`, and the pause came back `HTTP 409: Invalid status
+  transition from not_provisioned to paused`, which stopped the cancel before it
+  reached the remaining candidates. The refusal is now recorded as
+  `{"action": "pause_refused", "reason": ...}`, every other job is still
+  cancelled, and the audit is still halted. The `audit run` deploy wait tolerates
+  the same refusal when it pauses a deployment that timed out.
+- **`dagnam audit status` no longer crashes on a deployment that is already
+  gone.** A state file that still names a deployment the platform has since
+  deleted made the command exit with `Error: Deployment '...' not found`; the
+  row now simply reports no `requests_7d` and everything else is unchanged.
 
 ## [0.11.0] - 2026-09-06
 
