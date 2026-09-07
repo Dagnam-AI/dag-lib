@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from typing import Any
 
@@ -181,7 +182,35 @@ def test_a_429_without_a_usable_retry_after_waits_the_default(
 
     assert answers == ["ok", "ok"]
     assert latency.errors == 0
+    # Each call starts its own backoff, so both first refusals wait the base.
     assert slept == [RATE_LIMIT_SLEEP_SECONDS, RATE_LIMIT_SLEEP_SECONDS]
+
+
+def test_consecutive_429s_without_a_header_double_the_wait(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_rate_limited()] * 4 + [OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_the_computed_backoff_is_capped_too(
+    requests_mock: RequestsMocker, slept: list[float], monkeypatch: PytestMonkeyPatch
+) -> None:
+    # Not by dotted path: ``dagnam.audit`` re-exports the ``frontier`` *function*
+    # over its own submodule, so the attribute walk lands on the wrong object.
+    module = sys.modules["dagnam.audit.frontier"]
+    monkeypatch.setattr(module, "RATE_LIMIT_SLEEP_SECONDS", 100.0)
+    requests_mock.post(CHAT_URL, [_rate_limited(), OK_RESPONSE])
+
+    answers, _ = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert slept == [RATE_LIMIT_SLEEP_MAX_SECONDS]
 
 
 def test_an_outsized_retry_after_is_capped(
@@ -198,15 +227,17 @@ def test_an_outsized_retry_after_is_capped(
 def test_a_429_on_every_attempt_exhausts_the_budget_and_counts_one_error(
     requests_mock: RequestsMocker, slept: list[float]
 ) -> None:
-    requests_mock.post(CHAT_URL, [_rate_limited("1")] * RATE_LIMIT_RETRIES)
+    requests_mock.post(CHAT_URL, [_rate_limited()] * RATE_LIMIT_RETRIES)
 
     answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
 
     assert answers == [None]
     assert (latency.calls, latency.errors) == (1, 1)
     assert requests_mock.call_count == RATE_LIMIT_RETRIES
-    # No wait after the attempt that gives up.
-    assert slept == [1.0] * (RATE_LIMIT_RETRIES - 1)
+    # The full doubling sequence, and no wait after the attempt that gives up.
+    assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    assert len(slept) == RATE_LIMIT_RETRIES - 1
+    assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
 
 
 def test_a_non_429_http_error_fails_the_call_without_waiting(

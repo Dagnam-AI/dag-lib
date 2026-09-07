@@ -20,15 +20,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
   recorded, and the local workload rows and deployment keys are kept so a later
   `audit delete` can finish the job.
 
-- **`dagnam audit run`'s holdout replay honors the gateway's `Retry-After`.** Four
+- **`dagnam audit run`'s holdout replay waits out the gateway's rate limit.** Four
   workers replaying a holdout outrun the inference route's per-minute rate limit,
   and every `HTTP 429` counted as a failed call -- a 396-row holdout came back
   `unreliable: 276 of 396 replay calls failed` with no agreement measured. A
-  refusal is now waited out for the seconds the `Retry-After` names (a small
-  default when it is absent or unparseable, capped at one window) and the same
-  request is retried, up to `RATE_LIMIT_RETRIES` attempts; only an exhausted
-  budget is an error. The reported latency is the successful attempt's alone, so
-  the waits never show up as the endpoint's p50/p95.
+  refusal is now waited out and the same request retried, up to
+  `RATE_LIMIT_RETRIES` attempts; only an exhausted budget is an error. The wait
+  is the seconds the refusal's `Retry-After` names, and when it names none --
+  the gateway currently sends no such header -- a doubling backoff (1, 2, 4, 8,
+  16, 32, 64 s, each capped at `RATE_LIMIT_SLEEP_MAX_SECONDS`), so a call
+  outlasts a full per-minute window instead of spending every attempt inside the
+  one window it already exhausted. The reported latency is the successful
+  attempt's alone, so the waits never show up as the endpoint's p50/p95.
 
 ## [0.12.0] - 2026-09-06
 

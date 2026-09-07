@@ -25,11 +25,20 @@ from dagnam.audit.candidates import CandidateKind
 CHAT_TIMEOUT_SECONDS = 180.0
 """Per-call ceiling; a serverless replica's cold start is inside it."""
 RATE_LIMIT_RETRIES = 8
-"""Attempts one replay call gets; the gateway's 429s are not the candidate's failure."""
+"""Attempts one replay call gets; the gateway's 429s are not the candidate's failure.
+
+Their doubling waits span 127 s, so a call that never sees a ``Retry-After``
+still outlasts a per-minute window before it is called a failure.
+"""
 RATE_LIMIT_SLEEP_SECONDS = 1.0
-"""Wait before retrying a 429 whose ``Retry-After`` is absent or unparseable."""
+"""First wait after a 429 that names no usable ``Retry-After``; each further refusal doubles it.
+
+A gateway that refuses without saying for how long tells the client nothing, so
+the client must widen the gap itself: 1, 2, 4, 8, 16, 32, 64 seconds. A flat
+wait would fit every attempt inside the one window that is already exhausted.
+"""
 RATE_LIMIT_SLEEP_MAX_SECONDS = 65.0
-"""Cap on an honored ``Retry-After``: one full per-minute window, and a little slack."""
+"""Cap on any single wait, honored or computed: one full per-minute window, and a little slack."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +79,9 @@ def _completion(
 
     A 429 is the gateway's rate limit refusing the *replay*, not the candidate
     failing it, so the same request is retried after the ``Retry-After`` the
-    refusal names; only an exhausted attempt budget is an error. The reported
-    time is that one successful attempt's -- the waits are nobody's latency.
+    refusal names -- or, when it names none, after a doubling backoff; only an
+    exhausted attempt budget is an error. The reported time is that one
+    successful attempt's -- the waits are nobody's latency.
     """
     for attempt in range(RATE_LIMIT_RETRIES):
         started = time.perf_counter()
@@ -87,7 +97,10 @@ def _completion(
                     wait = parse_retry_after(
                         response.headers.get("Retry-After"), cap=RATE_LIMIT_SLEEP_MAX_SECONDS
                     )
-                    time.sleep(RATE_LIMIT_SLEEP_SECONDS if wait is None else wait)
+                    backoff = min(
+                        RATE_LIMIT_SLEEP_SECONDS * 2**attempt, RATE_LIMIT_SLEEP_MAX_SECONDS
+                    )
+                    time.sleep(backoff if wait is None else wait)
                 continue
             response.raise_for_status()
             content: Any = response.json()["choices"][0]["message"]["content"]
