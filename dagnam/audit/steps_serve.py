@@ -11,11 +11,12 @@ scores is what a customer's client would get.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 import json
 import re
 from typing import Any
 
-from dagnam._core.exceptions import LROFailedError, LROTimeoutError
+from dagnam._core.exceptions import DeploymentStateError, LROFailedError, LROTimeoutError
 from dagnam._types import JsonObject
 from dagnam.audit.frontier import Endpoint, replay_holdout
 from dagnam.audit.scoring import Agreement, modal_keys, score_json, score_labels
@@ -162,7 +163,10 @@ def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
     except LROTimeoutError:
         step.deploy_status = "timeout"
         step.error = f"deploy_timeout: not active after {ctx.deploy_timeout:.0f}s; paused"
-        ctx.client.pause_deployment(deployment_id)
+        # A revision that never activated leaves the deployment unpausable; the
+        # recorded timeout stands either way.
+        with suppress(DeploymentStateError):
+            ctx.client.pause_deployment(deployment_id)
         return state
     step.deploy_status = "running"
     return state

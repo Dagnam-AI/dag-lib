@@ -313,6 +313,35 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
     }
 
 
+def test_cancel_records_a_deployment_the_platform_refuses_to_pause(
+    run_cli: CliRunner, audit_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A revision that never activated leaves the deployment unpausable; cancel still finishes."""
+    from dagnam._core.exceptions import DeploymentStateError
+
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    refusal = DeploymentStateError("Invalid status transition from not_provisioned to paused")
+    with mock.patch("dagnam._core.client.DagnamClient") as client:
+        client.return_value.pause_deployment.side_effect = refusal
+        assert run_cli(["audit", "cancel", str(audit_dir), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "halted": {"reason": "cancelled"},
+        "actions": [
+            {"candidate": "w1/head_tune", "action": "cancelled_job", "id": "job-1"},
+            {
+                "candidate": "w1/head_tune",
+                "action": "pause_refused",
+                "id": "dep-1",
+                "reason": "Invalid status transition from not_provisioned to paused",
+            },
+        ],
+    }
+    state = load_state(audit_dir)
+    assert state.halted == {"reason": "cancelled"}
+    head = state.workloads["w1"][HEAD]
+    assert (head.run_status, head.deploy_status) == ("cancelled", "deploying")
+
+
 @pytest.fixture
 def cleanup(monkeypatch: PytestMonkeyPatch) -> FakeCleanup:
     fake = FakeCleanup(

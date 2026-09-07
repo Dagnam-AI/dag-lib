@@ -229,6 +229,7 @@ def cmd_audit_status(args: argparse.Namespace) -> None:
 
 def cmd_audit_cancel(args: argparse.Namespace) -> None:
     """Cancel every in-flight run and pause every deployment the state records; delete nothing."""
+    from dagnam._core.exceptions import DeploymentStateError
     from dagnam.audit.state import load_state, save_state
     from dagnam.audit.steps_train import RUN_COMPLETED, RUN_FAILED
 
@@ -245,11 +246,28 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
                 step.run_status = "cancelled"
                 actions.append({"candidate": label, "action": "cancelled_job", "id": job})
             if step.deployment_id is not None and step.deploy_status != "paused":
-                client.pause_deployment(step.deployment_id)
-                step.deploy_status = "paused"
-                actions.append(
-                    {"candidate": label, "action": "paused_deployment", "id": step.deployment_id}
-                )
+                # A deployment whose revision never activated sits in ``not_provisioned``
+                # and the platform refuses the transition; record it and carry on.
+                try:
+                    client.pause_deployment(step.deployment_id)
+                except DeploymentStateError as exc:
+                    actions.append(
+                        {
+                            "candidate": label,
+                            "action": "pause_refused",
+                            "id": step.deployment_id,
+                            "reason": str(exc),
+                        }
+                    )
+                else:
+                    step.deploy_status = "paused"
+                    actions.append(
+                        {
+                            "candidate": label,
+                            "action": "paused_deployment",
+                            "id": step.deployment_id,
+                        }
+                    )
     state.halted = {"reason": "cancelled"}
     save_state(audit_dir, state)
     emit_result(
