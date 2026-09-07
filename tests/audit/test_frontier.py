@@ -16,6 +16,7 @@ from dagnam.audit.frontier import (
     RATE_LIMIT_RETRIES,
     RATE_LIMIT_SLEEP_MAX_SECONDS,
     RATE_LIMIT_SLEEP_SECONDS,
+    TRANSIENT_STATUSES,
     CandidateResult,
     Endpoint,
     Latency,
@@ -89,7 +90,7 @@ def test_replay_treats_malformed_bodies_and_transport_errors_as_none(
 
 
 def test_replay_with_nothing_succeeding_has_no_latency(requests_mock: RequestsMocker) -> None:
-    requests_mock.post("https://x/v1/chat/completions", status_code=503)
+    requests_mock.post("https://x/v1/chat/completions", status_code=500)
     answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=0)
     assert answers == [None, None]
     assert latency == Latency(p50_ms=None, p95_ms=None, calls=2, errors=2)
@@ -154,9 +155,13 @@ def slept(monkeypatch: PytestMonkeyPatch) -> list[float]:
     return recorded
 
 
-def _rate_limited(retry_after: str | None = None) -> dict[str, Any]:
+def _refused(status: int, retry_after: str | None = None) -> dict[str, Any]:
     headers = {} if retry_after is None else {"Retry-After": retry_after}
-    return {"status_code": 429, "headers": headers, "json": {"error": "rate limited"}}
+    return {"status_code": status, "headers": headers, "json": {"error": "refused"}}
+
+
+def _rate_limited(retry_after: str | None = None) -> dict[str, Any]:
+    return _refused(429, retry_after)
 
 
 def test_a_429_is_waited_out_and_the_same_request_retried(
@@ -240,9 +245,11 @@ def test_a_429_on_every_attempt_exhausts_the_budget_and_counts_one_error(
     assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
 
 
-def test_a_non_429_http_error_fails_the_call_without_waiting(
+def test_a_non_transient_http_error_fails_the_call_without_waiting(
     requests_mock: RequestsMocker, slept: list[float]
 ) -> None:
+    # A 500 is the candidate answering badly, not the gateway refusing to ask it.
+    assert 500 not in TRANSIENT_STATUSES
     requests_mock.post(CHAT_URL, status_code=500)
 
     answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
@@ -251,3 +258,44 @@ def test_a_non_429_http_error_fails_the_call_without_waiting(
     assert (latency.calls, latency.errors) == (1, 1)
     assert requests_mock.call_count == 1
     assert slept == []
+
+
+def test_a_transient_502_is_waited_out_and_the_same_request_retried(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(502), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [RATE_LIMIT_SLEEP_SECONDS]
+    sent = [json.loads(r.text or "") for r in requests_mock.request_history]
+    assert sent == [{"model": "dep-1", "messages": [{"role": "user", "content": "q0"}]}] * 2
+
+
+def test_a_503_that_names_a_retry_after_waits_exactly_that_long(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(503, "3"), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == ["ok"]
+    assert (latency.calls, latency.errors) == (1, 0)
+    assert slept == [3.0]
+
+
+def test_a_504_on_every_attempt_exhausts_the_budget_and_counts_one_error(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(504)] * RATE_LIMIT_RETRIES)
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert answers == [None]
+    assert (latency.calls, latency.errors) == (1, 1)
+    assert requests_mock.call_count == RATE_LIMIT_RETRIES
+    # The full doubling sequence, and no wait after the attempt that gives up.
+    assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS

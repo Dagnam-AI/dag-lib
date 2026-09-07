@@ -20,18 +20,23 @@ and this project follows [Semantic Versioning](https://semver.org/).
   recorded, and the local workload rows and deployment keys are kept so a later
   `audit delete` can finish the job.
 
-- **`dagnam audit run`'s holdout replay waits out the gateway's rate limit.** Four
-  workers replaying a holdout outrun the inference route's per-minute rate limit,
-  and every `HTTP 429` counted as a failed call -- a 396-row holdout came back
-  `unreliable: 276 of 396 replay calls failed` with no agreement measured. A
-  refusal is now waited out and the same request retried, up to
-  `RATE_LIMIT_RETRIES` attempts; only an exhausted budget is an error. The wait
-  is the seconds the refusal's `Retry-After` names, and when it names none --
-  the gateway currently sends no such header -- a doubling backoff (1, 2, 4, 8,
-  16, 32, 64 s, each capped at `RATE_LIMIT_SLEEP_MAX_SECONDS`), so a call
-  outlasts a full per-minute window instead of spending every attempt inside the
-  one window it already exhausted. The reported latency is the successful
-  attempt's alone, so the waits never show up as the endpoint's p50/p95.
+- **`dagnam audit run`'s holdout replay waits out a transient gateway refusal.**
+  Four workers replaying a holdout outrun the inference route's per-minute rate
+  limit, and every `HTTP 429` counted as a failed call -- a 396-row holdout came
+  back `unreliable: 276 of 396 replay calls failed` with no agreement measured.
+  A `502`, `503` or `504` counted the same way, and one of them (the gateway
+  forwarding to a scale-to-zero replica that hiccupped) was enough to score 395
+  of 396 rows and fail an identity check on the row count alone. Every status in
+  `TRANSIENT_STATUSES` -- `429`, `502`, `503`, `504` -- is now waited out and the
+  same request retried, sharing one budget of `RATE_LIMIT_RETRIES` attempts; only
+  an exhausted budget is an error, and every other status (a `500` included)
+  still fails its call at once. The wait is the seconds the refusal's
+  `Retry-After` names, and when it names none -- the gateway currently sends no
+  such header on a 429 -- a doubling backoff (1, 2, 4, 8, 16, 32, 64 s, each
+  capped at `RATE_LIMIT_SLEEP_MAX_SECONDS`), so a call outlasts a full per-minute
+  window instead of spending every attempt inside the one window it already
+  exhausted. The reported latency is the successful attempt's alone, so the waits
+  never show up as the endpoint's p50/p95.
 
 ## [0.12.0] - 2026-09-06
 

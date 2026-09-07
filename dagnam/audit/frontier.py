@@ -25,7 +25,10 @@ from dagnam.audit.candidates import CandidateKind
 CHAT_TIMEOUT_SECONDS = 180.0
 """Per-call ceiling; a serverless replica's cold start is inside it."""
 RATE_LIMIT_RETRIES = 8
-"""Attempts one replay call gets; the gateway's 429s are not the candidate's failure.
+"""Attempts one replay call gets; a transient refusal is not the candidate's failure.
+
+It bounds both kinds in ``TRANSIENT_STATUSES``: the gateway's rate limit, and the
+gateway failing to reach the replica behind it.
 
 Their doubling waits span 127 s, so a call that never sees a ``Retry-After``
 still outlasts a per-minute window before it is called a failure.
@@ -39,6 +42,16 @@ wait would fit every attempt inside the one window that is already exhausted.
 """
 RATE_LIMIT_SLEEP_MAX_SECONDS = 65.0
 """Cap on any single wait, honored or computed: one full per-minute window, and a little slack."""
+TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+"""Statuses that refuse to *ask* the candidate, so the same request is retried instead.
+
+A 429 is the gateway's rate limit; a 502, 503 or 504 is the gateway failing to
+reach a scale-to-zero replica that hiccupped. None of them is the candidate's
+answer, so none of them is counted against it. Every other status -- any other
+4xx, and a 500, which is the candidate answering badly -- fails its call at
+once. Narrower than ``dagnam._core._retry.TRANSIENT_STATUS`` for exactly that
+reason: a replay must not retry a candidate's own 500 into agreement.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,11 +90,12 @@ def _completion(
 ) -> tuple[str | None, float]:
     """The answer, and the milliseconds the round trip that produced it took.
 
-    A 429 is the gateway's rate limit refusing the *replay*, not the candidate
-    failing it, so the same request is retried after the ``Retry-After`` the
-    refusal names -- or, when it names none, after a doubling backoff; only an
-    exhausted attempt budget is an error. The reported time is that one
-    successful attempt's -- the waits are nobody's latency.
+    A ``TRANSIENT_STATUSES`` reply refuses the *replay* -- the gateway's rate
+    limit, or the gateway failing to reach the replica behind it -- rather than
+    reporting the candidate failing it, so the same request is retried after the
+    ``Retry-After`` the refusal names -- or, when it names none, after a doubling
+    backoff; only an exhausted attempt budget is an error. The reported time is
+    that one successful attempt's -- the waits are nobody's latency.
     """
     for attempt in range(RATE_LIMIT_RETRIES):
         started = time.perf_counter()
@@ -92,7 +106,7 @@ def _completion(
                 headers={"Authorization": f"Bearer {endpoint.api_key}"},
                 timeout=timeout,
             )
-            if response.status_code == 429:
+            if response.status_code in TRANSIENT_STATUSES:
                 if attempt + 1 < RATE_LIMIT_RETRIES:
                     wait = parse_retry_after(
                         response.headers.get("Retry-After"), cap=RATE_LIMIT_SLEEP_MAX_SECONDS
@@ -177,6 +191,7 @@ __all__ = [
     "RATE_LIMIT_RETRIES",
     "RATE_LIMIT_SLEEP_MAX_SECONDS",
     "RATE_LIMIT_SLEEP_SECONDS",
+    "TRANSIENT_STATUSES",
     "CandidateResult",
     "Endpoint",
     "Latency",
