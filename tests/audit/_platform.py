@@ -19,17 +19,22 @@ from dagnam_contracts.prompts import render_chat_prompt
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.exceptions import (
+    APIError,
     DagnamError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
     ModelNotFoundError,
     ProjectNotFoundError,
+    TrainingJobNotFoundError,
 )
 from dagnam._types import JsonArray, JsonObject, QueryValue
 from dagnam.audit.cleanup import CleanupClient
 from dagnam.audit.steps import PlatformClient
 
 CHAT_URL = "https://x/v1/chat/completions"
+
+DATASET_IN_USE = "Dataset is referenced by a training run and cannot be deleted"
+"""The platform's own 409 wording (``src/datasets/service.py``)."""
 
 BASES: list[JsonObject] = [
     {"id": "bert-big", "family": "bert", "parameter_count": 340_000_000, "gated": False},
@@ -261,13 +266,19 @@ class FakeCleanup:
     def __init__(self, **present: list[str]) -> None:
         self.present: dict[str, set[str]] = {
             kind: set(present.get(kind, []))
-            for kind in ("deployment", "model", "dataset", "project")
+            for kind in ("deployment", "model", "job", "dataset", "project")
         }
         self.entry_of: dict[str, str] = {}
         """model version id -> entry id (a deleted entry takes its versions with it)."""
         self.call_log: list[tuple[str, str]] = []
         self.sticky: set[str] = set()
         """Ids whose delete succeeds but which a re-read still finds (a server bug to surface)."""
+        self.running: set[str] = set()
+        """Job ids the platform refuses to delete: it deletes terminal jobs only."""
+        self.held_by_job: dict[str, str] = {}
+        """dataset id -> job id: the live FK, a 409 for as long as that job exists."""
+        self.dataset_error: DagnamError | None = None
+        """Raised by ``delete_dataset`` whatever else is true (a server failure)."""
 
     def _take(self, kind: str, item_id: str, absent: type[DagnamError]) -> None:
         if item_id not in self.present[kind]:
@@ -300,12 +311,35 @@ class FakeCleanup:
         self.call_log.append(("delete_model_entry", model_id))
         self._take("model", model_id, ModelNotFoundError)
 
+    def get_training_job(self, job_id: str) -> JsonObject:
+        self.call_log.append(("get_training_job", job_id))
+        return self._need("job", job_id, TrainingJobNotFoundError)
+
+    def bulk_delete_training_jobs(self, job_ids: list[str]) -> JsonObject:
+        """The real route answers 200 with a per-id ``errors`` list, never a 404."""
+        self.call_log.append(("bulk_delete_training_jobs", ",".join(job_ids)))
+        deleted = 0
+        errors: JsonArray = []
+        for job_id in job_ids:
+            if job_id not in self.present["job"]:
+                errors.append({"job_id": job_id, "error": "Not found or not authorized"})
+            elif job_id in self.running:
+                errors.append({"job_id": job_id, "error": "Cannot delete job with status running"})
+            else:
+                self._take("job", job_id, TrainingJobNotFoundError)
+                deleted += 1
+        return {"deleted": deleted, "errors": errors}
+
     def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
         self.call_log.append(("get_dataset_meta", dataset_id))
         return self._need("dataset", dataset_id, DatasetNotFoundError)
 
     def delete_dataset(self, dataset_id: str) -> None:
         self.call_log.append(("delete_dataset", dataset_id))
+        if self.dataset_error is not None:
+            raise self.dataset_error
+        if self.held_by_job.get(dataset_id) in self.present["job"]:
+            raise APIError(409, DATASET_IN_USE)
         self._take("dataset", dataset_id, DatasetNotFoundError)
 
     def get_project(self, project_id: str) -> JsonObject:

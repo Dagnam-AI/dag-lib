@@ -280,7 +280,11 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         json_stdout=args.json,
         render_human=lambda _: "\n".join(
             [
-                *(f"{i['kind']} {i['id']}: {i['status']}" for i in receipt["items"]),
+                *(
+                    f"{i['kind']} {i['id']}: {i['status']}"
+                    + (f" ({i['reason']})" if "reason" in i else "")
+                    for i in receipt["items"]
+                ),
                 f"Receipt: {audit_dir / DELETED_FILE}",
             ]
         ),
