@@ -185,6 +185,30 @@ def test_wait_active_timeout_pauses_the_deployment(
     assert clock.t >= 5.0
 
 
+def test_wait_active_timeout_tolerates_a_deployment_that_cannot_be_paused(
+    make_ctx: Callable[..., StepContext],
+    platform: FakePlatform,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A revision that never activated leaves the deployment unpausable; the timeout still records."""
+    from dagnam._core.exceptions import DeploymentStateError
+
+    def refuse(deployment_id: str) -> None:
+        raise DeploymentStateError("Invalid status transition from not_provisioned to paused")
+
+    platform.revision_final = "stuck"
+    monkeypatch.setattr(platform, "pause_deployment", refuse)
+    ctx = make_ctx(deploy_timeout=5.0)
+    step = ctx.step(_served(_trained(), ctx))
+    assert (step.deploy_status, step.error) == (
+        "timeout",
+        "deploy_timeout: not active after 5s; paused",
+    )
+    assert platform.paused == []
+    assert clock.t >= 5.0
+
+
 def test_replay_and_score_labels_through_the_endpoint(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
 ) -> None:
