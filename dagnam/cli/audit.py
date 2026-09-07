@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dagnam._core.exceptions import DeploymentNotFoundError
 from dagnam.cli.audit_run import client_from_env, cmd_audit_run, fail
 from dagnam.cli.common import confirm_or_abort, print_next_step
 from dagnam.cli.presentation import Column, emit_result, render_table
@@ -165,9 +166,12 @@ def status_rows(state: AuditState, client: DagnamClient | None) -> list[dict[str
             agreement = step.agreement
             requests: int | None = None
             if client is not None and step.deployment_id is not None:
-                metrics = client.get_deployment_metrics(
-                    step.deployment_id, time_range=METRICS_RANGE
-                )
+                try:
+                    metrics = client.get_deployment_metrics(
+                        step.deployment_id, time_range=METRICS_RANGE
+                    )
+                except DeploymentNotFoundError:
+                    metrics = {}  # deleted out from under the state file; `audit delete` reconciles
                 count = metrics.get("requests_count")
                 requests = int(count) if isinstance(count, int | float) else None
             rows.append(

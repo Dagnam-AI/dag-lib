@@ -28,6 +28,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `{"action": "pause_refused", "reason": ...}`, every other job is still
   cancelled, and the audit is still halted. The `audit run` deploy wait tolerates
   the same refusal when it pauses a deployment that timed out.
+- **`dagnam audit status` no longer crashes on a deployment that is already
+  gone.** A state file that still names a deployment the platform has since
+  deleted made the command exit with `Error: Deployment '...' not found`; the
+  row now simply reports no `requests_7d` and everything else is unchanged.
 
 ## [0.12.0] - 2026-09-06
 

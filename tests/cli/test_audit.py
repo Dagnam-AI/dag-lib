@@ -14,9 +14,11 @@ from unittest import mock
 import pytest
 from tests.audit._platform import FakeCleanup
 
+from dagnam._core.exceptions import DeploymentNotFoundError
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.state import AuditState, StepState, load_state, save_state
-from dagnam.cli.audit import parse_map, parse_window
+from dagnam.cli.audit import parse_map, parse_window, status_rows
+from dagnam.cli.audit_run import client_from_env
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
@@ -263,6 +265,25 @@ def test_status_table_and_json(
     ]
     assert [r["requests_7d"] for r in js["rows"]] == [None, 7, None]
     assert js["rows"][2]["agreement"] == 0.9876
+
+
+def test_status_reports_no_requests_when_the_deployment_is_gone(
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    """A deployment deleted out from under the state file must not crash ``audit status``."""
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    metrics = mock.Mock(side_effect=DeploymentNotFoundError("dep-1"))
+    with mock.patch("dagnam._core.client.DagnamClient.get_deployment_metrics", metrics):
+        rows = status_rows(_state(), client_from_env())
+    assert metrics.call_args_list == [
+        mock.call("dep-1", time_range="7d"),
+        mock.call("dep-2", time_range="7d"),
+    ]
+    assert [r["requests_7d"] for r in rows] == [None, None, None]
+    assert rows[1]["deployment_id"] == "dep-1"
+    assert rows[1]["status"] == "deploying"
+    assert rows[1]["training_job_id"] == "job-1"
+    assert rows[2]["credits"] == 42.0
 
 
 def test_status_without_deployments_needs_no_credentials(
