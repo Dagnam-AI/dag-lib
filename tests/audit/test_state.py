@@ -18,6 +18,7 @@ def _state() -> AuditState:
     step.split_done = True
     step.agreement = {"metric": "exact", "value": 0.5, "ci95": [0.1, 0.9], "n": 4}
     step.training_cost_credits = 12.5
+    step.replay_cost_credits = 396.0
     state.candidate("w1", CandidateKind.HOSTED_FLOOR)
     state.halted = {"reason": "budget"}
     return state
@@ -88,3 +89,13 @@ def test_candidate_accessor_creates_once() -> None:
     step.run_id = "r"
     assert state.candidate("w", CandidateKind.SFT_SMALL) is step
     assert state.workloads == {"w": {CandidateKind.SFT_SMALL: StepState(run_id="r")}}
+
+
+def test_a_state_written_before_the_replay_cost_key_still_loads(tmp_path: Path) -> None:
+    doc = {
+        "schema": SCHEMA,
+        "workloads": {"w1": {"candidates": {"head_tune": {"training_cost_credits": 12.5}}}},
+    }
+    (tmp_path / STATE_FILE).write_text(json.dumps(doc))
+    step = load_state(tmp_path).candidate("w1", CandidateKind.HEAD_TUNE)
+    assert (step.training_cost_credits, step.replay_cost_credits) == (12.5, None)

@@ -11,6 +11,7 @@ import pytest
 from tests.audit._platform import Clock, FakePlatform, last_user, serve_chat, teacher
 from tests.typing_helpers import RequestsMocker
 
+from dagnam._core.exceptions import APIError
 from dagnam.audit.candidates import SFT_SMALL, CandidateKind
 from dagnam.audit.secrets import SECRETS_FILE
 from dagnam.audit.state import AuditState, StepState
@@ -234,6 +235,43 @@ def test_replay_and_score_labels_through_the_endpoint(
     ]
     replay_and_score(state, ctx)
     assert len(seen) == 4
+
+
+def test_replay_measures_its_credit_cost_from_the_account_balance(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    serve_chat(requests_mock, teacher)
+    platform.replay_charge = 396
+    ctx = make_ctx()
+    step = ctx.step(replay_and_score(_served(_trained(), ctx), ctx))
+    assert step.replay_cost_credits == 396.0  # 1000 before, 604 after
+    assert platform.call_log.count("get_credit_balance") == 2
+
+
+def test_replay_cost_never_reads_as_a_refund(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    serve_chat(requests_mock, teacher)
+    platform.replay_charge = -396  # a grant landed mid-replay: 604 before, 1000 after
+    ctx = make_ctx()
+    assert ctx.step(replay_and_score(_served(_trained(), ctx), ctx)).replay_cost_credits == 0.0
+
+
+@pytest.mark.parametrize("failing_read", [0, 1])
+def test_a_failed_balance_read_leaves_the_cost_unknown_and_the_candidate_scored(
+    make_ctx: Callable[..., StepContext],
+    platform: FakePlatform,
+    requests_mock: RequestsMocker,
+    failing_read: int,
+) -> None:
+    serve_chat(requests_mock, teacher)
+    platform.credit_errors = [None, None]
+    platform.credit_errors[failing_read] = APIError(500, "credits unavailable")
+    ctx = make_ctx()
+    step = ctx.step(replay_and_score(_served(_trained(), ctx), ctx))
+    assert step.replay_cost_credits is None
+    assert step.scored is True
+    assert step.error is None
 
 
 def test_replay_and_score_json_fields(

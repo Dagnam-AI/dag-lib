@@ -16,7 +16,12 @@ import json
 import re
 from typing import Any
 
-from dagnam._core.exceptions import DeploymentStateError, LROFailedError, LROTimeoutError
+from dagnam._core.exceptions import (
+    APIError,
+    DeploymentStateError,
+    LROFailedError,
+    LROTimeoutError,
+)
 from dagnam._types import JsonObject
 from dagnam.audit.frontier import Endpoint, replay_holdout
 from dagnam.audit.scoring import Agreement, modal_keys, score_json, score_labels
@@ -172,8 +177,25 @@ def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
     return state
 
 
+def _balance(ctx: StepContext) -> int | None:
+    """The account's credit balance, or ``None`` when the read fails.
+
+    A balance the platform will not report must never turn a completed replay
+    into an unscored candidate, so the cost is left unknown instead.
+    """
+    try:
+        return ctx.client.get_credit_balance()
+    except APIError:
+        return None
+
+
 def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
-    """Replay the holdout through the endpoint and record agreement and latency; done once ``scored``."""
+    """Replay the holdout, record agreement, latency and the replay's credit cost; done once ``scored``.
+
+    Every served prediction is metered, so the replay -- not the training --
+    is most of what an audit spends. Its cost is measured from the account
+    balance either side of the replay rather than assumed from a rate card.
+    """
     step = ctx.step(state)
     if step.scored:
         return state
@@ -183,7 +205,12 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
         return state
     rows = holdout(ctx)
     endpoint = Endpoint(ctx.client.api_url, required(step.deployment_id, "deployment_id"), key)
+    before = _balance(ctx)
     answers, latency = replay_holdout(endpoint, [{"messages": m} for m, _ in rows])
+    after = _balance(ctx)
+    if before is not None and after is not None:
+        # Clamped: a grant landing mid-replay would otherwise read as a refund.
+        step.replay_cost_credits = max(0.0, float(before - after))
     scored = [(a, t) for a, (_, t) in zip(answers, rows, strict=True) if a is not None]
     agreement = _SCORERS[ctx.structure_class]([a for a, _ in scored], [t for _, t in scored])
     step.agreement = {

@@ -62,6 +62,12 @@ class FakePlatform:
         self.submits = 0
         self.submitted: list[JsonObject] = []
         self.credits_estimate_max: int | None = 100
+        self.credit_balance = 1000
+        self.replay_charge = 4
+        """Credits the balance drops between the two reads that bracket one replay."""
+        self.credit_errors: list[BaseException | None] = []
+        """Per-read overrides: the i-th balance read raises ``credit_errors[i]`` when set."""
+        self.balance_reads = 0
         self.submit_errors: list[BaseException] = []
         self.run_polls = 2
         self.run_final_status = "completed"
@@ -95,6 +101,19 @@ class FakePlatform:
     def _next(self, prefix: str) -> str:
         self._ids[prefix] += 1
         return f"{prefix}-{self._ids[prefix]}"
+
+    def get_credit_balance(self) -> int:
+        """The metered balance: it drops by ``replay_charge`` on every second read."""
+        self._log("get_credit_balance")
+        self.balance_reads += 1
+        error = (
+            self.credit_errors[self.balance_reads - 1]
+            if self.balance_reads <= len(self.credit_errors)
+            else None
+        )
+        if error is not None:
+            raise error
+        return self.credit_balance - self.replay_charge * (self.balance_reads // 2)
 
     # -- projects / datasets ------------------------------------------------
 

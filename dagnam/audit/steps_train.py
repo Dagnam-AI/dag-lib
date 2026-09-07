@@ -1,7 +1,9 @@
 """Training steps: pick the base, submit the recipe run, follow it, find the version it pushed.
 
 The credit budget is enforced here, before a submit: the frontier halts with
-``halted: budget`` rather than start a run it cannot pay for (spec U4). The
+``halted: budget`` rather than start a run it cannot pay for (spec U4). What
+it counts is a candidate's whole cost -- the training run plus the metered
+predictions of its holdout replay, which is the larger half. The
 platform's own preflight still runs on every submit; its verdicts are recorded
 per candidate and the frontier continues (spec section 9).
 """
@@ -46,9 +48,9 @@ def pick_base(ctx: StepContext) -> JsonObject | None:
 
 
 def credits_spent(state: AuditState) -> tuple[float, float]:
-    """``(total, largest)`` over every candidate's ``training_cost_credits`` so far."""
+    """``(total, largest)`` over every candidate's training plus measured replay credits."""
     costs = [
-        step.training_cost_credits or 0.0
+        (step.training_cost_credits or 0.0) + (step.replay_cost_credits or 0.0)
         for candidates in state.workloads.values()
         for step in candidates.values()
     ]
@@ -75,9 +77,11 @@ def _create_run(ctx: StepContext, payload: JsonObject) -> JsonObject:
 def submit(state: AuditState, ctx: StepContext) -> AuditState:
     """Submit the recipe run for this candidate; done once ``run_id`` is set.
 
-    Before submitting, the budget check assumes the next run costs at least
-    as much as the largest estimate so far: ``spent + largest > max_credits``
-    (or ``spent >= max_credits``) halts the audit with ``halted: budget``.
+    Before submitting, the budget check assumes the next candidate costs at
+    least as much as the most expensive one so far -- training plus the
+    credits its holdout replay was measured to burn: ``spent + largest >
+    max_credits`` (or ``spent >= max_credits``) halts the audit with
+    ``halted: budget``.
     """
     step = ctx.step(state)
     if step.run_id is not None:

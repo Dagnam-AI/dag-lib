@@ -43,6 +43,7 @@ class StepState:
     agreement: dict[str, JsonValue] | None = None
     latency: dict[str, JsonValue] | None = None
     training_cost_credits: float | None = None
+    replay_cost_credits: float | None = None
     error: str | None = None
 
 

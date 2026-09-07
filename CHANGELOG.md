@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`dagnam audit run --max-credits` now counts the holdout replay.** Every
+  served prediction is metered, so a candidate's replay -- not its training
+  run -- is most of what an audit spends; counting the training estimate
+  alone under-reported a run by an order of magnitude and let an audit walk
+  into its plan limit mid-flight. The replay's cost is *measured*, not
+  assumed from a rate card: the SDK reads the account's credit balance either
+  side of the replay (new `DagnamClient.get_credit_balance` /
+  `AsyncDagnamClient.get_credit_balance`, `GET /api/v1/users/me/credits`) and
+  records the difference as the candidate's `replay_cost_credits`. A balance
+  read the platform refuses leaves the cost unknown and never unscores a
+  candidate. `audit-report.json` keeps `training_cost_credits` and gains
+  `replay_cost_credits` next to it; the Markdown candidate table's
+  `training credits` column is now `credits (train + replay)`.
+
 ## [0.12.0] - 2026-09-07
 
 ### Added

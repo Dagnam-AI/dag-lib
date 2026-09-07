@@ -23,6 +23,7 @@ API = "https://api.test"
 ENTITLEMENTS = "/api/v1/users/me/entitlements"
 QUOTA = "/api/v1/datasets/storage/quota"
 USAGE = "/api/v1/users/me/api-keys/key1/usage"
+CREDITS = "/api/v1/users/me/credits"
 
 pytestmark = pytest.mark.anyio
 
@@ -39,6 +40,20 @@ async def test_async_account_full_surface(client: AsyncDagnamClient, mock: Respx
     assert (await client.get_entitlements())["plan"] == "pro"
     assert (await client.get_storage_quota())["limit_bytes"] == 100
     assert await client.get_api_key_usage("key1") == {"calls": 5}
+
+
+async def test_async_get_credit_balance(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
+    mock.get(CREDITS).mock(return_value=httpx.Response(200, json={"balance": 604}))
+    assert await client.get_credit_balance() == 604
+
+
+@pytest.mark.parametrize("body", [{}, {"balance": "many"}, {"balance": True}])
+async def test_async_credit_balance_needs_an_integer(
+    client: AsyncDagnamClient, mock: RespxMockRouter, body: dict[str, object]
+) -> None:
+    mock.get(CREDITS).mock(return_value=httpx.Response(200, json=body))
+    with pytest.raises(TypeError, match="'balance' integer"):
+        await client.get_credit_balance()
 
 
 async def test_async_api_key_usage_quotes_path_segment(
