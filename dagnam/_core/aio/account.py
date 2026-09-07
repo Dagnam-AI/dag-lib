@@ -85,6 +85,14 @@ class AsyncAccountMixin(BaseAsyncDagnamClient):
         """Return the entitlement snapshot. ``GET /api/v1/users/me/entitlements``."""
         return ensure_json_object(await self._account_get("/api/v1/users/me/entitlements"))
 
+    async def get_credit_balance(self) -> int:
+        """Return the caller's current credit balance. ``GET /api/v1/users/me/credits``."""
+        body = ensure_json_object(await self._account_get("/api/v1/users/me/credits"))
+        balance = body.get("balance")
+        if not isinstance(balance, int) or isinstance(balance, bool):
+            raise TypeError("Credit balance response did not include a 'balance' integer")
+        return balance
+
     async def get_storage_quota(self) -> JsonObject:
         """Return dataset storage usage. ``GET /api/v1/datasets/storage/quota``."""
         return ensure_json_object(await self._account_get("/api/v1/datasets/storage/quota"))

@@ -9,7 +9,7 @@ recorded as ``halted: error`` before it propagates.
 
 Verdicts and prices belong to the scan report and Task 5's economics: this
 module reads ``scan-report.json`` for each workload's structure class and
-verdict, and records agreement, latency and training credits for the report
+verdict, and records agreement, latency and credits spent for the report
 to price; it never computes a cost itself.
 """
 
@@ -145,7 +145,8 @@ def run_audit(
     ``floor`` overrides the per-class default on the agreement lower bound;
     ``workloads`` names the workload ids to run (``None`` runs every
     ``candidate``/``marginal`` workload the scan derived); ``max_credits``
-    halts the frontier before a submit that would exceed it; ``wait=False``
+    halts the frontier before a submit that would exceed it, counting each
+    candidate's training run and its holdout replay; ``wait=False``
     returns as soon as a step would block on a run or a deployment, and the
     next call resumes. ``sleep``/``now`` are the clock every wait uses.
 

@@ -48,6 +48,10 @@ class PlatformClient(Protocol):
         """``POST /api/v1/projects``."""
         ...
 
+    def get_credit_balance(self) -> int:
+        """``GET /api/v1/users/me/credits`` -> the balance the replay's cost is measured against."""
+        ...
+
     def upload_dataset(
         self,
         file_path: str | Path,

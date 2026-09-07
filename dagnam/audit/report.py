@@ -99,6 +99,7 @@ def _candidate(
         },
         "serving_cost_usd_month": {"value": cost, "basis": "estimated"},
         "training_cost_credits": step.training_cost_credits,
+        "replay_cost_credits": step.replay_cost_credits,
         "status": candidate_status(spec, step),
     }
 
@@ -224,7 +225,8 @@ def _agreement(c: Mapping[str, Any]) -> str:
 def _candidate_row(c: Mapping[str, Any], winner: Mapping[str, Any] | None) -> str:
     lat = c["latency_ms"]
     p95 = "-" if lat["p95"] is None else f"{lat['p95']:.0f} ({lat['source']})"
-    credits = "-" if c["training_cost_credits"] is None else f"{c['training_cost_credits']:g}"
+    train, replay = c["training_cost_credits"], c["replay_cost_credits"]
+    credits = "-" if train is None and replay is None else f"{(train or 0.0) + (replay or 0.0):g}"
     cost = c["serving_cost_usd_month"]
     priced = "-" if cost["value"] is None else f"{cost['value']:.2f} ({cost['basis']})"
     mark = " (winner)" if winner is not None and winner["kind"] == c["kind"] else ""
@@ -235,7 +237,8 @@ def _candidate_row(c: Mapping[str, Any], winner: Mapping[str, Any] | None) -> st
 
 
 _CANDIDATE_HEAD = (
-    "| candidate | base | agreement [ci95] | p95 ms | serving $/month | training credits | status |",
+    "| candidate | base | agreement [ci95] | p95 ms | serving $/month"
+    " | credits (train + replay) | status |",
     "|---|---|---|---|---|---|---|",
 )
 

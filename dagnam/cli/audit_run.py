@@ -65,7 +65,7 @@ def upload_listing(
         else f"a new private project 'workload-audit-{audit_dir.resolve().name}'"
     )
     lines.append(f"  to: {project}")
-    lines.append(f"  credit ceiling: {max_credits}")
+    lines.append(f"  credit ceiling: {max_credits} (training and the metered holdout replay)")
     return lines
 
 

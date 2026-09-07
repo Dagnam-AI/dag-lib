@@ -101,6 +101,14 @@ class AccountClientMixin(BaseDagnamClient):
         """Return the entitlement snapshot. ``GET /api/v1/users/me/entitlements``."""
         return self._expect_object(self._account_get("/api/v1/users/me/entitlements"))
 
+    def get_credit_balance(self) -> int:
+        """Return the caller's current credit balance. ``GET /api/v1/users/me/credits``."""
+        body = self._expect_object(self._account_get("/api/v1/users/me/credits"))
+        balance = body.get("balance")
+        if not isinstance(balance, int) or isinstance(balance, bool):
+            raise TypeError("Credit balance response did not include a 'balance' integer")
+        return balance
+
     def get_storage_quota(self) -> JsonObject:
         """Return dataset storage usage. ``GET /api/v1/datasets/storage/quota``."""
         return self._expect_object(self._account_get("/api/v1/datasets/storage/quota"))

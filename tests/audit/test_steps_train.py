@@ -46,13 +46,16 @@ def test_pick_base_is_the_smallest_ungated_sized_base_of_the_family(
     assert pick_base(make_ctx(spec=SFT_SMALL)) is None  # qwen-7b is over max_params
 
 
-def test_credits_spent_sums_every_candidate() -> None:
+def test_credits_spent_sums_training_and_replay_for_every_candidate() -> None:
     state = AuditState()
     assert credits_spent(state) == (0.0, 0.0)
-    state.candidate("w1", CandidateKind.HEAD_TUNE).training_cost_credits = 100.0
-    state.candidate("w2", CandidateKind.SFT_SMALL).training_cost_credits = 250.0
-    state.candidate("w2", CandidateKind.HOSTED_FLOOR)
-    assert credits_spent(state) == (350.0, 250.0)
+    head = state.candidate("w1", CandidateKind.HEAD_TUNE)
+    head.training_cost_credits = 100.0
+    head.replay_cost_credits = 396.0
+    sft = state.candidate("w2", CandidateKind.SFT_SMALL)
+    sft.training_cost_credits = 250.0
+    state.candidate("w2", CandidateKind.HOSTED_FLOOR).replay_cost_credits = 4.0
+    assert credits_spent(state) == (750.0, 496.0)
 
 
 def test_submit_sends_the_frozen_payload_and_records_the_run(
@@ -110,6 +113,24 @@ def test_submit_halts_on_budget_before_calling_the_platform(
     submit(state, make_ctx(max_credits=400))
     assert state.halted is not None
     assert state.halted["reason"] == "budget"
+    assert platform.call_log == []
+
+
+def test_the_budget_projection_counts_the_previous_replay(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    """20 credits of training would fit; the 396-credit replay it implies does not."""
+    state = _ready()
+    done = state.candidate("w0", CandidateKind.SFT_SMALL)
+    done.training_cost_credits = 10.0
+    done.replay_cost_credits = 396.0
+    submit(state, make_ctx(max_credits=500))
+    assert state.halted == {
+        "reason": "budget",
+        "spent_credits": 406.0,
+        "max_credits": 500,
+        "next": "w1/head_tune",
+    }
     assert platform.call_log == []
 
 

@@ -82,6 +82,7 @@ def _scored(ci: tuple[float, float], **extra: Any) -> StepState:
         "scored": True,
         "latency": {"p50": 40.0, "p95": 90.0, "calls": 200, "errors": 0},
         "training_cost_credits": 12.0,
+        "replay_cost_credits": 4.0,
         "agreement": {
             "metric": "exact",
             "value": 0.99,
@@ -127,6 +128,7 @@ def test_report_follows_the_contract() -> None:
         "latency_ms",
         "serving_cost_usd_month",
         "training_cost_credits",
+        "replay_cost_credits",
         "status",
     }
     assert (head["run_id"], head["model_version_id"], head["deployment_id"]) == (
@@ -143,6 +145,7 @@ def test_report_follows_the_contract() -> None:
         "basis": "estimated",
     }
     assert head["training_cost_credits"] == 12.0
+    assert head["replay_cost_credits"] == 4.0
     assert head["status"] == "scored"
     # The hosted floor is the cheaper variant of the one model, priced over the month.
     assert hosted["base"] == "mini"
@@ -252,6 +255,8 @@ def test_report_markdown_equals_json_view(tmp_path: Path) -> None:
     assert "| head_tune (winner) |" in md
     assert "0.990 [0.980, 1.000] n=200" in md
     assert "90 (measured)" in md
+    assert "| credits (train + replay) |" in md
+    assert "| 16 | scored |" in md  # 12 training + 4 replay
     assert "- dataset: 800 rows, 3 redactions, 4 duplicates removed, 1 truncated" in md
     assert 'base_url="https://api.dagnam.ai/v1"' in md
     assert 'model="dep-1"' in md

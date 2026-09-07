@@ -359,7 +359,13 @@ def register_audit(subparsers: SubParsersAction) -> None:
         "--workloads", help="Comma-separated workload ids to run (default: all audited)."
     )
     run.add_argument("--floor", type=float, help="Quality floor on the agreement lower bound.")
-    run.add_argument("--max-credits", type=int, default=None, help="Stop before exceeding this.")
+    run.add_argument(
+        "--max-credits",
+        type=int,
+        default=None,
+        help="Credit ceiling for training plus the metered holdout replay; stop before"
+        " exceeding it.",
+    )
     run.add_argument("--yes", action="store_true", help="Skip the upload confirmation.")
     run.add_argument(
         "--no-wait", action="store_true", help="Return after submitting; resume later."

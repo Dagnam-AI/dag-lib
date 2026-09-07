@@ -23,12 +23,28 @@ API = "https://api.test"
 ENTITLEMENTS = f"{API}/api/v1/users/me/entitlements"
 QUOTA = f"{API}/api/v1/datasets/storage/quota"
 USAGE = f"{API}/api/v1/users/me/api-keys/key1/usage"
+CREDITS = f"{API}/api/v1/users/me/credits"
 
 
 def test_get_entitlements(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(ENTITLEMENTS, json={"plan": "pro", "limits": {}})
     assert client.get_entitlements()["plan"] == "pro"
     assert rmock.last_request.headers["Authorization"] == "Bearer k"
+
+
+def test_get_credit_balance(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(CREDITS, json={"balance": 604})
+    assert client.get_credit_balance() == 604
+    assert rmock.last_request.headers["Authorization"] == "Bearer k"
+
+
+@pytest.mark.parametrize("body", [{}, {"balance": "many"}, {"balance": True}])
+def test_credit_balance_needs_an_integer(
+    client: DagnamClient, rmock: RequestsMocker, body: dict[str, object]
+) -> None:
+    rmock.get(CREDITS, json=body)
+    with pytest.raises(TypeError, match="'balance' integer"):
+        client.get_credit_balance()
 
 
 def test_get_storage_quota(client: DagnamClient, rmock: RequestsMocker) -> None:
