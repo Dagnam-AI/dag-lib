@@ -276,3 +276,38 @@ def test_wrap_gemini_run_reads_its_contents_and_content() -> None:
     assert record.response == "a field of study"
     assert (record.prompt_tokens, record.completion_tokens) == (12, 4)
     assert record.model == "gemini-2.5-flash"
+
+
+def test_wrap_gemini_run_lifts_the_system_instruction_into_a_system_turn() -> None:
+    """``wrap_gemini`` keeps the system prompt in ``config.system_instruction``; it becomes turn 0."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "inputs": {
+                "messages": [{"role": "user", "content": "cancelling order"}],
+                "config": {"system_instruction": "Classify the intent."},
+            },
+            "outputs": {
+                "role": "assistant",
+                "content": "cancel_order",
+                "usage_metadata": {"input_tokens": 85, "output_tokens": 1},
+            },
+            "extra": {"metadata": {"ls_model_name": "gemini-2.5-flash-lite"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system == "Classify the intent."
+    assert record.messages == (Message("user", "cancelling order"),)
+    assert record.response == "cancel_order"
+
+    row["inputs"] = {
+        "messages": [{"role": "user", "content": "cancelling order"}],
+        "config": {"system_instruction": {"parts": [{"text": "Be terse."}]}},
+    }
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.system == "Be terse."

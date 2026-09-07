@@ -89,7 +89,22 @@ def _messages(inputs: Mapping[str, Any]) -> list[Any] | str:
         raise MalformedRowError(f"inputs.messages is not a list: {raw!r}")
     if raw and isinstance(raw[0], list):  # LangChain nests one batch of messages per prompt
         raw = raw[0]
-    return [_plain_message(m) for m in raw]
+    messages = [_plain_message(m) for m in raw]
+    # ``wrap_gemini`` leaves the system prompt in ``config.system_instruction``
+    # rather than as a turn; without it every step of an agent hashes to the
+    # same template and collapses into one workload.
+    system = get(inputs, "config.system_instruction")
+    if system is not None:
+        messages.insert(
+            0,
+            {
+                "role": "system",
+                "content": _plain_message(system)["content"]
+                if isinstance(system, Mapping) and "parts" in system
+                else system,
+            },
+        )
+    return messages
 
 
 def _response(outputs: Mapping[str, Any]) -> Any:
