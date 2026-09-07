@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-07
+
 ### Changed
 
 - **`dagnam audit run --max-credits` now counts the holdout replay.** Every
