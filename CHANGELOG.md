@@ -20,6 +20,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   recorded, and the local workload rows and deployment keys are kept so a later
   `audit delete` can finish the job.
 
+- **`dagnam audit cancel` no longer aborts on a deployment the platform refuses
+  to pause.** A revision that never activated leaves its deployment in
+  `not_provisioned`, and the pause came back `HTTP 409: Invalid status
+  transition from not_provisioned to paused`, which stopped the cancel before it
+  reached the remaining candidates. The refusal is now recorded as
+  `{"action": "pause_refused", "reason": ...}`, every other job is still
+  cancelled, and the audit is still halted. The `audit run` deploy wait tolerates
+  the same refusal when it pauses a deployment that timed out.
 - **`dagnam audit status` no longer crashes on a deployment that is already
   gone.** A state file that still names a deployment the platform has since
   deleted made the command exit with `Error: Deployment '...' not found`; the
