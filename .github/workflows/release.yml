@@ -68,14 +68,20 @@ jobs:
           python-version: "3.12"
       - name: Install from TestPyPI
         run: |
-          for i in 1 2 3 4 5; do
-            pip install \
+          # TestPyPI's simple index lagged its own upload by more than 2.5 minutes
+          # on 2026-09-07 (the environment wait timer used to hide that); wait up
+          # to 15 minutes, and FAIL here rather than let the smoke test import an
+          # absent package -- a loop that falls through exits 0.
+          installed=0
+          for i in $(seq 1 15); do
+            if pip install \
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
-              "dagnam==${GITHUB_REF_NAME#dagnam/v}" && break
-            echo "Waiting for TestPyPI indexing ($i/5)..."
-            sleep 30
+              "dagnam==${GITHUB_REF_NAME#dagnam/v}"; then installed=1; break; fi
+            echo "Waiting for TestPyPI indexing ($i/15)..."
+            sleep 60
           done
+          test "$installed" = 1 || { echo "::error::dagnam ${GITHUB_REF_NAME#dagnam/v} never appeared on TestPyPI"; exit 1; }
       - name: Import smoke test
         run: |
           python -c "import dagnam; print(dagnam.__version__)"
