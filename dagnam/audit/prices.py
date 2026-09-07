@@ -5,6 +5,12 @@ vendors' public price pages on its ``as_of`` date (URLs in its ``_sources``
 key); the newest bundled one is the default. A model without a row prices to
 ``None`` — never a guess. ``serving.json`` holds the two student serving rates,
 labelled *estimated* until the platform bills for real.
+
+A trace export names the same model many ways -- routers and gateways prefix
+the vendor (``anthropic/claude-sonnet-5``, ``models/gemini-2.5-flash``,
+``us.anthropic.claude-...``), pin a release date (``gpt-4o-2024-08-06``) or
+float one (``mistral-medium-latest``). :func:`canonical_model_id` reduces an
+id to the table's key so one row prices all of its spellings.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from dataclasses import dataclass
 from datetime import date
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from dagnam._core.exceptions import DagnamError
@@ -21,6 +28,34 @@ from dagnam._core.exceptions import DagnamError
 PRICES_DIR = Path(__file__).parent / "prices"
 _ONE_MILLION = 1_000_000
 _ROW_FIELDS = ("input_per_m", "output_per_m", "cached_input_per_m", "cheaper_variant")
+# Vendor/gateway namespaces (``anthropic/``, ``anthropic.``, ``anthropic:``) and the
+# Bedrock region prefixes, none of which are part of the model's identity.
+_PROVIDER_PREFIXES = frozenset(
+    {
+        "openai",
+        "anthropic",
+        "google",
+        "models",
+        "vertex_ai",
+        "bedrock",
+        "azure",
+        "mistral",
+        "deepseek",
+        "xai",
+        "cohere",
+        "meta",
+        "together",
+        "groq",
+        "openrouter",
+        "us",
+        "eu",
+    }
+)
+_PREFIX_RE = re.compile(r"^([a-z_]+)[/:.]")
+# A trailing release date and/or a Bedrock version suffix: ``-20250929``,
+# ``-2024-08-06``, ``-v1:0``, ``:0``. Every part is optional, so an id without
+# one is left alone.
+_DATED_SUFFIX_RE = re.compile(r"(?:-\d{8}|-\d{4}-\d{2}-\d{2})?(?:-v\d+)?(?::\d+)?$")
 
 
 class PriceTableError(DagnamError):
@@ -75,8 +110,19 @@ class PriceTable:
         return cls(version, as_of_date, {m: _row(path, m, raw) for m, raw in rows.items()})
 
     def cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
-        """USD for the given token counts, or ``None`` when ``model`` has no row."""
-        row = self.rows.get(model)
+        """USD for the given token counts, or ``None`` when ``model`` has no row.
+
+        The id is looked up exactly first, then as its :func:`canonical_model_id`
+        form, then with a trailing release date or Bedrock version suffix dropped
+        -- so a dated variant the vendor prices separately keeps its own row and
+        only an unlisted one falls back to the undated model.
+        """
+        canonical = canonical_model_id(model)
+        row = (
+            self.rows.get(model)
+            or self.rows.get(canonical)
+            or self.rows.get(_DATED_SUFFIX_RE.sub("", canonical, count=1))
+        )
         if row is None:
             return None
         return (
@@ -86,6 +132,19 @@ class PriceTable:
     def age_days(self, today: date) -> int:
         """Days since the table's ``as_of`` date."""
         return (today - self.as_of).days
+
+
+def canonical_model_id(model: str) -> str:
+    """Reduce a model id to the price table's key.
+
+    Lowercases, strips any run of provider/region namespaces (``openrouter:``,
+    ``vertex_ai/``, ``us.anthropic.``) and drops a floating ``-latest``. An id
+    that is already a table key is returned unchanged.
+    """
+    model = model.strip().lower()
+    while (match := _PREFIX_RE.match(model)) and match.group(1) in _PROVIDER_PREFIXES:
+        model = model[match.end() :]
+    return model.removesuffix("-latest")
 
 
 def _row(path: Path, model: str, raw: Any) -> PriceRow:

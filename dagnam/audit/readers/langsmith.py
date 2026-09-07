@@ -12,11 +12,11 @@ Field mapping, from the run data format reference
 | ``session_id`` | ``extra.metadata.session_id`` / ``extra.metadata.thread_id`` (the documented thread keys), else ``trace_id``. LangSmith's own top-level ``session_id`` is the tracing *project* id and is deliberately not used |
 | ``ts`` | ``start_time`` |
 | ``latency_ms`` | ``end_time - start_time``; 0 when ``end_time`` is absent |
-| ``model`` | ``extra.invocation_params.model`` / ``extra.metadata.ls_model_name`` / ``outputs.model`` |
+| ``model`` | ``extra.invocation_params.model`` / ``extra.invocation_params.model_name`` / ``extra.metadata.ls_model_name`` / ``outputs.model`` |
 | ``system`` / ``messages`` | ``inputs.messages``: OpenAI-style ``{role, content}`` dicts (the ``wrap_openai`` shape) or LangChain-serialized messages (``{"lc": 1, "id": [..., "HumanMessage"], "kwargs": {"content"}}``, possibly nested one list deep); a bare ``inputs.prompt`` / ``inputs.input`` string is one user turn |
 | ``response`` | ``outputs.choices[0].message`` / ``outputs.messages[-1]`` / ``outputs.generations[0][0]`` (``text`` or its serialized ``message``) / ``outputs.output`` |
-| ``prompt_tokens`` | ``prompt_tokens`` / ``outputs.usage.prompt_tokens`` / ``outputs.llm_output.token_usage.prompt_tokens`` |
-| ``completion_tokens`` | ``completion_tokens`` / ``outputs.usage.completion_tokens`` / ``outputs.llm_output.token_usage.completion_tokens`` |
+| ``prompt_tokens`` | any vendor spelling at the top level or under ``usage_metadata`` / ``outputs.usage`` / ``outputs.usage_metadata`` / ``outputs.llm_output.token_usage`` (see :func:`~dagnam.audit.readers.base.prompt_tokens`) |
+| ``completion_tokens`` | the same, for the completion count |
 | ``cost_usd`` | ``total_cost`` |
 | ``outcome`` | ``extra.metadata.outcome`` (a convention, not a LangSmith field) |
 | ``workload_hint`` | ``extra.metadata.workload`` (a convention, not a LangSmith field) |
@@ -34,10 +34,11 @@ from dagnam.audit.readers.base import (
     MalformedRowError,
     Reader,
     Row,
-    as_int,
+    completion_tokens,
     get,
     optional_float,
     parse_ts,
+    prompt_tokens,
     require,
     split_prompt,
     text,
@@ -48,6 +49,15 @@ from dagnam.audit.record import TraceRecord
 REQUIRED_FIELDS = ("id", "run_type", "start_time", "inputs", "outputs")
 
 _LC_ROLES = {"SystemMessage": "system", "HumanMessage": "user", "AIMessage": "assistant"}
+# The run's own counts first, then LangChain's ``usage_metadata`` and the
+# per-provider usage blocks the run carries through from the response.
+_USAGE_ROOTS = (
+    "",
+    "usage_metadata",
+    "outputs.usage",
+    "outputs.usage_metadata",
+    "outputs.llm_output.token_usage",
+)
 
 
 def _plain_message(message: object) -> Any:
@@ -109,6 +119,7 @@ def to_record(row: Row) -> TraceRecord | None:
             get(
                 row,
                 "extra.invocation_params.model",
+                "extra.invocation_params.model_name",
                 "extra.metadata.ls_model_name",
                 "outputs.model",
             )
@@ -118,24 +129,8 @@ def to_record(row: Row) -> TraceRecord | None:
         messages=messages,
         response=response,
         response_tool_calls=calls,
-        prompt_tokens=as_int(
-            get(
-                row,
-                "prompt_tokens",
-                "outputs.usage.prompt_tokens",
-                "outputs.llm_output.token_usage.prompt_tokens",
-            )
-            or 0
-        ),
-        completion_tokens=as_int(
-            get(
-                row,
-                "completion_tokens",
-                "outputs.usage.completion_tokens",
-                "outputs.llm_output.token_usage.completion_tokens",
-            )
-            or 0
-        ),
+        prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
+        completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
         latency_ms=0.0 if end is None else (parse_ts(end) - ts).total_seconds() * 1000.0,
         cost_usd=optional_float(get(row, "total_cost")),
         session_id=text(

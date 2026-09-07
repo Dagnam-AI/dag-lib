@@ -12,6 +12,10 @@ Malformed rows are counted and skipped. The share is judged once the file has
 been read: above :data:`MALFORMED_FATAL_SHARE` the read ends with
 :class:`MalformedExportError` carrying the first three offending row indices;
 below it the count is simply reported in :class:`ReadStats`.
+
+Token usage is every vendor's own spelling of the same two numbers, so the
+source readers all go through :func:`prompt_tokens` / :func:`completion_tokens`
+rather than each knowing one shape.
 """
 
 from __future__ import annotations
@@ -219,6 +223,65 @@ def require(row: Mapping[str, Any], *paths: str) -> Any:
     if value is None:
         raise MalformedRowError(f"missing {paths[0]}")
     return value
+
+
+# The two token counts as OpenAI, Anthropic, Google, Langfuse and LangSmith each
+# spell them. ``input``/``output`` are the Langfuse usage-block names and are
+# tried only inside a usage block: at the top level of a row they are the prompt
+# and the reply, not counts.
+_PROMPT_TOKEN_KEYS = (
+    "prompt_tokens",
+    "promptTokens",
+    "input_tokens",
+    "inputTokens",
+    "promptTokenCount",
+    "prompt_token_count",
+)
+_COMPLETION_TOKEN_KEYS = (
+    "completion_tokens",
+    "completionTokens",
+    "output_tokens",
+    "outputTokens",
+    "candidatesTokenCount",
+    "candidates_token_count",
+)
+# Anthropic reports cached prompt tokens separately from ``input_tokens``, so
+# they are added on rather than chosen between.
+_CACHED_PROMPT_TOKEN_KEYS = ("cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+def _token_paths(
+    roots: tuple[str, ...], keys: tuple[str, ...], nested: tuple[str, ...]
+) -> tuple[str, ...]:
+    return tuple(
+        f"{root}.{key}" if root else key
+        for root in roots
+        for key in ((*keys, *nested) if root else keys)
+    )
+
+
+def _tokens(row: Mapping[str, Any], paths: tuple[str, ...]) -> int:
+    return as_int(get(row, *paths) or 0)
+
+
+def prompt_tokens(row: Mapping[str, Any], *roots: str) -> int:
+    """Prompt tokens from a usage block at any of ``roots`` (``""`` = the row itself).
+
+    Every vendor spelling is tried per root, in the order the roots are given:
+    OpenAI's ``prompt_tokens``, Anthropic's ``input_tokens``, Gemini's
+    ``promptTokenCount``, Langfuse's ``usage.input``, LangSmith's
+    ``usage_metadata.input_tokens``. Anthropic's cache-read and cache-creation
+    counts are added to the base count, which excludes them. Absent counts are 0.
+    """
+    total = _tokens(row, _token_paths(roots, _PROMPT_TOKEN_KEYS, ("input",)))
+    return total + sum(
+        _tokens(row, _token_paths(roots, (key,), ())) for key in _CACHED_PROMPT_TOKEN_KEYS
+    )
+
+
+def completion_tokens(row: Mapping[str, Any], *roots: str) -> int:
+    """Completion tokens from a usage block at any of ``roots``; see :func:`prompt_tokens`."""
+    return _tokens(row, _token_paths(roots, _COMPLETION_TOKEN_KEYS, ("output",)))
 
 
 def text(value: object) -> str:

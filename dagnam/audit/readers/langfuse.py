@@ -17,8 +17,8 @@ the API reference (https://api.reference.langfuse.com/ — ``GET
 | ``model`` | ``model`` |
 | ``system`` / ``messages`` | ``input`` (a chat message list, a mapping holding ``messages``, or a bare prompt string) |
 | ``response`` | ``output`` (a string, or the assistant message object ``{role, content, tool_calls}``) |
-| ``prompt_tokens`` | ``usage.input`` / ``usageDetails.input`` / ``promptTokens`` / ``inputTokens`` |
-| ``completion_tokens`` | ``usage.output`` / ``usageDetails.output`` / ``completionTokens`` / ``outputTokens`` |
+| ``prompt_tokens`` | any vendor spelling under ``usage`` / ``usageDetails`` / ``usageMetadata`` / the row itself (see :func:`~dagnam.audit.readers.base.prompt_tokens`) |
+| ``completion_tokens`` | the same, for the completion count |
 | ``cost_usd`` | ``calculatedTotalCost`` / ``costDetails.total`` / ``totalCost`` |
 | ``outcome`` | ``metadata.outcome`` (a convention, not a Langfuse field) |
 | ``workload_hint`` | ``metadata.workload`` (a convention, not a Langfuse field) |
@@ -34,10 +34,11 @@ from dagnam.audit.readers.base import (
     UNKNOWN_MODEL,
     Reader,
     Row,
-    as_int,
+    completion_tokens,
     get,
     optional_float,
     parse_ts,
+    prompt_tokens,
     require,
     split_prompt,
     text,
@@ -46,6 +47,10 @@ from dagnam.audit.readers.base import (
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ("id", "type", "startTime", "input", "output")
+# A Langfuse row carries the counts under ``usage`` (or the older
+# ``usageDetails``), a Gemini-shaped export under ``usageMetadata``, and the
+# legacy export spellings at the top level.
+_USAGE_ROOTS = ("usage", "usageDetails", "usageMetadata", "")
 
 
 def _latency_ms(row: Row, start: datetime) -> float:
@@ -75,12 +80,8 @@ def to_record(row: Row) -> TraceRecord | None:
         messages=messages,
         response=response,
         response_tool_calls=calls,
-        prompt_tokens=as_int(
-            get(row, "usage.input", "usageDetails.input", "promptTokens", "inputTokens") or 0
-        ),
-        completion_tokens=as_int(
-            get(row, "usage.output", "usageDetails.output", "completionTokens", "outputTokens") or 0
-        ),
+        prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
+        completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
         latency_ms=_latency_ms(row, ts),
         cost_usd=optional_float(get(row, "calculatedTotalCost", "costDetails.total", "totalCost")),
         session_id=text(require(row, "sessionId", "traceId")),

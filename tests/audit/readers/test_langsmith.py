@@ -11,6 +11,7 @@ import polars as pl
 import pytest
 
 from dagnam.audit import Message, read_traces
+from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers import langsmith
 
 # Row counts of ``fixtures/langsmith_sample.jsonl`` (see fixtures/README.md).
@@ -174,3 +175,40 @@ def test_missing_end_time_gives_zero_latency() -> None:
     record = langsmith.to_record(row)
     assert record is not None
     assert record.latency_ms == 0.0
+
+
+def test_anthropic_run_with_usage_metadata_is_read_and_priced() -> None:
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "extra": {
+                "invocation_params": {"model_name": "claude-sonnet-4-5-20250929"},
+                "metadata": {"ls_provider": "anthropic"},
+            },
+            "usage_metadata": {"input_tokens": 900, "output_tokens": 120},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.model == "claude-sonnet-4-5-20250929"
+    assert (record.prompt_tokens, record.completion_tokens) == (900, 120)
+    assert PriceTable.load(None).cost(
+        record.model, record.prompt_tokens, record.completion_tokens
+    ) == pytest.approx(0.0045)
+
+
+def test_usage_metadata_on_the_outputs_is_read() -> None:
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row["outputs"] = {
+        **row["outputs"],  # type: ignore[dict-item]
+        "usage_metadata": {"input_tokens": 7, "output_tokens": 2},
+    }
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert (record.prompt_tokens, record.completion_tokens) == (7, 2)

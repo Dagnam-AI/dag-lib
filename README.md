@@ -377,6 +377,18 @@ dagnam agent install          # install the Agent Skill into Claude Code / Codex
 dagnam agent uninstall --all
 ```
 
+**`audit scan` prices the providers your agent actually calls.** The bundled price table
+(`dagnam/audit/prices/2026-09.json`, copied from each vendor's own pricing page on the table's
+`as_of` date) carries OpenAI, Anthropic, Google Gemini, Mistral, DeepSeek, xAI and Cohere rows,
+and a model id is matched against it after normalization: lowercased, with the provider or
+region namespace stripped (`anthropic/claude-sonnet-5`, `models/gemini-2.5-flash`,
+`openrouter:mistral/mistral-large-latest`, `us.anthropic.claude-...`), a floating `-latest`
+dropped, and -- only when the exact id has no row of its own -- a trailing release date or
+Bedrock version suffix dropped too (`gpt-4o-2024-08-06`, `...-v1:0`). Token usage is read in
+every vendor's spelling, so Anthropic's `input_tokens` plus its cache-read counts, Gemini's
+`promptTokenCount` and LangSmith's `usage_metadata.input_tokens` are counted exactly like
+OpenAI's `prompt_tokens`. A model the table does not list still prices to nothing, never a guess.
+
 Run `dagnam --help` or `dagnam <command> --help` for command-specific options.
 
 ## Agent Integration (Claude Code & Codex)

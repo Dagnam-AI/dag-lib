@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`dagnam audit scan` prices calls from every major provider, not just
+  OpenAI.** A model id is now looked up exactly, then through a normalized
+  form (new `canonical_model_id`): lowercased, with the provider/gateway or
+  Bedrock region namespace stripped (`anthropic/claude-sonnet-4-5`,
+  `models/gemini-2.5-flash`, `openrouter:mistral/mistral-large-latest`,
+  `us.anthropic.claude-...`) and a floating `-latest` dropped; a trailing
+  release date or Bedrock version suffix (`gpt-4o-2024-08-06`, `-v1:0`) is
+  dropped only when the exact id has no row of its own, so a dated variant the
+  vendor prices separately keeps its own price. The Langfuse, LangSmith and
+  OpenAI readers now read token usage through one shared helper that accepts
+  every vendor spelling -- Anthropic's `input_tokens`/`output_tokens` plus its
+  `cache_read_input_tokens` and `cache_creation_input_tokens`, Gemini's
+  `promptTokenCount`/`candidatesTokenCount` (and their snake_case forms),
+  LangSmith's `usage_metadata`, Langfuse's `usage`/`usageDetails` -- and
+  LangSmith runs also name their model through
+  `extra.invocation_params.model_name`. The bundled price table gains 19 rows
+  read from the vendors' own pricing pages on 2026-09-07: Mistral (7),
+  DeepSeek (2), xAI (5) and Cohere (5), each cited in the table's `_sources`.
+  Meta Llama has no rows: neither Together's nor Groq's pricing page states
+  the API model ids and per-token prices together, and the table never guesses
+  a price.
+
 ## [0.13.0] - 2026-09-07
 
 ### Changed
