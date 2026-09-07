@@ -24,9 +24,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `promptTokenCount`/`candidatesTokenCount` (and their snake_case forms),
   LangSmith's `usage_metadata`, Langfuse's `usage`/`usageDetails` -- and
   LangSmith runs also name their model through
-  `extra.invocation_params.model_name`. The bundled price table gains 19 rows
-  read from the vendors' own pricing pages on 2026-09-07: Mistral (7),
-  DeepSeek (2), xAI (5) and Cohere (5), each cited in the table's `_sources`.
+  `extra.invocation_params.model_name` and their reply through
+  `outputs.content`, which is where `wrap_anthropic` and `wrap_gemini` put it
+  (a string, or typed content blocks whose `text` is joined and whose non-text
+  blocks are skipped); their requests read from `inputs.contents` as well, so
+  an Anthropic or Gemini run no longer lands with an empty response. The
+  bundled price table gains 19 rows read from the vendors' own pricing pages
+  on 2026-09-07: Mistral (7), DeepSeek (2), xAI (5) and Cohere (5), each
+  cited in the table's `_sources`.
   Meta Llama has no rows: neither Together's nor Groq's pricing page states
   the API model ids and per-token prices together, and the table never guesses
   a price.

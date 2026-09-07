@@ -212,3 +212,67 @@ def test_usage_metadata_on_the_outputs_is_read() -> None:
 
     assert record is not None
     assert (record.prompt_tokens, record.completion_tokens) == (7, 2)
+
+
+def test_wrap_anthropic_run_reads_its_content_blocks() -> None:
+    """``wrap_anthropic`` dumps the Message into ``outputs``: content blocks, folded system."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "name": "ChatAnthropic",
+            # ``_strip_not_given`` folds the ``system`` kwarg in as a system turn.
+            "inputs": {
+                "messages": [
+                    {"role": "system", "content": "be brief"},
+                    {"role": "user", "content": "hi"},
+                ]
+            },
+            "outputs": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-5-20250929",
+                "content": [
+                    {"type": "thinking", "thinking": "hmm"},  # non-text block: ignored
+                    {"type": "text", "text": "hello "},
+                    {"type": "text", "text": "there"},
+                ],
+                "usage_metadata": {"input_tokens": 900, "output_tokens": 120},
+            },
+            "extra": {"metadata": {"ls_provider": "anthropic"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system == "be brief"
+    assert record.messages == (Message("user", "hi"),)
+    assert record.response == "hello there"
+    assert (record.prompt_tokens, record.completion_tokens) == (900, 120)
+    assert record.model == "claude-sonnet-4-5-20250929"
+
+
+def test_wrap_gemini_run_reads_its_contents_and_content() -> None:
+    """A raw Gemini request/response: ``inputs.contents`` parts, string ``outputs.content``."""
+    row = _llm_run()
+    del row["prompt_tokens"], row["completion_tokens"]
+    row.update(
+        {
+            "inputs": {"contents": [{"role": "user", "parts": [{"text": "what is AI?"}]}]},
+            "outputs": {
+                "role": "assistant",
+                "content": "a field of study",
+                "usage_metadata": {"prompt_token_count": 12, "candidates_token_count": 4},
+            },
+            "extra": {"metadata": {"ls_model_name": "gemini-2.5-flash"}},
+        }
+    )
+
+    record = langsmith.to_record(row)
+
+    assert record is not None
+    assert record.system is None
+    assert record.messages == (Message("user", "what is AI?"),)
+    assert record.response == "a field of study"
+    assert (record.prompt_tokens, record.completion_tokens) == (12, 4)
+    assert record.model == "gemini-2.5-flash"
