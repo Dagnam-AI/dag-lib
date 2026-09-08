@@ -39,10 +39,35 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `dagnam audit run` opts out entirely (nothing is published and the listing
   says so), `dagnam audit cancel` and `dagnam audit delete` go through the
   account for a run that published -- writing the server's own receipt as
-  `deleted.json` -- and `state.json` gains `audit_id` so a resumed run
-  continues the audit it already opened instead of starting a second one.
-  Publishing is best effort throughout: a failed call is logged, queued behind
-  the next one, and never stops a run.
+  `cancelled.json` and `deleted.json` respectively -- and `state.json` gains
+  `audit_id` so a resumed run continues the audit it already opened instead of
+  starting a second one. Publishing is best effort throughout: a failed call is
+  logged, queued behind the next one, and never stops a run.
+- **The run says where to watch what it published.** A created audit prints
+  `published: <audit-id> — watch it at <site>/audits/<audit-id>` (the site is
+  derived from the configured API URL, exactly as `dagnam login`'s sign-in link
+  is), and `dagnam audit status` carries the same `audit_id` and `url` in its
+  table and its `--json`. A run that stopped short still publishes its halt,
+  and it is published once: a resumed run that stops the same way again leaves
+  the halt the account already shows, because the account resumes a halted
+  audit itself on the next step this run publishes.
+- **`audit cancel` writes `cancelled.json`, not `deleted.json`.** A cancel
+  stops training jobs and pauses endpoints; nothing is deleted, so
+  `deleted.json` now only ever means the artifacts are gone. Both cancel paths
+  -- the local walk and the one the server performs for a published run --
+  leave the same local state (each candidate's run `cancelled`, its deployment
+  `paused`, the audit `halted`), so `audit status` reads the same after either
+  and a later `audit run` no longer resumes into `wait_run` against a job that
+  was cancelled.
+- **`--floor` and `--max-credits` are validated before anything is uploaded.**
+  A value outside `0 < floor <= 1`, or a credit ceiling that is not a
+  non-negative whole number, is an argument error (exit 2) rather than a run
+  whose every publish is refused by the server. Non-ASCII digit forms
+  (`"²"`), which `str.isdigit` accepts and `int()` does not, are rejected too.
+- **`state.json` is not backward compatible with 0.13.0.** The file gains
+  `audit_id` and a per-candidate `published_candidate_id`; 0.13.0 refuses a
+  step key it does not know, so an audit directory written by this release
+  cannot be resumed by the previous one. Newer readers read older files fine.
 - **`dagnam audit scan` prices calls from every major provider, not just
   OpenAI.** A model id is now looked up exactly, then through a normalized
   form (new `canonical_model_id`): lowercased, with the provider/gateway or

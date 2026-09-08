@@ -135,6 +135,12 @@ def wait_run(state: AuditState, ctx: StepContext) -> AuditState:
     step = ctx.step(state)
     if step.run_status == RUN_COMPLETED:
         return state
+    if step.run_status in RUN_FAILED:
+        # Terminal already, and nothing recorded it as an error: `dagnam audit
+        # cancel` stopped the run between two `audit run`s. Polling a job that
+        # will never move again is the one way a resumed audit hangs.
+        step.error = f"run_{step.run_status}: the run was already terminal when this audit resumed"
+        return state
     run_id = required(step.run_id, "run_id")
     try:
         run = wait_for(

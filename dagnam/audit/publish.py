@@ -25,11 +25,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from dagnam._core.auth import web_url_from_api_url
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import PlatformClient, StepContext, error_code
+from dagnam.audit.steps_serve import DEPLOY_RUNNING
 from dagnam.audit.steps_train import RUN_COMPLETED
 
 _LOGGER = logging.getLogger("dagnam.audit.publish")
@@ -81,9 +83,6 @@ failed reaches the account with candidates already part-finished, and this is
 what says which of their steps to publish before the run carries on.
 """
 
-DEPLOY_RUNNING = "running"
-"""``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
-
 REPLAY_STEP = "replay"
 """Published just before ``replay_and_score``: the server has no ``deploying -> scored`` edge."""
 PII_DISAGREEMENT = "pii_disagreement"
@@ -100,6 +99,8 @@ MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
 MAX_WORKLOADS = 200
 """``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter."""
+AUDIT_PATH = "audits"
+"""The site route one published audit is watched on."""
 
 _EXCERPT_MAX = 200
 _ERROR_MAX = 500
@@ -115,6 +116,21 @@ def installed_version() -> str:
         return version("dagnam")
     except PackageNotFoundError:
         return UNKNOWN_VERSION
+
+
+def silent(line: str) -> None:
+    """The default ``announce``: this package prints nothing the CLI did not ask it to."""
+
+
+def audit_url(api_url: str, audit_id: str) -> str:
+    """Where a person watches this audit: the site that matches the configured API.
+
+    ``dagnam login`` derives its "sign in at" link the same way
+    (:func:`dagnam._core.auth.web_url_from_api_url`); an API host with no known
+    site -- a private deployment -- links to the API host itself rather than
+    guessing at a domain that may not exist.
+    """
+    return f"{web_url_from_api_url(api_url) or api_url.rstrip('/')}/{AUDIT_PATH}/{audit_id}"
 
 
 def _number(value: object) -> float | None:
@@ -206,15 +222,24 @@ class Publisher:
     nothing to attach a candidate or a step to.
     """
 
-    def __init__(self, client: PlatformClient | None, state: AuditState) -> None:
+    def __init__(
+        self,
+        client: PlatformClient | None,
+        state: AuditState,
+        announce: Callable[[str], None] = silent,
+    ) -> None:
         self._client = client
         self._state = state
+        self._announce = announce
+        """Where the "watch it at ..." line goes; the CLI passes its own printer."""
         self._entries: dict[str, Mapping[str, Any]] = {}
         """Workload id -> its scan entry, for the serving cost a scored candidate carries."""
         self._pending: list[tuple[str, JsonObject]] = []
         """(candidate id, body) patches a failed call left to resend, oldest first."""
         self._new_audit = False
         """This run created the audit, so its candidates may need :meth:`backfill`."""
+        self._halted = state.halted is not None
+        """The account already believes this audit is halted, so :meth:`halt` would repeat itself."""
 
     # -- the audit ------------------------------------------------------------
 
@@ -226,6 +251,7 @@ class Publisher:
         the publisher at the live one before the first publish.
         """
         self._state = state
+        self._halted = state.halted is not None
 
     def start(
         self,
@@ -275,18 +301,33 @@ class Publisher:
             }
 
         created = self._guard("create_audit", lambda: client.create_audit(body()))
-        if created is not None:
-            self._state.audit_id = str(created["id"])
-            self._new_audit = True
+        if created is None:
+            return
+        audit_id = str(created["id"])
+        self._state.audit_id = audit_id
+        self._new_audit = True
+        link = f"published: {audit_id} — watch it at {audit_url(client.api_url, audit_id)}"
+        # Guarded like every other publish: a console that cannot encode the
+        # line must not end a run that has already published its scan.
+        self._guard("the audit's link", lambda: self._announce(link))
 
     def halt(self, reason: str) -> None:
-        """Tell the account the run stopped short, and why."""
+        """Tell the account the run stopped short, and why -- unless it already knows.
+
+        A resumed run inherits the halt the previous one published. The server
+        resumes a halted audit implicitly on the owner's next applied publish,
+        so the flush below is what makes this run's halt a *new* one; a run
+        that publishes nothing before stopping again leaves the halt it found.
+        """
         target = self._target()
         if target is None:
             return
         client, audit_id = target
         self._flush(client, audit_id)
+        if self._halted:
+            return
         self._guard("halt_audit", lambda: client.halt_audit(audit_id, reason))
+        self._halted = True
 
     # -- candidates -----------------------------------------------------------
 
@@ -403,13 +444,29 @@ class Publisher:
             candidate_id, body = self._pending[0]
             try:
                 client.patch_audit_candidate(audit_id, candidate_id, body)
-            except Exception as exc:
-                _LOGGER.warning(
-                    "audit publish: step %r failed (%s); the run continues", body["step"], exc
-                )
-                if not isinstance(exc, APIError) or exc.status_code not in DROP_STATUSES:
+            except APIError as exc:
+                if exc.status_code not in DROP_STATUSES:
+                    self._retrying(body, exc)
                     return
+                _LOGGER.warning(
+                    "audit publish: step %r was refused by the server (HTTP %d); not retried",
+                    body["step"],
+                    exc.status_code,
+                )
+            except Exception as exc:
+                self._retrying(body, exc)
+                return
+            else:
+                # A patch the server applied resumes an audit it had halted.
+                self._halted = False
             self._pending.pop(0)
+
+    @staticmethod
+    def _retrying(body: JsonObject, exc: Exception) -> None:
+        """One transient failure: the body stays queued in front of the next step's."""
+        _LOGGER.warning(
+            "audit publish: step %r failed (%s); will retry with the next step", body["step"], exc
+        )
 
     def _guard[T](self, what: str, run: Callable[[], T]) -> T | None:
         """Run one publish step; a failure is a warning, never the end of the run.
@@ -429,6 +486,7 @@ class Publisher:
 
 
 __all__ = [
+    "AUDIT_PATH",
     "DONE_BY_STEP",
     "MAX_PENDING",
     "MAX_WORKLOADS",
@@ -439,7 +497,9 @@ __all__ = [
     "STATUS_BY_STEP",
     "UNKNOWN_VERSION",
     "Publisher",
+    "audit_url",
     "installed_version",
+    "silent",
     "status_for",
     "workload_body",
 ]

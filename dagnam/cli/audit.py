@@ -36,7 +36,7 @@ METRICS_RANGE = "7d"
 def parse_window(value: str) -> int:
     """``30d`` or ``30`` -> 30; anything else is a usage error."""
     digits = value[:-1] if value.endswith("d") else value
-    if not digits.isdigit() or int(digits) < 1:
+    if not (digits.isascii() and digits.isdigit()) or int(digits) < 1:
         raise argparse.ArgumentTypeError(
             f"--window expects a number of days like 30d, not {value!r}"
         )
@@ -62,8 +62,13 @@ def parse_floor(value: str) -> float:
 
 
 def parse_credits(value: str) -> int:
-    """A credit ceiling of zero or more; anything else is a usage error."""
-    if not value.isdigit():
+    """A credit ceiling of zero or more; anything else is a usage error.
+
+    ``str.isdigit`` is true of ``"\u00b2"`` and every other non-ASCII digit
+    form, none of which ``int()`` accepts -- so the ASCII check is what keeps
+    this an argument error rather than a traceback.
+    """
+    if not (value.isascii() and value.isdigit()):
         raise argparse.ArgumentTypeError(
             f"--max-credits expects a whole number of credits, not {value!r}"
         )
@@ -241,12 +246,18 @@ def _render_status(result: object) -> str:
         ),
         rows,
     )
-    halted = js["halted"]
-    return table if halted is None else f"{table}\n\nhalted: {halted}"
+    lines = [table]
+    if js["audit_id"] is not None:
+        lines.append(f"\naudit {js['audit_id']}: {js['url']}")
+    if js["halted"] is not None:
+        lines.append(f"\nhalted: {js['halted']}")
+    return "\n".join(lines)
 
 
 def cmd_audit_status(args: argparse.Namespace) -> None:
     """The state table, one row per workload x candidate, with each endpoint's 7-day requests."""
+    from dagnam._core.auth import get_api_url
+    from dagnam.audit.publish import audit_url
     from dagnam.audit.state import load_state
 
     state = load_state(Path(args.audit_dir))
@@ -254,22 +265,34 @@ def cmd_audit_status(args: argparse.Namespace) -> None:
         step.deployment_id is not None for c in state.workloads.values() for step in c.values()
     )
     rows = status_rows(state, client_from_env() if needs_client else None)
-    result = {"project_id": state.project_id, "halted": state.halted, "rows": rows}
+    audit_id = state.audit_id
+    result = {
+        "project_id": state.project_id,
+        "audit_id": audit_id,
+        "url": None if audit_id is None else audit_url(get_api_url(), audit_id),
+        "halted": state.halted,
+        "rows": rows,
+    }
     emit_result(result, output=None, json_stdout=args.json, render_human=_render_status)
 
 
-def _render_receipt(receipt: Mapping[str, Any], audit_dir: Path) -> str:
-    """One line per artifact the server touched, then where the receipt was written."""
-    from dagnam.audit.cleanup import DELETED_FILE, receipt_rows
+def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
+    """One line per artifact the server touched, then where the receipt was written.
+
+    Every field is read with a default: a row the server spells differently
+    from this client is worth showing as ``?``, never worth a ``KeyError`` that
+    hides the whole receipt.
+    """
+    from dagnam.audit.cleanup import receipt_rows
 
     return "\n".join(
         [
             *(
-                f"{row['kind']} {row['id']}: {row['status']}"
+                f"{row.get('kind', '?')} {row.get('id', '?')}: {row.get('status', '?')}"
                 + (f" ({row['reason']})" if row.get("reason") else "")
                 for row in receipt_rows(receipt)
             ),
-            f"Receipt: {audit_dir / DELETED_FILE}",
+            f"Receipt: {path}",
         ]
     )
 
@@ -277,9 +300,14 @@ def _render_receipt(receipt: Mapping[str, Any], audit_dir: Path) -> str:
 def cmd_audit_cancel(args: argparse.Namespace) -> None:
     """Cancel every in-flight run and pause every deployment the state records; delete nothing."""
     from dagnam._core.exceptions import DeploymentStateError
-    from dagnam.audit.cleanup import write_receipt
+    from dagnam.audit.cleanup import (
+        CANCELLED_FILE,
+        DEPLOY_PAUSED,
+        TERMINAL_RUN,
+        mark_cancelled,
+        write_receipt,
+    )
     from dagnam.audit.state import load_state, save_state
-    from dagnam.audit.steps_train import RUN_COMPLETED, RUN_FAILED
 
     audit_dir = Path(args.audit_dir)
     state = load_state(audit_dir)
@@ -288,31 +316,32 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
         # The run published: the account knows every artifact it created, so the
         # server stops them all in one call and answers with the receipt.
         receipt = client.cancel_audit(state.audit_id)
-        write_receipt(audit_dir, receipt)
-        state.halted = {"reason": "cancelled"}
+        path = write_receipt(audit_dir, receipt, CANCELLED_FILE)
+        mark_cancelled(state)
         save_state(audit_dir, state)
         emit_result(
             receipt,
             output=None,
             json_stdout=args.json,
-            render_human=lambda _: _render_receipt(receipt, audit_dir),
+            render_human=lambda _: _render_receipt(receipt, path),
         )
         return
     actions: list[dict[str, str]] = []
+    unpaused: list[str] = []
     for workload_id, candidates in state.workloads.items():
         for kind, step in candidates.items():
             label = f"{workload_id}/{kind.value}"
             job = step.training_job_id
-            if job is not None and step.run_status not in {RUN_COMPLETED, *RUN_FAILED}:
+            if job is not None and step.run_status not in TERMINAL_RUN:
                 client.cancel_training_job(job)
-                step.run_status = "cancelled"
                 actions.append({"candidate": label, "action": "cancelled_job", "id": job})
-            if step.deployment_id is not None and step.deploy_status != "paused":
+            if step.deployment_id is not None and step.deploy_status != DEPLOY_PAUSED:
                 # A deployment whose revision never activated sits in ``not_provisioned``
                 # and the platform refuses the transition; record it and carry on.
                 try:
                     client.pause_deployment(step.deployment_id)
                 except DeploymentStateError as exc:
+                    unpaused.append(step.deployment_id)
                     actions.append(
                         {
                             "candidate": label,
@@ -322,7 +351,6 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
                         }
                     )
                 else:
-                    step.deploy_status = "paused"
                     actions.append(
                         {
                             "candidate": label,
@@ -330,7 +358,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
                             "id": step.deployment_id,
                         }
                     )
-    state.halted = {"reason": "cancelled"}
+    mark_cancelled(state, unpaused)
     save_state(audit_dir, state)
     emit_result(
         {"halted": state.halted, "actions": actions},
@@ -345,6 +373,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
 def cmd_audit_delete(args: argparse.Namespace) -> None:
     """Delete every platform artifact the run created and write ``deleted.json``."""
     from dagnam.audit.cleanup import (
+        DELETED_FILE,
         delete_audit,
         forget_locally,
         receipt_rows,
@@ -370,13 +399,13 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         # answers with the receipt, and only the local rows are left to drop.
         receipt = client.delete_audit(state.audit_id)
         write_receipt(audit_dir, receipt)
-        if not any(row["status"] == "blocked" for row in receipt_rows(receipt)):
+        if not any(row.get("status") == "blocked" for row in receipt_rows(receipt)):
             forget_locally(audit_dir, state)
     emit_result(
         receipt,
         output=None,
         json_stdout=args.json,
-        render_human=lambda _: _render_receipt(receipt, audit_dir),
+        render_human=lambda _: _render_receipt(receipt, audit_dir / DELETED_FILE),
     )
 
 

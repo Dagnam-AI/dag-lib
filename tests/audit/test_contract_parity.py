@@ -23,6 +23,21 @@ from dagnam.audit import derive, economics, prices, report, scoring, steps_serve
 from dagnam.audit.frontier import CandidateResult, Winner, frontier
 
 
+def test_the_shared_numbers_are_the_values_both_sides_ship() -> None:
+    """Pinned literally, so a contract bump that changes one fails here and not in production.
+
+    Every other assertion in this module says "the same object as the
+    contract's", which stays true however the contract's value moves. These are
+    the numbers the platform's own audit page and this SDK must agree on, so
+    they are written out.
+    """
+    assert REPORT_SCHEMA == "dagnam.audit.report/1"
+    assert DEFAULT_BASE_URL == "https://api.dagnam.ai/v1"
+    assert thresholds.FLOOR_LABEL == 0.97
+    assert thresholds.FLOOR_JSON == 0.95
+    assert thresholds.MAINTENANCE_USD_MONTH == 50.0
+
+
 def test_scorers_are_the_contract_objects() -> None:
     assert scoring.score_labels is contract_scoring.score_labels
     assert scoring.score_json is contract_scoring.score_json

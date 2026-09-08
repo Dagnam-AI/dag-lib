@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
 
+from dagnam._core.auth import web_url_from_api_url
 from dagnam._types import JsonObject, ensure_json_object
 from dagnam.cli.common import error, format_ascii_art, print_next_step
 
@@ -20,16 +21,6 @@ if TYPE_CHECKING:
 DEFAULT_TRAINING_METRICS_PATH = (
     Path.home() / ".dagnam" / "training-metrics" / "dagnam_metrics.jsonl"
 )
-
-
-def _web_url_from_api_url(api_url: str) -> str:
-    """Best-effort guess at the matching frontend URL (empty if unknown)."""
-    normalized = api_url.rstrip("/")
-    if normalized == "https://api.dagnam.ai":
-        return "https://dagnam.ai"
-    if normalized.startswith("http://localhost:") or normalized.startswith("http://127.0.0.1:"):
-        return "http://localhost:5173"
-    return ""
 
 
 def _lock_down_config_path(config_dir: Path, config_file: Path) -> None:
@@ -71,7 +62,7 @@ def cmd_login(
     from dagnam._core.exceptions import DagnamError
 
     api_url = getattr(args, "api_url", None) or "https://api.dagnam.ai"
-    web_url = _web_url_from_api_url(api_url)
+    web_url = web_url_from_api_url(api_url)
 
     print(f"{format_ascii_art()}\n")
     print("Log in to Dagnam.\n")

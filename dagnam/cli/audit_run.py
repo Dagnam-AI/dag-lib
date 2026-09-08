@@ -42,6 +42,11 @@ def client_from_env() -> DagnamClient:
     return DagnamClient(get_api_url(), get_api_key())
 
 
+def announce(line: str) -> None:
+    """Print one publisher line to stderr, so stdout stays the report ``--json`` pipes."""
+    print(line, file=sys.stderr)
+
+
 PUBLISH_LINE = (
     "  published to your account: progress and the report (workload ids, verdicts, spend,"
     " masked excerpts, the audit directory's name; never rows or keys);"
@@ -151,7 +156,7 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
         max_credits=max_credits,
         wait=not args.no_wait,
         client=client,
-        publisher=None if args.local_only else Publisher(client, state),
+        publisher=None if args.local_only else Publisher(client, state, announce),
     )
     scan = json.loads((audit_dir / SCAN_REPORT).read_text(encoding="utf-8"))
     # ponytail: the report prices the hosted floor from the bundled table; a

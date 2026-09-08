@@ -175,3 +175,12 @@ def test_warn_helper_allows_cleartext_localhost(
     warnings = _credential_warnings(caplog)
     assert len(warnings) == 1
     assert "cleartext" not in warnings[0]
+
+
+def test_web_url_from_api_url_names_the_site_that_goes_with_the_api() -> None:
+    """The one derivation `dagnam login` and the audit's "watch it at" link share."""
+    assert auth_mod.web_url_from_api_url("https://api.dagnam.ai") == "https://dagnam.ai"
+    assert auth_mod.web_url_from_api_url("https://api.dagnam.ai/") == "https://dagnam.ai"
+    assert auth_mod.web_url_from_api_url("http://localhost:8000") == "http://localhost:5173"
+    assert auth_mod.web_url_from_api_url("http://127.0.0.1:8000") == "http://localhost:5173"
+    assert auth_mod.web_url_from_api_url("https://corp.internal") == ""

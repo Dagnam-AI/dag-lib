@@ -36,6 +36,8 @@ DEPLOYMENT_TYPE = "text"
 INSTANCE_TYPE = "modal-serverless"
 CAPACITY_MODE = "serverless"
 CAPACITY_POLICY: dict[str, int] = {"min_replicas": 0, "max_replicas": 1}
+DEPLOY_RUNNING = "running"
+"""``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
 
 _MARKER = re.compile(r"^<\|(\w+)\|>\n", re.MULTILINE)
 
@@ -141,7 +143,7 @@ def _revision_status(ctx: StepContext, deployment_id: str) -> JsonObject:
     if newest is None:
         return {"status": "deploying"}
     if newest.get("is_active"):
-        return {"status": "running"}
+        return {"status": DEPLOY_RUNNING}
     status = string_field(newest, "status") or "deploying"
     return {"status": status, "error_message": string_field(newest, "failure_reason")}
 
@@ -149,14 +151,14 @@ def _revision_status(ctx: StepContext, deployment_id: str) -> JsonObject:
 def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
     """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused."""
     step = ctx.step(state)
-    if step.deploy_status == "running":
+    if step.deploy_status == DEPLOY_RUNNING:
         return state
     deployment_id = required(step.deployment_id, "deployment_id")
     try:
         wait_for(
             ctx,
             lambda: _revision_status(ctx, deployment_id),
-            success={"running"},
+            success={DEPLOY_RUNNING},
             failure={"failed"},
             timeout=ctx.deploy_timeout,
             name=f"deployment {deployment_id}",
@@ -173,7 +175,7 @@ def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
         with suppress(DeploymentStateError):
             ctx.client.pause_deployment(deployment_id)
         return state
-    step.deploy_status = "running"
+    step.deploy_status = DEPLOY_RUNNING
     return state
 
 
@@ -229,6 +231,7 @@ __all__ = [
     "CAPACITY_MODE",
     "CAPACITY_POLICY",
     "DEPLOYMENT_TYPE",
+    "DEPLOY_RUNNING",
     "INSTANCE_TYPE",
     "PLATFORM",
     "UNRELIABLE_ERROR_SHARE",

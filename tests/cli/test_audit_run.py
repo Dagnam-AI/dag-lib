@@ -275,8 +275,13 @@ def test_run_publishes_the_scan_the_candidates_and_every_step(
     from dagnam.audit.state import load_state
 
     assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert PUBLISH_LINE in out
+    # Discoverability: the audit page is named once, on stderr, so `--json`
+    # keeps stdout to the report alone.
+    assert "published: audit-1 — watch it at https://x/audits/audit-1" in captured.err
+    assert "watch it at" not in out
 
     assert platform.call_log.count("create_audit") == 1
     published = platform.audits[0]
@@ -347,9 +352,11 @@ def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
         run_cli(["audit", "run", str(prepared_dir), "--yes", "--local-only", "--floor", "0.5"]) == 0
     )
 
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert PUBLISH_LINE not in out
     assert "published to your account" not in out
+    assert "watch it at" not in captured.err
     assert platform.forbidden_attempts == []  # the tripwire itself, not just its effect
     assert platform.audits == []
     assert not [call for call in platform.call_log if "audit" in call]
@@ -365,6 +372,16 @@ def test_run_halted_tells_the_account_why(
     # w1 submitted; the submit w2's budget check refused is not published as a
     # step that happened, so exactly one `submit` reached the account.
     assert [body["step"] for _, body in platform.patches].count("submit") == 1
+
+
+def test_a_resumed_run_that_stops_again_the_same_way_does_not_repeat_the_halt(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    """The account still shows the first halt; the server resumes it on the next applied publish."""
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+    assert platform.halts == [("audit-1", "budget")]
 
 
 def test_a_run_that_crashes_publishes_the_halt_before_it_raises(

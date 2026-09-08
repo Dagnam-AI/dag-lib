@@ -19,6 +19,7 @@ from dagnam.audit.publish import (
     STATUS_BY_STEP,
     UNKNOWN_VERSION,
     Publisher,
+    audit_url,
     installed_version,
     workload_body,
 )
@@ -436,7 +437,8 @@ def test_a_failed_step_is_resent_with_the_next_one_and_never_raises(
 
     publisher.step(ctx, "upload", StepState())
     assert platform.patches == []
-    assert "the run continues" in caplog.text
+    assert "'upload' failed (API error 0: Connection failed); will retry" in caplog.text
+    assert "not retried" not in caplog.text
 
     publisher.step(ctx, "split", StepState(version_id="ver-1"))
     assert [body["step"] for _, body in platform.patches] == ["upload", "split"]
@@ -447,6 +449,7 @@ def test_a_body_the_server_calls_a_client_bug_is_logged_once_and_dropped(
     platform: FakePlatform,
     audit_dir: Path,
     make_ctx: Callable[..., StepContext],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     _start(publisher, audit_dir)
     ctx = make_ctx()
@@ -461,6 +464,10 @@ def test_a_body_the_server_calls_a_client_bug_is_logged_once_and_dropped(
 
     # Neither the bad body nor the refused transition is ever resent.
     assert [body["step"] for _, body in platform.patches] == ["pii_scan"]
+    # A drop reads differently from a retry: nothing is coming back for these.
+    assert "step 'upload' was refused by the server (HTTP 422); not retried" in caplog.text
+    assert "step 'split' was refused by the server (HTTP 409); not retried" in caplog.text
+    assert "will retry with the next step" not in caplog.text
 
 
 def test_the_resend_queue_is_capped_rather_than_grown_forever(
@@ -498,7 +505,8 @@ def test_a_failure_that_is_not_an_api_error_is_still_only_a_warning(
     platform.publish_errors["patch_audit_candidate"] = [TypeError("not JSON serializable")]
     publisher.step(make_ctx(), "upload", StepState())
     assert platform.patches == []
-    assert caplog.text.count("the run continues") == 2
+    assert caplog.text.count("the run continues") == 1  # create_audit
+    assert caplog.text.count("will retry with the next step") == 1  # the patch
 
 
 # ----------------------------------------------------------------- local only
@@ -666,3 +674,95 @@ def test_every_step_of_the_frontier_has_a_done_guard() -> None:
     from dagnam.audit.orchestrate import STEPS
 
     assert list(DONE_BY_STEP) == [run_step.__name__ for run_step in STEPS]
+
+
+# ------------------------------------------------ where to watch what was published
+
+
+def test_audit_url_points_at_the_site_that_goes_with_the_api() -> None:
+    """The same derivation `dagnam login` uses; a private API host links to itself."""
+    assert audit_url("https://api.dagnam.ai", "a1") == "https://dagnam.ai/audits/a1"
+    assert audit_url("http://localhost:8000", "a1") == "http://localhost:5173/audits/a1"
+    assert audit_url("https://corp.internal/", "a1") == "https://corp.internal/audits/a1"
+
+
+def test_a_created_audit_says_where_to_watch_it(
+    platform: FakePlatform, state: AuditState, audit_dir: Path
+) -> None:
+    lines: list[str] = []
+    _start(Publisher(platform, state, lines.append), audit_dir)
+    assert lines == ["published: audit-1 — watch it at https://x/audits/audit-1"]
+
+
+def test_nothing_is_said_when_the_audit_was_not_created(
+    platform: FakePlatform, state: AuditState, audit_dir: Path
+) -> None:
+    lines: list[str] = []
+    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
+    publisher = Publisher(platform, state, lines.append)
+
+    _start(publisher, audit_dir)
+    assert lines == []
+
+    state.audit_id = AUDIT_ID  # a resumed run: the audit exists, so nothing is created
+    _start(publisher, audit_dir)
+    assert lines == []
+
+
+def test_a_console_that_cannot_print_the_link_does_not_end_the_run(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cp1252 console raises on the em dash; the audit is published either way."""
+
+    def refuse(_line: str) -> None:
+        raise UnicodeEncodeError("cp1252", "—", 0, 1, "undefined")
+
+    _start(Publisher(platform, state, refuse), audit_dir)
+
+    assert state.audit_id == "audit-1"
+    assert "the audit's link failed" in caplog.text
+
+
+# ------------------------------------ the halt a resumed run inherits from the last one
+
+
+def _halted(state: AuditState) -> AuditState:
+    state.audit_id, state.halted = AUDIT_ID, {"reason": "budget"}
+    return state
+
+
+def test_the_halt_the_previous_run_published_is_not_sent_again(
+    platform: FakePlatform, state: AuditState
+) -> None:
+    """The account already shows this audit halted; repeating it says nothing new."""
+    publisher = Publisher(platform, _halted(state))
+    publisher.halt("budget")
+    assert platform.halts == []
+
+    publisher.follow(_halted(AuditState(project_id="proj-1")))
+    publisher.halt("error")
+    assert platform.halts == []
+
+
+def test_a_halt_after_this_run_published_anything_is_sent(
+    platform: FakePlatform, state: AuditState, make_ctx: Callable[..., StepContext]
+) -> None:
+    """A patch the server applies resumes the audit, so the next halt is a new one."""
+    publisher = Publisher(platform, _halted(state))
+    step = StepState(published_candidate_id="cand-1")
+
+    publisher.step(make_ctx(), "upload", step)
+    publisher.halt("budget")
+
+    assert platform.halts == [(AUDIT_ID, "budget")]
+    publisher.halt("budget")  # and only once
+    assert platform.halts == [(AUDIT_ID, "budget")]
+
+
+def test_a_run_that_never_halted_publishes_its_first_halt(
+    publisher: Publisher, platform: FakePlatform, audit_dir: Path
+) -> None:
+    _start(publisher, audit_dir)
+    publisher.halt("error")
+    publisher.halt("error")
+    assert platform.halts == [("audit-1", "error")]

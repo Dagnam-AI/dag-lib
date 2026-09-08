@@ -17,7 +17,7 @@ from tests.audit._platform import FakeCleanup
 from dagnam._core.exceptions import DeploymentNotFoundError
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.state import AuditState, StepState, load_state, save_state
-from dagnam.cli.audit import parse_map, parse_window, status_rows
+from dagnam.cli.audit import parse_credits, parse_map, parse_window, status_rows
 from dagnam.cli.audit_run import client_from_env
 
 if TYPE_CHECKING:
@@ -173,9 +173,15 @@ def test_scan_empty_export_fails_with_a_reason(
 def test_scan_flag_parsers() -> None:
     assert parse_window("30d") == 30
     assert parse_window("7") == 7
-    for bad in ("0d", "d", "-3", "month"):
+    # "\u00b2" is a digit to `str.isdigit` and not a number to `int`.
+    for bad in ("0d", "d", "-3", "month", "\u00b2", "\u00b2d"):
         with pytest.raises(argparse.ArgumentTypeError, match="--window expects"):
             parse_window(bad)
+    assert parse_credits("0") == 0
+    assert parse_credits("500") == 500
+    for bad in ("-5", "5.5", "\u00b2", "many"):
+        with pytest.raises(argparse.ArgumentTypeError, match="--max-credits expects"):
+            parse_credits(bad)
     assert parse_map(None) is None
     assert parse_map([]) is None
     assert parse_map(["response=out", "system=sys"]) == {"response": "out", "system": "sys"}
@@ -474,11 +480,26 @@ def test_cancel_of_a_published_run_goes_to_the_server_and_writes_its_receipt(
     out = capsys.readouterr().out
     assert "training_job job-1: stopped" in out
     assert "deployment dep-1: blocked (not provisioned)" in out
-    assert f"Receipt: {published_dir / 'deleted.json'}" in out
+    assert f"Receipt: {published_dir / 'cancelled.json'}" in out
     assert (
-        json.loads((published_dir / "deleted.json").read_text(encoding="utf-8")) == CANCEL_RECEIPT
+        json.loads((published_dir / "cancelled.json").read_text(encoding="utf-8")) == CANCEL_RECEIPT
     )
-    assert load_state(published_dir).halted == {"reason": "cancelled"}
+    assert not (published_dir / "deleted.json").exists()  # nothing was deleted
+    state = load_state(published_dir)
+    assert state.halted == {"reason": "cancelled"}
+    # The same local marks the local cancel leaves, so `status` reads the same.
+    head, done = state.workloads["w1"][HEAD], state.workloads["w2"][SFT]
+    assert (head.run_status, head.deploy_status) == ("cancelled", "paused")
+    assert (done.run_status, done.deploy_status) == ("completed", "paused")
+
+    # ``status`` reads the same client_from_env patched above, so no key is needed.
+    assert run_cli(["audit", "status", str(published_dir), "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["candidate"], r["run_status"]) for r in rows] == [
+        ("hosted_floor", None),
+        ("head_tune", "cancelled"),
+        ("sft_small", "completed"),
+    ]
 
 
 def test_delete_of_a_published_run_names_the_audit_and_drops_the_local_rows(
@@ -514,3 +535,69 @@ def test_delete_of_a_published_run_keeps_the_local_rows_when_something_is_blocke
 
     assert (published_dir / "workloads" / "w1" / "dataset.jsonl").exists()
     assert "deployment dep-1: blocked (not provisioned)" in capsys.readouterr().out
+
+
+def test_a_cancelled_candidate_is_not_resumed_into_wait_run(published_dir: Path) -> None:
+    """`audit run` after a cancel must not poll a job the platform already stopped."""
+    from dagnam.audit.cleanup import mark_cancelled
+    from dagnam.audit.steps_train import wait_run
+
+    state = load_state(published_dir)
+    mark_cancelled(state)
+    step = state.workloads["w1"][HEAD]
+    assert step.run_status == "cancelled"
+
+    polled: list[str] = []
+    ctx = mock.Mock()
+    ctx.step.return_value = step
+    ctx.client.get_foundation_run.side_effect = lambda run_id: polled.append(run_id)
+
+    wait_run(state, ctx)
+
+    assert polled == []
+    assert step.error is not None
+    assert step.error.startswith("run_cancelled:")
+
+
+def test_a_receipt_row_missing_a_field_still_renders(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A row the server spells differently must not cost the whole receipt."""
+    client = mock.Mock()
+    client.cancel_audit.return_value = {
+        "schema": "dagnam.audit.deleted/1",
+        "entries": [{"kind": "deployment", "id": "dep-1"}, {"id": "job-1", "status": "stopped"}],
+    }
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+
+    assert run_cli(["audit", "cancel", str(published_dir)]) == 0
+
+    out = capsys.readouterr().out
+    assert "deployment dep-1: ?" in out
+    assert "? job-1: stopped" in out
+
+
+def test_status_names_the_published_audit_and_where_to_watch_it(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    monkeypatch.setenv("DAGNAM_API_URL", "https://api.dagnam.ai")
+    url = "https://dagnam.ai/audits/audit-1"
+    with mock.patch("dagnam._core.client.DagnamClient.get_deployment_metrics", return_value={}):
+        assert run_cli(["audit", "status", str(published_dir)]) == 0
+    assert f"audit audit-1: {url}" in capsys.readouterr().out
+
+    with mock.patch("dagnam._core.client.DagnamClient.get_deployment_metrics", return_value={}):
+        assert run_cli(["audit", "status", str(published_dir), "--json"]) == 0
+    js = json.loads(capsys.readouterr().out)
+    assert (js["audit_id"], js["url"]) == ("audit-1", url)
+
+
+def test_status_of_a_local_only_run_names_no_audit(
+    run_cli: CliRunner, audit_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    with mock.patch("dagnam._core.client.DagnamClient.get_deployment_metrics", return_value={}):
+        assert run_cli(["audit", "status", str(audit_dir), "--json"]) == 0
+    js = json.loads(capsys.readouterr().out)
+    assert (js["audit_id"], js["url"]) == (None, None)

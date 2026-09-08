@@ -53,6 +53,21 @@ def _warn_if_untrusted_api_url(url: str) -> None:
         )
 
 
+def web_url_from_api_url(api_url: str) -> str:
+    """The website that goes with an API base URL, or "" when it cannot be guessed.
+
+    The one place the SDK turns the configured API host into a link a person
+    can open -- ``dagnam login``'s "sign in at ..." and the audit's "watch it
+    at ..." both read it here, so they can never point at different sites.
+    """
+    normalized = api_url.rstrip("/")
+    if normalized == _DEFAULT_API_URL:
+        return "https://dagnam.ai"
+    if normalized.startswith("http://localhost:") or normalized.startswith("http://127.0.0.1:"):
+        return "http://localhost:5173"
+    return ""
+
+
 def configure(api_key: Optional[str] = None, api_url: Optional[str] = None) -> None:
     """Store inline credentials in module-level state."""
     global _api_key, _api_url
