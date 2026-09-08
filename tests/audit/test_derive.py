@@ -56,7 +56,13 @@ def _rec(
 
 @pytest.mark.parametrize(
     ("raw", "label"),
-    [("Returns.", "returns"), ("  BILLING!!  ", "billing"), ("high", "high"), ("...", "")],
+    [
+        ("Returns.", "returns"),
+        ("  BILLING!!  ", "billing"),
+        ("high", "high"),
+        ("...", ""),
+        ('"Refund"', "refund"),
+    ],
 )
 def test_normalize_label(raw: str, label: str) -> None:
     assert normalize_label(raw) == label

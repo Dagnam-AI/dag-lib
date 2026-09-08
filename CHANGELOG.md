@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The audit's scorers, thresholds, frontier rule and report blocks come from
+  `dagnam-contracts` 0.3.0.** `dagnam.audit.scoring`, `thresholds`,
+  `economics`, `frontier`, `report`, `derive` and `steps_serve` keep every
+  public name and every number they had, but the bodies now live in
+  `dagnam_contracts.audit` -- one definition of agreement, the economics
+  bands, the winner and the switch block, so the SDK and the platform can
+  never disagree about the same candidates.
+- **A quoted label now normalizes like a bare one.** `normalize_label`
+  (`dagnam.audit.normalize_label`) is the contract's, which strips surrounding
+  punctuation rather than only trailing: `'"Refund"'` normalizes to `refund`,
+  where it previously kept its opening quote. Scoring a holdout whose teacher
+  or candidate quotes its labels now counts those rows as agreeing.
+
 ### Added
 
 - **`dagnam audit scan` prices calls from every major provider, not just

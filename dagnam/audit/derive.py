@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-import string
 from typing import Any
 
+from dagnam_contracts.audit.scoring import normalize_label
 from dagnam_contracts.hygiene import compute_exact_duplicates
 from dagnam_contracts.prompts import render_chat_prompt
 
@@ -28,8 +28,6 @@ FORMAT_BY_STRUCTURE: dict[str, str] = {
     "short_span": "chat-messages",
     "free_text": "chat-messages",
 }
-
-_TRAILING = string.punctuation + string.whitespace
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,11 +57,6 @@ class WorkloadDataset:
     rows: list[dict[str, Any]]
     split: dict[str, list[int]]
     stats: dict[str, Any]
-
-
-def normalize_label(response: str) -> str:
-    """Strip, casefold and drop trailing punctuation, so ``"Returns."`` and ``"returns"`` agree."""
-    return response.strip().casefold().rstrip(_TRAILING)
 
 
 def _prompt_turns(record: TraceRecord) -> list[dict[str, str]]:

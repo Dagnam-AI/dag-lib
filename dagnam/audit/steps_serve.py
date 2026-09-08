@@ -16,6 +16,8 @@ import json
 import re
 from typing import Any
 
+from dagnam_contracts.audit.verdict import UNRELIABLE_ERROR_SHARE
+
 from dagnam._core.exceptions import (
     APIError,
     DeploymentStateError,
@@ -34,8 +36,6 @@ DEPLOYMENT_TYPE = "text"
 INSTANCE_TYPE = "modal-serverless"
 CAPACITY_MODE = "serverless"
 CAPACITY_POLICY: dict[str, int] = {"min_replicas": 0, "max_replicas": 1}
-UNRELIABLE_ERROR_SHARE = 0.10
-"""Spec section 9: more than this share of failed replay calls marks the candidate ``unreliable``."""
 
 _MARKER = re.compile(r"^<\|(\w+)\|>\n", re.MULTILINE)
 

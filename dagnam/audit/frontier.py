@@ -3,8 +3,10 @@
 ``replay_holdout`` speaks the platform's OpenAI-compatible route with the
 deployment-scoped key: ``model``, ``messages`` and nothing else, because the
 route refuses generation parameters rather than ignoring them. Latency is the
-client's own clock over the successful calls. ``frontier`` is the one rule of
-the report: the cheapest candidate whose agreement *lower bound* clears the floor.
+client's own clock over the successful calls. The one rule of the report --
+``frontier``: the cheapest candidate whose agreement *lower bound* clears the
+floor -- is the contract's, re-exported here so the SDK and the platform pick
+the same winner from the same points.
 """
 
 from __future__ import annotations
@@ -16,11 +18,11 @@ import math
 import time
 from typing import Any
 
+from dagnam_contracts.audit.verdict import CandidateResult, Winner, frontier
 import requests
 
 from dagnam._core._retry import parse_retry_after
 from dagnam._types import JsonValue
-from dagnam.audit.candidates import CandidateKind
 
 CHAT_TIMEOUT_SECONDS = 180.0
 """Per-call ceiling; a serverless replica's cold start is inside it."""
@@ -152,38 +154,6 @@ def replay_holdout(
         errors=len(results) - len(timings),
     )
     return answers, latency
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateResult:
-    """One scored point on the frontier: its interval, monthly cost and tail latency."""
-
-    kind: CandidateKind
-    ci: tuple[float, float]
-    cost_usd_month: float
-    p95_ms: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class Winner:
-    """The frontier's choice and the numbers it was chosen on."""
-
-    kind: CandidateKind
-    cost_usd_month: float
-    agreement_lo: float
-
-
-def frontier(points: Sequence[CandidateResult], *, floor: float) -> Winner | None:
-    """The cheapest point whose ``ci`` lower bound is at least ``floor``; ``None`` if none clears it.
-
-    Ties on cost go to the higher lower bound, so a more certain candidate wins
-    a dead heat.
-    """
-    passing = [p for p in points if p.ci[0] >= floor]
-    if not passing:
-        return None
-    best = min(passing, key=lambda p: (p.cost_usd_month, -p.ci[0]))
-    return Winner(kind=best.kind, cost_usd_month=best.cost_usd_month, agreement_lo=best.ci[0])
 
 
 __all__ = [
