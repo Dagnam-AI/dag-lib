@@ -350,6 +350,7 @@ def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
     out = capsys.readouterr().out
     assert PUBLISH_LINE not in out
     assert "published to your account" not in out
+    assert platform.forbidden_attempts == []  # the tripwire itself, not just its effect
     assert platform.audits == []
     assert not [call for call in platform.call_log if "audit" in call]
     assert load_state(prepared_dir).audit_id is None
@@ -383,3 +384,69 @@ def test_a_publish_outage_never_stops_the_run(
     assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
     assert platform.candidates == []  # nothing to attach to
     assert (prepared_dir / "audit-report.json").exists()
+
+
+def test_the_consent_line_is_exactly_what_the_account_is_told_it_may_keep() -> None:
+    assert PUBLISH_LINE == (
+        "  published to your account: progress and the report (workload ids, verdicts, spend,"
+        " masked excerpts, the audit directory's name; never rows or keys);"
+        " 'audit delete' removes them; --local-only keeps them here"
+    )
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    [
+        ("--floor", "1.5", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--floor", "0", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--floor", "high", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--max-credits", "-5", "--max-credits expects a whole number of credits"),
+        ("--max-credits", "5.5", "--max-credits expects a whole number of credits"),
+    ],
+)
+def test_a_bad_floor_or_ceiling_fails_before_anything_is_uploaded(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    capsys: StrCapture,
+    flag: str,
+    value: str,
+    message: str,
+) -> None:
+    """The server holds the same bounds; catching them here beats a dropped 422 per publish."""
+    with pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "run", str(prepared_dir), "--yes", flag, value])
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+    assert platform.call_log == []
+
+
+def test_a_run_that_publishes_late_backfills_the_steps_it_already_took(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    """The audit service was down for the first run; the second one catches the account up."""
+    from dagnam._core.exceptions import APIError
+
+    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    assert platform.patches == []
+
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    head = [body for cid, body in platform.patches if cid == "cand-1"]
+    assert [body["step"] for body in head] == [
+        "upload",
+        "resolve_version",
+        "split",
+        "wait_split",
+        "pii_scan",
+        "wait_pii",
+        "submit",
+        "wait_run",
+        "resolve_model_version",
+        "create_deployment",
+        "create_revision",
+        "wait_active",
+        "replay",
+        "replay_and_score",
+    ]
+    assert head[-1]["status"] == "scored"

@@ -30,6 +30,7 @@ from dagnam._types import JsonObject
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import PlatformClient, StepContext, error_code
+from dagnam.audit.steps_train import RUN_COMPLETED
 
 _LOGGER = logging.getLogger("dagnam.audit.publish")
 
@@ -58,15 +59,47 @@ STATUS_BY_STEP: Mapping[str, str] = {
 }
 """Every step of ``orchestrate.STEPS`` -> the candidate status it leaves behind."""
 
+DONE_BY_STEP: Mapping[str, Callable[[StepState], bool]] = {
+    "upload": lambda s: s.dataset_id is not None,
+    "resolve_version": lambda s: s.version_id is not None,
+    "split": lambda s: s.split_task_id is not None,
+    "wait_split": lambda s: bool(s.split_done),
+    "pii_scan": lambda s: s.pii_task_id is not None,
+    "wait_pii": lambda s: s.pii_agrees is not None,
+    "submit": lambda s: s.run_id is not None,
+    "wait_run": lambda s: s.run_status == RUN_COMPLETED,
+    "resolve_model_version": lambda s: s.model_version_id is not None,
+    "create_deployment": lambda s: s.deployment_id is not None,
+    "create_revision": lambda s: s.deploy_status is not None,
+    "wait_active": lambda s: s.deploy_status == DEPLOY_RUNNING,
+    "replay_and_score": lambda s: bool(s.scored),
+}
+"""Each step's own "already done" guard, mirrored from ``steps_*``, in ``STEPS`` order.
+
+Only :meth:`Publisher.backfill` reads it: a run whose first ``create_audit``
+failed reaches the account with candidates already part-finished, and this is
+what says which of their steps to publish before the run carries on.
+"""
+
+DEPLOY_RUNNING = "running"
+"""``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
+
 REPLAY_STEP = "replay"
 """Published just before ``replay_and_score``: the server has no ``deploying -> scored`` edge."""
 PII_DISAGREEMENT = "pii_disagreement"
 FAILED = "failed"
 
-DROP_STATUSES = frozenset({400, 422})
-"""A body this client should never have sent: logged once with the reason, never resent."""
+DROP_STATUSES = frozenset({400, 409, 422})
+"""Logged once with the server's reason and never resent.
+
+400/422 is a body this client should never have sent; 409 is a transition the
+candidate's lifecycle refuses, and a refused transition does not become legal
+by asking again -- the back-fill of a resumed run relies on that.
+"""
 MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
+MAX_WORKLOADS = 200
+"""``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter."""
 
 _EXCERPT_MAX = 200
 _ERROR_MAX = 500
@@ -109,6 +142,30 @@ def _pii_counts(audit_dir: Path, workload_id: str) -> dict[str, int]:
         "counts"
     )
     return {str(code): int(n) for code, n in counts.items()} if isinstance(counts, Mapping) else {}
+
+
+def _capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list[Mapping[str, Any]]:
+    """At most :data:`MAX_WORKLOADS` entries: the run's own first, then by spend.
+
+    The server refuses a longer list outright, which would make the whole
+    publish a dropped 422 -- so a scan that found more workloads than the audit
+    page holds publishes the ones the run took plus the biggest spenders, and
+    says in the log what it left out.
+    """
+    if len(entries) <= MAX_WORKLOADS:
+        return entries
+    ranked = sorted(
+        entries,
+        key=lambda e: (str(e["id"]) not in selected, -(_number(e.get("cost_usd_month")) or 0.0)),
+    )
+    _LOGGER.warning(
+        "audit publish: the scan found %d workloads and the account holds %d;"
+        " publishing the %d this run took plus the highest-spending others",
+        len(entries),
+        MAX_WORKLOADS,
+        sum(1 for e in entries if str(e["id"]) in selected),
+    )
+    return ranked[:MAX_WORKLOADS]
 
 
 def workload_body(
@@ -156,6 +213,8 @@ class Publisher:
         """Workload id -> its scan entry, for the serving cost a scored candidate carries."""
         self._pending: list[tuple[str, JsonObject]] = []
         """(candidate id, body) patches a failed call left to resend, oldest first."""
+        self._new_audit = False
+        """This run created the audit, so its candidates may need :meth:`backfill`."""
 
     # -- the audit ------------------------------------------------------------
 
@@ -189,6 +248,7 @@ class Publisher:
         client = self._client
         if client is None or self._state.audit_id is not None or not entries:
             return
+        published = _capped(entries, selected)
 
         def body() -> JsonObject:
             # Built inside the guarded call: a scan report this client cannot
@@ -210,13 +270,14 @@ class Publisher:
                         selected=str(entry["id"]) in selected,
                         pii_counts=_pii_counts(audit_dir, str(entry["id"])),
                     )
-                    for entry in entries
+                    for entry in published
                 ],
             }
 
-        created = self._call(client, "create_audit", lambda c: c.create_audit(body()))
+        created = self._guard("create_audit", lambda: client.create_audit(body()))
         if created is not None:
             self._state.audit_id = str(created["id"])
+            self._new_audit = True
 
     def halt(self, reason: str) -> None:
         """Tell the account the run stopped short, and why."""
@@ -225,7 +286,7 @@ class Publisher:
             return
         client, audit_id = target
         self._flush(client, audit_id)
-        self._call(client, "halt_audit", lambda c: c.halt_audit(audit_id, reason))
+        self._guard("halt_audit", lambda: client.halt_audit(audit_id, reason))
 
     # -- candidates -----------------------------------------------------------
 
@@ -240,11 +301,26 @@ class Publisher:
             "kind": ctx.spec.kind.value,
             "recipe_key": ctx.spec.recipe_key,
         }
-        created = self._call(
-            client, "create_audit_candidate", lambda c: c.create_audit_candidate(audit_id, body)
+        created = self._guard(
+            "create_audit_candidate", lambda: client.create_audit_candidate(audit_id, body)
         )
         if created is not None:
             step.published_candidate_id = str(created["id"])
+
+    def backfill(self, ctx: StepContext, step: StepState) -> None:
+        """Publish the steps this candidate already finished before the audit existed.
+
+        Only after a ``create_audit`` that succeeded on a resumed run: a fresh
+        run has nothing finished, and a run whose audit was already published
+        recorded every step as it happened. A step the server refuses (409) is
+        dropped, so a candidate that is further along than this walk expects
+        settles at its real status instead of being retried forever.
+        """
+        if not self._new_audit or self._target() is None:
+            return
+        for step_name, done in DONE_BY_STEP.items():
+            if done(step):
+                self.step(ctx, step_name, step)
 
     def step(self, ctx: StepContext, step_name: str, step: StepState) -> None:
         """Record one step of a candidate, resending anything an earlier call could not."""
@@ -255,9 +331,12 @@ class Publisher:
         candidate_id = step.published_candidate_id
         if candidate_id is None:
             return
+        patch = self._guard(f"the {step_name} body", lambda: self._patch(ctx, step_name, step))
+        if patch is None:
+            return
         if step_name == "replay_and_score":
             self._queue(candidate_id, {"step": REPLAY_STEP, "status": "replaying"})
-        self._queue(candidate_id, self._patch(ctx, step_name, step))
+        self._queue(candidate_id, patch)
         self._flush(*target)
 
     def _patch(self, ctx: StepContext, step_name: str, step: StepState) -> JsonObject:
@@ -332,12 +411,15 @@ class Publisher:
                     return
             self._pending.pop(0)
 
-    def _call(
-        self, client: PlatformClient, what: str, send: Callable[[PlatformClient], JsonObject]
-    ) -> JsonObject | None:
-        """Run one publish call; a failure is a warning, never the end of the run."""
+    def _guard[T](self, what: str, run: Callable[[], T]) -> T | None:
+        """Run one publish step; a failure is a warning, never the end of the run.
+
+        This wraps the body-building too, not only the call, so nothing in the
+        publisher -- a scan report it cannot map, a step name it does not know
+        -- can raise into the run.
+        """
         try:
-            return send(client)
+            return run()
         except Exception as exc:
             # Publishing is an echo of what the run already recorded on disk, so
             # nothing it can go wrong at -- a refusal, a dead network, a body
@@ -347,7 +429,9 @@ class Publisher:
 
 
 __all__ = [
+    "DONE_BY_STEP",
     "MAX_PENDING",
+    "MAX_WORKLOADS",
     "MEASURED_FROM",
     "REPLAY_STEP",
     "SCORED_BY",

@@ -44,8 +44,8 @@ def client_from_env() -> DagnamClient:
 
 PUBLISH_LINE = (
     "  published to your account: progress and the report (workload ids, verdicts, spend,"
-    " masked excerpts; never rows or keys); 'audit delete' removes them;"
-    " --local-only keeps them here"
+    " masked excerpts, the audit directory's name; never rows or keys);"
+    " 'audit delete' removes them; --local-only keeps them here"
 )
 """What ``audit run`` says it mirrors into the account, in the listing the user confirms."""
 

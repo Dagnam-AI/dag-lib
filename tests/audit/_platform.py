@@ -36,6 +36,16 @@ CHAT_URL = "https://x/v1/chat/completions"
 DATASET_IN_USE = "Dataset is referenced by a training run and cannot be deleted"
 """The platform's own 409 wording (``src/datasets/service.py``)."""
 
+
+class PublishLeak(BaseException):
+    """An audit route reached under ``--local-only``.
+
+    A ``BaseException`` on purpose: the publisher swallows every ``Exception``
+    so that a publish failure can never end a run, which would swallow this
+    tripwire too and let a leak pass as a green test.
+    """
+
+
 BASES: list[JsonObject] = [
     {"id": "bert-big", "family": "bert", "parameter_count": 340_000_000, "gated": False},
     {
@@ -105,6 +115,8 @@ class FakePlatform:
         """Per method name: the exception the next call raises, popped in order."""
         self.forbid_publishing = False
         """``--local-only``: any audit route is a test failure, not a recorded call."""
+        self.forbidden_attempts: list[str] = []
+        """Audit routes reached while ``forbid_publishing``; a leak, recorded before it raises."""
         self.receipt: JsonObject = {
             "schema": "dagnam.audit.deleted/1",
             "deleted_at": "2026-09-07T10:00:00+00:00",
@@ -299,9 +311,14 @@ class FakePlatform:
     # -- publishing the audit ----------------------------------------------------
 
     def _publish(self, name: str) -> None:
-        """Log one audit route, refusing it outright under ``forbid_publishing``."""
+        """Log one audit route, refusing it outright under ``forbid_publishing``.
+
+        The attempt is recorded BEFORE it raises, so a test can see a leak the
+        publisher caught and discarded rather than only one that escaped.
+        """
         if self.forbid_publishing:
-            raise AssertionError("must not be called")
+            self.forbidden_attempts.append(name)
+            raise PublishLeak(f"{name} must not be called")
         self._log(name)
         errors = self.publish_errors.get(name)
         if errors:

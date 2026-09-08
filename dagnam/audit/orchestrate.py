@@ -217,6 +217,10 @@ def run_audit(
             )
             if publisher is not None:
                 publisher.candidate(ctx, step)
+                # A run whose first publish failed reaches the account with work
+                # already done; without this the candidate would sit at
+                # `uploading` until a step it has not reached yet moves it.
+                publisher.backfill(ctx, step)
             for run_step in STEPS:
                 if run_step in LONG_WAITS and not wait:
                     return state

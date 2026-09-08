@@ -13,7 +13,9 @@ from dagnam._core.exceptions import APIError
 from dagnam.audit.candidates import HEAD_TUNE, SFT_SMALL, CandidateKind
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.publish import (
+    DONE_BY_STEP,
     MAX_PENDING,
+    MAX_WORKLOADS,
     STATUS_BY_STEP,
     UNKNOWN_VERSION,
     Publisher,
@@ -448,12 +450,17 @@ def test_a_body_the_server_calls_a_client_bug_is_logged_once_and_dropped(
 ) -> None:
     _start(publisher, audit_dir)
     ctx = make_ctx()
-    platform.publish_errors["patch_audit_candidate"] = [APIError(422, "extra keys not permitted")]
+    platform.publish_errors["patch_audit_candidate"] = [
+        APIError(422, "extra keys not permitted"),
+        APIError(409, "candidate cannot move from 'scored' to 'splitting'"),
+    ]
 
     publisher.step(ctx, "upload", StepState())
     publisher.step(ctx, "split", StepState())
+    publisher.step(ctx, "pii_scan", StepState())
 
-    assert [body["step"] for _, body in platform.patches] == ["split"]
+    # Neither the bad body nor the refused transition is ever resent.
+    assert [body["step"] for _, body in platform.patches] == ["pii_scan"]
 
 
 def test_the_resend_queue_is_capped_rather_than_grown_forever(
@@ -547,3 +554,115 @@ def test_the_state_round_trips_the_published_ids(tmp_path: Path) -> None:
     read = load_state(tmp_path)
     assert read.audit_id == AUDIT_ID
     assert read.candidate("w1", CandidateKind.HEAD_TUNE).published_candidate_id == "cand-1"
+
+
+# ------------------------------------------------ the account's own workload cap
+
+
+def test_a_scan_bigger_than_the_account_holds_publishes_the_run_s_own_first(
+    publisher: Publisher, platform: FakePlatform, audit_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """201 workloads would be a dropped 422; the run's own and the biggest spenders go."""
+    cheap = [
+        {**_entry(f"w{i}", "enum_label", "candidate"), "cost_usd_month": float(i)}
+        for i in range(200)
+    ]
+    mine = {**_entry("mine", "enum_label", "candidate"), "cost_usd_month": 0.0}
+    scan = {**SCAN, "workloads": [mine, *cheap]}
+
+    publisher.start(audit_dir, scan, ["mine"], floor=0.97, max_credits=500, sdk_version="9.9.9")
+
+    published = platform.audits[0]["workloads"]
+    assert len(published) == MAX_WORKLOADS
+    assert published[0]["workload_id"] == "mine"  # selected first, despite spending nothing
+    assert published[0]["selected"] is True
+    assert [w["workload_id"] for w in published[1:4]] == ["w199", "w198", "w197"]
+    assert "w0" not in {w["workload_id"] for w in published}
+    assert "the scan found 201 workloads and the account holds 200" in caplog.text
+
+
+def test_a_scan_within_the_cap_is_published_in_the_order_it_was_scanned(
+    publisher: Publisher, platform: FakePlatform, audit_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _start(publisher, audit_dir)
+    assert [w["workload_id"] for w in platform.audits[0]["workloads"]] == ["w1", "w2"]
+    assert "the account holds" not in caplog.text
+
+
+# --------------------------------------------- nothing in the publisher can raise
+
+
+def test_a_step_the_publisher_does_not_know_is_a_warning_not_a_crash(
+    publisher: Publisher,
+    platform: FakePlatform,
+    audit_dir: Path,
+    make_ctx: Callable[..., StepContext],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _start(publisher, audit_dir)
+    publisher.step(make_ctx(), "a_step_from_the_future", StepState())
+    assert platform.patches == []
+    assert "the a_step_from_the_future body failed" in caplog.text
+
+
+# ---------------------------------------------------------------- the back-fill
+
+
+def _completed_upload(step: StepState) -> StepState:
+    step.dataset_id, step.version_id = "ds-1", "ver-1"
+    return step
+
+
+def test_a_run_whose_first_publish_failed_backfills_what_it_already_did(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    """The audit lands on the second run; its candidates must not sit at `uploading`."""
+    publisher = Publisher(platform, state)
+    step = _completed_upload(StepState())
+
+    _start(publisher, audit_dir)
+    ctx = make_ctx()
+    publisher.candidate(ctx, step)
+    publisher.backfill(ctx, step)
+
+    assert [body["step"] for _, body in platform.patches] == ["upload", "resolve_version"]
+    assert [body["status"] for _, body in platform.patches] == ["uploading", "uploading"]
+    assert platform.patches[-1][1]["dataset_version_id"] == "ver-1"
+
+
+def test_a_transition_the_backfill_gets_wrong_is_dropped_not_retried_forever(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    publisher = Publisher(platform, state)
+    step = _completed_upload(StepState())
+    _start(publisher, audit_dir)
+    platform.publish_errors["patch_audit_candidate"] = [APIError(409, "cannot move from 'scored'")]
+
+    ctx = make_ctx()
+    publisher.candidate(ctx, step)
+    publisher.backfill(ctx, step)
+
+    # The refused patch is gone, not queued in front of the one after it.
+    assert [body["step"] for _, body in platform.patches] == ["resolve_version"]
+
+
+def test_the_backfill_is_silent_on_a_fresh_run_and_on_a_resumed_published_one(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    fresh = Publisher(platform, state)
+    _start(fresh, audit_dir)
+    ctx = make_ctx()
+    fresh.backfill(ctx, StepState())  # nothing is done yet
+    assert platform.patches == []
+
+    resumed_state = AuditState(project_id="proj-1", audit_id=AUDIT_ID)
+    resumed = Publisher(platform, resumed_state)
+    _start(resumed, audit_dir)  # returns before the POST: the audit already exists
+    resumed.backfill(ctx, _completed_upload(StepState()))
+    assert platform.patches == []
+
+
+def test_every_step_of_the_frontier_has_a_done_guard() -> None:
+    from dagnam.audit.orchestrate import STEPS
+
+    assert list(DONE_BY_STEP) == [run_step.__name__ for run_step in STEPS]

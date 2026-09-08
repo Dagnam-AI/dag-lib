@@ -43,6 +43,33 @@ def parse_window(value: str) -> int:
     return int(digits)
 
 
+def parse_floor(value: str) -> float:
+    """A quality floor in ``(0, 1]``; anything else is a usage error.
+
+    The platform holds the same bound, so catching it here turns a value that
+    would make every publish a dropped 422 into an argument error before the
+    run starts.
+    """
+    try:
+        floor = float(value)
+    except ValueError:
+        floor = float("nan")
+    if not 0 < floor <= 1:
+        raise argparse.ArgumentTypeError(
+            f"--floor expects an agreement lower bound above 0 and at most 1, not {value!r}"
+        )
+    return floor
+
+
+def parse_credits(value: str) -> int:
+    """A credit ceiling of zero or more; anything else is a usage error."""
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"--max-credits expects a whole number of credits, not {value!r}"
+        )
+    return int(value)
+
+
 def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
     """``["field=column", ...]`` -> ``{"field": "column"}``; ``None`` when no pair was given."""
     if not pairs:
@@ -398,10 +425,12 @@ def register_audit(subparsers: SubParsersAction) -> None:
     run.add_argument(
         "--workloads", help="Comma-separated workload ids to run (default: all audited)."
     )
-    run.add_argument("--floor", type=float, help="Quality floor on the agreement lower bound.")
+    run.add_argument(
+        "--floor", type=parse_floor, help="Quality floor on the agreement lower bound (0 < f <= 1)."
+    )
     run.add_argument(
         "--max-credits",
-        type=int,
+        type=parse_credits,
         default=None,
         help="Credit ceiling for training plus the metered holdout replay; stop before"
         " exceeding it.",
