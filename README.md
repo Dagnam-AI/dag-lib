@@ -389,6 +389,23 @@ every vendor's spelling, so Anthropic's `input_tokens` plus its cache-read count
 `promptTokenCount` and LangSmith's `usage_metadata.input_tokens` are counted exactly like
 OpenAI's `prompt_tokens`. A model the table does not list still prices to nothing, never a guess.
 
+**Watch it on the website.** `dagnam audit run` mirrors the audit into your account as it
+goes -- the scan's workloads (ids, verdicts, spend, masked template excerpts and the redaction
+counts) and then each candidate's progress, ending in its agreement, its measured latency and
+what the replay cost -- so the audit page shows a run in flight and keeps the report when it
+finishes. When the audit is created the run prints where to watch it
+(`published: <audit-id> — watch it at https://dagnam.ai/audits/<audit-id>`), and
+`dagnam audit status ./audit` repeats the link. The derived rows, the raw traces and the
+deployment keys stay on your machine; the run itself never depends on the upload, and a publish
+that fails is retried with the next step rather than stopping the audit. A run that stopped
+short is published as halted, and the account resumes it by itself when the next `dagnam audit
+run` publishes its first step. `dagnam audit run ./audit --local-only` publishes nothing;
+`dagnam audit cancel ./audit` stops the jobs and pauses the endpoints, writing `cancelled.json`;
+and `dagnam audit delete ./audit` deletes everything the run created on the platform, writes
+`deleted.json`, and then removes the local `workloads/` rows and the deployment keys — the
+audit's own files (`state.json`, `scan-report.json`, `audit-report.json`, `deleted.json`) stay
+where they are.
+
 Run `dagnam --help` or `dagnam <command> --help` for command-specific options.
 
 ## Agent Integration (Claude Code & Codex)

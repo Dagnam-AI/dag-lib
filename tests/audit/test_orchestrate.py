@@ -290,3 +290,26 @@ def test_no_socket_is_opened_by_scan_paths(
         records, structure_class=found[0].structure_class.value, max_seq_length=512
     )
     assert dataset.rows
+
+
+def test_a_cancelled_candidate_is_skipped_wherever_the_cancel_caught_it(
+    run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
+) -> None:
+    """`audit cancel` paused the deployment; resuming must not poll it back to life."""
+    from dagnam.audit.cleanup import mark_cancelled
+    from dagnam.audit.state import save_state
+
+    state = run()
+    head = state.workloads["w1"][HEAD]
+    head.scored, head.deploy_status = None, "deploying"  # the cancel caught it at wait_active
+    mark_cancelled(state)
+    save_state(audit_dir, state)
+    platform.call_log.clear()
+
+    run()
+
+    assert platform.call_log == []
+    assert load_state(audit_dir).workloads == state.workloads
+    # w2 scored before the cancel, so it kept its result and lost its endpoint.
+    assert state.workloads["w2"][SFT].deploy_status == "paused"
+    assert state.workloads["w2"][SFT].error is None

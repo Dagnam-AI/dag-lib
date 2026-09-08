@@ -36,11 +36,43 @@ METRICS_RANGE = "7d"
 def parse_window(value: str) -> int:
     """``30d`` or ``30`` -> 30; anything else is a usage error."""
     digits = value[:-1] if value.endswith("d") else value
-    if not digits.isdigit() or int(digits) < 1:
+    if not (digits.isascii() and digits.isdigit()) or int(digits) < 1:
         raise argparse.ArgumentTypeError(
             f"--window expects a number of days like 30d, not {value!r}"
         )
     return int(digits)
+
+
+def parse_floor(value: str) -> float:
+    """A quality floor in ``(0, 1]``; anything else is a usage error.
+
+    The platform holds the same bound, so catching it here turns a value that
+    would make every publish a dropped 422 into an argument error before the
+    run starts.
+    """
+    try:
+        floor = float(value)
+    except ValueError:
+        floor = float("nan")
+    if not 0 < floor <= 1:
+        raise argparse.ArgumentTypeError(
+            f"--floor expects an agreement lower bound above 0 and at most 1, not {value!r}"
+        )
+    return floor
+
+
+def parse_credits(value: str) -> int:
+    """A credit ceiling of zero or more; anything else is a usage error.
+
+    ``str.isdigit`` is true of ``"\u00b2"`` and every other non-ASCII digit
+    form, none of which ``int()`` accepts -- so the ASCII check is what keeps
+    this an argument error rather than a traceback.
+    """
+    if not (value.isascii() and value.isdigit()):
+        raise argparse.ArgumentTypeError(
+            f"--max-credits expects a whole number of credits, not {value!r}"
+        )
+    return int(value)
 
 
 def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
@@ -214,12 +246,18 @@ def _render_status(result: object) -> str:
         ),
         rows,
     )
-    halted = js["halted"]
-    return table if halted is None else f"{table}\n\nhalted: {halted}"
+    lines = [table]
+    if js["audit_id"] is not None:
+        lines.append(f"\naudit {js['audit_id']}: {js['url']}")
+    if js["halted"] is not None:
+        lines.append(f"\nhalted: {js['halted']}")
+    return "\n".join(lines)
 
 
 def cmd_audit_status(args: argparse.Namespace) -> None:
     """The state table, one row per workload x candidate, with each endpoint's 7-day requests."""
+    from dagnam._core.auth import get_api_url
+    from dagnam.audit.publish import audit_url
     from dagnam.audit.state import load_state
 
     state = load_state(Path(args.audit_dir))
@@ -227,34 +265,95 @@ def cmd_audit_status(args: argparse.Namespace) -> None:
         step.deployment_id is not None for c in state.workloads.values() for step in c.values()
     )
     rows = status_rows(state, client_from_env() if needs_client else None)
-    result = {"project_id": state.project_id, "halted": state.halted, "rows": rows}
+    audit_id = state.audit_id
+    result = {
+        "project_id": state.project_id,
+        "audit_id": audit_id,
+        "url": None if audit_id is None else audit_url(get_api_url(), audit_id),
+        "halted": state.halted,
+        "rows": rows,
+    }
     emit_result(result, output=None, json_stdout=args.json, render_human=_render_status)
+
+
+def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
+    """One line per artifact the server touched, then where the receipt was written.
+
+    Every field is read with a default: a row the server spells differently
+    from this client is worth showing as ``?``, never worth a ``KeyError`` that
+    hides the whole receipt.
+    """
+    from dagnam.audit.cleanup import receipt_rows
+
+    return "\n".join(
+        [
+            *(
+                f"{row.get('kind', '?')} {row.get('id', '?')}: {row.get('status', '?')}"
+                + (f" ({row['reason']})" if row.get("reason") else "")
+                for row in receipt_rows(receipt)
+            ),
+            f"Receipt: {path}",
+        ]
+    )
 
 
 def cmd_audit_cancel(args: argparse.Namespace) -> None:
     """Cancel every in-flight run and pause every deployment the state records; delete nothing."""
     from dagnam._core.exceptions import DeploymentStateError
+    from dagnam.audit.cleanup import (
+        CANCELLED_FILE,
+        DEPLOY_PAUSED,
+        TERMINAL_RUN,
+        mark_cancelled,
+        receipt_rows,
+        write_receipt,
+    )
     from dagnam.audit.state import load_state, save_state
-    from dagnam.audit.steps_train import RUN_COMPLETED, RUN_FAILED
 
     audit_dir = Path(args.audit_dir)
     state = load_state(audit_dir)
     client = client_from_env()
+    if state.audit_id is not None:
+        # The run published: the account knows every artifact it created, so the
+        # server stops them all in one call and answers with the receipt.
+        receipt = client.cancel_audit(state.audit_id)
+        path = write_receipt(audit_dir, receipt, CANCELLED_FILE)
+        # A deployment the server could not pause is not paused here either:
+        # the two cancel paths must leave the same state for the same situation.
+        mark_cancelled(
+            state,
+            [
+                str(row["id"])
+                for row in receipt_rows(receipt)
+                if row.get("kind") == "deployment"
+                and row.get("status") == "blocked"
+                and row.get("id")
+            ],
+        )
+        save_state(audit_dir, state)
+        emit_result(
+            receipt,
+            output=None,
+            json_stdout=args.json,
+            render_human=lambda _: _render_receipt(receipt, path),
+        )
+        return
     actions: list[dict[str, str]] = []
+    unpaused: list[str] = []
     for workload_id, candidates in state.workloads.items():
         for kind, step in candidates.items():
             label = f"{workload_id}/{kind.value}"
             job = step.training_job_id
-            if job is not None and step.run_status not in {RUN_COMPLETED, *RUN_FAILED}:
+            if job is not None and step.run_status not in TERMINAL_RUN:
                 client.cancel_training_job(job)
-                step.run_status = "cancelled"
                 actions.append({"candidate": label, "action": "cancelled_job", "id": job})
-            if step.deployment_id is not None and step.deploy_status != "paused":
+            if step.deployment_id is not None and step.deploy_status != DEPLOY_PAUSED:
                 # A deployment whose revision never activated sits in ``not_provisioned``
                 # and the platform refuses the transition; record it and carry on.
                 try:
                     client.pause_deployment(step.deployment_id)
                 except DeploymentStateError as exc:
+                    unpaused.append(step.deployment_id)
                     actions.append(
                         {
                             "candidate": label,
@@ -264,7 +363,6 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
                         }
                     )
                 else:
-                    step.deploy_status = "paused"
                     actions.append(
                         {
                             "candidate": label,
@@ -272,7 +370,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
                             "id": step.deployment_id,
                         }
                     )
-    state.halted = {"reason": "cancelled"}
+    mark_cancelled(state, unpaused)
     save_state(audit_dir, state)
     emit_result(
         {"halted": state.halted, "actions": actions},
@@ -286,30 +384,40 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
 
 def cmd_audit_delete(args: argparse.Namespace) -> None:
     """Delete every platform artifact the run created and write ``deleted.json``."""
-    from dagnam.audit.cleanup import DELETED_FILE, delete_audit, recorded_ids
+    from dagnam.audit.cleanup import (
+        DELETED_FILE,
+        delete_audit,
+        forget_locally,
+        receipt_rows,
+        recorded_ids,
+        write_receipt,
+    )
     from dagnam.audit.state import load_state
 
     audit_dir = Path(args.audit_dir)
-    ids = recorded_ids(load_state(audit_dir))
+    state = load_state(audit_dir)
+    ids = recorded_ids(state)
     listing = "\n".join(f"  {kind}: {', '.join(found)}" for kind, found in ids.items() if found)
+    if state.audit_id is not None:
+        listing = f"{listing}\n  audit: {state.audit_id} (and its published report)".lstrip("\n")
     confirm_or_abort(
         f"This deletes from your account:\n{listing or '  (nothing recorded)'}", assume_yes=args.yes
     )
-    receipt = delete_audit(audit_dir, client_from_env())
+    client = client_from_env()
+    if state.audit_id is None:
+        receipt = delete_audit(audit_dir, client)
+    else:
+        # The published audit owns the same artifacts; the server walks them and
+        # answers with the receipt, and only the local rows are left to drop.
+        receipt = client.delete_audit(state.audit_id)
+        write_receipt(audit_dir, receipt)
+        if not any(row.get("status") == "blocked" for row in receipt_rows(receipt)):
+            forget_locally(audit_dir, state)
     emit_result(
         receipt,
         output=None,
         json_stdout=args.json,
-        render_human=lambda _: "\n".join(
-            [
-                *(
-                    f"{i['kind']} {i['id']}: {i['status']}"
-                    + (f" ({i['reason']})" if "reason" in i else "")
-                    for i in receipt["items"]
-                ),
-                f"Receipt: {audit_dir / DELETED_FILE}",
-            ]
-        ),
+        render_human=lambda _: _render_receipt(receipt, audit_dir / DELETED_FILE),
     )
 
 
@@ -358,13 +466,20 @@ def register_audit(subparsers: SubParsersAction) -> None:
     run.add_argument(
         "--workloads", help="Comma-separated workload ids to run (default: all audited)."
     )
-    run.add_argument("--floor", type=float, help="Quality floor on the agreement lower bound.")
+    run.add_argument(
+        "--floor", type=parse_floor, help="Quality floor on the agreement lower bound (0 < f <= 1)."
+    )
     run.add_argument(
         "--max-credits",
-        type=int,
+        type=parse_credits,
         default=None,
         help="Credit ceiling for training plus the metered holdout replay; stop before"
         " exceeding it.",
+    )
+    run.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Do not publish this run to your account; everything stays in the audit directory.",
     )
     run.add_argument("--yes", action="store_true", help="Skip the upload confirmation.")
     run.add_argument(

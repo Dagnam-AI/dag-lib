@@ -126,6 +126,34 @@ class PlatformClient(Protocol):
         """``POST /api/v1/deployments/{id}/pause``."""
         ...
 
+    # -- publishing the audit to the account (dagnam.audit.publish) -------------
+
+    def create_audit(self, payload: JsonObject) -> JsonObject:
+        """``POST /api/v1/audits`` -> the audit record; its ``id`` is the ``audit_id``."""
+        ...
+
+    def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
+        """``POST /api/v1/audits/{id}/candidates`` (idempotent per workload x kind)."""
+        ...
+
+    def patch_audit_candidate(
+        self, audit_id: str, candidate_id: str, payload: JsonObject
+    ) -> JsonObject:
+        """``PATCH /api/v1/audits/{id}/candidates/{cid}``: one step of a candidate."""
+        ...
+
+    def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
+        """``POST /api/v1/audits/{id}/halt``."""
+        ...
+
+    def cancel_audit(self, audit_id: str) -> JsonObject:
+        """``POST /api/v1/audits/{id}/cancel`` -> the receipt of what it stopped."""
+        ...
+
+    def delete_audit(self, audit_id: str) -> JsonObject:
+        """``DELETE /api/v1/audits/{id}`` -> the receipt the CLI writes as ``deleted.json``."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class StepContext:

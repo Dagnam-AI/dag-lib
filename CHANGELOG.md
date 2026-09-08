@@ -7,8 +7,67 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The audit's scorers, thresholds, frontier rule and report blocks come from
+  `dagnam-contracts` 0.3.0.** `dagnam.audit.scoring`, `thresholds`,
+  `economics`, `frontier`, `report`, `derive` and `steps_serve` keep every
+  public name and every number they had, but the bodies now live in
+  `dagnam_contracts.audit` -- one definition of agreement, the economics
+  bands, the winner and the switch block, so the SDK and the platform can
+  never disagree about the same candidates.
+- **A quoted label now normalizes like a bare one.** `normalize_label`
+  (`dagnam.audit.normalize_label`) is the contract's, which strips surrounding
+  punctuation rather than only trailing: `'"Refund"'` normalizes to `refund`,
+  where it previously kept its opening quote. Scoring a holdout whose teacher
+  or candidate quotes its labels now counts those rows as agreeing -- and,
+  because `dagnam.audit.derive` normalizes through the same function, the
+  `label` field of the derived training rows a workload uploads changes with
+  it, not only the scoring.
+
 ### Added
 
+- **`dagnam audit run` publishes the audit to your account as it runs, so you
+  can watch it on the website.** The scan header and every workload it found
+  (ids, structure class, masked template excerpt, calls/day, spend, verdict and
+  its reason, the redaction counts, and which workloads this run took) go up
+  once; then a candidate per workload x kind, and one record per step as the
+  frontier walks it -- uploading, splitting, the PII check, submitting,
+  training, deploying, and the scored replay with its agreement, its
+  client-measured latency and the credits it burned. Derived rows, raw traces
+  and deployment keys never leave the machine. New `--local-only` on
+  `dagnam audit run` opts out entirely (nothing is published and the listing
+  says so), `dagnam audit cancel` and `dagnam audit delete` go through the
+  account for a run that published -- writing the server's own receipt as
+  `cancelled.json` and `deleted.json` respectively -- and `state.json` gains
+  `audit_id` so a resumed run continues the audit it already opened instead of
+  starting a second one. Publishing is best effort throughout: a failed call is
+  logged, queued behind the next one, and never stops a run.
+- **The run says where to watch what it published.** A created audit prints
+  `published: <audit-id> — watch it at <site>/audits/<audit-id>` (the site is
+  derived from the configured API URL, exactly as `dagnam login`'s sign-in link
+  is), and `dagnam audit status` carries the same `audit_id` and `url` in its
+  table and its `--json`. A run that stopped short still publishes its halt,
+  and it is published once: a resumed run that stops the same way again leaves
+  the halt the account already shows, because the account resumes a halted
+  audit itself on the next step this run publishes.
+- **`audit cancel` writes `cancelled.json`, not `deleted.json`.** A cancel
+  stops training jobs and pauses endpoints; nothing is deleted, so
+  `deleted.json` now only ever means the artifacts are gone. Both cancel paths
+  -- the local walk and the one the server performs for a published run --
+  leave the same local state (each candidate's run `cancelled`, its deployment
+  `paused`, the audit `halted`), so `audit status` reads the same after either
+  and a later `audit run` no longer resumes into `wait_run` against a job that
+  was cancelled.
+- **`--floor` and `--max-credits` are validated before anything is uploaded.**
+  A value outside `0 < floor <= 1`, or a credit ceiling that is not a
+  non-negative whole number, is an argument error (exit 2) rather than a run
+  whose every publish is refused by the server. Non-ASCII digit forms
+  (`"²"`), which `str.isdigit` accepts and `int()` does not, are rejected too.
+- **`state.json` is not backward compatible with 0.13.0.** The file gains
+  `audit_id` and a per-candidate `published_candidate_id`; 0.13.0 refuses a
+  step key it does not know, so an audit directory written by this release
+  cannot be resumed by the previous one. Newer readers read older files fine.
 - **`dagnam audit scan` prices calls from every major provider, not just
   OpenAI.** A model id is now looked up exactly, then through a normalized
   form (new `canonical_model_id`): lowercased, with the provider/gateway or

@@ -11,7 +11,7 @@ what a second ``audit delete`` needs to finish the job.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -29,11 +29,20 @@ from dagnam._core.exceptions import (
 )
 from dagnam._types import JsonObject
 from dagnam.audit.secrets import SecretStore
-from dagnam.audit.state import AuditState, load_state
+from dagnam.audit.state import AuditState, StepState, load_state
+from dagnam.audit.steps_train import RUN_COMPLETED, RUN_FAILED
 from dagnam.audit.workspace import write_atomic
 
 SCHEMA = "dagnam.audit.deleted/1"
 DELETED_FILE = "deleted.json"
+CANCELLED_FILE = "cancelled.json"
+"""``audit cancel``'s receipt. A cancel stops artifacts; only a delete removes them."""
+RUN_CANCELLED = "cancelled"
+DEPLOY_PAUSED = "paused"
+CANCELLED_ERROR = "cancelled: stopped by `dagnam audit cancel`"
+"""``StepState.error`` on a candidate a cancel stopped; ``error_code`` reads ``cancelled``."""
+TERMINAL_RUN = frozenset({RUN_COMPLETED, *RUN_FAILED})
+"""Run statuses a cancel leaves alone: they already stopped on their own."""
 CONFLICT_STATUS = 409
 """A refusal, not a failure: the id is recorded ``blocked``, the rest still runs."""
 
@@ -205,6 +214,78 @@ def _delete_one(
     raise RuntimeError(f"{kind} {item_id} still exists after delete")
 
 
+def write_receipt(audit_dir: Path, receipt: Mapping[str, Any], name: str = DELETED_FILE) -> Path:
+    """Write one receipt atomically, exactly as given, and return where it went.
+
+    The server's own receipt goes through here verbatim when the run published
+    (it lists its rows under ``entries``, where this module's local receipt
+    uses ``items``); :func:`receipt_rows` reads either. ``name`` says which
+    receipt it is: a cancel writes :data:`CANCELLED_FILE`, so ``deleted.json``
+    only ever means the artifacts are gone.
+    """
+    path = audit_dir / name
+    write_atomic(path, json.dumps(receipt, indent=2))
+    return path
+
+
+def receipt_rows(receipt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A receipt's rows, whichever key its writer used."""
+    for key in ("items", "entries"):
+        rows = receipt.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def mark_cancelled(state: AuditState, unpaused: Collection[str] = ()) -> None:
+    """Record a cancel in the local state, whoever performed it.
+
+    Both cancel paths call this -- the local walk over the recorded ids and the
+    published cancel the server performs in one call -- so ``audit status``
+    reads the same after either, and the next ``audit run`` finds a terminal
+    run instead of resuming into ``wait_run`` against a job that is gone.
+    ``unpaused`` names the deployments the platform refused to pause; their
+    status is left as it was, because they were not paused.
+    """
+    for candidates in state.workloads.values():
+        for step in candidates.values():
+            _cancel_step(step, unpaused)
+    state.halted = {"reason": RUN_CANCELLED}
+
+
+def _cancel_step(step: StepState, unpaused: Collection[str]) -> None:
+    """One candidate's marks: its run cancelled, its deployment paused, and itself terminal.
+
+    A candidate that never started is left alone. Everything else records
+    what the cancel did to it -- and, unless it had already scored, also
+    :data:`CANCELLED_ERROR`, which is what makes the next ``audit run`` skip
+    the candidate outright rather than resume into a wait against a job or a
+    deployment that is gone: the run could have been stopped at any step, not
+    only ``wait_run``. A candidate that scored keeps its result (its numbers
+    are the report's) but *not* its deployment: a cancel pauses that endpoint
+    like any other, and a status left saying ``running`` would make the next
+    ``audit cancel`` pause it a second time.
+    """
+    if step.training_job_id is None and step.deployment_id is None:
+        return
+    if step.training_job_id is not None and step.run_status not in TERMINAL_RUN:
+        step.run_status = RUN_CANCELLED
+    if step.deployment_id is not None and step.deployment_id not in unpaused:
+        step.deploy_status = DEPLOY_PAUSED
+    if not step.scored:
+        step.error = CANCELLED_ERROR
+
+
+def forget_locally(audit_dir: Path, state: AuditState) -> None:
+    """Drop the deployment keys and the derived rows: nothing of the audit is left here."""
+    secrets = SecretStore(audit_dir)
+    for steps in state.workloads.values():
+        for step in steps.values():
+            if step.key_ref is not None:
+                secrets.forget(step.key_ref)
+    shutil.rmtree(audit_dir / "workloads", ignore_errors=True)
+
+
 def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
     """Delete every recorded artifact, write ``deleted.json``, then drop local rows and secrets.
 
@@ -225,24 +306,24 @@ def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
         "deleted_at": datetime.now(UTC).isoformat(),
         "items": items,
     }
-    write_atomic(audit_dir / DELETED_FILE, json.dumps(receipt, indent=2))
-    if any(item["status"] == "blocked" for item in items):
-        return receipt
-    secrets = SecretStore(audit_dir)
-    for steps in state.workloads.values():
-        for step in steps.values():
-            if step.key_ref is not None:
-                secrets.forget(step.key_ref)
-    shutil.rmtree(audit_dir / "workloads", ignore_errors=True)
+    write_receipt(audit_dir, receipt)
+    if not any(item["status"] == "blocked" for item in items):
+        forget_locally(audit_dir, state)
     return receipt
 
 
 __all__ = [
+    "CANCELLED_ERROR",
+    "CANCELLED_FILE",
     "DELETED_FILE",
     "KINDS",
     "SCHEMA",
     "CleanupBlockedError",
     "CleanupClient",
     "delete_audit",
+    "forget_locally",
+    "mark_cancelled",
+    "receipt_rows",
     "recorded_ids",
+    "write_receipt",
 ]

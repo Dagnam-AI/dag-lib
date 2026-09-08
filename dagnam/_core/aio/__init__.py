@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dagnam._core.aio.account import AsyncAccountMixin
+from dagnam._core.aio.audit import AsyncAuditMixin
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.aio.checkpoints import AsyncCheckpointsMixin
 from dagnam._core.aio.codegen import AsyncCodegenMixin
@@ -18,6 +19,7 @@ from dagnam._core.aio.training import AsyncTrainingMixin
 
 class AsyncDagnamClient(
     AsyncAccountMixin,
+    AsyncAuditMixin,
     AsyncDatasetsMixin,
     AsyncInferenceMixin,
     AsyncCheckpointsMixin,

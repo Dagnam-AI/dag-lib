@@ -4,8 +4,11 @@
 candidates the run produced, the frontier's winner and the switch values
 (spec section 7). The verdict a customer reads -- REPLACE, NOT YET, KEEP
 (section 7a) -- is a view over ``verdict.status`` and ``winner`` that the
-markdown renders from the JSON, never a second computation. A deployment key
-never appears: the switch names a ``key_ref``.
+markdown renders from the JSON, never a second computation. The derived blocks
+themselves -- the winner, the switch, the snippet -- come from
+``dagnam_contracts.audit.report``, so the platform renders the same report
+from the same candidates. A deployment key never appears: the switch names a
+``key_ref``.
 """
 
 from __future__ import annotations
@@ -16,13 +19,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dagnam_contracts.audit.report import (
+    DEFAULT_BASE_URL,
+    REPORT_SCHEMA,
+    render_switch_snippet,
+    switch_block,
+    winner_of,
+)
+
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
 from dagnam.audit.economics import customer_verdict, serving_cost_usd_month
-from dagnam.audit.frontier import CandidateResult, frontier
 from dagnam.audit.orchestrate import FLOOR_BY_STRUCTURE
 from dagnam.audit.prices import PriceTable
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import error_code
+from dagnam.audit.steps_serve import DEPLOY_RUNNING
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import (
     DAYS_PER_MONTH,
@@ -35,9 +46,8 @@ from dagnam.audit.thresholds import (
     RATIO_NOT_WORTH_IT,
 )
 
-SCHEMA = "dagnam.audit.report/1"
-DEFAULT_BASE_URL = "https://api.dagnam.ai/v1"
-"""The OpenAI-compatible root a switched client points at."""
+SCHEMA = REPORT_SCHEMA
+"""The ``schema`` value of ``audit-report.json``."""
 
 
 def _hosted_floor(entry: Mapping[str, Any], table: PriceTable) -> tuple[str | None, float | None]:
@@ -65,7 +75,7 @@ def candidate_status(spec: CandidateSpec, step: StepState) -> str:
     if step.scored:
         return "scored"
     if step.deploy_status is not None:
-        return "running" if step.deploy_status == "running" else "deploying"
+        return DEPLOY_RUNNING if step.deploy_status == DEPLOY_RUNNING else "deploying"
     if step.run_status is not None:
         return step.run_status
     return "uploaded" if step.dataset_id is not None else "pending"
@@ -105,31 +115,8 @@ def _candidate(
 
 
 def _winner(candidates: list[dict[str, Any]], default_floor: float) -> dict[str, Any] | None:
-    points: list[CandidateResult] = []
-    floor = default_floor
-    for c in candidates:
-        agreement, cost = c["agreement"], c["serving_cost_usd_month"]["value"]
-        if agreement is None or cost is None:
-            continue
-        floor = float(agreement.get("floor", floor))
-        points.append(
-            CandidateResult(
-                kind=CandidateKind(c["kind"]),
-                ci=(float(agreement["ci95"][0]), float(agreement["ci95"][1])),
-                cost_usd_month=float(cost),
-                p95_ms=c["latency_ms"]["p95"],
-            )
-        )
-    winner = frontier(points, floor=floor)
-    if winner is None:
-        return None
-    won = next(c for c in candidates if c["kind"] == winner.kind.value)
-    return {
-        "kind": winner.kind.value,
-        "cost_usd_month": winner.cost_usd_month,
-        "agreement_lo": winner.agreement_lo,
-        "deployment_id": won["deployment_id"],
-    }
+    """The contract's ``winner`` block over this workload's candidate dicts."""
+    return winner_of(candidates, floor=default_floor)
 
 
 def build_audit_report(
@@ -152,14 +139,8 @@ def build_audit_report(
             for spec in CANDIDATES[cls]
         ]
         winner = _winner(candidates, FLOOR_BY_STRUCTURE[cls])
-        key_ref = None
-        if winner is not None:
-            key_ref = steps[CandidateKind(winner["kind"])].key_ref
-        switch = (
-            {"base_url": base_url, "model": winner["deployment_id"], "key_ref": key_ref}
-            if winner is not None
-            else None
-        )
+        key_ref = None if winner is None else steps[CandidateKind(winner["kind"])].key_ref
+        switch = switch_block(winner, key_ref, base_url=base_url)
         workloads.append({**entry, "candidates": candidates, "winner": winner, "switch": switch})
     return {
         **scan,
@@ -178,24 +159,6 @@ def write_audit_report(report: Mapping[str, Any], out_dir: Path) -> None:
     text = json.dumps(report, indent=2)
     (out_dir / "audit-report.json").write_text(text, encoding="utf-8")
     (out_dir / "audit-report.md").write_text(render_markdown(json.loads(text)), encoding="utf-8")
-
-
-def render_switch_snippet(
-    deployment_id: str, key_ref: str, *, base_url: str = DEFAULT_BASE_URL
-) -> str:
-    """The stock OpenAI-client snippet that switches a workload; the key stays a ``key_ref``."""
-    return "\n".join(
-        [
-            "from openai import OpenAI",
-            "",
-            "client = OpenAI(",
-            f'    base_url="{base_url}",',
-            f"    api_key=DEPLOYMENT_KEY,  # key_ref {key_ref}: read it from your keyring or"
-            " audit secrets.json; never paste it here",
-            ")",
-            f'client.chat.completions.create(model="{deployment_id}", messages=[...])',
-        ]
-    )
 
 
 def _usd(value: float | None) -> str:

@@ -32,18 +32,6 @@ def _key_prompt(_prompt: str) -> str:
 # ---------------------------------------------------------------- login
 
 
-def test_web_url_from_api_url_prod() -> None:
-    assert login_mod._web_url_from_api_url("https://api.dagnam.ai") == "https://dagnam.ai"
-
-
-def test_web_url_from_api_url_local() -> None:
-    assert login_mod._web_url_from_api_url("http://localhost:8000") == "http://localhost:5173"
-
-
-def test_web_url_from_api_url_unknown() -> None:
-    assert login_mod._web_url_from_api_url("https://corp.internal") == ""
-
-
 def test_login_prints_help_block(capsys: StrCapture, monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setattr(login_mod, "error", lambda msg: (_ for _ in ()).throw(SystemExit(msg)))
 

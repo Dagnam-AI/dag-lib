@@ -45,6 +45,7 @@ class StepState:
     training_cost_credits: float | None = None
     replay_cost_credits: float | None = None
     error: str | None = None
+    published_candidate_id: str | None = None
 
 
 _STEP_KEYS = frozenset(f.name for f in fields(StepState))
@@ -52,10 +53,18 @@ _STEP_KEYS = frozenset(f.name for f in fields(StepState))
 
 @dataclass(slots=True)
 class AuditState:
-    """The whole audit: project, price table, per-workload candidates, and why it halted."""
+    """The whole audit: project, published audit, price table, candidates, and why it halted.
+
+    ``audit_id`` is the account-side audit ``dagnam audit run`` published this
+    run to (``None`` for a ``--local-only`` run, and for one whose first publish
+    failed): it is what makes a resumed run patch the audit it already created
+    rather than open a second one, and what routes ``cancel``/``delete``
+    through the server.
+    """
 
     schema: str = SCHEMA
     project_id: str | None = None
+    audit_id: str | None = None
     price_table_version: str | None = None
     workloads: dict[str, dict[CandidateKind, StepState]] = field(default_factory=dict)
     halted: dict[str, JsonValue] | None = None
@@ -69,6 +78,7 @@ class AuditState:
         return {
             "schema": self.schema,
             "project_id": self.project_id,
+            "audit_id": self.audit_id,
             "price_table_version": self.price_table_version,
             "workloads": {
                 workload_id: {
@@ -110,6 +120,7 @@ def _from_json(raw: object) -> AuditState:
     halted = data.get("halted")
     return AuditState(
         project_id=data.get("project_id"),
+        audit_id=data.get("audit_id"),
         price_table_version=data.get("price_table_version"),
         workloads=workloads,
         halted=_object(halted, "halted") if halted is not None else None,

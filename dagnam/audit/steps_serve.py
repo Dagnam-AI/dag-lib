@@ -16,6 +16,8 @@ import json
 import re
 from typing import Any
 
+from dagnam_contracts.audit.verdict import UNRELIABLE_ERROR_SHARE
+
 from dagnam._core.exceptions import (
     APIError,
     DeploymentStateError,
@@ -34,8 +36,8 @@ DEPLOYMENT_TYPE = "text"
 INSTANCE_TYPE = "modal-serverless"
 CAPACITY_MODE = "serverless"
 CAPACITY_POLICY: dict[str, int] = {"min_replicas": 0, "max_replicas": 1}
-UNRELIABLE_ERROR_SHARE = 0.10
-"""Spec section 9: more than this share of failed replay calls marks the candidate ``unreliable``."""
+DEPLOY_RUNNING = "running"
+"""``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
 
 _MARKER = re.compile(r"^<\|(\w+)\|>\n", re.MULTILINE)
 
@@ -141,22 +143,30 @@ def _revision_status(ctx: StepContext, deployment_id: str) -> JsonObject:
     if newest is None:
         return {"status": "deploying"}
     if newest.get("is_active"):
-        return {"status": "running"}
+        return {"status": DEPLOY_RUNNING}
     status = string_field(newest, "status") or "deploying"
     return {"status": status, "error_message": string_field(newest, "failure_reason")}
 
 
 def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
-    """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused."""
+    """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused.
+
+    A candidate that already scored waits for nothing: it was deployed,
+    replayed and scored on an earlier run, and ``dagnam audit cancel`` may
+    since have paused that endpoint. This is the one step whose "already done"
+    guard is not implied by its own key -- a paused deployment is not
+    ``running`` -- so without this a resumed run would wake a live endpoint
+    back up to re-reach a number the state already holds.
+    """
     step = ctx.step(state)
-    if step.deploy_status == "running":
+    if step.deploy_status == DEPLOY_RUNNING or step.scored:
         return state
     deployment_id = required(step.deployment_id, "deployment_id")
     try:
         wait_for(
             ctx,
             lambda: _revision_status(ctx, deployment_id),
-            success={"running"},
+            success={DEPLOY_RUNNING},
             failure={"failed"},
             timeout=ctx.deploy_timeout,
             name=f"deployment {deployment_id}",
@@ -173,7 +183,7 @@ def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
         with suppress(DeploymentStateError):
             ctx.client.pause_deployment(deployment_id)
         return state
-    step.deploy_status = "running"
+    step.deploy_status = DEPLOY_RUNNING
     return state
 
 
@@ -229,6 +239,7 @@ __all__ = [
     "CAPACITY_MODE",
     "CAPACITY_POLICY",
     "DEPLOYMENT_TYPE",
+    "DEPLOY_RUNNING",
     "INSTANCE_TYPE",
     "PLATFORM",
     "UNRELIABLE_ERROR_SHARE",

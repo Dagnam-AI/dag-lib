@@ -6,6 +6,7 @@ from functools import partial
 import io
 import json
 from pathlib import Path
+import socket
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from tests.audit._platform import Clock, FakePlatform, json_row, label_row, serv
 
 from dagnam.audit.orchestrate import run_audit
 from dagnam.audit.workspace import write_workload
+from dagnam.cli.audit_run import PUBLISH_LINE
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, RequestsMocker, StrCapture
@@ -262,3 +264,206 @@ def test_run_refuses_unknown_workloads_missing_scan_and_nothing_to_run(
     assert exc.value.code == 1
     assert "nothing to run" in capsys.readouterr().err
     assert platform.call_log == []
+
+
+# ------------------------------------------------------------------ publishing
+
+
+def test_run_publishes_the_scan_the_candidates_and_every_step(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
+) -> None:
+    from dagnam.audit.state import load_state
+
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert PUBLISH_LINE in out
+    # Discoverability: the audit page is named once, on stderr, so `--json`
+    # keeps stdout to the report alone.
+    assert "published: audit-1 — watch it at https://x/audits/audit-1" in captured.err
+    assert "watch it at" not in out
+
+    assert platform.call_log.count("create_audit") == 1
+    published = platform.audits[0]
+    assert published["source"] == "cli"
+    assert published["floor"] == 0.5
+    assert published["local_dir_name"] == "audit"
+    assert [(w["workload_id"], w["selected"]) for w in published["workloads"]] == [
+        ("w1", True),
+        ("w2", True),
+        ("w3", False),
+    ]
+    assert [w["pii_counts"] for w in published["workloads"]] == [{"PII_EMAIL": 2}, {}, {}]
+
+    state = load_state(prepared_dir)
+    assert state.audit_id == "audit-1"
+    assert [kind for _, body in platform.candidates for kind in [body["kind"]]] == [
+        "head_tune",
+        "sft_small",
+    ]
+    head = [body for cid, body in platform.patches if cid == "cand-1"]
+    assert [body["step"] for body in head] == [
+        "upload",
+        "resolve_version",
+        "split",
+        "wait_split",
+        "pii_scan",
+        "wait_pii",
+        "submit",
+        "wait_run",
+        "resolve_model_version",
+        "create_deployment",
+        "create_revision",
+        "wait_active",
+        "replay",
+        "replay_and_score",
+    ]
+    scored = head[-1]
+    assert scored["status"] == "scored"
+    assert scored["scored_by"] == "cli"
+    assert scored["latency"]["measured_from"] == "client"
+    assert scored["agreement"]["floor"] == 0.5
+    assert scored["serving_cost_usd_month"] > 0
+    assert scored["replay_cost_credits"] == 4.0
+    assert platform.halts == []
+
+    # A resumed run republishes nothing: the audit exists and no step moved.
+    calls = list(platform.call_log)
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 0
+    assert platform.call_log == calls
+
+
+def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    capsys: StrCapture,
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    from dagnam.audit.state import load_state
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("network")
+
+    platform.forbid_publishing = True  # any /api/v1/audits call is an AssertionError
+    monkeypatch.setattr(socket, "socket", refuse)
+
+    assert (
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--local-only", "--floor", "0.5"]) == 0
+    )
+
+    captured = capsys.readouterr()
+    out = captured.out
+    assert PUBLISH_LINE not in out
+    assert "published to your account" not in out
+    assert "watch it at" not in captured.err
+    assert platform.forbidden_attempts == []  # the tripwire itself, not just its effect
+    assert platform.audits == []
+    assert not [call for call in platform.call_log if "audit" in call]
+    assert load_state(prepared_dir).audit_id is None
+
+
+def test_run_halted_tells_the_account_why(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    with pytest.raises(SystemExit):
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+    assert platform.halts == [("audit-1", "budget")]
+    # w1 submitted; the submit w2's budget check refused is not published as a
+    # step that happened, so exactly one `submit` reached the account.
+    assert [body["step"] for _, body in platform.patches].count("submit") == 1
+
+
+def test_a_resumed_run_that_stops_again_the_same_way_does_not_repeat_the_halt(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    """The account still shows the first halt; the server resumes it on the next applied publish."""
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+    assert platform.halts == [("audit-1", "budget")]
+
+
+def test_a_run_that_crashes_publishes_the_halt_before_it_raises(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    platform.submit_errors = [RuntimeError("socket reset")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 1
+    assert platform.halts == [("audit-1", "error")]
+
+
+def test_a_publish_outage_never_stops_the_run(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    from dagnam._core.exceptions import APIError
+
+    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    assert platform.candidates == []  # nothing to attach to
+    assert (prepared_dir / "audit-report.json").exists()
+
+
+def test_the_consent_line_is_exactly_what_the_account_is_told_it_may_keep() -> None:
+    assert PUBLISH_LINE == (
+        "  published to your account: progress and the report (workload ids, verdicts, spend,"
+        " masked excerpts, the audit directory's name; never rows or keys);"
+        " 'audit delete' removes them; --local-only keeps them here"
+    )
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    [
+        ("--floor", "1.5", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--floor", "0", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--floor", "high", "--floor expects an agreement lower bound above 0 and at most 1"),
+        ("--max-credits", "-5", "--max-credits expects a whole number of credits"),
+        ("--max-credits", "5.5", "--max-credits expects a whole number of credits"),
+    ],
+)
+def test_a_bad_floor_or_ceiling_fails_before_anything_is_uploaded(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    capsys: StrCapture,
+    flag: str,
+    value: str,
+    message: str,
+) -> None:
+    """The server holds the same bounds; catching them here beats a dropped 422 per publish."""
+    with pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "run", str(prepared_dir), "--yes", flag, value])
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+    assert platform.call_log == []
+
+
+def test_a_run_that_publishes_late_backfills_the_steps_it_already_took(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    """The audit service was down for the first run; the second one catches the account up."""
+    from dagnam._core.exceptions import APIError
+
+    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    assert platform.patches == []
+
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    head = [body for cid, body in platform.patches if cid == "cand-1"]
+    assert [body["step"] for body in head] == [
+        "upload",
+        "resolve_version",
+        "split",
+        "wait_split",
+        "pii_scan",
+        "wait_pii",
+        "submit",
+        "wait_run",
+        "resolve_model_version",
+        "create_deployment",
+        "create_revision",
+        "wait_active",
+        "replay",
+        "replay_and_score",
+    ]
+    assert head[-1]["status"] == "scored"
