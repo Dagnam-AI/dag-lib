@@ -305,6 +305,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
         DEPLOY_PAUSED,
         TERMINAL_RUN,
         mark_cancelled,
+        receipt_rows,
         write_receipt,
     )
     from dagnam.audit.state import load_state, save_state
@@ -317,7 +318,18 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
         # server stops them all in one call and answers with the receipt.
         receipt = client.cancel_audit(state.audit_id)
         path = write_receipt(audit_dir, receipt, CANCELLED_FILE)
-        mark_cancelled(state)
+        # A deployment the server could not pause is not paused here either:
+        # the two cancel paths must leave the same state for the same situation.
+        mark_cancelled(
+            state,
+            [
+                str(row["id"])
+                for row in receipt_rows(receipt)
+                if row.get("kind") == "deployment"
+                and row.get("status") == "blocked"
+                and row.get("id")
+            ],
+        )
         save_state(audit_dir, state)
         emit_result(
             receipt,

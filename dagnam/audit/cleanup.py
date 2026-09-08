@@ -39,6 +39,8 @@ CANCELLED_FILE = "cancelled.json"
 """``audit cancel``'s receipt. A cancel stops artifacts; only a delete removes them."""
 RUN_CANCELLED = "cancelled"
 DEPLOY_PAUSED = "paused"
+CANCELLED_ERROR = "cancelled: stopped by `dagnam audit cancel`"
+"""``StepState.error`` on a candidate a cancel stopped; ``error_code`` reads ``cancelled``."""
 TERMINAL_RUN = frozenset({RUN_COMPLETED, *RUN_FAILED})
 """Run statuses a cancel leaves alone: they already stopped on their own."""
 CONFLICT_STATUS = 409
@@ -252,11 +254,22 @@ def mark_cancelled(state: AuditState, unpaused: Collection[str] = ()) -> None:
 
 
 def _cancel_step(step: StepState, unpaused: Collection[str]) -> None:
-    """One candidate's marks: its run cancelled unless it already stopped, its deployment paused."""
+    """One candidate's marks: its run cancelled, its deployment paused, and itself terminal.
+
+    A candidate that already scored is left alone -- it finished before the
+    cancel and its numbers are the report's -- and so is one that never
+    started. Everything the cancel stopped records :data:`CANCELLED_ERROR`,
+    which is what makes the next ``audit run`` skip the candidate outright
+    rather than resume into a wait against a job or a deployment that is gone:
+    the run could have been stopped at any step, not only ``wait_run``.
+    """
+    if step.scored or (step.training_job_id is None and step.deployment_id is None):
+        return
     if step.training_job_id is not None and step.run_status not in TERMINAL_RUN:
         step.run_status = RUN_CANCELLED
     if step.deployment_id is not None and step.deployment_id not in unpaused:
         step.deploy_status = DEPLOY_PAUSED
+    step.error = CANCELLED_ERROR
 
 
 def forget_locally(audit_dir: Path, state: AuditState) -> None:
@@ -296,6 +309,7 @@ def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
 
 
 __all__ = [
+    "CANCELLED_ERROR",
     "CANCELLED_FILE",
     "DELETED_FILE",
     "KINDS",

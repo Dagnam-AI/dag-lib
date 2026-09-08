@@ -33,6 +33,7 @@ from dagnam.audit.orchestrate import FLOOR_BY_STRUCTURE
 from dagnam.audit.prices import PriceTable
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import error_code
+from dagnam.audit.steps_serve import DEPLOY_RUNNING
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import (
     DAYS_PER_MONTH,
@@ -74,7 +75,7 @@ def candidate_status(spec: CandidateSpec, step: StepState) -> str:
     if step.scored:
         return "scored"
     if step.deploy_status is not None:
-        return "running" if step.deploy_status == "running" else "deploying"
+        return DEPLOY_RUNNING if step.deploy_status == DEPLOY_RUNNING else "deploying"
     if step.run_status is not None:
         return step.run_status
     return "uploaded" if step.dataset_id is not None else "pending"

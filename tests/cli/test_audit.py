@@ -489,16 +489,20 @@ def test_cancel_of_a_published_run_goes_to_the_server_and_writes_its_receipt(
     assert state.halted == {"reason": "cancelled"}
     # The same local marks the local cancel leaves, so `status` reads the same.
     head, done = state.workloads["w1"][HEAD], state.workloads["w2"][SFT]
-    assert (head.run_status, head.deploy_status) == ("cancelled", "paused")
+    # dep-1 is `blocked` in the receipt: the server could not pause it, so neither
+    # does the local state -- exactly what the local cancel path records.
+    assert (head.run_status, head.deploy_status) == ("cancelled", "deploying")
+    assert head.error == "cancelled: stopped by `dagnam audit cancel`"
     assert (done.run_status, done.deploy_status) == ("completed", "paused")
+    assert done.error is None  # it scored before the cancel; nothing to stop
 
     # ``status`` reads the same client_from_env patched above, so no key is needed.
     assert run_cli(["audit", "status", str(published_dir), "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)["rows"]
-    assert [(r["candidate"], r["run_status"]) for r in rows] == [
-        ("hosted_floor", None),
-        ("head_tune", "cancelled"),
-        ("sft_small", "completed"),
+    assert [(r["candidate"], r["status"], r["run_status"]) for r in rows] == [
+        ("hosted_floor", "untested", None),
+        ("head_tune", "cancelled", "cancelled"),
+        ("sft_small", "scored", "completed"),
     ]
 
 
