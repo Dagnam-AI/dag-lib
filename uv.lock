@@ -580,7 +580,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dagnam-contracts", specifier = ">=0.2.0" },
+    { name = "dagnam-contracts", specifier = ">=0.3.0" },
     { name = "filelock", specifier = ">=3.13" },
     { name = "flax", marker = "extra == 'all'", specifier = ">=0.7" },
     { name = "flax", marker = "extra == 'flax'", specifier = ">=0.7" },
@@ -634,11 +634,11 @@ dev = [
 
 [[package]]
 name = "dagnam-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/36/c5/2a7fe5d6583d00c2bb25ba9d6a5d6864570635d3409e177ece7d3ed38f2e/dagnam_contracts-0.2.0.tar.gz", hash = "sha256:99ea719404982905c926e0192a5e2a5848204539baca1e7c53ee179ec664c7fb", size = 64396, upload-time = "2026-09-06T20:27:52.731Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/eb/ab9124f76a142f895305a8cd1f4612ae51ec026553993d64fc0d6720b960/dagnam_contracts-0.3.0.tar.gz", hash = "sha256:3a4c54492b9ed1cf8e42242b6f375b0d2ceab98f6e72782b4fcc848317576a98", size = 75985, upload-time = "2026-09-08T06:44:53.518Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/bd/f1b0174d71bd07e0b039efaae76a935bf96a1d5031162b1456e97c47d659/dagnam_contracts-0.2.0-py3-none-any.whl", hash = "sha256:06176eade7948e3924c54863d0076179ff50c9db7651c19c894173706b6c9d8d", size = 29835, upload-time = "2026-09-06T20:27:51.603Z" },
+    { url = "https://files.pythonhosted.org/packages/08/dc/295b39fc75ed3b4c9fefcc2008e7827aa9bc393b3c32db7985f1701edabd/dagnam_contracts-0.3.0-py3-none-any.whl", hash = "sha256:20aefd7b61885010301640715b627145b74ab029f92ba950e4c6ca80ba9bb971", size = 40101, upload-time = "2026-09-08T06:44:52.198Z" },
 ]
 
 [[package]]

@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-08
+
 ### Changed
 
 - **The audit's scorers, thresholds, frontier rule and report blocks come from
