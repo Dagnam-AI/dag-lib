@@ -46,6 +46,7 @@ from dagnam.audit.frontier import (
 from dagnam.audit.normalize import normalize_template, template_hash
 from dagnam.audit.orchestrate import run_audit
 from dagnam.audit.prices import PriceTable, PriceTableError
+from dagnam.audit.publish import Publisher
 from dagnam.audit.readers import (
     MALFORMED_FATAL_SHARE,
     MalformedExportError,
@@ -84,6 +85,7 @@ __all__ = [
     "Message",
     "PriceTable",
     "PriceTableError",
+    "Publisher",
     "ReadStats",
     "RedactStats",
     "ScanReport",

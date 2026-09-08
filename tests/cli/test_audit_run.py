@@ -6,6 +6,7 @@ from functools import partial
 import io
 import json
 from pathlib import Path
+import socket
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from tests.audit._platform import Clock, FakePlatform, json_row, label_row, serv
 
 from dagnam.audit.orchestrate import run_audit
 from dagnam.audit.workspace import write_workload
+from dagnam.cli.audit_run import PUBLISH_LINE
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, RequestsMocker, StrCapture
@@ -262,3 +264,122 @@ def test_run_refuses_unknown_workloads_missing_scan_and_nothing_to_run(
     assert exc.value.code == 1
     assert "nothing to run" in capsys.readouterr().err
     assert platform.call_log == []
+
+
+# ------------------------------------------------------------------ publishing
+
+
+def test_run_publishes_the_scan_the_candidates_and_every_step(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
+) -> None:
+    from dagnam.audit.state import load_state
+
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    out = capsys.readouterr().out
+    assert PUBLISH_LINE in out
+
+    assert platform.call_log.count("create_audit") == 1
+    published = platform.audits[0]
+    assert published["source"] == "cli"
+    assert published["floor"] == 0.5
+    assert published["local_dir_name"] == "audit"
+    assert [(w["workload_id"], w["selected"]) for w in published["workloads"]] == [
+        ("w1", True),
+        ("w2", True),
+        ("w3", False),
+    ]
+    assert [w["pii_counts"] for w in published["workloads"]] == [{"PII_EMAIL": 2}, {}, {}]
+
+    state = load_state(prepared_dir)
+    assert state.audit_id == "audit-1"
+    assert [kind for _, body in platform.candidates for kind in [body["kind"]]] == [
+        "head_tune",
+        "sft_small",
+    ]
+    head = [body for cid, body in platform.patches if cid == "cand-1"]
+    assert [body["step"] for body in head] == [
+        "upload",
+        "resolve_version",
+        "split",
+        "wait_split",
+        "pii_scan",
+        "wait_pii",
+        "submit",
+        "wait_run",
+        "resolve_model_version",
+        "create_deployment",
+        "create_revision",
+        "wait_active",
+        "replay",
+        "replay_and_score",
+    ]
+    scored = head[-1]
+    assert scored["status"] == "scored"
+    assert scored["scored_by"] == "cli"
+    assert scored["latency"]["measured_from"] == "client"
+    assert scored["agreement"]["floor"] == 0.5
+    assert scored["serving_cost_usd_month"] > 0
+    assert scored["replay_cost_credits"] == 4.0
+    assert platform.halts == []
+
+    # A resumed run republishes nothing: the audit exists and no step moved.
+    calls = list(platform.call_log)
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 0
+    assert platform.call_log == calls
+
+
+def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    capsys: StrCapture,
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    from dagnam.audit.state import load_state
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("network")
+
+    platform.forbid_publishing = True  # any /api/v1/audits call is an AssertionError
+    monkeypatch.setattr(socket, "socket", refuse)
+
+    assert (
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--local-only", "--floor", "0.5"]) == 0
+    )
+
+    out = capsys.readouterr().out
+    assert PUBLISH_LINE not in out
+    assert "published to your account" not in out
+    assert platform.audits == []
+    assert not [call for call in platform.call_log if "audit" in call]
+    assert load_state(prepared_dir).audit_id is None
+
+
+def test_run_halted_tells_the_account_why(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    with pytest.raises(SystemExit):
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+    assert platform.halts == [("audit-1", "budget")]
+    # w1 submitted; the submit w2's budget check refused is not published as a
+    # step that happened, so exactly one `submit` reached the account.
+    assert [body["step"] for _, body in platform.patches].count("submit") == 1
+
+
+def test_a_run_that_crashes_publishes_the_halt_before_it_raises(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    platform.submit_errors = [RuntimeError("socket reset")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 1
+    assert platform.halts == [("audit-1", "error")]
+
+
+def test_a_publish_outage_never_stops_the_run(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    from dagnam._core.exceptions import APIError
+
+    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    assert platform.candidates == []  # nothing to attach to
+    assert (prepared_dir / "audit-report.json").exists()

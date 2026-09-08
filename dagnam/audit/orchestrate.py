@@ -16,11 +16,14 @@ to price; it never computes a cost itself.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 import json
 from pathlib import Path
 import time
+from typing import Any
 
 from dagnam.audit.candidates import CANDIDATES
+from dagnam.audit.publish import Publisher, installed_version
 from dagnam.audit.secrets import SecretStore
 from dagnam.audit.state import AuditState, load_state, save_state
 from dagnam.audit.steps import (
@@ -78,13 +81,12 @@ FLOOR_BY_STRUCTURE: dict[StructureClass, float] = {
 type ScanWorkload = tuple[str, StructureClass, str]
 
 
-def _scan(audit_dir: Path) -> tuple[str | None, list[ScanWorkload]]:
-    """``(price_table_version, [(id, structure_class, verdict status)])`` from ``scan-report.json``."""
+def _scan(audit_dir: Path) -> tuple[dict[str, Any], list[ScanWorkload]]:
+    """``(the scan report, [(id, structure_class, verdict status)])`` from ``scan-report.json``."""
     path = audit_dir / SCAN_REPORT
     if not path.exists():
         raise FileNotFoundError(f"{path} not found: run `dagnam audit scan` first")
     report = json.loads(path.read_text(encoding="utf-8"))
-    version = report.get("price_table_version")
     workloads = [
         (
             str(entry["id"]),
@@ -93,7 +95,7 @@ def _scan(audit_dir: Path) -> tuple[str | None, list[ScanWorkload]]:
         )
         for entry in report.get("workloads", [])
     ]
-    return (version if isinstance(version, str) else None), workloads
+    return report, workloads
 
 
 def _select(
@@ -135,12 +137,17 @@ def run_audit(
     max_credits: int,
     wait: bool,
     client: PlatformClient,
+    publisher: Publisher | None = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
     run_timeout: float = RUN_TIMEOUT_SECONDS,
     deploy_timeout: float = DEPLOY_TIMEOUT_SECONDS,
 ) -> AuditState:
     """Run (or resume) the frontier under ``audit_dir`` and return the state it reached.
+
+    ``publisher`` mirrors the run into the account as it goes; ``None``
+    (``--local-only``) keeps every number on this machine. A publish failure is
+    never allowed to stop the run.
 
     ``floor`` overrides the per-class default on the agreement lower bound;
     ``workloads`` names the workload ids to run (``None`` runs every
@@ -153,9 +160,14 @@ def run_audit(
     Idempotent: a second call over a finished audit makes no platform call.
     """
     state = load_state(audit_dir)
-    price_table_version, scanned = _scan(audit_dir)
+    if publisher is not None:
+        publisher.follow(state)
+    scan, scanned = _scan(audit_dir)
     selected = _select(audit_dir, scanned, workloads)
-    state.price_table_version = price_table_version
+    price_table_version = scan.get("price_table_version")
+    state.price_table_version = (
+        price_table_version if isinstance(price_table_version, str) else None
+    )
     state.halted = None
     secrets = SecretStore(audit_dir)
     if state.project_id is None:
@@ -167,6 +179,18 @@ def run_audit(
             }
         )
         state.project_id = str(created["id"])
+    if publisher is not None:
+        # Without --floor each class keeps its own default, so the audit header
+        # records the strictest of them; every candidate's agreement carries
+        # the floor it was actually held to.
+        publisher.start(
+            audit_dir,
+            scan,
+            [workload_id for workload_id, _ in selected],
+            floor=floor if floor is not None else max(FLOOR_BY_STRUCTURE.values()),
+            max_credits=max_credits,
+            sdk_version=installed_version(),
+        )
     save_state(audit_dir, state)
 
     for workload_id, structure_class in selected:
@@ -191,9 +215,12 @@ def run_audit(
                 run_timeout=run_timeout,
                 deploy_timeout=deploy_timeout,
             )
+            if publisher is not None:
+                publisher.candidate(ctx, step)
             for run_step in STEPS:
                 if run_step in LONG_WAITS and not wait:
                     return state
+                before = asdict(step)
                 try:
                     state = run_step(state, ctx)
                 except Exception as exc:
@@ -205,14 +232,29 @@ def run_audit(
                         "detail": f"{type(exc).__name__}: {exc}",
                     }
                     save_state(audit_dir, state)
+                    _halt(publisher, "error")
                     raise
+                if publisher is not None and state.halted is None and asdict(step) != before:
+                    # Only a step that recorded something is published: a resumed
+                    # run walks every step again and the ones already done change
+                    # nothing. A step that halted the run did not do what its
+                    # name says (the budget check refuses the submit), so it is
+                    # the halt that is published, never the step it stopped.
+                    publisher.step(ctx, run_step.__name__, step)
                 save_state(audit_dir, state)
                 if state.halted is not None:
+                    _halt(publisher, str(state.halted["reason"]))
                     return state
                 if step.error:
                     stop_workload = error_code(step) in WORKLOAD_STOPPING
                     break
     return state
+
+
+def _halt(publisher: Publisher | None, reason: str) -> None:
+    """Tell the account the run stopped short; a ``None`` publisher keeps it local."""
+    if publisher is not None:
+        publisher.halt(reason)
 
 
 __all__ = [

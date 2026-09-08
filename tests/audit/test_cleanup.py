@@ -196,3 +196,16 @@ def test_fresh_audit_dir_deletes_nothing(audit_dir: Path, platform: FakeCleanup)
     assert receipt["items"] == []
     assert platform.call_log == []
     assert not (audit_dir / "workloads").exists()
+
+
+def test_a_receipt_with_no_rows_reads_as_empty() -> None:
+    """A receipt from a server that lists its rows under neither key is not a crash."""
+    from dagnam.audit.cleanup import receipt_rows
+
+    assert receipt_rows({"deleted_at": "2026-09-07T10:00:00+00:00"}) == []
+    assert receipt_rows({"items": [{"kind": "project", "id": "p1"}, "junk"]}) == [
+        {"kind": "project", "id": "p1"}
+    ]
+    assert receipt_rows({"entries": [{"kind": "project", "id": "p1"}]}) == [
+        {"kind": "project", "id": "p1"}
+    ]

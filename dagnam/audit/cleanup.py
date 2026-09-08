@@ -11,7 +11,7 @@ what a second ``audit delete`` needs to finish the job.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -205,6 +205,35 @@ def _delete_one(
     raise RuntimeError(f"{kind} {item_id} still exists after delete")
 
 
+def write_receipt(audit_dir: Path, receipt: Mapping[str, Any]) -> None:
+    """Write ``deleted.json`` atomically, exactly as given.
+
+    The server's own receipt goes through here verbatim when the run published
+    (it lists its rows under ``entries``, where this module's local receipt
+    uses ``items``); :func:`receipt_rows` reads either.
+    """
+    write_atomic(audit_dir / DELETED_FILE, json.dumps(receipt, indent=2))
+
+
+def receipt_rows(receipt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A receipt's rows, whichever key its writer used."""
+    for key in ("items", "entries"):
+        rows = receipt.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def forget_locally(audit_dir: Path, state: AuditState) -> None:
+    """Drop the deployment keys and the derived rows: nothing of the audit is left here."""
+    secrets = SecretStore(audit_dir)
+    for steps in state.workloads.values():
+        for step in steps.values():
+            if step.key_ref is not None:
+                secrets.forget(step.key_ref)
+    shutil.rmtree(audit_dir / "workloads", ignore_errors=True)
+
+
 def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
     """Delete every recorded artifact, write ``deleted.json``, then drop local rows and secrets.
 
@@ -225,15 +254,9 @@ def delete_audit(audit_dir: Path, client: CleanupClient) -> dict[str, Any]:
         "deleted_at": datetime.now(UTC).isoformat(),
         "items": items,
     }
-    write_atomic(audit_dir / DELETED_FILE, json.dumps(receipt, indent=2))
-    if any(item["status"] == "blocked" for item in items):
-        return receipt
-    secrets = SecretStore(audit_dir)
-    for steps in state.workloads.values():
-        for step in steps.values():
-            if step.key_ref is not None:
-                secrets.forget(step.key_ref)
-    shutil.rmtree(audit_dir / "workloads", ignore_errors=True)
+    write_receipt(audit_dir, receipt)
+    if not any(item["status"] == "blocked" for item in items):
+        forget_locally(audit_dir, state)
     return receipt
 
 
@@ -244,5 +267,8 @@ __all__ = [
     "CleanupBlockedError",
     "CleanupClient",
     "delete_audit",
+    "forget_locally",
+    "receipt_rows",
     "recorded_ids",
+    "write_receipt",
 ]

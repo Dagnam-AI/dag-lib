@@ -425,3 +425,92 @@ def test_audit_is_grouped_and_described() -> None:
     assert "audit" in ALL_GROUPED_COMMANDS
     assert COMMAND_DESCRIPTIONS["audit"].startswith("Audit exported LLM traces")
     assert any("dagnam audit scan" in line for line in EXAMPLES)
+
+
+# ------------------------------------- a run that published: the server cleans up
+
+
+CANCEL_RECEIPT: dict[str, object] = {
+    "schema": "dagnam.audit.deleted/1",
+    "deleted_at": "2026-09-07T10:00:00+00:00",
+    "entries": [
+        {"kind": "training_job", "id": "job-1", "status": "stopped", "reason": None},
+        {"kind": "deployment", "id": "dep-1", "status": "blocked", "reason": "not provisioned"},
+    ],
+}
+DELETE_RECEIPT: dict[str, object] = {
+    "schema": "dagnam.audit.deleted/1",
+    "deleted_at": "2026-09-07T10:00:00+00:00",
+    "entries": [
+        {"kind": "deployment", "id": "dep-1", "status": "deleted", "reason": None},
+        {"kind": "project", "id": "proj-1", "status": "deleted", "reason": None},
+    ],
+}
+
+
+@pytest.fixture
+def published_dir(tmp_path: Path) -> Path:
+    """An audit dir whose run published, so ``cancel``/``delete`` go through the server."""
+    root = tmp_path / "audit"
+    state = _state()
+    state.audit_id = "audit-1"
+    state.workloads["w1"][HEAD].key_ref = "w1/head_tune"
+    save_state(root, state)
+    (root / "workloads" / "w1").mkdir(parents=True)
+    (root / "workloads" / "w1" / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
+    return root
+
+
+def test_cancel_of_a_published_run_goes_to_the_server_and_writes_its_receipt(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    client = mock.Mock()
+    client.cancel_audit.return_value = CANCEL_RECEIPT
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+
+    assert run_cli(["audit", "cancel", str(published_dir)]) == 0
+
+    assert client.method_calls == [mock.call.cancel_audit("audit-1")]
+    out = capsys.readouterr().out
+    assert "training_job job-1: stopped" in out
+    assert "deployment dep-1: blocked (not provisioned)" in out
+    assert f"Receipt: {published_dir / 'deleted.json'}" in out
+    assert (
+        json.loads((published_dir / "deleted.json").read_text(encoding="utf-8")) == CANCEL_RECEIPT
+    )
+    assert load_state(published_dir).halted == {"reason": "cancelled"}
+
+
+def test_delete_of_a_published_run_names_the_audit_and_drops_the_local_rows(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    client = mock.Mock()
+    client.delete_audit.return_value = DELETE_RECEIPT
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+
+    with mock.patch("builtins.input", return_value="no"), pytest.raises(SystemExit):
+        run_cli(["audit", "delete", str(published_dir)])
+    assert "audit: audit-1 (and its published report)" in capsys.readouterr().out
+    assert client.method_calls == []
+
+    assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 0
+    assert client.method_calls == [mock.call.delete_audit("audit-1")]
+    out = capsys.readouterr().out
+    assert "project proj-1: deleted" in out
+    assert json.loads((published_dir / "deleted.json").read_text(encoding="utf-8")) == (
+        DELETE_RECEIPT
+    )
+    assert not (published_dir / "workloads").exists()
+
+
+def test_delete_of_a_published_run_keeps_the_local_rows_when_something_is_blocked(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    client = mock.Mock()
+    client.delete_audit.return_value = CANCEL_RECEIPT  # carries a `blocked` entry
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+
+    assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 0
+
+    assert (published_dir / "workloads" / "w1" / "dataset.jsonl").exists()
+    assert "deployment dep-1: blocked (not provisioned)" in capsys.readouterr().out

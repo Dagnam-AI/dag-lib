@@ -20,10 +20,29 @@ and this project follows [Semantic Versioning](https://semver.org/).
   (`dagnam.audit.normalize_label`) is the contract's, which strips surrounding
   punctuation rather than only trailing: `'"Refund"'` normalizes to `refund`,
   where it previously kept its opening quote. Scoring a holdout whose teacher
-  or candidate quotes its labels now counts those rows as agreeing.
+  or candidate quotes its labels now counts those rows as agreeing -- and,
+  because `dagnam.audit.derive` normalizes through the same function, the
+  `label` field of the derived training rows a workload uploads changes with
+  it, not only the scoring.
 
 ### Added
 
+- **`dagnam audit run` publishes the audit to your account as it runs, so you
+  can watch it on the website.** The scan header and every workload it found
+  (ids, structure class, masked template excerpt, calls/day, spend, verdict and
+  its reason, the redaction counts, and which workloads this run took) go up
+  once; then a candidate per workload x kind, and one record per step as the
+  frontier walks it -- uploading, splitting, the PII check, submitting,
+  training, deploying, and the scored replay with its agreement, its
+  client-measured latency and the credits it burned. Derived rows, raw traces
+  and deployment keys never leave the machine. New `--local-only` on
+  `dagnam audit run` opts out entirely (nothing is published and the listing
+  says so), `dagnam audit cancel` and `dagnam audit delete` go through the
+  account for a run that published -- writing the server's own receipt as
+  `deleted.json` -- and `state.json` gains `audit_id` so a resumed run
+  continues the audit it already opened instead of starting a second one.
+  Publishing is best effort throughout: a failed call is logged, queued behind
+  the next one, and never stops a run.
 - **`dagnam audit scan` prices calls from every major provider, not just
   OpenAI.** A model id is now looked up exactly, then through a normalized
   form (new `canonical_model_id`): lowercased, with the provider/gateway or

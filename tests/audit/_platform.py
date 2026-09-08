@@ -92,6 +92,24 @@ class FakePlatform:
         self.deployments: list[JsonObject] = []
         self.revisions: list[JsonObject] = []
         self.paused: list[str] = []
+        self.audits: list[dict[str, Any]] = []
+        """``create_audit`` payloads, in order."""
+        self.candidates: list[tuple[str, dict[str, Any]]] = []
+        """``(audit_id, payload)`` per ``create_audit_candidate``."""
+        self.patches: list[tuple[str, dict[str, Any]]] = []
+        """``(candidate_id, payload)`` per ``patch_audit_candidate``."""
+        self.halts: list[tuple[str, str]] = []
+        self.cancelled: list[str] = []
+        self.deleted_audits: list[str] = []
+        self.publish_errors: dict[str, list[BaseException]] = {}
+        """Per method name: the exception the next call raises, popped in order."""
+        self.forbid_publishing = False
+        """``--local-only``: any audit route is a test failure, not a recorded call."""
+        self.receipt: JsonObject = {
+            "schema": "dagnam.audit.deleted/1",
+            "deleted_at": "2026-09-07T10:00:00+00:00",
+            "entries": [{"kind": "project", "id": "proj-1", "status": "deleted", "reason": None}],
+        }
         self._polls: Counter[str] = Counter()
         self._ids: Counter[str] = Counter()
 
@@ -277,6 +295,49 @@ class FakePlatform:
         self._log("pause_deployment")
         self.paused.append(deployment_id)
         return {"id": deployment_id, "status": "paused"}
+
+    # -- publishing the audit ----------------------------------------------------
+
+    def _publish(self, name: str) -> None:
+        """Log one audit route, refusing it outright under ``forbid_publishing``."""
+        if self.forbid_publishing:
+            raise AssertionError("must not be called")
+        self._log(name)
+        errors = self.publish_errors.get(name)
+        if errors:
+            raise errors.pop(0)
+
+    def create_audit(self, payload: JsonObject) -> JsonObject:
+        self._publish("create_audit")
+        self.audits.append(payload)
+        return {"id": self._next("audit")}
+
+    def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
+        self._publish("create_audit_candidate")
+        self.candidates.append((audit_id, payload))
+        return {"id": self._next("cand")}
+
+    def patch_audit_candidate(
+        self, audit_id: str, candidate_id: str, payload: JsonObject
+    ) -> JsonObject:
+        self._publish("patch_audit_candidate")
+        self.patches.append((candidate_id, payload))
+        return {"id": candidate_id, "status": payload["status"]}
+
+    def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
+        self._publish("halt_audit")
+        self.halts.append((audit_id, reason))
+        return {"id": audit_id, "status": "halted", "halted_reason": reason}
+
+    def cancel_audit(self, audit_id: str) -> JsonObject:
+        self._publish("cancel_audit")
+        self.cancelled.append(audit_id)
+        return dict(self.receipt)
+
+    def delete_audit(self, audit_id: str) -> JsonObject:
+        self._publish("delete_audit")
+        self.deleted_audits.append(audit_id)
+        return dict(self.receipt)
 
 
 class FakeCleanup:

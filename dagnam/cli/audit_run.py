@@ -1,9 +1,11 @@
 """``dagnam audit run``: say exactly what will leave the machine, get a yes, then run the frontier.
 
 Nothing is uploaded before the listing: which workloads, how many redacted
-rows each, the redaction counts per class, which project they go to and the
-credit ceiling. Without ``--yes`` the command asks once on a terminal and
-refuses outright when stdin is not one (spec section 10).
+rows each, the redaction counts per class, which project they go to, the
+credit ceiling, and -- unless ``--local-only`` was passed -- that the run's
+progress and report are mirrored into the account. Without ``--yes`` the
+command asks once on a terminal and refuses outright when stdin is not one
+(spec section 10).
 """
 
 from __future__ import annotations
@@ -40,11 +42,21 @@ def client_from_env() -> DagnamClient:
     return DagnamClient(get_api_url(), get_api_key())
 
 
+PUBLISH_LINE = (
+    "  published to your account: progress and the report (workload ids, verdicts, spend,"
+    " masked excerpts; never rows or keys); 'audit delete' removes them;"
+    " --local-only keeps them here"
+)
+"""What ``audit run`` says it mirrors into the account, in the listing the user confirms."""
+
+
 def upload_listing(
     audit_dir: Path,
     selected: Sequence[tuple[str, StructureClass]],
     state: AuditState,
     max_credits: int,
+    *,
+    local_only: bool = False,
 ) -> list[str]:
     """The lines the user confirms: every workload, its rows and redactions, the project, the ceiling."""
     lines = ["About to upload (redacted, derived rows only; raw traces stay here):"]
@@ -66,6 +78,8 @@ def upload_listing(
     )
     lines.append(f"  to: {project}")
     lines.append(f"  credit ceiling: {max_credits} (training and the metered holdout replay)")
+    if not local_only:
+        lines.append(PUBLISH_LINE)
     return lines
 
 
@@ -102,6 +116,7 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
         select_workloads,
     )
     from dagnam.audit.prices import PriceTable
+    from dagnam.audit.publish import Publisher
     from dagnam.audit.report import build_audit_report, write_audit_report
     from dagnam.audit.state import load_state
 
@@ -115,7 +130,11 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
     if not selected:
         fail(args, "nothing to run: the scan found no workload worth auditing")
     state = load_state(audit_dir)
-    print("\n".join(upload_listing(audit_dir, selected, state, max_credits)))
+    print(
+        "\n".join(
+            upload_listing(audit_dir, selected, state, max_credits, local_only=args.local_only)
+        )
+    )
     if not args.yes and not sys.stdin.isatty():
         fail(
             args,
@@ -132,6 +151,7 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
         max_credits=max_credits,
         wait=not args.no_wait,
         client=client,
+        publisher=None if args.local_only else Publisher(client, state),
     )
     scan = json.loads((audit_dir / SCAN_REPORT).read_text(encoding="utf-8"))
     # ponytail: the report prices the hosted floor from the bundled table; a
