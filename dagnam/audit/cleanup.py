@@ -256,20 +256,24 @@ def mark_cancelled(state: AuditState, unpaused: Collection[str] = ()) -> None:
 def _cancel_step(step: StepState, unpaused: Collection[str]) -> None:
     """One candidate's marks: its run cancelled, its deployment paused, and itself terminal.
 
-    A candidate that already scored is left alone -- it finished before the
-    cancel and its numbers are the report's -- and so is one that never
-    started. Everything the cancel stopped records :data:`CANCELLED_ERROR`,
-    which is what makes the next ``audit run`` skip the candidate outright
-    rather than resume into a wait against a job or a deployment that is gone:
-    the run could have been stopped at any step, not only ``wait_run``.
+    A candidate that never started is left alone. Everything else records
+    what the cancel did to it -- and, unless it had already scored, also
+    :data:`CANCELLED_ERROR`, which is what makes the next ``audit run`` skip
+    the candidate outright rather than resume into a wait against a job or a
+    deployment that is gone: the run could have been stopped at any step, not
+    only ``wait_run``. A candidate that scored keeps its result (its numbers
+    are the report's) but *not* its deployment: a cancel pauses that endpoint
+    like any other, and a status left saying ``running`` would make the next
+    ``audit cancel`` pause it a second time.
     """
-    if step.scored or (step.training_job_id is None and step.deployment_id is None):
+    if step.training_job_id is None and step.deployment_id is None:
         return
     if step.training_job_id is not None and step.run_status not in TERMINAL_RUN:
         step.run_status = RUN_CANCELLED
     if step.deployment_id is not None and step.deployment_id not in unpaused:
         step.deploy_status = DEPLOY_PAUSED
-    step.error = CANCELLED_ERROR
+    if not step.scored:
+        step.error = CANCELLED_ERROR
 
 
 def forget_locally(audit_dir: Path, state: AuditState) -> None:

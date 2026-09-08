@@ -310,3 +310,6 @@ def test_a_cancelled_candidate_is_skipped_wherever_the_cancel_caught_it(
 
     assert platform.call_log == []
     assert load_state(audit_dir).workloads == state.workloads
+    # w2 scored before the cancel, so it kept its result and lost its endpoint.
+    assert state.workloads["w2"][SFT].deploy_status == "paused"
+    assert state.workloads["w2"][SFT].error is None

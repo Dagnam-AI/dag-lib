@@ -149,9 +149,17 @@ def _revision_status(ctx: StepContext, deployment_id: str) -> JsonObject:
 
 
 def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
-    """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused."""
+    """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused.
+
+    A candidate that already scored waits for nothing: it was deployed,
+    replayed and scored on an earlier run, and ``dagnam audit cancel`` may
+    since have paused that endpoint. This is the one step whose "already done"
+    guard is not implied by its own key -- a paused deployment is not
+    ``running`` -- so without this a resumed run would wake a live endpoint
+    back up to re-reach a number the state already holds.
+    """
     step = ctx.step(state)
-    if step.deploy_status == DEPLOY_RUNNING:
+    if step.deploy_status == DEPLOY_RUNNING or step.scored:
         return state
     deployment_id = required(step.deployment_id, "deployment_id")
     try:

@@ -442,6 +442,7 @@ CANCEL_RECEIPT: dict[str, object] = {
     "entries": [
         {"kind": "training_job", "id": "job-1", "status": "stopped", "reason": None},
         {"kind": "deployment", "id": "dep-1", "status": "blocked", "reason": "not provisioned"},
+        {"kind": "deployment", "id": "dep-2", "status": "stopped", "reason": None},
     ],
 }
 DELETE_RECEIPT: dict[str, object] = {
@@ -461,6 +462,7 @@ def published_dir(tmp_path: Path) -> Path:
     state = _state()
     state.audit_id = "audit-1"
     state.workloads["w1"][HEAD].key_ref = "w1/head_tune"
+    state.workloads["w2"][SFT].deploy_status = "running"  # scored, and still serving
     save_state(root, state)
     (root / "workloads" / "w1").mkdir(parents=True)
     (root / "workloads" / "w1" / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
@@ -493,8 +495,9 @@ def test_cancel_of_a_published_run_goes_to_the_server_and_writes_its_receipt(
     # does the local state -- exactly what the local cancel path records.
     assert (head.run_status, head.deploy_status) == ("cancelled", "deploying")
     assert head.error == "cancelled: stopped by `dagnam audit cancel`"
+    # It scored before the cancel, so it keeps its result -- but not its endpoint.
     assert (done.run_status, done.deploy_status) == ("completed", "paused")
-    assert done.error is None  # it scored before the cancel; nothing to stop
+    assert done.error is None
 
     # ``status`` reads the same client_from_env patched above, so no key is needed.
     assert run_cli(["audit", "status", str(published_dir), "--json"]) == 0
@@ -605,3 +608,32 @@ def test_status_of_a_local_only_run_names_no_audit(
         assert run_cli(["audit", "status", str(audit_dir), "--json"]) == 0
     js = json.loads(capsys.readouterr().out)
     assert (js["audit_id"], js["url"]) == (None, None)
+
+
+def test_cancel_pauses_a_scored_candidates_live_endpoint_exactly_once(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """A scored candidate keeps its result; its deployment is paused, and only once."""
+    monkeypatch.setenv("DAGNAM_API_KEY", "k")
+    root = tmp_path / "audit"
+    state = AuditState(project_id="proj-1")
+    state.workloads["w1"] = {
+        SFT: StepState(
+            training_job_id="job-1",
+            run_status="completed",
+            deployment_id="dep-1",
+            deploy_status="running",
+            scored=True,
+        )
+    }
+    save_state(root, state)
+
+    with mock.patch("dagnam._core.client.DagnamClient") as client:
+        assert run_cli(["audit", "cancel", str(root)]) == 0
+    assert client.return_value.method_calls == [mock.call.pause_deployment("dep-1")]
+    step = load_state(root).workloads["w1"][SFT]
+    assert (step.run_status, step.deploy_status, step.error) == ("completed", "paused", None)
+
+    with mock.patch("dagnam._core.client.DagnamClient") as client:
+        assert run_cli(["audit", "cancel", str(root)]) == 0
+    assert client.return_value.method_calls == []  # the state says it is already paused
