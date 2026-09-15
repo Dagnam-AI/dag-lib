@@ -42,6 +42,12 @@ DEPLOY_RUNNING = "running"
 _MARKER = re.compile(r"^<\|(\w+)\|>\n", re.MULTILINE)
 
 
+# TODO(contracts 0.3.1): import `parse_chat_prompt` from `dagnam_contracts.audit`
+# (beside `render_chat_prompt`) and delete this copy, once the floor in
+# pyproject.toml moves to `dagnam-contracts>=0.3.1`. The rendering is the
+# contract's, so its inverse belongs there too -- the platform needs it to read
+# back what a Studio replay sent. Keep the re-export from this module's
+# `__all__` so importers do not move in the same change.
 def parse_chat_prompt(text: str) -> list[dict[str, str]]:
     """Invert ``dagnam_contracts.prompts.render_chat_prompt``: marker blocks back to messages.
 

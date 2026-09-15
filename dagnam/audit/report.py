@@ -119,6 +119,11 @@ def _candidate(
     }
 
 
+# TODO(contracts 0.3.1): the winner block gains `candidate_id`, so `_candidate`
+# should carry `step.published_candidate_id` and `winner_of` will pass it
+# through -- that is what lets the audit page link a winner row to the
+# candidate the run published. Apply with the floor bump, not before: on 0.3.0
+# `winner_of` drops the key and the report would gain a field nothing reads.
 def _winner(candidates: list[dict[str, Any]], default_floor: float) -> dict[str, Any] | None:
     """The contract's ``winner`` block over this workload's candidate dicts."""
     return winner_of(candidates, floor=default_floor)
