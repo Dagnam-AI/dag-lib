@@ -309,3 +309,28 @@ def test_the_wait_active_guard_mirrors_the_step_s_own_or_scored(
 
     steps = [body["step"] for _, body in platform.patches]
     assert steps.index("wait_active") < steps.index("replay")
+
+
+def test_the_backfill_of_an_errored_candidate_ends_at_its_terminal_failure(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    """The steps it finished keep their own status; the one it died on carries the error.
+
+    Marking every finished step `failed` would say the candidate died at
+    `upload`; the step that failed is the first one it never finished.
+    """
+    step = _completed_upload(StepState())
+    step.split_task_id, step.error = "split-1", "split_failed: the task never started"
+
+    publisher = Publisher(platform, state)
+    start(publisher, audit_dir)
+    publisher.candidate(make_ctx(), step)
+    publisher.backfill(make_ctx(), step)
+
+    assert [(body["step"], body["status"]) for _, body in platform.patches] == [
+        ("upload", "uploading"),
+        ("resolve_version", "uploading"),
+        ("split", "splitting"),
+        ("wait_split", "failed"),
+    ]
+    assert platform.patches[-1][1]["error"] == "split_failed: the task never started"

@@ -388,15 +388,36 @@ class Publisher:
         recorded every step as it happened. A step the server refuses (409) is
         dropped, so a candidate that is further along than this walk expects
         settles at its real status instead of being retried forever.
+
+        A candidate an earlier run left with a recorded error ends at that
+        error: the steps it finished keep the status they earned, and the
+        first one it never finished -- the step it died on -- carries the
+        terminal ``failed``. Without the distinction the whole trail would read
+        ``failed`` and the audit would say the candidate died at ``upload``.
         """
         if not self._new_audit or self._target() is None:
             return
+        terminal = step.error is not None and not step.scored
         for step_name, done in DONE_BY_STEP.items():
             if done(step):
+                # Only a terminal candidate needs the override: for every other
+                # one ``status_for`` already reads the right status off the step.
+                self.step(
+                    ctx, step_name, step, status=STATUS_BY_STEP[step_name] if terminal else None
+                )
+            elif terminal:
                 self.step(ctx, step_name, step)
+                return
 
-    def step(self, ctx: StepContext, step_name: str, step: StepState) -> None:
-        """Record one step of a candidate, resending anything an earlier call could not."""
+    def step(
+        self, ctx: StepContext, step_name: str, step: StepState, *, status: str | None = None
+    ) -> None:
+        """Record one step of a candidate, resending anything an earlier call could not.
+
+        ``status`` overrides what :func:`status_for` would read off the step;
+        only :meth:`backfill` passes it, to publish a step that *succeeded* on
+        a candidate whose later error is already recorded.
+        """
         target = self._target()
         if target is None:
             return
@@ -404,7 +425,9 @@ class Publisher:
         candidate_id = step.published_candidate_id
         if candidate_id is None:
             return
-        patch = self._guard(f"the {step_name} body", lambda: self._patch(ctx, step_name, step))
+        patch = self._guard(
+            f"the {step_name} body", lambda: self._patch(ctx, step_name, step, status)
+        )
         if patch is None:
             return
         if step_name == "replay_and_score":
@@ -412,10 +435,15 @@ class Publisher:
         self._queue(candidate_id, patch)
         self._flush(*target)
 
-    def _patch(self, ctx: StepContext, step_name: str, step: StepState) -> JsonObject:
+    def _patch(
+        self, ctx: StepContext, step_name: str, step: StepState, status: str | None = None
+    ) -> JsonObject:
         """The ``CandidatePatch`` body for one step: its status plus whatever the step produced."""
-        body: JsonObject = {"step": step_name, "status": status_for(step_name, step)}
-        if step.error is not None:
+        resolved = status_for(step_name, step) if status is None else status
+        body: JsonObject = {"step": step_name, "status": resolved}
+        if step.error is not None and status is None:
+            # The error belongs to the step that recorded it, not to the ones a
+            # back-fill replays behind it -- those are the ones given a status.
             body["error"] = step.error[:_ERROR_MAX]
         for key, value in (
             ("dataset_version_id", step.version_id),

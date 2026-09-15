@@ -17,8 +17,9 @@ from dagnam._core.exceptions import APIError, QuotaExceededError
 from dagnam.audit import build_dataset, discover_workloads
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.orchestrate import SCAN_REPORT, run_audit
+from dagnam.audit.publish import Publisher
 from dagnam.audit.record import TraceRecord
-from dagnam.audit.state import STATE_FILE, AuditState, load_state
+from dagnam.audit.state import STATE_FILE, AuditState, load_state, save_state
 
 HEAD, SFT, HOSTED = CandidateKind.HEAD_TUNE, CandidateKind.SFT_SMALL, CandidateKind.HOSTED_FLOOR
 
@@ -313,3 +314,31 @@ def test_a_cancelled_candidate_is_skipped_wherever_the_cancel_caught_it(
     # w2 scored before the cancel, so it kept its result and lost its endpoint.
     assert state.workloads["w2"][SFT].deploy_status == "paused"
     assert state.workloads["w2"][SFT].error is None
+
+
+def test_a_candidate_that_errored_earlier_still_publishes_its_failure_on_resume(
+    run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
+) -> None:
+    """The candidate is skipped, not invisible.
+
+    A recorded failure is terminal, so the frontier walks past the candidate
+    without running a step -- and when it is *this* run that first reached the
+    account, skipping it before the publisher saw it left the candidate absent
+    from the audit for good.
+    """
+    state = AuditState(project_id="proj-1")
+    failed = state.candidate("w1", HEAD)
+    failed.dataset_id, failed.version_id = "ds-1", "ver-1"
+    failed.error = "split_failed: the task never started"
+    save_state(audit_dir, state)
+
+    run(workloads=["w1"], publisher=Publisher(platform, AuditState()))
+
+    assert [body["kind"] for _, body in platform.candidates] == ["head_tune"]
+    assert [(body["step"], body["status"]) for _, body in platform.patches] == [
+        ("upload", "uploading"),
+        ("resolve_version", "uploading"),
+        ("split", "failed"),
+    ]
+    assert platform.patches[-1][1]["error"] == "split_failed: the task never started"
+    assert load_state(audit_dir).candidate("w1", HEAD).published_candidate_id == "cand-1"

@@ -197,9 +197,9 @@ def run_audit(
         stop_workload = False
         for spec in CANDIDATES[structure_class]:
             step = state.candidate(workload_id, spec.kind)
-            if spec.recipe_key is None or step.error or stop_workload:
-                # The hosted floor is priced by the report, never run; a recorded
-                # failure is terminal for this audit (delete the state to retry).
+            if spec.recipe_key is None or stop_workload:
+                # The hosted floor is priced by the report, never run; a workload
+                # a stopping error ended runs no further candidate.
                 continue
             ctx = StepContext(
                 audit_dir=audit_dir,
@@ -221,6 +221,15 @@ def run_audit(
                 # already done; without this the candidate would sit at
                 # `uploading` until a step it has not reached yet moves it.
                 publisher.backfill(ctx, step)
+            if step.error:
+                # A recorded failure is terminal for this audit (delete the state
+                # to retry) -- but the publisher above still had to see it, or a
+                # run that reached the account late would leave the candidate out
+                # of the audit entirely. Saved because that publish is what
+                # gave the candidate its id: unsaved, the next run opens a
+                # second candidate for the same failure.
+                save_state(audit_dir, state)
+                continue
             for run_step in STEPS:
                 if run_step in LONG_WAITS and not wait:
                     return state
