@@ -160,6 +160,9 @@ def test_report_follows_the_contract() -> None:
         "cost_usd_month": head["serving_cost_usd_month"]["value"],
         "agreement_lo": 0.98,
         "deployment_id": "dep-1",
+        # A CLI-local run opens no account-side candidate, so the contract's
+        # fifth key is None; a published run's id is not sourced here.
+        "candidate_id": None,
     }
     assert w1["switch"] == {
         "base_url": "https://api.dagnam.ai/v1",

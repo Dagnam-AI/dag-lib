@@ -9,6 +9,25 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.14.1] - 2026-09-14
 
+### Changed
+
+- **Requires `dagnam-contracts` 0.3.1.** Three more things the SDK used to keep
+  its own copy of now come from the contract, so the platform and the CLI
+  cannot disagree about them: `dagnam.audit.steps_serve.parse_chat_prompt` is
+  `dagnam_contracts.prompts.parse_chat_prompt` (the inverse of the rendering it
+  sits beside -- a drifting inverse replays text the classifier never saw), the
+  `deleted.json` schema id is `dagnam_contracts.audit.DELETED_SCHEMA`, and the
+  serving rates are the contract's. The names, the values and the behaviour are
+  unchanged.
+- **A `cancelled.json` receipt is stamped `dagnam.audit.cancelled/1`.** The
+  server writes it; a cancel stops artifacts where a delete removes them, so it
+  was never the same document as `deleted.json` and no longer claims to be. A
+  receipt written by an older server is passed through as it arrives.
+- **`audit-report.json`'s `winner` block carries a fifth key, `candidate_id`.**
+  It is the account-side candidate the winner was published as, and `null` for
+  a `--local-only` run (and for any run of this version, which does not source
+  it). Readers that assumed four keys should be updated.
+
 ### Fixed
 
 - **A run wider than the audit page refuses to publish instead of 404ing every

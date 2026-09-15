@@ -6,7 +6,7 @@ from collections.abc import Callable
 import json
 from pathlib import Path
 
-from dagnam_contracts.prompts import render_chat_prompt
+from dagnam_contracts.prompts import parse_chat_prompt, render_chat_prompt
 import pytest
 from tests.audit._platform import Clock, FakePlatform, last_user, serve_chat, teacher
 from tests.typing_helpers import RequestsMocker
@@ -21,7 +21,6 @@ from dagnam.audit.steps_serve import (
     create_deployment,
     create_revision,
     holdout,
-    parse_chat_prompt,
     replay_and_score,
     wait_active,
 )

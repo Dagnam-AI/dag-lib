@@ -5,7 +5,10 @@ The deployment shape is the one G0 proved through the SDK (``vllm`` / ``text``
 platform renders the app from the version's task contract, so a head-tuned
 classifier and a chat adapter take the same path. The replay sends the
 holdout's turns and lets the served bridge render them, so what the endpoint
-scores is what a customer's client would get.
+scores is what a customer's client would get -- and the reading back is
+``dagnam_contracts.prompts.parse_chat_prompt``, the inverse of the rendering
+this module re-exports it beside, so a replay can never send text the
+classifier was not trained on.
 """
 
 from __future__ import annotations
@@ -13,10 +16,10 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 import json
-import re
 from typing import Any
 
 from dagnam_contracts.audit.verdict import UNRELIABLE_ERROR_SHARE
+from dagnam_contracts.prompts import parse_chat_prompt
 
 from dagnam._core.exceptions import (
     APIError,
@@ -38,36 +41,6 @@ CAPACITY_MODE = "serverless"
 CAPACITY_POLICY: dict[str, int] = {"min_replicas": 0, "max_replicas": 1}
 DEPLOY_RUNNING = "running"
 """``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
-
-_MARKER = re.compile(r"^<\|(\w+)\|>\n", re.MULTILINE)
-
-
-# TODO(contracts 0.3.1): import `parse_chat_prompt` from `dagnam_contracts.audit`
-# (beside `render_chat_prompt`) and delete this copy, once the floor in
-# pyproject.toml moves to `dagnam-contracts>=0.3.1`. The rendering is the
-# contract's, so its inverse belongs there too -- the platform needs it to read
-# back what a Studio replay sent. Keep the re-export from this module's
-# `__all__` so importers do not move in the same change.
-def parse_chat_prompt(text: str) -> list[dict[str, str]]:
-    """Invert ``dagnam_contracts.prompts.render_chat_prompt``: marker blocks back to messages.
-
-    A chunk before the first marker (a row truncated from the front) becomes
-    a ``user`` turn so nothing the classifier saw is dropped.
-    """
-    # ponytail: a content line that is itself `<|role|>` splits here; the
-    # rendering is the contract's, so fix it there if a real export shows it.
-    markers = list(_MARKER.finditer(text))
-    messages: list[dict[str, str]] = []
-    leading = text[: markers[0].start()] if markers else text
-    if leading:
-        messages.append({"role": "user", "content": leading.removesuffix("\n")})
-    for index, marker in enumerate(markers):
-        end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
-        messages.append(
-            {"role": marker.group(1), "content": text[marker.end() : end].removesuffix("\n")}
-        )
-    return messages
-
 
 type HoldoutRow = tuple[list[dict[str, str]], str]
 

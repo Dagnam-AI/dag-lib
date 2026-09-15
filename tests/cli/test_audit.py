@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 from unittest import mock
 
+from dagnam_contracts.audit import CANCELLED_SCHEMA
 import pytest
 from tests.audit._platform import FakeCleanup
 
@@ -269,7 +270,9 @@ def test_audit_is_grouped_and_described() -> None:
 
 
 CANCEL_RECEIPT: dict[str, object] = {
-    "schema": "dagnam.audit.deleted/1",
+    # The server's own receipt, written through verbatim: a cancel stops
+    # artifacts, so it is not the `deleted/1` document a delete returns.
+    "schema": CANCELLED_SCHEMA,
     "deleted_at": "2026-09-07T10:00:00+00:00",
     "entries": [
         {"kind": "training_job", "id": "job-1", "status": "stopped", "reason": None},
