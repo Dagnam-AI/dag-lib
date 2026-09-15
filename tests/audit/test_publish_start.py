@@ -10,7 +10,7 @@ from tests.audit._platform import FakePlatform
 from tests.audit._publish import AUDIT_ID, SCAN, entry, start
 
 from dagnam._core.exceptions import APIError
-from dagnam.audit.publish import MAX_WORKLOADS, Publisher, audit_url, workload_body
+from dagnam.audit.publish import MAX_WORKLOADS, Publisher, audit_url
 from dagnam.audit.state import AuditState
 
 if TYPE_CHECKING:
@@ -86,27 +86,6 @@ def test_start_publishes_nothing_when_the_scan_found_no_workload(
     )
     assert platform.audits == []
     assert state.audit_id is None
-
-
-def test_a_workload_without_numbers_still_publishes_a_valid_body() -> None:
-    body = workload_body(
-        {"id": "w9", "structure_class": "free_text"}, selected=False, pii_counts={}
-    )
-    assert body == {
-        "workload_id": "w9",
-        "structure_class": "free_text",
-        "template_excerpt": "",
-        "calls_per_day": 0.0,
-        "mean_prompt_tokens": None,
-        "mean_completion_tokens": None,
-        "spend_usd_month": None,
-        "export_p50_ms": None,
-        "verdict": "unknown_cost",
-        "verdict_reason": "",
-        "ratio": None,
-        "pii_counts": {},
-        "selected": False,
-    }
 
 
 # ------------------------------------------------ the account's own workload cap

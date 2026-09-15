@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
 from importlib.metadata import PackageNotFoundError, version
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,16 @@ from dagnam._core.auth import web_url_from_api_url
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
 from dagnam.audit.economics import serving_cost_usd_month
+from dagnam.audit.publish_body import (
+    ID_MAX,
+    MAX_WORKLOADS,
+    capped,
+    number,
+    pii_counts,
+    sub,
+    too_many_selected,
+    workload_body,
+)
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import PlatformClient, StepContext, error_code
 from dagnam.audit.steps_serve import DEPLOY_RUNNING
@@ -99,19 +108,10 @@ by asking again -- the back-fill of a resumed run relies on that.
 """
 MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
-MAX_WORKLOADS = 200
-"""``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter.
-
-More *selected* than this is the one shape that cannot be published at all --
-see :func:`too_many_selected`.
-"""
 AUDIT_PATH = "audits"
 """The site route one published audit is watched on."""
 
-_EXCERPT_MAX = 200
 _ERROR_MAX = 500
-_REASON_MAX = 300
-_ID_MAX = 64
 _NAME_MAX = 120
 _VERSION_MAX = 32
 
@@ -137,99 +137,6 @@ def audit_url(api_url: str, audit_id: str) -> str:
     guessing at a domain that may not exist.
     """
     return f"{web_url_from_api_url(api_url) or api_url.rstrip('/')}/{AUDIT_PATH}/{audit_id}"
-
-
-def _number(value: object) -> float | None:
-    """``value`` as a float when it is a real number, else ``None``."""
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def _mean(total: object, calls: object) -> int | None:
-    """A per-call mean from the scan's totals; the server stores means, not totals."""
-    amount, over = _number(total), _number(calls)
-    return None if amount is None or not over else round(amount / over)
-
-
-def _sub(entry: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    value = entry.get(key)
-    return value if isinstance(value, Mapping) else {}
-
-
-def _pii_counts(audit_dir: Path, workload_id: str) -> dict[str, int]:
-    """The redaction counts Task 6 wrote for this workload; empty when it derived none."""
-    meta = audit_dir / "workloads" / workload_id / "meta.json"
-    if not meta.is_file():
-        return {}
-    counts = _sub(_sub(json.loads(meta.read_text(encoding="utf-8")), "stats"), "redact").get(
-        "counts"
-    )
-    return {str(code): int(n) for code, n in counts.items()} if isinstance(counts, Mapping) else {}
-
-
-def _capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list[Mapping[str, Any]]:
-    """At most :data:`MAX_WORKLOADS` entries: the run's own first, then by spend.
-
-    The server refuses a longer list outright, which would make the whole
-    publish a dropped 422 -- so a scan that found more workloads than the audit
-    page holds publishes the ones the run took plus the biggest spenders, and
-    says in the log what it left out. Selected workloads sort first, so the
-    ones this run will open candidates against are never what the cap drops;
-    :func:`too_many_selected` is what guarantees they all fit.
-    """
-    if len(entries) <= MAX_WORKLOADS:
-        return entries
-    ranked = sorted(
-        entries,
-        key=lambda e: (str(e["id"]) not in selected, -(_number(e.get("cost_usd_month")) or 0.0)),
-    )
-    _LOGGER.warning(
-        "audit publish: the scan found %d workloads and the account holds %d;"
-        " publishing the %d this run took plus the highest-spending others",
-        len(entries),
-        MAX_WORKLOADS,
-        sum(1 for e in entries if str(e["id"]) in selected),
-    )
-    return ranked[:MAX_WORKLOADS]
-
-
-def too_many_selected(count: int) -> str | None:
-    """Why a run of ``count`` workloads cannot be published, or ``None`` when it can.
-
-    A candidate is opened against a workload the audit carries, so publishing a
-    list the cap truncated would 404 every candidate of every row it dropped.
-    There is no honest body to send for a run this wide: it stays local, with
-    every number still in ``audit-report.json``.
-    """
-    if count <= MAX_WORKLOADS:
-        return None
-    return (
-        f"not published: this run took {count} workloads and an audit page holds"
-        f" {MAX_WORKLOADS}; every number stays in the local report."
-        " Run fewer at a time (--workloads) to publish it."
-    )
-
-
-def workload_body(
-    entry: Mapping[str, Any], *, selected: bool, pii_counts: Mapping[str, int]
-) -> JsonObject:
-    """One ``scan-report.json`` workload as the publish body's ``WorkloadPublish``."""
-    verdict = _sub(entry, "verdict")
-    tokens = _sub(entry, "tokens")
-    return {
-        "workload_id": str(entry["id"])[:_ID_MAX],
-        "structure_class": str(entry["structure_class"]),
-        "template_excerpt": str(entry.get("template_excerpt") or "")[:_EXCERPT_MAX],
-        "calls_per_day": _number(entry.get("calls_per_day")) or 0.0,
-        "mean_prompt_tokens": _mean(tokens.get("prompt"), entry.get("calls")),
-        "mean_completion_tokens": _mean(tokens.get("completion"), entry.get("calls")),
-        "spend_usd_month": _number(entry.get("cost_usd_month")),
-        "export_p50_ms": _number(_sub(entry, "latency_ms").get("p50")),
-        "verdict": str(verdict.get("status") or "unknown_cost"),
-        "verdict_reason": str(verdict.get("reason") or "")[:_REASON_MAX],
-        "ratio": _number(verdict.get("ratio")),
-        "pii_counts": dict(pii_counts),
-        "selected": selected,
-    }
 
 
 def status_for(step_name: str, step: StepState) -> str:
@@ -306,7 +213,7 @@ class Publisher:
             # the person is waiting for the link that is not coming.
             self._guard("the workload-cap notice", lambda: self._announce(refusal))
             return
-        published = _capped(entries, selected)
+        published = capped(entries, selected)
 
         def body() -> JsonObject:
             # Built inside the guarded call: a scan report this client cannot
@@ -326,7 +233,7 @@ class Publisher:
                     workload_body(
                         entry,
                         selected=str(entry["id"]) in selected,
-                        pii_counts=_pii_counts(audit_dir, str(entry["id"])),
+                        pii_counts=pii_counts(audit_dir, str(entry["id"])),
                     )
                     for entry in published
                 ],
@@ -370,7 +277,7 @@ class Publisher:
             return
         client, audit_id = target
         body: JsonObject = {
-            "workload_id": ctx.workload_id[:_ID_MAX],
+            "workload_id": ctx.workload_id[:ID_MAX],
             "kind": ctx.spec.kind.value,
             "recipe_key": ctx.spec.recipe_key,
         }
@@ -471,12 +378,12 @@ class Publisher:
         entry = self._entries.get(ctx.workload_id)
         if entry is None or ctx.spec.serving_rate_key is None:
             return None
-        tokens = _sub(entry, "tokens")
+        tokens = sub(entry, "tokens")
         return serving_cost_usd_month(
             ctx.spec.serving_rate_key,
-            calls_per_day=_number(entry.get("calls_per_day")) or 0.0,
-            completion_tokens=int(_number(tokens.get("completion")) or 0),
-            calls=int(_number(entry.get("calls")) or 1) or 1,
+            calls_per_day=number(entry.get("calls_per_day")) or 0.0,
+            completion_tokens=int(number(tokens.get("completion")) or 0),
+            calls=int(number(entry.get("calls")) or 1) or 1,
         )
 
     # -- transport ------------------------------------------------------------
