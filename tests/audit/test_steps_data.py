@@ -72,6 +72,40 @@ def test_resolve_version_handles_no_versions_yet(
     assert ctx.step(resolve_version(state, ctx)).version_id == "ds-1-v1"
 
 
+def test_resolve_version_halts_when_processing_already_failed(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    """The platform made the upload's processing run terminal before the first version poll."""
+    ctx = make_ctx()
+    state = upload(AuditState(), ctx)
+    platform.analysis = {"analysis_status": "failed", "analysis_error": "unsupported file"}
+    step = ctx.step(resolve_version(state, ctx))
+    assert step.version_id is None
+    assert step.error == "upload_failed: unsupported file"
+    assert "list_dataset_versions" not in platform.call_log
+
+
+def test_resolve_version_halts_when_processing_fails_mid_wait(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two pending polls, then the dataset goes terminal; a row with no reason still names one."""
+    platform.version_polls = 9
+    ctx = make_ctx()
+    state = upload(AuditState(), ctx)
+    rows = iter(
+        [
+            {"analysis_status": "processing"},
+            {"analysis_status": "processing"},
+            {"analysis_status": "failed"},
+        ]
+    )
+    monkeypatch.setattr(platform, "get_dataset", lambda dataset_id: next(rows))
+    step = ctx.step(resolve_version(state, ctx))
+    assert step.version_id is None
+    assert step.error == "upload_failed: the platform gave no reason"
+    assert platform.call_log.count("list_dataset_versions") == 2
+
+
 def test_resolve_version_records_a_format_mismatch(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:

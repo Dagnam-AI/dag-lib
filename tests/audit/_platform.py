@@ -99,6 +99,8 @@ class FakePlatform:
         self.revision_polls = 2
         self.revision_final = "active"
         self.uploads: dict[str, str] = {}
+        self.analysis: JsonObject = {"analysis_status": "completed", "analysis_error": None}
+        """The dataset row's processing state, as ``get_dataset`` reports it."""
         self.deployments: list[JsonObject] = []
         self.revisions: list[JsonObject] = []
         self.paused: list[str] = []
@@ -167,6 +169,10 @@ class FakePlatform:
         dataset_id = self._next("ds")
         self.uploads[dataset_id] = "labeled-example" if "label" in first else "chat-messages"
         return {"id": dataset_id, "name": name, "format": format, "dataset_type": dataset_type}
+
+    def get_dataset(self, dataset_id: str) -> JsonObject:
+        self._log("get_dataset")
+        return {"id": dataset_id, **self.analysis}
 
     def list_dataset_versions(self, dataset_id: str) -> list[JsonObject]:
         self._log("list_dataset_versions")
