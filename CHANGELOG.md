@@ -7,6 +7,46 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-14
+
+### Fixed
+
+- **A run wider than the audit page refuses to publish instead of 404ing every
+  candidate.** `AuditCreate.workloads` holds 200 rows, and the rows past that
+  cap never reached the account -- so a run that *selected* more than 200
+  workloads opened its candidates against workloads the audit did not carry and
+  collected one 404 warning per candidate for the whole run. `dagnam audit run`
+  now says so once, publishes nothing, and keeps every number in the local
+  `audit-report.json`. A scan that merely *found* more than 200 is unchanged:
+  the ones this run took are published first, then the biggest spenders.
+- **A candidate that failed on an earlier run reaches the account on resume.**
+  A recorded failure is terminal, and the frontier skipped such a candidate
+  before the publisher ever saw it -- so a run whose first `create_audit` failed
+  left that candidate out of the audit page entirely, with no row and no reason.
+  The back-fill now publishes each step the candidate finished with the status
+  it earned and ends at the step it actually died on, carrying the error.
+- **A paused deployment is reported as `paused`, not `deploying`.** An endpoint
+  `dagnam audit cancel` had deliberately stopped read, in `audit-report.json`
+  and the markdown beside it, as one still on its way up.
+- **The audit's "watch it at" link matches the API host exactly.** It was chosen
+  with a prefix test, so a URL that merely *starts* like a known host --
+  `http://localhost:8000@evil.example/`, whose host is `evil.example` -- was
+  given that host's site. It now compares the parsed host and scheme, which
+  also fixes two honest cases the prefix missed: `https://api.dagnam.ai/v1` and
+  a port-less `http://localhost`.
+- **A back-fill no longer republishes one redundant `deploying` pulse** for a
+  candidate that scored and was paused since: `wait_active`'s "already done"
+  guard now mirrors the step's own, which returns early on `scored` as well as
+  on `running`.
+
+### Removed
+
+- **`dagnam.audit.prices.SERVING_RATES`** (and the `prices/serving.json` it read)
+  duplicated `dagnam_contracts.audit.serving.SERVING_RATES`, which is what every
+  serving cost has actually been computed from. Read the rates from the contract
+  -- `load_serving_rates()` there carries their basis and assumptions, and the
+  npm package ships the same file.
+
 ## [0.14.0] - 2026-09-08
 
 ### Changed
