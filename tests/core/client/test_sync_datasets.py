@@ -43,6 +43,23 @@ def test_list_datasets_no_search(client: DagnamClient, rmock: RequestsMocker) ->
     assert qs == {"type": ["all"]}
 
 
+def test_get_dataset_reads_the_analysis_status(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(
+        f"{API}/api/v1/datasets/ds%201",
+        json={"id": "ds 1", "analysis_status": "failed", "analysis_error": "bad rows"},
+    )
+    assert client.get_dataset("ds 1")["analysis_status"] == "failed"
+
+
+def test_get_dataset_404_raises_dataset_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/datasets/ds1", status_code=404)
+    client._sleep = lambda _s: None
+    with pytest.raises(DatasetNotFoundError):
+        client.get_dataset("ds1")
+
+
 def test_get_dataset_meta_with_version(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/datasets/ds1/meta", json={"id": "ds1"})
     client.get_dataset_meta("ds1", version="v2")

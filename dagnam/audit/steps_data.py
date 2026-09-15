@@ -20,6 +20,8 @@ FILE_FORMAT = "json"
 """The upload ``format`` is the FILE format; the row format is sniffed into the version."""
 SPLIT_NAMES = {"train": "train", "eval_holdout": "validation"}
 """Task 6's split names -> the platform's."""
+PROCESSING_FAILED = "failed"
+"""``analysis_status`` once the platform has given up on processing the upload."""
 
 
 def upload(state: AuditState, ctx: StepContext) -> AuditState:
@@ -39,7 +41,15 @@ def upload(state: AuditState, ctx: StepContext) -> AuditState:
 
 
 def _newest_version(ctx: StepContext, dataset_id: str) -> JsonObject:
-    """The highest-numbered version as a pollable payload: ``ready`` once sniffed and counted."""
+    """The highest-numbered version as a pollable payload: ``ready`` once sniffed and counted.
+
+    ``failed`` when the platform's own processing run for the upload gave up:
+    that is terminal on the dataset row, so waiting for a version it will
+    never produce would burn the whole task timeout with no cause.
+    """
+    dataset = ctx.client.get_dataset(dataset_id)
+    if dataset.get("analysis_status") == PROCESSING_FAILED:
+        return {"status": PROCESSING_FAILED, "analysis_error": dataset.get("analysis_error")}
     versions = ctx.client.list_dataset_versions(dataset_id)
     if not versions:
         return {"status": "pending"}
@@ -56,12 +66,19 @@ def resolve_version(state: AuditState, ctx: StepContext) -> AuditState:
     dataset_id = required(step.dataset_id, "dataset_id")
     version = wait_for(
         ctx,
+        # `failed` is terminal, not an LRO failure: the audit records it as
+        # this candidate's step error below, which is what halts the run with
+        # the platform's own reason instead of raising out of the step.
         lambda: _newest_version(ctx, dataset_id),
-        success={"ready"},
+        success={"ready", PROCESSING_FAILED},
         failure=set(),
         timeout=ctx.task_timeout,
         name=f"dataset {dataset_id} sniff",
     )
+    if version["status"] == PROCESSING_FAILED:
+        reason = string_field(version, "analysis_error") or "the platform gave no reason"
+        step.error = f"upload_failed: {reason}"
+        return state
     expected = str(ctx.meta()["stats"]["format_key"])
     sniffed = string_field(version, "data_format")
     if sniffed != expected:
@@ -150,6 +167,7 @@ def wait_pii(state: AuditState, ctx: StepContext) -> AuditState:
 __all__ = [
     "DATASET_TYPE",
     "FILE_FORMAT",
+    "PROCESSING_FAILED",
     "SPLIT_NAMES",
     "pii_scan",
     "resolve_version",

@@ -116,14 +116,13 @@ def _candidate(
         "training_cost_credits": step.training_cost_credits,
         "replay_cost_credits": step.replay_cost_credits,
         "status": candidate_status(spec, step),
+        # The account-side row this candidate was published to (`None` for a
+        # `--local-only` run): `winner_of` passes it through, which is what
+        # lets the audit page link a winner to the candidate the run published.
+        "candidate_id": step.published_candidate_id,
     }
 
 
-# TODO(contracts 0.3.1): the winner block gains `candidate_id`, so `_candidate`
-# should carry `step.published_candidate_id` and `winner_of` will pass it
-# through -- that is what lets the audit page link a winner row to the
-# candidate the run published. Apply with the floor bump, not before: on 0.3.0
-# `winner_of` drops the key and the report would gain a field nothing reads.
 def _winner(candidates: list[dict[str, Any]], default_floor: float) -> dict[str, Any] | None:
     """The contract's ``winner`` block over this workload's candidate dicts."""
     return winner_of(candidates, floor=default_floor)

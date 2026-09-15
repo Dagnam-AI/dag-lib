@@ -131,6 +131,7 @@ def test_report_follows_the_contract() -> None:
         "training_cost_credits",
         "replay_cost_credits",
         "status",
+        "candidate_id",
     }
     assert (head["run_id"], head["model_version_id"], head["deployment_id"]) == (
         "run-1",
@@ -178,6 +179,16 @@ def test_report_follows_the_contract() -> None:
             None,
         )
     assert SECRET not in json.dumps(js)
+
+
+def test_a_published_run_names_the_winning_candidate_id() -> None:
+    """The report and the account agree on the row: the winner carries the published id."""
+    state = _state()
+    state.workloads["w1"][HEAD].published_candidate_id = "cand-7"
+    js = build_audit_report(state, _scan(), price_table=TABLE)
+    w1 = js["workloads"][0]
+    assert [c["candidate_id"] for c in w1["candidates"]] == [None, "cand-7"]
+    assert w1["winner"]["candidate_id"] == "cand-7"
 
 
 def test_hosted_floor_needs_one_priced_model_with_a_variant() -> None:

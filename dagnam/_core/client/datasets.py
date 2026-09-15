@@ -59,6 +59,24 @@ class DatasetsClientMixin(BaseDagnamClient):
         )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
+    def get_dataset(self, dataset_id: str) -> JsonObject:
+        """GET /api/v1/datasets/{dataset_id} — the dataset row.
+
+        Unlike ``get_dataset_meta`` this answers while the upload is still
+        being processed, and it carries ``analysis_status`` /
+        ``analysis_error`` — so a caller waiting on a new upload can tell a
+        processing run that failed from one still running.
+        """
+        dataset_path = quote_path_segment(dataset_id)
+        url = f"{self.api_url}/api/v1/datasets/{dataset_path}"
+        resp = self._request(
+            "GET",
+            url,
+            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
+        return response_json_object(resp)
+
     def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
         """Fetch dataset metadata from the API.
 

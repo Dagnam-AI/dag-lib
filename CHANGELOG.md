@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-09-14
+
+### Fixed
+
+- **`dagnam audit run` stops on a failed dataset upload instead of waiting out
+  its timeout.** A dataset whose processing run fails is terminal on the
+  platform (`analysis_status: "failed"`), and it never produces the version the
+  data step was polling for -- so the run sat there for the whole task timeout
+  and then reported no cause. The step now reads the dataset row alongside the
+  versions and records `upload_failed: <the platform's reason>`, which halts
+  that candidate and shows up in `audit-report.json` and the markdown beside
+  it. A dataset still `pending` waits exactly as before.
+
+### Changed
+
+- **`audit-report.json`'s candidates and `winner` carry `candidate_id`.** 0.14.1
+  added the key to the contract but left it `null`; a published run now names
+  the account-side candidate, so the report and the audit page agree on which
+  row won. A `--local-only` run opens no candidate, so it stays `null`.
+- **New client method `DagnamClient.get_dataset(dataset_id)`** -- the dataset
+  row (`GET /api/v1/datasets/{id}`), which unlike `get_dataset_meta` answers
+  while an upload is still being processed and carries `analysis_status` and
+  `analysis_error`.
+
 ## [0.14.1] - 2026-09-14
 
 ### Changed

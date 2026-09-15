@@ -66,6 +66,10 @@ class PlatformClient(Protocol):
         """``POST /api/v1/datasets/`` (multipart)."""
         ...
 
+    def get_dataset(self, dataset_id: str) -> JsonObject:
+        """``GET /api/v1/datasets/{id}`` -> the row, with ``analysis_status``/``analysis_error``."""
+        ...
+
     def list_dataset_versions(self, dataset_id: str) -> list[JsonObject]:
         """``GET /api/v1/datasets/{id}/versions``."""
         ...
