@@ -16,7 +16,7 @@ from dagnam_contracts.audit.report import (
     winner_of,
 )
 
-from dagnam.audit import derive, economics, prices, report, scoring, steps_serve, thresholds
+from dagnam.audit import derive, economics, report, scoring, steps_serve, thresholds
 
 # By name, not through ``dagnam.audit``: the package re-exports the ``frontier``
 # *function*, which shadows the module of the same name.
@@ -70,13 +70,6 @@ def test_thresholds_and_rules_are_the_contract_values() -> None:
     assert report.SCHEMA == REPORT_SCHEMA
     assert report.DEFAULT_BASE_URL == DEFAULT_BASE_URL
     assert report.render_switch_snippet is render_switch_snippet
-
-
-def test_bundled_serving_rates_equal_the_contract_rates() -> None:
-    """``serving.json`` still stamps the price table, but its numbers are the contract's."""
-    for kind, rates in contract_serving.SERVING_RATES.items():
-        for unit, value in rates.items():
-            assert prices.SERVING_RATES[kind][unit] == value, f"{kind}.{unit}"
 
 
 def test_report_winner_matches_the_contract_over_the_same_candidates() -> None:

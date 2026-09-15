@@ -10,7 +10,6 @@ import pytest
 
 from dagnam.audit.prices import (
     PRICES_DIR,
-    SERVING_RATES,
     PriceRow,
     PriceTable,
     PriceTableError,
@@ -183,12 +182,3 @@ def test_optional_row_fields_are_optional(tmp_path: Path) -> None:
         ' "output_per_m": 2, "cached_input_per_m": 0.5, "cheaper_variant": "m"}}}'
     )
     assert PriceTable.load(path).rows["m"] == PriceRow("m", 1.0, 2.0, 0.5, "m")
-
-
-def test_serving_rates_are_the_two_estimated_rows() -> None:
-    assert set(SERVING_RATES) == {"cpu-classifier", "gpu-small-llm"}
-    assert SERVING_RATES["cpu-classifier"]["usd_per_1k_requests"] > 0
-    assert SERVING_RATES["gpu-small-llm"]["usd_per_m_output_tokens"] > 0
-    for rate in SERVING_RATES.values():
-        assert rate["basis"] == "estimated"
-        assert rate["assumptions"]

@@ -17,7 +17,7 @@ from typing import Literal
 from dagnam.audit.structure import StructureClass
 
 StudentKind = Literal["cpu-classifier", "gpu-small-llm"]
-"""The two serving shapes a student is priced as (rows of Task 5's ``SERVING_RATES``)."""
+"""The two serving shapes a student is priced as (``dagnam_contracts.audit.serving``)."""
 
 
 class CandidateKind(StrEnum):
@@ -35,7 +35,7 @@ class CandidateSpec:
     ``recipe_key``/``base_family`` are ``None`` for a candidate that needs no
     run; ``max_params`` caps the base chosen from the catalog (``None`` means
     the family's smallest, whatever its size). ``serving_rate_key`` names the
-    row in Task 5's ``SERVING_RATES`` the report prices serving with; it is
+    row in the contract's ``SERVING_RATES`` the report prices serving with; it is
     ``None`` for the hosted floor, whose cost comes from the price table.
     """
 
