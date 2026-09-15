@@ -10,6 +10,7 @@ from tests.audit._publish import AUDIT_ID, start
 
 from dagnam._core.exceptions import APIError
 from dagnam.audit.candidates import CandidateKind
+from dagnam.audit.cleanup import DEPLOY_PAUSED
 from dagnam.audit.publish import (
     DONE_BY_STEP,
     MAX_PENDING,
@@ -285,3 +286,26 @@ def test_a_run_that_never_halted_publishes_its_first_halt(
     publisher.halt("error")
     publisher.halt("error")
     assert platform.halts == [("audit-1", "error")]
+
+
+def test_the_wait_active_guard_mirrors_the_step_s_own_or_scored(
+    platform: FakePlatform, state: AuditState, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    """A candidate that scored and was paused since has finished `wait_active`.
+
+    The step returns early on `step.scored` as well as on `running` -- it was
+    live once, and `dagnam audit cancel` pauses that endpoint -- so a guard
+    that asked only for `running` made the back-fill publish one `deploying`
+    pulse the run itself never sends.
+    """
+    scored_then_paused = StepState(
+        deployment_id="dep-1", deploy_status=DEPLOY_PAUSED, scored=True, published_candidate_id="c1"
+    )
+    assert DONE_BY_STEP["wait_active"](scored_then_paused)
+
+    publisher = Publisher(platform, state)
+    start(publisher, audit_dir)
+    publisher.backfill(make_ctx(), scored_then_paused)
+
+    steps = [body["step"] for _, body in platform.patches]
+    assert steps.index("wait_active") < steps.index("replay")

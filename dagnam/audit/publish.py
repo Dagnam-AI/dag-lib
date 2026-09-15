@@ -73,7 +73,9 @@ DONE_BY_STEP: Mapping[str, Callable[[StepState], bool]] = {
     "resolve_model_version": lambda s: s.model_version_id is not None,
     "create_deployment": lambda s: s.deployment_id is not None,
     "create_revision": lambda s: s.deploy_status is not None,
-    "wait_active": lambda s: s.deploy_status == DEPLOY_RUNNING,
+    # ``or s.scored`` mirrors the step's own guard: a candidate that already
+    # scored was live once, and a cancel since may have paused that endpoint.
+    "wait_active": lambda s: s.deploy_status == DEPLOY_RUNNING or bool(s.scored),
     "replay_and_score": lambda s: bool(s.scored),
 }
 """Each step's own "already done" guard, mirrored from ``steps_*``, in ``STEPS`` order.
