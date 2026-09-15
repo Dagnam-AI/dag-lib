@@ -100,7 +100,11 @@ by asking again -- the back-fill of a resumed run relies on that.
 MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
 MAX_WORKLOADS = 200
-"""``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter."""
+"""``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter.
+
+More *selected* than this is the one shape that cannot be published at all --
+see :func:`too_many_selected`.
+"""
 AUDIT_PATH = "audits"
 """The site route one published audit is watched on."""
 
@@ -168,7 +172,9 @@ def _capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list
     The server refuses a longer list outright, which would make the whole
     publish a dropped 422 -- so a scan that found more workloads than the audit
     page holds publishes the ones the run took plus the biggest spenders, and
-    says in the log what it left out.
+    says in the log what it left out. Selected workloads sort first, so the
+    ones this run will open candidates against are never what the cap drops;
+    :func:`too_many_selected` is what guarantees they all fit.
     """
     if len(entries) <= MAX_WORKLOADS:
         return entries
@@ -184,6 +190,23 @@ def _capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list
         sum(1 for e in entries if str(e["id"]) in selected),
     )
     return ranked[:MAX_WORKLOADS]
+
+
+def too_many_selected(count: int) -> str | None:
+    """Why a run of ``count`` workloads cannot be published, or ``None`` when it can.
+
+    A candidate is opened against a workload the audit carries, so publishing a
+    list the cap truncated would 404 every candidate of every row it dropped.
+    There is no honest body to send for a run this wide: it stays local, with
+    every number still in ``audit-report.json``.
+    """
+    if count <= MAX_WORKLOADS:
+        return None
+    return (
+        f"not published: this run took {count} workloads and an audit page holds"
+        f" {MAX_WORKLOADS}; every number stays in the local report."
+        " Run fewer at a time (--workloads) to publish it."
+    )
 
 
 def workload_body(
@@ -275,6 +298,13 @@ class Publisher:
         self._entries = {str(entry["id"]): entry for entry in entries}
         client = self._client
         if client is None or self._state.audit_id is not None or not entries:
+            return
+        refusal = too_many_selected(sum(1 for entry in entries if str(entry["id"]) in selected))
+        if refusal is not None:
+            _LOGGER.warning("audit publish: %s", refusal)
+            # Said out loud, not only logged: the run was asked to publish and
+            # the person is waiting for the link that is not coming.
+            self._guard("the workload-cap notice", lambda: self._announce(refusal))
             return
         published = _capped(entries, selected)
 
@@ -503,5 +533,6 @@ __all__ = [
     "installed_version",
     "silent",
     "status_for",
+    "too_many_selected",
     "workload_body",
 ]

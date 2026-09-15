@@ -134,6 +134,57 @@ def test_a_scan_bigger_than_the_account_holds_publishes_the_run_s_own_first(
     assert "the scan found 201 workloads and the account holds 200" in caplog.text
 
 
+def test_more_selected_workloads_than_the_account_holds_publishes_nothing(
+    publisher: Publisher, platform: FakePlatform, state: AuditState, audit_dir: Path
+) -> None:
+    """Publishing a truncated list would 404 every candidate the cap dropped.
+
+    The cap ranks selected workloads first, so it only ever drops unselected
+    ones -- unless the run itself took more than the page holds, and then there
+    is no honest body to send. The run keeps every number locally.
+    """
+    selected = [entry(f"w{i}", "enum_label", "candidate") for i in range(MAX_WORKLOADS + 1)]
+    lines: list[str] = []
+    publisher = Publisher(platform, state, lines.append)
+
+    publisher.start(
+        audit_dir,
+        {**SCAN, "workloads": selected},
+        [str(w["id"]) for w in selected],
+        floor=0.97,
+        max_credits=500,
+        sdk_version="9.9.9",
+    )
+
+    assert platform.audits == []
+    assert state.audit_id is None
+    assert lines == [
+        "not published: this run took 201 workloads and an audit page holds 200;"
+        " every number stays in the local report. Run fewer at a time (--workloads)"
+        " to publish it."
+    ]
+
+
+def test_exactly_as_many_selected_workloads_as_the_account_holds_is_published(
+    publisher: Publisher, platform: FakePlatform, audit_dir: Path
+) -> None:
+    """The cap is the last size that fits, not the first that does not."""
+    selected = [entry(f"w{i}", "enum_label", "candidate") for i in range(MAX_WORKLOADS)]
+
+    publisher.start(
+        audit_dir,
+        {**SCAN, "workloads": [*selected, entry("extra", "enum_label", "not_worth_it")]},
+        [str(w["id"]) for w in selected],
+        floor=0.97,
+        max_credits=500,
+        sdk_version="9.9.9",
+    )
+
+    published = platform.audits[0]["workloads"]
+    assert len(published) == MAX_WORKLOADS
+    assert all(w["selected"] for w in published)  # the unselected extra is what was dropped
+
+
 def test_a_scan_within_the_cap_is_published_in_the_order_it_was_scanned(
     publisher: Publisher, platform: FakePlatform, audit_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
