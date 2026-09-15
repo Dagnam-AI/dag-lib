@@ -13,7 +13,9 @@ from tests.audit._platform import Clock, FakePlatform, json_row, label_row
 
 from dagnam.audit import TraceRecord, read_traces, write_workload
 from dagnam.audit.candidates import HEAD_TUNE, CandidateSpec
+from dagnam.audit.publish import Publisher
 from dagnam.audit.secrets import SecretStore
+from dagnam.audit.state import AuditState
 from dagnam.audit.steps import StepContext
 from dagnam.audit.structure import StructureClass
 
@@ -104,3 +106,13 @@ def make_ctx(audit_dir: Path, platform: FakePlatform, clock: Clock) -> Callable[
         return StepContext(**settings)
 
     return build
+
+
+@pytest.fixture
+def state() -> AuditState:
+    return AuditState(project_id="proj-1")
+
+
+@pytest.fixture
+def publisher(platform: FakePlatform, state: AuditState) -> Publisher:
+    return Publisher(platform, state)

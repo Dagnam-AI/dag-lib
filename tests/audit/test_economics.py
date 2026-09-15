@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
+from dagnam_contracts.audit.serving import SERVING_RATES
 from hypothesis import given, settings, strategies as st
 import pytest
 from tests.audit._records import make_workload
@@ -20,7 +21,7 @@ from dagnam.audit.economics import (
     replaceability,
     student_cost_usd_month,
 )
-from dagnam.audit.prices import SERVING_RATES, PriceRow, PriceTable
+from dagnam.audit.prices import PriceRow, PriceTable
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import (
     DAYS_PER_MONTH,

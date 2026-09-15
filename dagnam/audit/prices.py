@@ -1,10 +1,11 @@
-"""Vendor price tables and the platform's estimated serving rates.
+"""Vendor price tables: what a teacher model costs per million tokens.
 
 A price table is a versioned JSON file under ``prices/`` copied from the
 vendors' public price pages on its ``as_of`` date (URLs in its ``_sources``
 key); the newest bundled one is the default. A model without a row prices to
-``None`` — never a guess. ``serving.json`` holds the two student serving rates,
-labelled *estimated* until the platform bills for real.
+``None`` — never a guess. The student serving rates are not here: they belong
+to the contract (``dagnam_contracts.audit.serving``), which the platform reads
+too, and ``load_serving_rates()`` there carries their basis and assumptions.
 
 A trace export names the same model many ways -- routers and gateways prefix
 the vendor (``anthropic/claude-sonnet-5``, ``models/gemini-2.5-flash``,
@@ -158,12 +159,3 @@ def _row(path: Path, model: str, raw: Any) -> PriceRow:
         raise PriceTableError(path, f"row {model} has a mistyped field")
     cached = None if values[2] is None else float(values[2])
     return PriceRow(model, float(values[0]), float(values[1]), cached, values[3])
-
-
-def _serving_rates() -> Mapping[str, Mapping[str, Any]]:
-    data = json.loads((PRICES_DIR / "serving.json").read_text(encoding="utf-8"))
-    return data["rates"]
-
-
-SERVING_RATES: Mapping[str, Mapping[str, Any]] = _serving_rates()
-"""``cpu-classifier`` ($ per 1K requests) and ``gpu-small-llm`` ($ per 1M output tokens), each labelled ``basis: estimated`` with its assumptions."""

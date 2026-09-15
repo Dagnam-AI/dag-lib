@@ -18,6 +18,8 @@ from pathlib import Path
 import shutil
 from typing import Any, Protocol
 
+from dagnam_contracts.audit import DELETED_SCHEMA
+
 from dagnam._core.exceptions import (
     APIError,
     DagnamError,
@@ -33,10 +35,16 @@ from dagnam.audit.state import AuditState, StepState, load_state
 from dagnam.audit.steps_train import RUN_COMPLETED, RUN_FAILED
 from dagnam.audit.workspace import write_atomic
 
-SCHEMA = "dagnam.audit.deleted/1"
+SCHEMA = DELETED_SCHEMA
+"""The schema ``delete_audit`` stamps on ``deleted.json``; the contract owns the id."""
 DELETED_FILE = "deleted.json"
 CANCELLED_FILE = "cancelled.json"
-"""``audit cancel``'s receipt. A cancel stops artifacts; only a delete removes them."""
+"""``audit cancel``'s receipt. A cancel stops artifacts; only a delete removes them.
+
+The server stamps it :data:`~dagnam_contracts.audit.CANCELLED_SCHEMA`
+(``dagnam.audit.cancelled/1``) -- a different document from a delete receipt,
+and it is written through verbatim, never re-stamped here.
+"""
 RUN_CANCELLED = "cancelled"
 DEPLOY_PAUSED = "paused"
 CANCELLED_ERROR = "cancelled: stopped by `dagnam audit cancel`"

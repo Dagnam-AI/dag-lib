@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
 from importlib.metadata import PackageNotFoundError, version
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,16 @@ from dagnam._core.auth import web_url_from_api_url
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
 from dagnam.audit.economics import serving_cost_usd_month
+from dagnam.audit.publish_body import (
+    ID_MAX,
+    MAX_WORKLOADS,
+    capped,
+    number,
+    pii_counts,
+    sub,
+    too_many_selected,
+    workload_body,
+)
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import PlatformClient, StepContext, error_code
 from dagnam.audit.steps_serve import DEPLOY_RUNNING
@@ -73,7 +82,9 @@ DONE_BY_STEP: Mapping[str, Callable[[StepState], bool]] = {
     "resolve_model_version": lambda s: s.model_version_id is not None,
     "create_deployment": lambda s: s.deployment_id is not None,
     "create_revision": lambda s: s.deploy_status is not None,
-    "wait_active": lambda s: s.deploy_status == DEPLOY_RUNNING,
+    # ``or s.scored`` mirrors the step's own guard: a candidate that already
+    # scored was live once, and a cancel since may have paused that endpoint.
+    "wait_active": lambda s: s.deploy_status == DEPLOY_RUNNING or bool(s.scored),
     "replay_and_score": lambda s: bool(s.scored),
 }
 """Each step's own "already done" guard, mirrored from ``steps_*``, in ``STEPS`` order.
@@ -97,15 +108,10 @@ by asking again -- the back-fill of a resumed run relies on that.
 """
 MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
-MAX_WORKLOADS = 200
-"""``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter."""
 AUDIT_PATH = "audits"
 """The site route one published audit is watched on."""
 
-_EXCERPT_MAX = 200
 _ERROR_MAX = 500
-_REASON_MAX = 300
-_ID_MAX = 64
 _NAME_MAX = 120
 _VERSION_MAX = 32
 
@@ -131,80 +137,6 @@ def audit_url(api_url: str, audit_id: str) -> str:
     guessing at a domain that may not exist.
     """
     return f"{web_url_from_api_url(api_url) or api_url.rstrip('/')}/{AUDIT_PATH}/{audit_id}"
-
-
-def _number(value: object) -> float | None:
-    """``value`` as a float when it is a real number, else ``None``."""
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def _mean(total: object, calls: object) -> int | None:
-    """A per-call mean from the scan's totals; the server stores means, not totals."""
-    amount, over = _number(total), _number(calls)
-    return None if amount is None or not over else round(amount / over)
-
-
-def _sub(entry: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    value = entry.get(key)
-    return value if isinstance(value, Mapping) else {}
-
-
-def _pii_counts(audit_dir: Path, workload_id: str) -> dict[str, int]:
-    """The redaction counts Task 6 wrote for this workload; empty when it derived none."""
-    meta = audit_dir / "workloads" / workload_id / "meta.json"
-    if not meta.is_file():
-        return {}
-    counts = _sub(_sub(json.loads(meta.read_text(encoding="utf-8")), "stats"), "redact").get(
-        "counts"
-    )
-    return {str(code): int(n) for code, n in counts.items()} if isinstance(counts, Mapping) else {}
-
-
-def _capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list[Mapping[str, Any]]:
-    """At most :data:`MAX_WORKLOADS` entries: the run's own first, then by spend.
-
-    The server refuses a longer list outright, which would make the whole
-    publish a dropped 422 -- so a scan that found more workloads than the audit
-    page holds publishes the ones the run took plus the biggest spenders, and
-    says in the log what it left out.
-    """
-    if len(entries) <= MAX_WORKLOADS:
-        return entries
-    ranked = sorted(
-        entries,
-        key=lambda e: (str(e["id"]) not in selected, -(_number(e.get("cost_usd_month")) or 0.0)),
-    )
-    _LOGGER.warning(
-        "audit publish: the scan found %d workloads and the account holds %d;"
-        " publishing the %d this run took plus the highest-spending others",
-        len(entries),
-        MAX_WORKLOADS,
-        sum(1 for e in entries if str(e["id"]) in selected),
-    )
-    return ranked[:MAX_WORKLOADS]
-
-
-def workload_body(
-    entry: Mapping[str, Any], *, selected: bool, pii_counts: Mapping[str, int]
-) -> JsonObject:
-    """One ``scan-report.json`` workload as the publish body's ``WorkloadPublish``."""
-    verdict = _sub(entry, "verdict")
-    tokens = _sub(entry, "tokens")
-    return {
-        "workload_id": str(entry["id"])[:_ID_MAX],
-        "structure_class": str(entry["structure_class"]),
-        "template_excerpt": str(entry.get("template_excerpt") or "")[:_EXCERPT_MAX],
-        "calls_per_day": _number(entry.get("calls_per_day")) or 0.0,
-        "mean_prompt_tokens": _mean(tokens.get("prompt"), entry.get("calls")),
-        "mean_completion_tokens": _mean(tokens.get("completion"), entry.get("calls")),
-        "spend_usd_month": _number(entry.get("cost_usd_month")),
-        "export_p50_ms": _number(_sub(entry, "latency_ms").get("p50")),
-        "verdict": str(verdict.get("status") or "unknown_cost"),
-        "verdict_reason": str(verdict.get("reason") or "")[:_REASON_MAX],
-        "ratio": _number(verdict.get("ratio")),
-        "pii_counts": dict(pii_counts),
-        "selected": selected,
-    }
 
 
 def status_for(step_name: str, step: StepState) -> str:
@@ -274,7 +206,14 @@ class Publisher:
         client = self._client
         if client is None or self._state.audit_id is not None or not entries:
             return
-        published = _capped(entries, selected)
+        refusal = too_many_selected(sum(1 for entry in entries if str(entry["id"]) in selected))
+        if refusal is not None:
+            _LOGGER.warning("audit publish: %s", refusal)
+            # Said out loud, not only logged: the run was asked to publish and
+            # the person is waiting for the link that is not coming.
+            self._guard("the workload-cap notice", lambda: self._announce(refusal))
+            return
+        published = capped(entries, selected)
 
         def body() -> JsonObject:
             # Built inside the guarded call: a scan report this client cannot
@@ -294,7 +233,7 @@ class Publisher:
                     workload_body(
                         entry,
                         selected=str(entry["id"]) in selected,
-                        pii_counts=_pii_counts(audit_dir, str(entry["id"])),
+                        pii_counts=pii_counts(audit_dir, str(entry["id"])),
                     )
                     for entry in published
                 ],
@@ -338,7 +277,7 @@ class Publisher:
             return
         client, audit_id = target
         body: JsonObject = {
-            "workload_id": ctx.workload_id[:_ID_MAX],
+            "workload_id": ctx.workload_id[:ID_MAX],
             "kind": ctx.spec.kind.value,
             "recipe_key": ctx.spec.recipe_key,
         }
@@ -356,15 +295,36 @@ class Publisher:
         recorded every step as it happened. A step the server refuses (409) is
         dropped, so a candidate that is further along than this walk expects
         settles at its real status instead of being retried forever.
+
+        A candidate an earlier run left with a recorded error ends at that
+        error: the steps it finished keep the status they earned, and the
+        first one it never finished -- the step it died on -- carries the
+        terminal ``failed``. Without the distinction the whole trail would read
+        ``failed`` and the audit would say the candidate died at ``upload``.
         """
         if not self._new_audit or self._target() is None:
             return
+        terminal = step.error is not None and not step.scored
         for step_name, done in DONE_BY_STEP.items():
             if done(step):
+                # Only a terminal candidate needs the override: for every other
+                # one ``status_for`` already reads the right status off the step.
+                self.step(
+                    ctx, step_name, step, status=STATUS_BY_STEP[step_name] if terminal else None
+                )
+            elif terminal:
                 self.step(ctx, step_name, step)
+                return
 
-    def step(self, ctx: StepContext, step_name: str, step: StepState) -> None:
-        """Record one step of a candidate, resending anything an earlier call could not."""
+    def step(
+        self, ctx: StepContext, step_name: str, step: StepState, *, status: str | None = None
+    ) -> None:
+        """Record one step of a candidate, resending anything an earlier call could not.
+
+        ``status`` overrides what :func:`status_for` would read off the step;
+        only :meth:`backfill` passes it, to publish a step that *succeeded* on
+        a candidate whose later error is already recorded.
+        """
         target = self._target()
         if target is None:
             return
@@ -372,7 +332,9 @@ class Publisher:
         candidate_id = step.published_candidate_id
         if candidate_id is None:
             return
-        patch = self._guard(f"the {step_name} body", lambda: self._patch(ctx, step_name, step))
+        patch = self._guard(
+            f"the {step_name} body", lambda: self._patch(ctx, step_name, step, status)
+        )
         if patch is None:
             return
         if step_name == "replay_and_score":
@@ -380,10 +342,15 @@ class Publisher:
         self._queue(candidate_id, patch)
         self._flush(*target)
 
-    def _patch(self, ctx: StepContext, step_name: str, step: StepState) -> JsonObject:
+    def _patch(
+        self, ctx: StepContext, step_name: str, step: StepState, status: str | None = None
+    ) -> JsonObject:
         """The ``CandidatePatch`` body for one step: its status plus whatever the step produced."""
-        body: JsonObject = {"step": step_name, "status": status_for(step_name, step)}
-        if step.error is not None:
+        resolved = status_for(step_name, step) if status is None else status
+        body: JsonObject = {"step": step_name, "status": resolved}
+        if step.error is not None and status is None:
+            # The error belongs to the step that recorded it, not to the ones a
+            # back-fill replays behind it -- those are the ones given a status.
             body["error"] = step.error[:_ERROR_MAX]
         for key, value in (
             ("dataset_version_id", step.version_id),
@@ -411,12 +378,12 @@ class Publisher:
         entry = self._entries.get(ctx.workload_id)
         if entry is None or ctx.spec.serving_rate_key is None:
             return None
-        tokens = _sub(entry, "tokens")
+        tokens = sub(entry, "tokens")
         return serving_cost_usd_month(
             ctx.spec.serving_rate_key,
-            calls_per_day=_number(entry.get("calls_per_day")) or 0.0,
-            completion_tokens=int(_number(tokens.get("completion")) or 0),
-            calls=int(_number(entry.get("calls")) or 1) or 1,
+            calls_per_day=number(entry.get("calls_per_day")) or 0.0,
+            completion_tokens=int(number(tokens.get("completion")) or 0),
+            calls=int(number(entry.get("calls")) or 1) or 1,
         )
 
     # -- transport ------------------------------------------------------------
@@ -501,5 +468,6 @@ __all__ = [
     "installed_version",
     "silent",
     "status_for",
+    "too_many_selected",
     "workload_body",
 ]

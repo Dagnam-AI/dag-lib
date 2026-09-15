@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from dagnam_contracts import prompts as contract_prompts
 from dagnam_contracts.audit import (
+    CANCELLED_SCHEMA,
+    DELETED_SCHEMA,
     scoring as contract_scoring,
     serving as contract_serving,
     verdict as contract_verdict,
@@ -16,7 +19,7 @@ from dagnam_contracts.audit.report import (
     winner_of,
 )
 
-from dagnam.audit import derive, economics, prices, report, scoring, steps_serve, thresholds
+from dagnam.audit import cleanup, derive, economics, report, scoring, steps_serve, thresholds
 
 # By name, not through ``dagnam.audit``: the package re-exports the ``frontier``
 # *function*, which shadows the module of the same name.
@@ -32,6 +35,8 @@ def test_the_shared_numbers_are_the_values_both_sides_ship() -> None:
     they are written out.
     """
     assert REPORT_SCHEMA == "dagnam.audit.report/1"
+    assert DELETED_SCHEMA == "dagnam.audit.deleted/1"
+    assert CANCELLED_SCHEMA == "dagnam.audit.cancelled/1"
     assert DEFAULT_BASE_URL == "https://api.dagnam.ai/v1"
     assert thresholds.FLOOR_LABEL == 0.97
     assert thresholds.FLOOR_JSON == 0.95
@@ -46,6 +51,8 @@ def test_scorers_are_the_contract_objects() -> None:
     assert scoring.Agreement is contract_scoring.Agreement
     assert scoring.Z95 == contract_scoring.Z95
     assert derive.normalize_label is contract_scoring.normalize_label
+    assert derive.render_chat_prompt is contract_prompts.render_chat_prompt
+    assert steps_serve.parse_chat_prompt is contract_prompts.parse_chat_prompt
 
 
 def test_thresholds_and_rules_are_the_contract_values() -> None:
@@ -70,13 +77,7 @@ def test_thresholds_and_rules_are_the_contract_values() -> None:
     assert report.SCHEMA == REPORT_SCHEMA
     assert report.DEFAULT_BASE_URL == DEFAULT_BASE_URL
     assert report.render_switch_snippet is render_switch_snippet
-
-
-def test_bundled_serving_rates_equal_the_contract_rates() -> None:
-    """``serving.json`` still stamps the price table, but its numbers are the contract's."""
-    for kind, rates in contract_serving.SERVING_RATES.items():
-        for unit, value in rates.items():
-            assert prices.SERVING_RATES[kind][unit] == value, f"{kind}.{unit}"
+    assert cleanup.SCHEMA is DELETED_SCHEMA
 
 
 def test_report_winner_matches_the_contract_over_the_same_candidates() -> None:
