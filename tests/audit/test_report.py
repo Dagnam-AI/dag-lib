@@ -11,6 +11,7 @@ import pytest
 from tests.audit._records import make_workload
 
 from dagnam.audit.candidates import HEAD_TUNE, HOSTED_FLOOR, SFT_SMALL, CandidateKind
+from dagnam.audit.cleanup import DEPLOY_PAUSED
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.prices import PriceRow, PriceTable
 from dagnam.audit.report import (
@@ -219,6 +220,9 @@ def test_winner_uses_the_recorded_floor_and_a_custom_base_url() -> None:
         (StepState(dataset_id="ds", run_status="queued"), "queued"),
         (StepState(run_status="completed", deploy_status="deploying"), "deploying"),
         (StepState(run_status="completed", deploy_status="running"), "running"),
+        # A paused endpoint is not on its way up: `deploying` would read as
+        # "any moment now" for a deployment that is deliberately stopped.
+        (StepState(run_status="completed", deploy_status=DEPLOY_PAUSED), DEPLOY_PAUSED),
         (StepState(deploy_status="running", scored=True), "scored"),
         (StepState(scored=True, error="unreliable: 3 of 4 replay calls failed"), "unreliable"),
         (StepState(error="rejected_preflight: too big"), "rejected_preflight"),

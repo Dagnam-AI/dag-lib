@@ -59,11 +59,17 @@ def web_url_from_api_url(api_url: str) -> str:
     The one place the SDK turns the configured API host into a link a person
     can open -- ``dagnam login``'s "sign in at ..." and the audit's "watch it
     at ..." both read it here, so they can never point at different sites.
+
+    Matched on the parsed host and scheme, never on a prefix of the URL:
+    ``http://localhost:8000@evil.example/`` is a URL whose host is
+    ``evil.example``, and a lookalike domain is the same trick the other way
+    round. A host with no known site -- a private deployment -- gets "".
     """
-    normalized = api_url.rstrip("/")
-    if normalized == _DEFAULT_API_URL:
+    parsed = urlparse(api_url)
+    host = parsed.hostname or ""
+    if parsed.scheme == "https" and host == urlparse(_DEFAULT_API_URL).hostname:
         return "https://dagnam.ai"
-    if normalized.startswith("http://localhost:") or normalized.startswith("http://127.0.0.1:"):
+    if parsed.scheme == "http" and host in {"localhost", "127.0.0.1"}:
         return "http://localhost:5173"
     return ""
 

@@ -28,6 +28,7 @@ from dagnam_contracts.audit.report import (
 )
 
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
+from dagnam.audit.cleanup import DEPLOY_PAUSED
 from dagnam.audit.economics import customer_verdict, serving_cost_usd_month
 from dagnam.audit.orchestrate import FLOOR_BY_STRUCTURE
 from dagnam.audit.prices import PriceTable
@@ -75,7 +76,11 @@ def candidate_status(spec: CandidateSpec, step: StepState) -> str:
     if step.scored:
         return "scored"
     if step.deploy_status is not None:
-        return DEPLOY_RUNNING if step.deploy_status == DEPLOY_RUNNING else "deploying"
+        # `running` and `paused` are where a deployment *is*; every other value
+        # is a revision still on its way up. A paused endpoint reported as
+        # `deploying` reads as "any moment now" for one deliberately stopped.
+        settled = {DEPLOY_RUNNING, DEPLOY_PAUSED}
+        return step.deploy_status if step.deploy_status in settled else "deploying"
     if step.run_status is not None:
         return step.run_status
     return "uploaded" if step.dataset_id is not None else "pending"

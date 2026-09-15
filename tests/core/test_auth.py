@@ -184,3 +184,20 @@ def test_web_url_from_api_url_names_the_site_that_goes_with_the_api() -> None:
     assert auth_mod.web_url_from_api_url("http://localhost:8000") == "http://localhost:5173"
     assert auth_mod.web_url_from_api_url("http://127.0.0.1:8000") == "http://localhost:5173"
     assert auth_mod.web_url_from_api_url("https://corp.internal") == ""
+
+
+def test_web_url_from_api_url_matches_the_host_exactly() -> None:
+    """A prefix match let any host that merely *starts* like a known one borrow its site.
+
+    `http://localhost:8000@evil.example/` is a URL whose host is `evil.example`
+    -- it only reads as localhost -- and a lookalike domain is the same trick
+    the other way round. The site is named from the parsed host and scheme or
+    not at all.
+    """
+    assert auth_mod.web_url_from_api_url("http://localhost:8000@evil.example/") == ""
+    assert auth_mod.web_url_from_api_url("http://localhost.evil.example:8000") == ""
+    assert auth_mod.web_url_from_api_url("https://api.dagnam.ai.evil.example") == ""
+    assert auth_mod.web_url_from_api_url("http://api.dagnam.ai") == ""  # cleartext is not the API
+    # A path on a known host is still that host.
+    assert auth_mod.web_url_from_api_url("https://api.dagnam.ai/v1") == "https://dagnam.ai"
+    assert auth_mod.web_url_from_api_url("http://localhost") == "http://localhost:5173"
