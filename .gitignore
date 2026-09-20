@@ -237,3 +237,6 @@ graphify-out/
 *.yml.tmp.*
 *.yaml.tmp.*
 .tmp-*
+
+# macOS Finder metadata
+.DS_Store
