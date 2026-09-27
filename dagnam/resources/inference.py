@@ -3,6 +3,12 @@
 Thin wrappers over the Dagnam.AI inference API that reuse the existing
 ``DagnamClient`` and auth-resolution chain (``DAGNAM_API_KEY`` env var,
 config file, ``dagnam.configure()``, or explicit override).
+
+``inference``, ``inference_batch``, ``deployment_health`` and
+``inference_schema`` authenticate with the deployment's own key (the
+``api_key`` a deployment returns when it is created or its key is rotated), so
+pass ``api_key=<deployment key>``; an account key is refused. ``inference_stream``
+uses the account key.
 """
 
 from __future__ import annotations
@@ -28,9 +34,9 @@ def inference(
     api_url: Optional[str] = None,
     timeout: int = 30,
 ) -> JsonObject:
-    """Call a deployed model's /predict endpoint.
+    """Call a deployed model's /predict endpoint with ``inputs`` as the model input.
 
-    >>> result = dagnam.inference("dep_abc123", {"text": "hello"})
+    >>> result = dagnam.inference("dep_abc123", {"text": "hello"}, api_key=deployment_key)
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.predict(deployment_id, inputs, timeout=timeout)
@@ -47,7 +53,9 @@ def inference_batch(
 ) -> JsonArray:
     """Batch-predict against a deployed model.
 
-    >>> results = dagnam.inference_batch("dep_abc123", [{"x": 1}, {"x": 2}])
+    >>> results = dagnam.inference_batch(
+    ...     "dep_abc123", [{"text": "a"}, {"text": "b"}], api_key=deployment_key
+    ... )
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.predict_batch(deployment_id, inputs, timeout=timeout)
@@ -62,8 +70,8 @@ def deployment_health(
 ) -> JsonObject:
     """Check a deployment's health status.
 
-    >>> health = dagnam.deployment_health("dep_abc123")
-    >>> health["status"]
+    >>> health = dagnam.deployment_health("dep_abc123", api_key=deployment_key)
+    >>> health["health_status"]
     'healthy'
     """
     resolved = resolve_client(client, api_key, api_url)
@@ -79,7 +87,7 @@ def inference_schema(
 ) -> JsonObject:
     """Return the input/output schema for a deployment's inference endpoint.
 
-    >>> schema = dagnam.inference_schema("dep_abc123")
+    >>> schema = dagnam.inference_schema("dep_abc123", api_key=deployment_key)
     >>> schema["input_schema"]
     """
     resolved = resolve_client(client, api_key, api_url)

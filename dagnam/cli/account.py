@@ -10,10 +10,6 @@ import platform
 import sys
 from typing import TYPE_CHECKING, Any, TypeGuard
 
-from dagnam.cli.account_data import register_account_data
-from dagnam.cli.account_profile import register_account_profile
-from dagnam.cli.account_security import register_account_security
-from dagnam.cli.account_settings import register_notifications, register_settings
 from dagnam.cli.common import error, mask_key, resolve_version
 from dagnam.cli.presentation import Column, emit_result, render_table
 
@@ -386,15 +382,3 @@ def register_account(subparsers: SubParsersAction) -> None:
     )
     config_unset.add_argument("key", help="Config key to unset, e.g. training_metrics_path.")
     config_unset.set_defaults(func=cmd_config_unset)
-
-    account_cmd = subparsers.add_parser(
-        "account",
-        help="Manage settings and notification preferences.",
-        description="Get, update, or reset the caller's settings and notification preferences.",
-    )
-    account_sub = account_cmd.add_subparsers(dest="account_command", required=True)
-    register_settings(account_sub)
-    register_notifications(account_sub)
-    register_account_profile(account_sub)
-    register_account_security(account_sub)
-    register_account_data(account_sub)

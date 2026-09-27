@@ -127,25 +127,6 @@ def metrics(
     return resolved.get_deployment_metrics(_stringify_id(deployment_id), time_range=time_range)
 
 
-def collect_metrics(
-    deployment_id: str,
-    *,
-    backfill_minutes: int = 60,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Trigger an immediate metrics collection for a deployment.
-
-    Backfills ``backfill_minutes`` of 1-minute data points when the deployment
-    has no metrics yet; otherwise collects a single new point.
-    """
-    resolved = resolve_client(client, api_key, api_url)
-    return resolved.collect_deployment_metrics(
-        _stringify_id(deployment_id), backfill_minutes=backfill_minutes
-    )
-
-
 def logs(
     deployment_id: str,
     *,
@@ -232,6 +213,30 @@ def create_revision(
 # ---------------------------------------------------------------------------
 
 
+def deploy_model_version(
+    model_version_id: str,
+    *,
+    name: Optional[str] = None,
+    project_id: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Deploy a model version from the registry and return the new deployment.
+
+    One call creates the deployment and its first serving revision. The result
+    carries the deployment's ``api_key`` exactly once, so store it now. Serving
+    starts asynchronously: poll :func:`revisions` until the newest revision
+    reports ``is_active``. ``name`` defaults to the model name and version, and
+    ``project_id`` to the model entry's project.
+
+    >>> dep = dagnam.deployments.deploy_model_version("mv_123", name="support-bot")
+    >>> key = dep["api_key"]
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.deploy_model_version(model_version_id, name=name, project_id=project_id)
+
+
 def create(
     *,
     name: str,
@@ -258,6 +263,10 @@ def create(
     the returned LRO polls until the deployment reaches ``running`` or
     ``failed``.  Fire-and-forget callers can inspect ``op.initial()``
     without ever calling ``wait()``.
+
+    The deployment serves no requests until it has a revision: create one with
+    :func:`create_revision`, or use :func:`deploy_model_version`, which creates
+    the deployment and its first revision in one call.
 
     >>> op = dagnam.deployments.create(
     ...     name="my-dep",
@@ -304,67 +313,17 @@ def create(
     )
 
 
-def create_from_training_job(
-    *,
-    name: str,
-    project_id: str,
-    training_job_id: str,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> LongRunningOperation:
-    """Serve a finished training job as a serverless chat model.
-
-    A thin wrapper over :func:`create` supplying the platform defaults a
-    Modal-served text model expects (``vllm`` / ``text`` /
-    ``modal-serverless``). The API resolves the weights from the job, so the
-    required ``checkpoint_path`` is a label naming the job, not a location.
-    Returns the same LRO as :func:`create`.
-    """
-    return create(
-        name=name,
-        project_id=project_id,
-        training_job_id=training_job_id,
-        checkpoint_path=f"training-job://{_stringify_id(training_job_id)}",
-        platform="vllm",
-        deployment_type="text",
-        instance_type="modal-serverless",
-        client=client,
-        api_key=api_key,
-        api_url=api_url,
-    )
-
-
 def update(
     deployment_id: str,
     *,
-    name: Optional[str] = None,
-    instance_type: Optional[str] = None,
-    num_instances: Optional[int] = None,
-    auto_scaling_enabled: Optional[bool] = None,
-    min_instances: Optional[int] = None,
-    max_instances: Optional[int] = None,
-    config: Optional[JsonMapping] = None,
+    name: str,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Update mutable deployment fields (non-lifecycle)."""
+    """Rename a deployment. Serving capacity is managed by the platform."""
     resolved = resolve_client(client, api_key, api_url)
-    payload: JsonObject = {}
-    for key, value in (
-        ("name", name),
-        ("instance_type", instance_type),
-        ("num_instances", num_instances),
-        ("auto_scaling_enabled", auto_scaling_enabled),
-        ("min_instances", min_instances),
-        ("max_instances", max_instances),
-    ):
-        if value is not None:
-            payload[key] = value
-    if config is not None:
-        payload["config"] = _json_object_from_mapping(config)
-    return resolved.update_deployment(_stringify_id(deployment_id), payload)
+    return resolved.update_deployment(_stringify_id(deployment_id), {"name": name})
 
 
 def delete(
@@ -419,86 +378,9 @@ def resume(
     )
 
 
-def scale(
-    deployment_id: str,
-    num_instances: int,
-    *,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> LongRunningOperation:
-    """Scale a deployment's instance count (returns an LRO)."""
-    resolved = resolve_client(client, api_key, api_url)
-    dep_id = _stringify_id(deployment_id)
-    initial = resolved.scale_deployment(dep_id, num_instances=num_instances)
-    return _lifecycle_lro(
-        resolved,
-        dep_id,
-        initial,
-        success_states=_ACTIVE_STATES,
-        name="deployments.scale",
-    )
-
-
-def rollback(
-    deployment_id: str,
-    checkpoint_id: str | UUID,
-    *,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> LongRunningOperation:
-    """Roll the deployment back to ``checkpoint_id`` (returns an LRO).
-
-    The checkpoint is resolved and re-authorized server-side through the
-    checkpoint -> training job -> project -> owner ownership chain; a
-    checkpoint you don't own (or that doesn't exist) returns a 404.
-    """
-    resolved = resolve_client(client, api_key, api_url)
-    dep_id = _stringify_id(deployment_id)
-    initial = resolved.rollback_deployment(dep_id, checkpoint_id=_stringify_id(checkpoint_id))
-    return _lifecycle_lro(
-        resolved,
-        dep_id,
-        initial,
-        success_states=_ACTIVE_STATES,
-        name="deployments.rollback",
-    )
-
-
 # ---------------------------------------------------------------------------
-# Planning — estimate cost, validate config, list platforms, retry
+# Planning — validate config, list platforms
 # ---------------------------------------------------------------------------
-
-
-def estimate_cost(
-    *,
-    platform: str,
-    instance_type: str,
-    num_instances: int = 1,
-    auto_scaling_enabled: bool = False,
-    min_instances: Optional[int] = None,
-    max_instances: Optional[int] = None,
-    region: Optional[str] = None,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Estimate hourly/daily/monthly cost for a deployment shape."""
-    resolved = resolve_client(client, api_key, api_url)
-    payload: JsonObject = {
-        "platform": platform,
-        "instance_type": instance_type,
-        "num_instances": num_instances,
-        "auto_scaling_enabled": auto_scaling_enabled,
-    }
-    if min_instances is not None:
-        payload["min_instances"] = min_instances
-    if max_instances is not None:
-        payload["max_instances"] = max_instances
-    if region is not None:
-        payload["region"] = region
-    return resolved.estimate_cost(payload)
 
 
 def validate(
@@ -551,24 +433,6 @@ def platforms(
     """List available serving platforms and their capabilities."""
     resolved = resolve_client(client, api_key, api_url)
     return resolved.list_deployment_platforms()
-
-
-def retry(
-    deployment_id: str,
-    *,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Retry a failed or stuck deployment (re-queues it; returns the record).
-
-    Unlike :func:`pause`/:func:`resume`/:func:`rollback`, this returns the
-    re-queued deployment object directly rather than a
-    :class:`~dagnam._core.lro.LongRunningOperation`; poll :func:`get` if you
-    need to wait for it to reach ``running``.
-    """
-    resolved = resolve_client(client, api_key, api_url)
-    return resolved.retry_deployment(_stringify_id(deployment_id))
 
 
 # ---------------------------------------------------------------------------
@@ -633,11 +497,10 @@ def predict_stream(
 
 
 __all__ = [
-    "collect_metrics",
     "create",
     "create_revision",
     "delete",
-    "estimate_cost",
+    "deploy_model_version",
     "get",
     "health",
     "list",
@@ -647,10 +510,7 @@ __all__ = [
     "platforms",
     "predict_stream",
     "resume",
-    "retry",
     "revisions",
-    "rollback",
-    "scale",
     "stream_events",
     "update",
     "validate",

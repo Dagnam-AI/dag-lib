@@ -115,15 +115,6 @@ def test_deployments_create_with_optional_fields() -> None:
     assert payload["config"] == {"x": 1}
 
 
-def test_deployments_update_with_config() -> None:
-    client = MagicMock(spec=DagnamClient)
-    client.update_deployment.return_value = {"id": "dep1"}
-    deployments.update("dep1", client=client, name="new", config={"k": "v"})
-    payload = client.update_deployment.call_args[0][1]
-    assert payload["name"] == "new"
-    assert payload["config"] == {"k": "v"}
-
-
 def test_deployments_delete() -> None:
     client = MagicMock(spec=DagnamClient)
     client.delete_deployment.return_value = None

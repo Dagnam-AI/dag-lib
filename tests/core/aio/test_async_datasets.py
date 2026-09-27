@@ -94,29 +94,11 @@ async def test_async_list_dataset_versions_404(
 
 
 async def test_async_list_system_datasets(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
-    mock.get("/api/v1/datasets/system").mock(
+    route = mock.get("/api/v1/datasets/browse").mock(
         return_value=httpx.Response(200, json=[{"id": "iris"}])
     )
     assert await client.list_system_datasets() == [{"id": "iris"}]
-
-
-async def test_async_get_system_dataset_meta(
-    client: AsyncDagnamClient, mock: RespxMockRouter
-) -> None:
-    mock.get("/api/v1/datasets/system/iris").mock(
-        return_value=httpx.Response(200, json={"id": "iris"})
-    )
-    assert await client.get_system_dataset_meta("iris") == {"id": "iris"}
-
-
-async def test_async_get_system_dataset_meta_with_version(
-    client: AsyncDagnamClient, mock: RespxMockRouter
-) -> None:
-    route = mock.get("/api/v1/datasets/system/iris").mock(
-        return_value=httpx.Response(200, json={"id": "iris"})
-    )
-    assert await client.get_system_dataset_meta("iris", version="1.0") == {"id": "iris"}
-    assert "version=1.0" in str(route.calls[0].request.url)
+    assert route.calls[0].request.url.params["source_type"] == "system"
 
 
 async def test_async_download_dataset(
@@ -200,20 +182,6 @@ async def test_async_download_dataset_timeout(
     mock.get("/api/v1/datasets/ds1/download").mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(APIError, match="Request timed out"):
         await client.download_dataset("ds1", tmp_path)
-
-
-async def test_async_download_system_dataset(
-    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
-) -> None:
-    mock.get("/api/v1/datasets/system/iris/download").mock(
-        return_value=httpx.Response(
-            200,
-            content=b"iris",
-            headers={"content-disposition": 'attachment; filename="iris.csv"'},
-        )
-    )
-    out = await client.download_system_dataset("iris", tmp_path)
-    assert out.read_bytes() == b"iris"
 
 
 async def test_async_upload_dataset(

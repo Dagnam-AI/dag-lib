@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -27,14 +25,17 @@ class InferenceClientMixin(BaseDagnamClient):
     def predict(
         self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_TIMEOUT
     ) -> JsonObject:
-        """POST /api/v1/inference/{deployment_id}/predict"""
+        """POST /api/v1/inference/{deployment_id}/predict with body ``{"input": inputs}``.
+
+        The route authenticates with the deployment's own key, not an account key.
+        """
         deployment_path = quote_path_segment(deployment_id)
         url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict"
         resp = self._request(
             "POST",
             url,
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
-            json=inputs,
+            json={"input": inputs},
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -74,19 +75,24 @@ class InferenceClientMixin(BaseDagnamClient):
     def open_inference_stream(self, deployment_id: str, inputs: JsonObject) -> requests.Response:
         """Open a single-shot streaming-predict SSE connection.
 
-        GET /api/v1/inference/{deployment_id}/predict/stream?token=...&input=...
-        Auth: a per-connection scoped stream token in the query string (minted
-        via the header-authenticated endpoint above); the long-lived API key
-        never appears in a URL.
+        ``POST /api/v1/inference/{id}/predict/stream/session`` stores the input
+        server-side (header auth) and returns a ``session_id`` with a short-lived
+        stream token; ``GET /api/v1/inference/{id}/predict/stream/{session_id}?token=...``
+        then streams. Neither the API key nor the input ever appears in a URL.
         """
-        token = self.mint_inference_stream_token(deployment_id)
-        deployment_path = quote_path_segment(deployment_id)
-        url = f"{self.api_url}/api/v1/inference/{deployment_path}/predict/stream"
-        params = {**stream_query_params(token), "input": json.dumps(inputs)}
+        stream_path = f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict/stream"
+        session = self._request(
+            "POST",
+            f"{self.api_url}{stream_path}/session",
+            raise_for=lambda r: raise_for_deployment(r, deployment_id),
+            json={"input": inputs},
+            allow_redirects=ALLOW_REDIRECTS,
+        ).json()
+        url = f"{self.api_url}{stream_path}/{quote_path_segment(str(session['session_id']))}"
         try:
             resp = requests.get(
                 url,
-                params=params,
+                params=stream_query_params(str(session["token"])),
                 headers={"Accept": "text/event-stream"},
                 stream=True,
                 timeout=(STREAM_CONNECT_TIMEOUT, SSE_READ_TIMEOUT),

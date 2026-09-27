@@ -1,0 +1,23 @@
+#!/bin/sh
+# Dagnam.AI post-merge hook -- a pull or merge of `main` updates the roadmap.
+#
+# Generic and byte-identical in every Dagnam.AI repo, like `pre-push`. It runs
+# the roadmap sync named by `git config dagnam.roadmapSync`, which the
+# workspace tooling sets in each clone it manages, and does nothing when that
+# key is unset or the file it names is gone (the tooling is not checked out
+# beside this repo). A post-merge hook cannot undo the merge, so this never
+# fails: whatever the sync changes is left uncommitted for a person to review.
+
+sync=$(git config --get dagnam.roadmapSync) || exit 0
+[ -n "$sync" ] && [ -f "$sync" ] || exit 0
+
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+repo=$(basename "$(dirname "$common")")
+
+for py in python3 python; do
+	if command -v "$py" >/dev/null 2>&1 && "$py" -c '' >/dev/null 2>&1; then
+		"$py" "$sync" --repo "$repo" || echo "post-merge: roadmap sync reported a problem (above)." >&2
+		exit 0
+	fi
+done
+exit 0

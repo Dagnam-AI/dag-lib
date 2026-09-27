@@ -1,11 +1,12 @@
 """Cross-platform PreToolUse hook: deny un-confirmed costly Dagnam commands.
 
 Reads the harness hook event (JSON on stdin) and, if the Bash command runs a costly
-Dagnam action (deployments create/delete, training create/delete, projects delete,
-hub publish, or a public visibility flag) WITHOUT an explicit ``DAGNAM_CONFIRM=1``
-prefix, emits a deny decision. Both the CLI verb shape (``dagnam deployments create``)
-and the Python SDK shape (``python -c "import dagnam; dagnam.deployments.create(...)"``,
-which ``SKILL.md`` recommends) are matched.
+Dagnam action (deploying a model version, creating or deleting a deployment, training
+create/delete, projects delete, hub publish, or a public visibility flag) WITHOUT an
+explicit ``DAGNAM_CONFIRM=1`` prefix, emits a deny decision. Both the CLI verb shape
+(``dagnam deployments deploy-version``) and the Python SDK shape
+(``python -c "import dagnam; dagnam.deployments.deploy_model_version(...)"``, which
+``SKILL.md`` recommends) are matched.
 
 This hook is **non-authoritative, best-effort defense-in-depth ONLY.** It has known
 blind spots -- command obfuscation (base64/eval, string-built attribute names),
@@ -31,14 +32,14 @@ import sys
 # command) cannot hide it from the deny check.
 _COSTLY = re.compile(
     r"\bdagnam\b.*\b(?:"
-    r"deployments?\s+(?:create|delete)"  # CLI: dagnam deployments create
+    r"deployments?\s+(?:create|delete|deploy-version)"  # CLI: dagnam deployments deploy-version
     r"|training\s+(?:create|delete)"
     r"|projects?\s+delete"
-    r"|deployments?\s*\.\s*(?:create|delete)"  # SDK: dagnam.deployments.create(
+    r"|deployments?\s*\.\s*(?:create|delete|deploy_model_version)"  # SDK shape of the above
     r"|training\s*\.\s*(?:create|delete)"  # SDK: dagnam.training.create(
     r"|projects?\s*\.\s*delete"
     r"|hub\s*\.\s*create"  # SDK: publish to the hub
-    r"|create_training_job"
+    r"|create_training_job|create_deployment|deploy_model_version"  # client method shapes
     r"|visibility\s*=\s*[\\'\"]*public"  # any public create/upload (quotes/escapes optional)
     r")",
     re.DOTALL,

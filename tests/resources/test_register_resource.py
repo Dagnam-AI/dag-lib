@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from tests.typing_helpers import PytestMonkeyPatch
+import pytest
+from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 from dagnam import account
 from dagnam._core.client import DagnamClient
+from dagnam._core.exceptions import APIError, EmailNotVerifiedError, QuotaExceededError
+from dagnam._types import JsonObject
 
 KEY_OBJ = {
     "id": "k1",
@@ -94,3 +97,87 @@ def test_register_resolves_default_api_url_when_not_overridden(
 def test_register_default_constants() -> None:
     assert account.DEFAULT_SDK_SCOPES == ("read", "write")
     assert account.DEFAULT_KEY_NAME == "dagnam-cli"
+
+
+# The real refusals of POST /api/v1/users/me/api-keys for a plan without keys:
+# a 403 when the plan lacks the feature, a 402 when its key count is zero.
+_FEATURE_GATED = {
+    "error": "feature_gated",
+    "feature_key": "api_keys.create",
+    "current_plan": "free",
+    "required_plan": "pro",
+    "message": "`api_keys.create` is not included in your current plan.",
+    "remediation_hints": ["Upgrade to a plan that includes this feature."],
+}
+_KEY_LIMIT = {**_FEATURE_GATED, "error": "limit_exceeded", "limit_key": "api_keys.count"}
+
+
+def _serve_register_and_login(requests_mock: RequestsMocker) -> None:
+    requests_mock.post("https://api.test/api/v1/auth/register", status_code=201, json={"id": "u1"})
+    requests_mock.post(
+        "https://api.test/api/v1/auth/login", json={"access_token": "tok", "token_type": "bearer"}
+    )
+
+
+@pytest.mark.parametrize(("status", "body"), [(403, _FEATURE_GATED), (402, _KEY_LIMIT)])
+def test_register_on_a_plan_without_keys_says_the_account_exists(
+    requests_mock: RequestsMocker, status: int, body: JsonObject
+) -> None:
+    _serve_register_and_login(requests_mock)
+    requests_mock.post("https://api.test/api/v1/users/me/api-keys", status_code=status, json=body)
+
+    with pytest.raises(QuotaExceededError) as exc_info:
+        account.register("a@b.c", "Secret123!", api_url="https://api.test")
+
+    message = str(exc_info.value)
+    assert message.startswith("Account created; API keys need a paid plan.")
+    assert "dagnam login" in message
+
+
+def test_register_key_step_other_errors_propagate(requests_mock: RequestsMocker) -> None:
+    _serve_register_and_login(requests_mock)
+    requests_mock.post("https://api.test/api/v1/users/me/api-keys", status_code=400, json={})
+
+    with pytest.raises(APIError) as exc_info:
+        account.register("a@b.c", "Secret123!", api_url="https://api.test")
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("body", "raised"),
+    [
+        (
+            {"detail": {"error": "email_not_verified", "message": "Email not verified"}},
+            EmailNotVerifiedError,
+        ),
+        ({"detail": "Not allowed"}, APIError),
+    ],
+)
+def test_register_key_step_non_plan_403_propagates_as_is(
+    requests_mock: RequestsMocker, body: JsonObject, raised: type[Exception]
+) -> None:
+    _serve_register_and_login(requests_mock)
+    requests_mock.post("https://api.test/api/v1/users/me/api-keys", status_code=403, json=body)
+
+    with pytest.raises(raised) as exc_info:
+        account.register("a@b.c", "Secret123!", api_url="https://api.test")
+
+    assert not isinstance(exc_info.value, QuotaExceededError)
+    assert "Account created" not in str(exc_info.value)
+
+
+def test_register_key_step_non_plan_402_is_not_reported_as_no_keys(
+    requests_mock: RequestsMocker,
+) -> None:
+    _serve_register_and_login(requests_mock)
+    requests_mock.post(
+        "https://api.test/api/v1/users/me/api-keys",
+        status_code=402,
+        json={"error": "insufficient_credits", "message": "Not enough credits."},
+    )
+
+    with pytest.raises(QuotaExceededError) as exc_info:
+        account.register("a@b.c", "Secret123!", api_url="https://api.test")
+
+    assert "Account created" not in str(exc_info.value)

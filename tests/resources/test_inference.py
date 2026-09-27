@@ -139,17 +139,17 @@ def test_inference_stream_delegates_to_iter_sse_once(monkeypatch) -> None:
 
 
 def test_inference_stream_wire_end_to_end(rmock) -> None:
-    """Real client + mocked HTTP: token minted per connection, never the API key."""
+    """Real client + mocked HTTP: the input goes in a session, only a stream token in the URL."""
     from dagnam._core.client import DagnamClient
     from dagnam.resources import inference as inference_mod
 
     client = DagnamClient("https://api.test", "k")
     rmock.post(
-        "https://api.test/api/v1/inference/dep1/stream-access-token",
-        json={"token": "stream-t-1"},
+        "https://api.test/api/v1/inference/dep1/predict/stream/session",
+        json={"session_id": "sess-1", "token": "stream-t-1", "expires_in": 300},
     )
     stream_route = rmock.get(
-        "https://api.test/api/v1/inference/dep1/predict/stream",
+        "https://api.test/api/v1/inference/dep1/predict/stream/sess-1",
         text=('event: token\ndata: {"token": "he"}\n\nevent: complete\ndata: {"done": true}\n\n'),
         headers={"Content-Type": "text/event-stream"},
     )

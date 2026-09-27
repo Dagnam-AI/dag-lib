@@ -113,7 +113,7 @@ class ProjectsClientMixin(BaseDagnamClient):
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
     def import_dag(self, payload: JsonObject) -> JsonObject:
-        value = self._project_request("POST", "/api/v1/projects/import", json_body=payload)
+        value = self._project_request("POST", "/api/v1/projects/import-dag", json_body=payload)
         if isinstance(value, dict):
             return value
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
@@ -121,7 +121,7 @@ class ProjectsClientMixin(BaseDagnamClient):
     def import_dag_existing(self, project_id: str, payload: JsonObject) -> JsonObject:
         value = self._project_request(
             "POST",
-            f"/api/v1/projects/{quote_path_segment(project_id)}/import",
+            f"/api/v1/projects/{quote_path_segment(project_id)}/import-dag",
             project_id=project_id,
             json_body=payload,
         )

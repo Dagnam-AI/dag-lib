@@ -43,7 +43,6 @@ def build_parser() -> DagnamArgumentParser:
     every subcommand inherits typo suggestions and grouped help.
     """
     from dagnam.cli.account import register_account
-    from dagnam.cli.account_keys import register_keys
     from dagnam.cli.account_profile import register_profile
     from dagnam.cli.agent import register_agent
     from dagnam.cli.audit import register_audit
@@ -98,7 +97,6 @@ def build_parser() -> DagnamArgumentParser:
     register_training(subparsers)
     register_account(subparsers)
     register_profile(subparsers)
-    register_keys(subparsers)
     register_agent(subparsers)
 
     return parser

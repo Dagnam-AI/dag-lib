@@ -4,3 +4,10 @@
 # and Ubuntu, does not; the MSYS2 bash that Git for Windows uses does.
 pre-push text eol=lf
 .githooks/policy text eol=lf
+
+# Hook files are POSIX shell and must keep LF endings. A CRLF shebang makes a
+# hook unrunnable, and a CRLF policy file is read as TRUNK="main<CR>" by any
+# /bin/sh that does not strip carriage returns -- dash, the default on Debian
+# and Ubuntu, does not; the MSYS2 bash that Git for Windows uses does.
+commit-msg text eol=lf
+post-merge text eol=lf

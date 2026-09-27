@@ -34,7 +34,7 @@ from dagnam.audit.steps import PlatformClient
 CHAT_URL = "https://x/v1/chat/completions"
 
 DATASET_IN_USE = "Dataset is referenced by a training run and cannot be deleted"
-"""The platform's own 409 wording (``src/datasets/service.py``)."""
+"""The platform's own 409 wording, from its dataset service."""
 
 
 class PublishLeak(BaseException):

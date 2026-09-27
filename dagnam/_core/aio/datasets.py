@@ -60,23 +60,14 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     async def list_system_datasets(self) -> list[JsonObject]:
-        resp = await self._request(
-            "GET", "/api/v1/datasets/system", raise_for=lambda r: raise_for_dataset(r, "system")
-        )
-        return [item for item in response_json_array(resp) if isinstance(item, dict)]
-
-    async def get_system_dataset_meta(
-        self, dataset_id: str, version: str | None = None
-    ) -> JsonObject:
-        """GET /api/v1/datasets/system/{dataset_id} — Get system dataset metadata."""
-        params = {"version": version} if version else None
+        """GET /api/v1/datasets/browse?source_type=system: the built-in datasets."""
         resp = await self._request(
             "GET",
-            f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}",
-            params=params,
-            raise_for=lambda r: raise_for_dataset(r, dataset_id),
+            "/api/v1/datasets/browse",
+            params={"source_type": "system"},
+            raise_for=lambda r: raise_for_dataset(r, "system"),
         )
-        return response_json_object(resp)
+        return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     async def _download_to_dir(
         self,
@@ -123,13 +114,6 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
             output_dir,
             dataset_id,
             params=params,
-        )
-
-    async def download_system_dataset(self, dataset_id: str, output_dir: Path) -> Path:
-        return await self._download_to_dir(
-            f"/api/v1/datasets/system/{quote_path_segment(dataset_id)}/download",
-            output_dir,
-            dataset_id,
         )
 
     async def upload_dataset(

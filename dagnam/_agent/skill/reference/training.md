@@ -16,7 +16,7 @@
 - `dagnam.create_training_job(project_id, epochs, batch_size, learning_rate, optimizer, loss_function, training_dataset_id, framework="pytorch", validation_dataset_id=None, test_dataset_id=None, train_split=0.8, val_split=0.1, test_split=0.1, config_overrides=None, max_duration_seconds=None, confirm_resource_warning=False) -> dict` — **[guardrail]** leave `confirm_resource_warning=False` on the first call to surface the resource estimate; only re-call with `True` after the user confirms.
 - `dagnam.stream_training(job_id, last_event_id=None, include_heartbeats=False) -> Iterator[TrainingEvent]` — each event has `.event` (name) / `.data` (dict or str) / `.id`; terminal names: `complete`, `failed`, `cancelled`, `stream_end`.
 - `dagnam.get_training_job(job_id)`, `dagnam.list_training_jobs(page=1, limit=20, status=None, project_id=None)`, `dagnam.cancel_training_job(job_id)`, `dagnam.delete_training_jobs(job_ids)`, `dagnam.training_logs(job_id, ...)`, `dagnam.training_metrics(job_id, ...)`, `dagnam.training_metrics_summary(job_id)`.
-- `dagnam.download_checkpoint(job_id, checkpoint_id=None, cache_dir=None, prefer_best=True) -> Path`.
+- `dagnam.download_checkpoint(job_id, checkpoint_id=None, *, cache_dir=None, prefer_best=False) -> Path`: the latest checkpoint by default; `prefer_best=True` picks the best one (falling back to the latest).
 
 ## Instrumenting a training script (generated / authored code)
 A run reports back to the platform with the top-level instrumentation API:

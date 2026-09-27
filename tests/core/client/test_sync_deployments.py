@@ -17,6 +17,8 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tests.typing_helpers import JsonObject, PytestMonkeyPatch, RequestsMocker
 
 API = "https://api.test"
@@ -116,18 +118,6 @@ def test_pause_resume(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/deployments/dep1/resume", json={"paused": False})
     assert client.pause_deployment("dep1") == {"paused": True}
     assert client.resume_deployment("dep1") == {"paused": False}
-
-
-def test_scale_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.put(f"{API}/api/v1/deployments/dep1/scale", json={"instances": 5})
-    client.scale_deployment("dep1", 5)
-    assert rmock.last_request.qs == {"num_instances": ["5"]}
-
-
-def test_rollback_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/deployments/dep1/rollback", json={"ok": True})
-    client.rollback_deployment("dep1", "ckpt-1")
-    assert rmock.last_request.qs == {"checkpoint_id": ["ckpt-1"]}
 
 
 def test_get_deployment_metrics(client: DagnamClient, rmock: RequestsMocker) -> None:
@@ -241,16 +231,6 @@ def test_deployments_text_response(client: DagnamClient, rmock: RequestsMocker) 
 # ---------------------------------------------------------------- deployment planning
 
 
-def test_estimate_cost(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(
-        f"{API}/api/v1/deployments/estimate-cost",
-        json={"hourly_cost": 0.5, "daily_cost": 12.0, "monthly_cost": 360.0},
-    )
-    out = client.estimate_cost({"platform": "fastapi", "instance_type": "cpu.small"})
-    assert out["monthly_cost"] == 360.0
-    assert rmock.last_request.json()["platform"] == "fastapi"
-
-
 def test_validate_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/deployments/validate", json={"valid": True, "errors": []})
     assert client.validate_deployment({"name": "x"})["valid"] is True
@@ -273,39 +253,6 @@ def test_list_deployment_platforms_rejects_non_array(
     rmock.get(f"{API}/api/v1/deployments-platforms", json={"not": "an array"})
     with pytest.raises(TypeError, match="Expected JSON array"):
         client.list_deployment_platforms()
-
-
-def test_retry_deployment(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/deployments/d1/retry", json={"id": "d1", "status": "deploying"})
-    assert client.retry_deployment("d1")["status"] == "deploying"
-
-
-def test_retry_deployment_404(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/deployments/d1/retry", status_code=404)
-    with pytest.raises(DeploymentNotFoundError):
-        client.retry_deployment("d1")
-
-
-def test_collect_deployment_metrics(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(
-        f"{API}/api/v1/deployments/dep1/metrics/collect",
-        json={"deployment_id": "dep1", "points_created": 60, "backfilled": True},
-    )
-    result = client.collect_deployment_metrics("dep1", backfill_minutes=120)
-    assert result["points_created"] == 60
-    assert rmock.last_request.qs["backfill_minutes"] == ["120"]
-
-
-def test_collect_deployment_metrics_409_maps_state_error(
-    client: DagnamClient, rmock: RequestsMocker
-) -> None:
-    from dagnam._core.exceptions import DeploymentStateError
-
-    rmock.post(
-        f"{API}/api/v1/deployments/dep1/metrics/collect", status_code=409, text="not running"
-    )
-    with pytest.raises(DeploymentStateError):
-        client.collect_deployment_metrics("dep1")
 
 
 def test_create_deployment_sends_idempotency_key(
@@ -401,3 +348,109 @@ def test_get_deployment_revisions(client: DagnamClient, rmock: RequestsMocker) -
     result = client.get_deployment_revisions("dep1", page=2, limit=5)
     assert result == [{"id": "rev1", "revision_number": 2, "is_active": True}]
     assert rmock.last_request.qs == {"page": ["2"], "limit": ["5"]}
+
+
+# ---------------------------------------------------------------- deploy a model version
+
+
+def test_deploy_model_version_sends_only_the_version_by_default(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/from-model-version",
+        status_code=201,
+        json={"id": "dep1", "status": "not_provisioned", "api_key": "dep-key"},
+    )
+    result = client.deploy_model_version("mv1")
+    assert result["api_key"] == "dep-key"
+    assert rmock.last_request.json() == {"model_version_id": "mv1"}
+    assert rmock.last_request.headers["Idempotency-Key"]
+
+
+def test_deploy_model_version_sends_name_project_and_explicit_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/from-model-version", status_code=201, json={"id": "dep1"})
+    client.deploy_model_version("mv1", name="bot", project_id="p1", idempotency_key="key-7")
+    assert rmock.last_request.json() == {
+        "model_version_id": "mv1",
+        "name": "bot",
+        "project_id": "p1",
+    }
+    assert rmock.last_request.headers["Idempotency-Key"] == "key-7"
+
+
+def test_deploy_model_version_422_maps_validation(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/from-model-version", status_code=422, text="not deployable"
+    )
+    with pytest.raises(DeploymentValidationError, match="not deployable"):
+        client.deploy_model_version("mv1")
+
+
+# ---------------------------------------------------------------- replayed creates
+
+REPLAYED = {"Idempotency-Replayed": "true"}
+ROTATED = {"key_prefix": "sk_new12", "api_key": "fresh-key"}
+
+
+def test_rotate_deployment_key_posts_and_returns_the_new_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/deployments/dep1/rotate-key", json=ROTATED)
+    assert client.rotate_deployment_key("dep1") == ROTATED
+
+
+@pytest.mark.parametrize(
+    ("path", "call"),
+    [
+        ("/api/v1/deployments/from-model-version", lambda c: c.deploy_model_version("mv1")),
+        ("/api/v1/deployments", lambda c: c.create_deployment({"name": "x"})),
+    ],
+    ids=["deploy_model_version", "create_deployment"],
+)
+def test_replayed_create_rotates_to_restore_the_key(
+    client: DagnamClient,
+    rmock: RequestsMocker,
+    path: str,
+    call: Callable[[DagnamClient], JsonObject],
+) -> None:
+    # The idempotency cache never stores the one-time key, so a replay has api_key null.
+    rmock.post(
+        f"{API}{path}",
+        status_code=201,
+        headers=REPLAYED,
+        json={"id": "dep1", "key_prefix": "sk_old12", "api_key": None},
+    )
+    rmock.post(f"{API}/api/v1/deployments/dep1/rotate-key", json=ROTATED)
+    result = call(client)
+    assert result == {"id": "dep1", "key_prefix": "sk_new12", "api_key": "fresh-key"}
+    assert [r.path for r in rmock.request_history] == [path, "/api/v1/deployments/dep1/rotate-key"]
+
+
+def test_first_create_with_its_key_does_not_rotate(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(
+        f"{API}/api/v1/deployments/from-model-version",
+        status_code=201,
+        json={"id": "dep1", "api_key": "dep-key"},
+    )
+    assert client.deploy_model_version("mv1")["api_key"] == "dep-key"
+    assert [r.path for r in rmock.request_history] == ["/api/v1/deployments/from-model-version"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "collect_deployment_metrics",
+        "estimate_cost",
+        "retry_deployment",
+        "rollback_deployment",
+        "scale_deployment",
+    ],
+)
+def test_removed_client_methods_are_gone(name: str) -> None:
+    assert not hasattr(DagnamClient, name)

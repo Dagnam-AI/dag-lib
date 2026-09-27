@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -62,44 +61,54 @@ def test_mint_inference_stream_token_timeout_wraps_apierror(
     assert exc_info.value.status_code == 0
 
 
-def test_open_inference_stream_carries_token_and_input_in_query(
+SESSION_URL = f"{API}/api/v1/inference/dep1/predict/stream/session"
+STREAM_URL = f"{API}/api/v1/inference/dep1/predict/stream/sess-1"
+SESSION = {"session_id": "sess-1", "token": "stream-t", "expires_in": 300}
+
+
+def test_open_inference_stream_posts_the_input_then_streams_the_session(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    rmock.post(f"{API}/api/v1/inference/dep1/stream-access-token", json={"token": "stream-t"})
+    rmock.post(SESSION_URL, json=SESSION)
     rmock.get(
-        f"{API}/api/v1/inference/dep1/predict/stream",
+        STREAM_URL,
         text="event: complete\ndata: {}\n\n",
         headers={"Content-Type": "text/event-stream"},
     )
     resp = client.open_inference_stream("dep1", {"text": "hi"})
     assert resp.status_code == 200
-    qs = rmock.last_request.qs
-    assert qs["token"] == ["stream-t"]
-    assert json.loads(qs["input"][0]) == {"text": "hi"}
-    # Auth rides only in the query token — the API key never appears in the URL
-    # params, and no Authorization header is sent on the stream request.
-    assert "api_key" not in qs
-    assert "Authorization" not in rmock.last_request.headers
-    assert rmock.last_request.headers["Accept"] == "text/event-stream"
+    session_req, stream_req = rmock.request_history
+    # The input goes in a header-authenticated POST body, never in a URL.
+    assert session_req.json() == {"input": {"text": "hi"}}
+    assert session_req.headers["Authorization"] == "Bearer k"
+    # The stream URL carries only the session's short-lived token: no input, no API key.
+    assert stream_req.qs == {"token": ["stream-t"]}
+    assert "Authorization" not in stream_req.headers
+    assert stream_req.headers["Accept"] == "text/event-stream"
 
 
-def test_open_inference_stream_404_maps_not_found(
+def test_open_inference_stream_session_404_maps_not_found(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    rmock.post(f"{API}/api/v1/inference/missing/stream-access-token", json={"token": "t"})
-    rmock.get(f"{API}/api/v1/inference/missing/predict/stream", status_code=404)
+    rmock.post(f"{API}/api/v1/inference/missing/predict/stream/session", status_code=404)
     with pytest.raises(DeploymentNotFoundError):
         client.open_inference_stream("missing", {"x": 1})
+
+
+def test_open_inference_stream_expired_session_404_maps_not_found(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(SESSION_URL, json=SESSION)
+    rmock.get(STREAM_URL, status_code=404)
+    with pytest.raises(DeploymentNotFoundError):
+        client.open_inference_stream("dep1", {"x": 1})
 
 
 def test_open_inference_stream_connection_error_wraps_apierror(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    rmock.post(f"{API}/api/v1/inference/dep1/stream-access-token", json={"token": "t"})
-    rmock.get(
-        f"{API}/api/v1/inference/dep1/predict/stream",
-        exc=requests_lib.ConnectionError("down"),
-    )
+    rmock.post(SESSION_URL, json=SESSION)
+    rmock.get(STREAM_URL, exc=requests_lib.ConnectionError("down"))
     with pytest.raises(APIError) as exc_info:
         client.open_inference_stream("dep1", {"x": 1})
     assert exc_info.value.status_code == 0
@@ -108,11 +117,8 @@ def test_open_inference_stream_connection_error_wraps_apierror(
 def test_open_inference_stream_timeout_wraps_apierror(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    rmock.post(f"{API}/api/v1/inference/dep1/stream-access-token", json={"token": "t"})
-    rmock.get(
-        f"{API}/api/v1/inference/dep1/predict/stream",
-        exc=requests_lib.Timeout("slow"),
-    )
+    rmock.post(SESSION_URL, json=SESSION)
+    rmock.get(STREAM_URL, exc=requests_lib.Timeout("slow"))
     with pytest.raises(APIError) as exc_info:
         client.open_inference_stream("dep1", {"x": 1})
     assert exc_info.value.status_code == 0

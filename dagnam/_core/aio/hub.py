@@ -215,7 +215,7 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         return ensure_json_object(
             await self._hub_req(
                 "GET",
-                "/api/v1/hub/starred",
+                "/api/v1/hub/models/starred",
                 params={"sort_by": sort_by, "page": page, "limit": limit},
             )
         )

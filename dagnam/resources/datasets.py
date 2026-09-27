@@ -85,7 +85,7 @@ def list_system(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> builtin_list[JsonObject]:
-    """List the built-in system datasets (``GET /api/v1/datasets/system``).
+    """List the built-in datasets; pass one's ``name`` to ``dagnam.load_dataset``.
 
     >>> dagnam.datasets.list_system()
     """

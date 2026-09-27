@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import httpx
@@ -28,10 +29,11 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_async_predict(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
-    mock.post("/api/v1/inference/dep1/predict").mock(
+    route = mock.post("/api/v1/inference/dep1/predict").mock(
         return_value=httpx.Response(200, json={"y": 1})
     )
     assert await client.predict("dep1", {"x": 1}) == {"y": 1}
+    assert json.loads(route.calls[0].request.content) == {"input": {"x": 1}}
 
 
 async def test_async_predict_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
@@ -74,36 +76,59 @@ async def test_async_inference_schema_404(client: AsyncDagnamClient, mock: Respx
 # ---------------------------------------------------------------- streaming
 
 
+async def test_async_mint_inference_stream_token(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    # No longer used by stream_predict (the session returns its own token); still public.
+    route = mock.post("/api/v1/inference/dep1/stream-access-token").mock(
+        return_value=httpx.Response(200, json={"token": "t1"})
+    )
+    assert await client.mint_inference_stream_token("dep1") == "t1"
+    assert route.calls[0].request.headers["Authorization"] == "Bearer k"
+
+
+_SESSION = "/api/v1/inference/dep1/predict/stream/session"
+_STREAM = "/api/v1/inference/dep1/predict/stream/s1"
+
+
+def _session_ok(mock: RespxMockRouter) -> None:
+    mock.post(_SESSION).mock(
+        return_value=httpx.Response(
+            200, json={"session_id": "s1", "token": "t1", "expires_in": 300}
+        )
+    )
+
+
 async def test_async_stream_predict_yields_tokens_until_complete(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/dep1/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
+    session = mock.post(_SESSION).mock(
+        return_value=httpx.Response(
+            200, json={"session_id": "s1", "token": "t1", "expires_in": 300}
+        )
     )
     body = (
         'event: token\ndata: {"token": "he", "index": 1}\n\n'
         'event: token\ndata: {"token": "llo", "index": 2}\n\n'
         'event: complete\ndata: {"done": true, "total_tokens": 2}\n\n'
     )
-    route = mock.get("/api/v1/inference/dep1/predict/stream").mock(
+    route = mock.get(_STREAM).mock(
         return_value=httpx.Response(200, text=body, headers={"Content-Type": "text/event-stream"})
     )
     events = [ev async for ev in client.stream_predict("dep1", {"text": "hi"})]
     assert [ev.event for ev in events] == ["token", "token", "complete"]
     assert events[0].data == {"token": "he", "index": 1}
-    sent = route.calls[0].request.url
-    assert "token=t1" in str(sent)
-    assert "input=" in str(sent)
+    assert json.loads(session.calls[0].request.content) == {"input": {"text": "hi"}}
+    # Only the session's short-lived token rides in the stream URL, never the input.
+    assert dict(route.calls[0].request.url.params) == {"token": "t1"}
 
 
 async def test_async_stream_predict_error_event_is_terminal(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/dep1/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
-    )
+    _session_ok(mock)
     body = 'event: error\ndata: {"message": "model blew up"}\n\n'
-    mock.get("/api/v1/inference/dep1/predict/stream").mock(
+    mock.get(_STREAM).mock(
         return_value=httpx.Response(200, text=body, headers={"Content-Type": "text/event-stream"})
     )
     events = [ev async for ev in client.stream_predict("dep1", {"text": "hi"})]
@@ -114,10 +139,8 @@ async def test_async_stream_predict_error_event_is_terminal(
 async def test_async_stream_predict_ends_without_terminal_raises(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/dep1/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
-    )
-    mock.get("/api/v1/inference/dep1/predict/stream").mock(
+    _session_ok(mock)
+    mock.get(_STREAM).mock(
         return_value=httpx.Response(
             200,
             text='event: token\ndata: {"token": "a"}\n\n',
@@ -128,24 +151,30 @@ async def test_async_stream_predict_ends_without_terminal_raises(
         _ = [ev async for ev in client.stream_predict("dep1", {"text": "hi"})]
 
 
-async def test_async_stream_predict_404_maps_not_found(
+async def test_async_stream_predict_session_404_maps_not_found(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/missing/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
+    mock.post("/api/v1/inference/missing/predict/stream/session").mock(
+        return_value=httpx.Response(404)
     )
-    mock.get("/api/v1/inference/missing/predict/stream").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         _ = [ev async for ev in client.stream_predict("missing", {"x": 1})]
+
+
+async def test_async_stream_predict_expired_session_404_maps_not_found(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    _session_ok(mock)
+    mock.get(_STREAM).mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        _ = [ev async for ev in client.stream_predict("dep1", {"x": 1})]
 
 
 async def test_async_stream_predict_connect_error_maps_apierror(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/dep1/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
-    )
-    mock.get("/api/v1/inference/dep1/predict/stream").mock(side_effect=httpx.ConnectError("down"))
+    _session_ok(mock)
+    mock.get(_STREAM).mock(side_effect=httpx.ConnectError("down"))
     with pytest.raises(APIError):
         _ = [ev async for ev in client.stream_predict("dep1", {"x": 1})]
 
@@ -153,10 +182,8 @@ async def test_async_stream_predict_connect_error_maps_apierror(
 async def test_async_stream_predict_connect_timeout_maps_apierror(
     client: AsyncDagnamClient, mock: RespxMockRouter
 ) -> None:
-    mock.post("/api/v1/inference/dep1/stream-access-token").mock(
-        return_value=httpx.Response(200, json={"token": "t1"})
-    )
-    mock.get("/api/v1/inference/dep1/predict/stream").mock(side_effect=httpx.ConnectTimeout("slow"))
+    _session_ok(mock)
+    mock.get(_STREAM).mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(APIError):
         _ = [ev async for ev in client.stream_predict("dep1", {"x": 1})]
 

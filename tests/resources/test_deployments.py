@@ -15,7 +15,6 @@ from dagnam._core.exceptions import (
     APIError,
     AuthError,
     DeploymentNotFoundError,
-    DeploymentStateError,
     DeploymentValidationError,
 )
 from dagnam._core.lro import LongRunningOperation
@@ -57,13 +56,6 @@ class TestReadDelegation:
         out = deployments.get("dep-1", client=client)
         client.get_deployment.assert_called_once_with("dep-1")
         assert out["status"] == "running"
-
-    def test_collect_metrics_delegates(self) -> None:
-        client = MagicMock()
-        client.collect_deployment_metrics.return_value = {"points_created": 1}
-        result = deployments.collect_metrics("dep1", backfill_minutes=30, client=client)
-        assert result == {"points_created": 1}
-        client.collect_deployment_metrics.assert_called_once_with("dep1", backfill_minutes=30)
 
     def test_logs_forwards_all_filters(self) -> None:
         client = MagicMock(spec=DagnamClient)
@@ -138,6 +130,21 @@ class TestCreateRevision:
         )
 
 
+class TestDeployModelVersion:
+    def test_delegates_and_returns_the_deployment_with_its_key(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.deploy_model_version.return_value = {"id": "dep-1", "api_key": "dep-key"}
+        result = deployments.deploy_model_version("mv1", client=client)
+        assert result == {"id": "dep-1", "api_key": "dep-key"}
+        client.deploy_model_version.assert_called_once_with("mv1", name=None, project_id=None)
+
+    def test_passes_name_and_project(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.deploy_model_version.return_value = {"id": "dep-1"}
+        deployments.deploy_model_version("mv1", name="bot", project_id="p1", client=client)
+        client.deploy_model_version.assert_called_once_with("mv1", name="bot", project_id="p1")
+
+
 class TestLifecycleLRO:
     def test_create_returns_lro_with_initial_payload(self) -> None:
         client = MagicMock(spec=DagnamClient)
@@ -186,23 +193,6 @@ class TestLifecycleLRO:
         assert sent["region"] == "us-east-1"
         assert sent["config"] == {"k": "v"}
 
-    def test_scale_returns_lro_and_passes_count(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.scale_deployment.return_value = {"id": "dep-1", "status": "running"}
-        client.get_deployment.return_value = {"id": "dep-1", "status": "running"}
-        op = deployments.scale("dep-1", num_instances=4, client=client)
-        client.scale_deployment.assert_called_once_with("dep-1", num_instances=4)
-        assert isinstance(op, LongRunningOperation)
-        # wait returns immediately because status is already running
-        op.wait(timeout=5).result()
-
-    def test_rollback_returns_lro(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.rollback_deployment.return_value = {"id": "dep-1", "status": "deploying"}
-        op = deployments.rollback("dep-1", "ckpt-v2", client=client)
-        client.rollback_deployment.assert_called_once_with("dep-1", checkpoint_id="ckpt-v2")
-        assert isinstance(op, LongRunningOperation)
-
     def test_pause_success_state_is_paused(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.pause_deployment.return_value = {"id": "dep-1", "status": "paused"}
@@ -210,13 +200,12 @@ class TestLifecycleLRO:
         op = deployments.pause("dep-1", client=client)
         op.wait(timeout=5).result()
 
-    def test_update_is_synchronous(self) -> None:
+    def test_update_renames(self) -> None:
         client = MagicMock(spec=DagnamClient)
-        client.update_deployment.return_value = {"id": "dep-1", "num_instances": 2}
-        out = deployments.update("dep-1", num_instances=2, name="renamed", client=client)
-        payload = client.update_deployment.call_args.args[1]
-        assert payload == {"num_instances": 2, "name": "renamed"}
-        assert out["num_instances"] == 2
+        client.update_deployment.return_value = {"id": "dep-1", "name": "renamed"}
+        out = deployments.update("dep-1", name="renamed", client=client)
+        client.update_deployment.assert_called_once_with("dep-1", {"name": "renamed"})
+        assert out["name"] == "renamed"
 
 
 # ---------------------------------------------------------------------------
@@ -244,13 +233,6 @@ class TestClientErrorMapping:
         requests_mock.post("https://x/api/v1/deployments", status_code=422, text="bad fields")
         with pytest.raises(DeploymentValidationError):
             self._client().create_deployment({"name": "x"})
-
-    def test_scale_maps_409_to_stateerror(self, requests_mock: RequestsMocker) -> None:
-        requests_mock.put(
-            "https://x/api/v1/deployments/dep-1/scale", status_code=409, text="not running"
-        )
-        with pytest.raises(DeploymentStateError):
-            self._client().scale_deployment("dep-1", num_instances=3)
 
     def test_connectionerror_wrapped(self, requests_mock: RequestsMocker) -> None:
         requests_mock.get(
@@ -298,45 +280,11 @@ class TestEndToEndLRO:
 
 
 # ---------------------------------------------------------------------------
-# Planning delegation — estimate-cost / validate / platforms / retry
+# Planning delegation — validate / platforms
 # ---------------------------------------------------------------------------
 
 
 class TestPlanningDelegation:
-    def test_estimate_cost_minimal_payload(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.estimate_cost.return_value = {"monthly_cost": 12.0}
-        out = deployments.estimate_cost(
-            platform="fastapi", instance_type="cpu.small", client=client
-        )
-        assert out["monthly_cost"] == 12.0
-        sent = client.estimate_cost.call_args.args[0]
-        assert sent == {
-            "platform": "fastapi",
-            "instance_type": "cpu.small",
-            "num_instances": 1,
-            "auto_scaling_enabled": False,
-        }
-
-    def test_estimate_cost_includes_optional_fields(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.estimate_cost.return_value = {"monthly_cost": 99.0}
-        deployments.estimate_cost(
-            platform="fastapi",
-            instance_type="gpu.large",
-            num_instances=3,
-            auto_scaling_enabled=True,
-            min_instances=1,
-            max_instances=5,
-            region="us-east-1",
-            client=client,
-        )
-        sent = client.estimate_cost.call_args.args[0]
-        assert sent["num_instances"] == 3
-        assert sent["min_instances"] == 1
-        assert sent["max_instances"] == 5
-        assert sent["region"] == "us-east-1"
-
     def test_validate_minimal_payload(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.validate_deployment.return_value = {"valid": True, "errors": []}
@@ -390,13 +338,6 @@ class TestPlanningDelegation:
         assert isinstance(first, dict)
         assert first["platform"] == "fastapi"
 
-    def test_retry_delegates(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.retry_deployment.return_value = {"id": "d1", "status": "deploying"}
-        out = deployments.retry("d1", client=client)
-        client.retry_deployment.assert_called_once_with("d1")
-        assert out["status"] == "deploying"
-
 
 def test_predict_stream_is_inference_stream_alias(monkeypatch) -> None:
     from dagnam.resources import deployments as deployments_mod
@@ -415,36 +356,10 @@ def test_predict_stream_is_inference_stream_alias(monkeypatch) -> None:
     assert calls["args"] == ("dep1", {"text": "x"}, False, "C")
 
 
-class TestCreateFromTrainingJob:
-    def test_supplies_the_modal_chat_defaults(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.create_deployment.return_value = {"id": "dep-1", "status": "deploying"}
-        op = deployments.create_from_training_job(
-            name="chat", project_id="p1", training_job_id="job-1", client=client
-        )
-        assert isinstance(op, LongRunningOperation)
-        initial = op.initial()
-        assert initial is not None
-        assert initial["id"] == "dep-1"
-        sent = client.create_deployment.call_args.args[0]
-        assert sent["name"] == "chat"
-        assert sent["project_id"] == "p1"
-        assert sent["training_job_id"] == "job-1"
-        assert sent["platform"] == "vllm"
-        assert sent["deployment_type"] == "text"
-        assert sent["instance_type"] == "modal-serverless"
-        # ``checkpoint_path`` is required by the API but the weights come from
-        # the job; it must be non-empty and traversal-free, nothing more.
-        assert sent["checkpoint_path"]
-        assert "../" not in sent["checkpoint_path"]
-        assert "checkpoint_id" not in sent
-
-    def test_lro_polls_the_new_deployment(self) -> None:
-        client = MagicMock(spec=DagnamClient)
-        client.create_deployment.return_value = {"id": "dep-1", "status": "deploying"}
-        client.get_deployment.return_value = {"id": "dep-1", "status": "running"}
-        op = deployments.create_from_training_job(
-            name="chat", project_id="p1", training_job_id="job-1", client=client
-        )
-        assert op.wait(timeout=1, sleep=lambda _s: None).result()["status"] == "running"
-        client.get_deployment.assert_called_with("dep-1")
+@pytest.mark.parametrize(
+    "name",
+    ["collect_metrics", "create_from_training_job", "estimate_cost", "retry", "rollback", "scale"],
+)
+def test_removed_functions_are_gone(name: str) -> None:
+    assert not hasattr(deployments, name)
+    assert name not in deployments.__all__

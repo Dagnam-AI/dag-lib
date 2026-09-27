@@ -1,4 +1,4 @@
-"""Tests for system dataset name resolution in load_dataset()."""
+"""Tests for load_dataset(): name resolution, routing and cache safety."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 from dagnam import load_dataset
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import ChecksumError, DagnamError
+from dagnam._core.exceptions import ChecksumError, DagnamError, DatasetNotFoundError
 from dagnam._types import JsonObject, JsonValue
 from dagnam.data import cache
 from dagnam.data.dataset import DagnamDataset
@@ -93,64 +93,57 @@ USER_META = {
 
 
 # ------------------------------------------------------------------
-# Routing tests — friendly names → system endpoints
+# Routing tests: a built-in dataset's name resolves to its id
 # ------------------------------------------------------------------
+
+SYSTEM_ID = "7d0b3c1e-2f4a-4b6c-9d8e-0f1a2b3c4d5e"
+BROWSE_URL = "http://localhost/api/v1/datasets/browse"
 
 
 class TestSystemDatasetRouting:
-    """Friendly names should route through system dataset endpoints."""
+    """The API addresses datasets only by id, so a name is looked up first."""
 
-    def test_friendly_name_calls_system_meta(self, tmp_path: Path) -> None:
-        meta = {
-            **SYSTEM_META,
-            "checksum": "placeholder",
-            "source_type": "system",
-        }
-
+    def test_name_resolves_to_the_system_row_then_loads_by_id(
+        self, tmp_path: Path, requests_mock: RequestsMocker
+    ) -> None:
+        requests_mock.get(
+            BROWSE_URL,
+            json=[
+                {"id": "11111111-2222-4333-8444-555555555555", "name": "Fashion MNIST"},
+                {"id": SYSTEM_ID, "name": "MNIST Handwritten Digits"},
+            ],
+        )
+        meta = {**SYSTEM_META, "id": SYSTEM_ID, "source_type": "system"}
+        requests_mock.get(f"http://localhost/api/v1/datasets/{SYSTEM_ID}/meta", json=meta)
         mock_native_ds = MagicMock(spec=DagnamDataset)
 
         with (
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
-            patch.object(
-                DagnamClient, "get_system_dataset_meta", return_value=meta
-            ) as mock_sys_meta,
-            patch.object(DagnamClient, "get_dataset_meta") as mock_user_meta,
             patch(
                 "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
             ) as mock_resolve,
         ):
-            ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
+            ds = load_dataset("mnist handwritten digits", cache_dir=str(tmp_path))
 
-            mock_sys_meta.assert_called_once_with("mnist-digits", version=None)
-            mock_user_meta.assert_not_called()
-            mock_resolve.assert_called_once_with(meta, binding=None)
-            assert ds is mock_native_ds
+        assert ds is mock_native_ds
+        mock_resolve.assert_called_once_with(meta, binding=None)
+        assert requests_mock.request_history[0].qs == {"source_type": ["system"]}
 
-    def test_friendly_name_with_dashes(self, tmp_path: Path) -> None:
-        """Names like 'imdb-sentiment' are NOT UUIDs and should use system endpoints.
-        With unified architecture, system datasets route to native loaders."""
-        meta = {
-            **SYSTEM_META,
-            "id": "imdb-sentiment",
-            "name": "IMDB Sentiment",
-            "checksum": "placeholder",
-            "source_type": "system",
-        }
-
-        mock_native_ds = MagicMock(spec=DagnamDataset)
+    def test_unknown_name_raises_not_found(
+        self, tmp_path: Path, requests_mock: RequestsMocker
+    ) -> None:
+        requests_mock.get(BROWSE_URL, json=[{"id": SYSTEM_ID, "name": "MNIST Handwritten Digits"}])
 
         with (
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
-            patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
-            patch(
-                "dagnam.data.loaders.system.load_system_dataset", return_value=mock_native_ds
-            ) as mock_resolve,
+            pytest.raises(DatasetNotFoundError) as exc_info,
         ):
-            ds = load_dataset("imdb-sentiment", cache_dir=str(tmp_path))
-            assert ds is mock_native_ds
-            mock_resolve.assert_called_once_with(meta, binding=None)
+            load_dataset("mnist-digits", cache_dir=str(tmp_path))
+        assert requests_mock.call_count == 1
+        assert exc_info.value.dataset_id == "mnist-digits"
+        assert "dagnam.datasets.list_system()" in str(exc_info.value)
 
 
 # ------------------------------------------------------------------
@@ -180,21 +173,19 @@ class TestUserDatasetRouting:
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
             patch.object(DagnamClient, "get_dataset_meta", return_value=meta) as mock_user_meta,
-            patch.object(DagnamClient, "get_system_dataset_meta") as mock_sys_meta,
+            patch.object(DagnamClient, "list_system_datasets") as mock_sys_list,
             patch.object(
                 DagnamClient, "download_dataset", side_effect=_fake_download
             ) as mock_user_dl,
-            patch.object(DagnamClient, "download_system_dataset") as mock_sys_dl,
         ):
             ds = load_dataset(dataset_id, cache_dir=str(tmp_path))
 
             mock_user_meta.assert_called_once_with(dataset_id, version=None)
-            mock_sys_meta.assert_not_called()
+            mock_sys_list.assert_not_called()
             mock_user_dl.assert_called_once()
             # download was handed the deterministic staging dir, not the final dir
             staging_arg = Path(mock_user_dl.call_args.args[1])
             assert staging_arg == tmp_path / ".staging" / dataset_id
-            mock_sys_dl.assert_not_called()
             assert ds.name == "My Custom Dataset"
             # promoted: data lives in the final cache dir, staging is consumed
             assert (tmp_path / dataset_id / "data.csv").read_bytes() == csv_content
@@ -207,46 +198,18 @@ class TestUserDatasetRouting:
 
 
 class TestClientSystemMethods:
-    """Verify DagnamClient system dataset methods hit the right URLs."""
+    """The system catalog is the browse route filtered to built-in datasets."""
 
     def test_list_system_datasets(self, requests_mock: RequestsMocker) -> None:
         client = DagnamClient("http://localhost:8000", "test-key")
-        url = "http://localhost:8000/api/v1/datasets/system"
-        requests_mock.get(url, json=[{"id": "mnist-digits", "name": "MNIST"}])
+        url = "http://localhost:8000/api/v1/datasets/browse"
+        requests_mock.get(url, json=[{"id": SYSTEM_ID, "name": "MNIST"}])
 
         result = client.list_system_datasets()
 
         assert requests_mock.call_count == 1
-        assert requests_mock.last_request.url == url
-        assert result == [{"id": "mnist-digits", "name": "MNIST"}]
-
-    def test_get_system_dataset_meta(self, requests_mock: RequestsMocker) -> None:
-        client = DagnamClient("http://localhost:8000", "test-key")
-        url = "http://localhost:8000/api/v1/datasets/system/mnist-digits"
-        requests_mock.get(url, json={"id": "mnist-digits", "name": "MNIST"})
-
-        result = client.get_system_dataset_meta("mnist-digits")
-
-        assert requests_mock.last_request.url == url
-        assert result["id"] == "mnist-digits"
-
-    def test_download_system_dataset(self, tmp_path: Path) -> None:
-        client = DagnamClient("http://localhost:8000", "test-key")
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.headers = {
-            "Content-Disposition": 'attachment; filename="mnist.csv"',
-            "Content-Length": "5",
-        }
-        mock_resp.iter_content.return_value = [b"hello"]
-
-        with patch("dagnam._core.client.base.requests.get", return_value=mock_resp) as mock_get:
-            result = client.download_system_dataset("mnist-digits", tmp_path)
-
-        call_url = mock_get.call_args[0][0]
-        assert call_url == "http://localhost:8000/api/v1/datasets/system/mnist-digits/download"
-        assert result == tmp_path / "mnist.csv"
-        assert result.read_bytes() == b"hello"
+        assert requests_mock.last_request.qs == {"source_type": ["system"]}
+        assert result == [{"id": SYSTEM_ID, "name": "MNIST"}]
 
 
 # ------------------------------------------------------------------

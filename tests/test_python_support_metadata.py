@@ -10,8 +10,11 @@ def test_project_metadata_advertises_python_3_12_plus_support() -> None:
 
     # No upper Python cap — a pure-Python SDK must not lock users off 3.13/3.14+.
     assert project["requires-python"] == ">=3.12"
-    assert "Programming Language :: Python :: 3.12" in project["classifiers"]
-    assert "Programming Language :: Python :: 3.13" in project["classifiers"]
+    # The classifiers name only what CI tests (see test_ci_matrix_uses_python_3_12).
+    versions = [
+        c for c in project["classifiers"] if c.startswith("Programming Language :: Python :: 3.")
+    ]
+    assert versions == ["Programming Language :: Python :: 3.12"]
 
 
 def test_version_is_single_sourced_from_package_init() -> None:

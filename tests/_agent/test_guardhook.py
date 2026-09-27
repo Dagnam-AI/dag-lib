@@ -33,6 +33,18 @@ def test_denies_unconfirmed_deploy(monkeypatch: PytestMonkeyPatch, capsys: StrCa
     assert payload["permissionDecision"] == "deny"
 
 
+def test_denies_unconfirmed_version_deploy(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    code, payload = _run(
+        {"tool_name": "Bash", "tool_input": {"command": "dagnam deployments deploy-version mv-1"}},
+        monkeypatch,
+        capsys,
+    )
+    assert code == 0
+    assert payload["permissionDecision"] == "deny"
+
+
 def test_denies_unconfirmed_training_delete(
     monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:
@@ -123,10 +135,13 @@ def test_allows_non_costly_command(monkeypatch: PytestMonkeyPatch, capsys: StrCa
     [
         'python -c "import dagnam; dagnam.deployments.create(name=1)"',
         'python -c "import dagnam; dagnam.deployments.delete(d)"',
+        'python -c "import dagnam; dagnam.deployments.deploy_model_version(v)"',
         'python -c "import dagnam; dagnam.training.create(pid)"',
         'python -c "import dagnam; dagnam.training.delete(jid)"',
         'python -c "import dagnam; dagnam.projects.delete(pid)"',
         'python -c "import dagnam; dagnam.create_training_job(pid)"',
+        'python -c "import dagnam; c = dagnam.DagnamClient(u, k); c.deploy_model_version(v)"',
+        'python -c "import dagnam; c = dagnam.DagnamClient(u, k); c.create_deployment(p)"',
         "python -c \"import dagnam; dagnam.hub.create(visibility='public')\"",
         'python -c "import dagnam; dagnam.datasets.upload(f, visibility=\\"public\\")"',
     ],

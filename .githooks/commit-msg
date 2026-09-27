@@ -1,0 +1,44 @@
+#!/bin/sh
+# Dagnam.AI commit-msg hook -- every commit accounts for its docs and roadmap.
+#
+# Generic and byte-identical in every Dagnam.AI repo, like `pre-push`. It names
+# no checker itself: it runs the one named by `git config dagnam.commitCheck`,
+# which the workspace tooling sets in each clone it manages. When that key is
+# unset -- an outside contributor, a fresh clone -- the hook does nothing, so a
+# public repo's copy never depends on anything a contributor cannot have.
+#
+# The checker receives the repo's name (the main clone's directory, also from
+# inside a linked worktree) and the message file. It exits 1 with the lines to
+# add when the commit does not account for itself. `git commit --no-verify`
+# bypasses this, by design; it constrains habit, not an adversary.
+
+checker=$(git config --get dagnam.commitCheck) || exit 0
+[ -n "$checker" ] || exit 0
+
+# Merges, reverts and fixup!/squash!/amend! commits are exempt everywhere
+# the checker itself applies this exemption -- checked here too, before the
+# checker file or python are touched, so a stale dagnam.commitCheck path can
+# never block one of these.
+git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && exit 0
+case "$(sed -n 1p "$1")" in
+	fixup!\ *|squash!\ *|amend!\ *|'Revert "'*) exit 0 ;;
+esac
+
+if [ ! -f "$checker" ]; then
+	echo "commit-msg: git config dagnam.commitCheck points at a missing file: $checker" >&2
+	echo "commit-msg: re-run the tooling's install_hooks.py, or \`git config --unset dagnam.commitCheck\`." >&2
+	exit 1
+fi
+
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+repo=$(basename "$(dirname "$common")")
+
+for py in python3 python; do
+	# `-c ''` weeds out a launcher stub that exists but cannot run anything.
+	if command -v "$py" >/dev/null 2>&1 && "$py" -c '' >/dev/null 2>&1; then
+		exec "$py" "$checker" --repo "$repo" --message-file "$1"
+	fi
+done
+
+echo "commit-msg: no python3 or python on PATH to run $checker" >&2
+exit 1

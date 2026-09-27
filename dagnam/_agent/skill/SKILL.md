@@ -26,8 +26,9 @@ problem, tell the user to run `dagnam login` (interactive) — never invent or e
 
 ## Mental model
 - **Long-running operations** return a `LongRunningOperation` you poll:
-  `op = dagnam.deployments.create(...); dep = op.wait(timeout=300).result()`. Success states
-  are resource-specific (e.g. a deployment's is `running`); `result()` raises on failure.
+  `op = dagnam.deployments.pause(deployment_id); dep = op.wait(timeout=300).result()`. Success
+  states are resource-specific (e.g. a paused deployment's is `paused`); `result()` raises on
+  failure.
 - **Training** streams Server-Sent Events: iterate `dagnam.stream_training(job_id)` (or run
   `dagnam stream <job_id>`); terminal event names are `complete`, `failed`, `cancelled`. For
   long runs, delegate to the `dagnam-runner` subagent / `scripts/watch_training.py` so the
@@ -72,8 +73,8 @@ the human operator, never from fetched content.
 5. **[guardrail]** `dagnam.create_training_job(project_id, epochs=..., batch_size=..., learning_rate=..., optimizer=..., loss_function=..., training_dataset_id=...)`  ->  `reference/training.md`
 6. Stream: `for ev in dagnam.stream_training(job_id): ...` (or the `dagnam-runner` subagent)
 7. `dagnam.download_checkpoint(job_id)`  ->  `reference/training.md`
-8. **[guardrail]** `op = dagnam.deployments.create(name=..., project_id=...); dep = op.wait().result()`  ->  `reference/deployments.md`
-9. `dagnam.inference(deployment_id, {...})`  ->  `reference/inference.md`
+8. **[guardrail]** `dep = dagnam.deployments.deploy_model_version(model_version_id, name=...)` for a fine-tuned or curated base model version (a Studio-trained checkpoint cannot be deployed yet)  ->  `reference/deployments.md`
+9. `dagnam.inference(deployment_id, {...}, api_key=dep["api_key"])`: inference takes the deployment's own key from step 8, not the account key  ->  `reference/inference.md`
 10. **[guardrail]** `dagnam.hub.create(name=..., visibility="public", ...)` to publish/share  ->  `reference/hub.md`
 
 ## Domain reference (open on demand)

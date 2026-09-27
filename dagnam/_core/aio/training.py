@@ -179,9 +179,11 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
         )
 
     async def restore_from_checkpoint(self, job_id: str, checkpoint_id: str) -> JsonObject:
-        """Restart a job from one of its checkpoints.
+        """Start a new job from one of a job's checkpoints; returns the new job.
 
         ``POST /api/v1/training/jobs/{job_id}/checkpoints/{checkpoint_id}/restore``.
+        An API key with write access to training works, under the same checks as
+        :meth:`restart_training_job`.
         """
         return ensure_json_object(
             await self._training_req(

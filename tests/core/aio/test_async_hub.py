@@ -64,7 +64,7 @@ async def test_async_hub_misc(client: AsyncDagnamClient, mock: RespxMockRouter) 
     mock.get("/api/v1/hub/categories").mock(return_value=httpx.Response(200, json=[]))
     mock.get("/api/v1/hub/featured").mock(return_value=httpx.Response(200, json=[]))
     mock.get("/api/v1/hub/trending").mock(return_value=httpx.Response(200, json=[]))
-    mock.get("/api/v1/hub/starred").mock(return_value=httpx.Response(200, json={}))
+    mock.get("/api/v1/hub/models/starred").mock(return_value=httpx.Response(200, json={}))
 
     await client.list_hub_model_files("m1")
     await client.download_hub_model("m1", file_id="f1")

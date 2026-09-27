@@ -1,8 +1,8 @@
-"""Wire-level coverage for API-key create/list/revoke sync client methods.
+"""Wire-level coverage for the sync ``create_api_key`` client method.
 
-Covers ``AccountClientMixin.create_api_key/list_api_keys/revoke_api_key``, plus
-the ``raise_for_generic``/``_expect_object``/``_expect_array`` error mapping
-these methods share with the rest of the account surface.
+``dagnam.account.register`` mints its first key through it with a session
+token; the tests also pin the ``raise_for_generic``/``_expect_object`` error
+mapping it shares with the rest of the account surface.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dagnam._core.client import DagnamClient
+from dagnam._core.client.account import ApiKeyPlanError
 from dagnam._core.exceptions import APIError, AuthError, QuotaExceededError
 
 if TYPE_CHECKING:
@@ -91,49 +92,25 @@ def test_create_api_key_402_raises_quotaexceedederror(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
     rmock.post(API_KEYS, status_code=402, json={"message": "Plan limit reached"})
-    with pytest.raises(QuotaExceededError):
+    with pytest.raises(QuotaExceededError) as exc_info:
+        client.create_api_key("ci-key")
+    # No refusal code in the body, so it is not reported as a plan without keys.
+    assert not isinstance(exc_info.value, ApiKeyPlanError)
+
+
+def test_create_api_key_plan_refusal_without_message_raises_apikeyplanerror(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(API_KEYS, status_code=403, json={"error": "feature_gated"})
+    with pytest.raises(ApiKeyPlanError, match="Plan limit reached"):
         client.create_api_key("ci-key")
 
 
-# ------------------------------------------------------------------- list_api_keys
-
-
-def test_list_api_keys_returns_array(client: DagnamClient, rmock: RequestsMocker) -> None:
-    payload = [{k: v for k, v in CREATED.items() if k != "key"}]
-    rmock.get(API_KEYS, json=payload)
-    result = client.list_api_keys()
-    assert result == payload
-    assert rmock.last_request.headers["Authorization"] == "Bearer k"
-
-
-def test_list_api_keys_401_raises_autherror(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.get(API_KEYS, status_code=401, text="nope")
-    with pytest.raises(AuthError):
-        client.list_api_keys()
-
-
-# ------------------------------------------------------------------ revoke_api_key
-
-
-def test_revoke_api_key_sends_delete(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.delete(f"{API_KEYS}/key-1", status_code=204)
-    result = client.revoke_api_key("key-1")
-    assert result is None
-    assert rmock.last_request.headers["Authorization"] == "Bearer k"
-
-
-def test_revoke_api_key_quotes_id(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.delete(f"{API_KEYS}/a%2Fb", status_code=204)
-    client.revoke_api_key("a/b")
-
-
-def test_revoke_api_key_401_raises_autherror(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.delete(f"{API_KEYS}/key-1", status_code=401, text="nope")
-    with pytest.raises(AuthError):
-        client.revoke_api_key("key-1")
-
-
-def test_revoke_api_key_404_raises_apierror(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.delete(f"{API_KEYS}/ghost", status_code=404, json={"detail": "API key not found"})
-    with pytest.raises(APIError):
-        client.revoke_api_key("ghost")
+def test_create_api_key_non_json_403_maps_generically(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(API_KEYS, status_code=403, text="forbidden")
+    with pytest.raises(APIError) as exc_info:
+        client.create_api_key("ci-key")
+    assert not isinstance(exc_info.value, ApiKeyPlanError)
+    assert exc_info.value.status_code == 403

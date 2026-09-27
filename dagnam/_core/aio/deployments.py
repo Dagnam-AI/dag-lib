@@ -12,6 +12,7 @@ from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
+    response_json_object,
     response_json_value,
     stream_query_params,
 )
@@ -96,18 +97,55 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             )
         )
 
+    async def _post_created_deployment(
+        self, path: str, body: JsonObject, *, idempotency_key: str | None = None
+    ) -> JsonObject:
+        """POST a create route; restore the one-time key after a replay (see the sync twin)."""
+        resp = await self._request(
+            "POST",
+            path,
+            json=body,
+            raise_for=lambda r: raise_for_deployment(r, "deployment"),
+            idempotent=True,
+            idempotency_key=idempotency_key,
+        )
+        created = response_json_object(resp)
+        if resp.headers.get("Idempotency-Replayed") == "true" and created.get("api_key") is None:
+            created.update(await self.rotate_deployment_key(str(created["id"])))
+        return created
+
     async def create_deployment(self, payload: JsonObject) -> JsonObject:
-        return ensure_json_object(
-            await self._deployment_req(
-                "POST", "/api/v1/deployments", json_body=payload, idempotent=True
-            )
+        return await self._post_created_deployment("/api/v1/deployments", payload)
+
+    async def deploy_model_version(
+        self,
+        model_version_id: str,
+        *,
+        name: str | None = None,
+        project_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """Deploy a registry model version. ``POST /api/v1/deployments/from-model-version``.
+
+        Returns the deployment with its one-time ``api_key``; an
+        ``Idempotency-Key`` is minted when none is given (see the sync twin).
+        """
+        body: JsonObject = {"model_version_id": model_version_id}
+        if name is not None:
+            body["name"] = name
+        if project_id is not None:
+            body["project_id"] = project_id
+        return await self._post_created_deployment(
+            "/api/v1/deployments/from-model-version", body, idempotency_key=idempotency_key
         )
 
-    async def estimate_cost(self, payload: JsonObject) -> JsonObject:
-        """Estimate deployment cost. ``POST /api/v1/deployments/estimate-cost``."""
+    async def rotate_deployment_key(self, deployment_id: str) -> JsonObject:
+        """Replace the deployment's key. ``POST /api/v1/deployments/{id}/rotate-key``."""
         return ensure_json_object(
             await self._deployment_req(
-                "POST", "/api/v1/deployments/estimate-cost", json_body=payload
+                "POST",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rotate-key",
+                deployment_id=deployment_id,
             )
         )
 
@@ -159,36 +197,6 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             )
         )
 
-    async def scale_deployment(self, deployment_id: str, num_instances: int) -> JsonObject:
-        return ensure_json_object(
-            await self._deployment_req(
-                "PUT",
-                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
-                deployment_id=deployment_id,
-                params={"num_instances": num_instances},
-            )
-        )
-
-    async def rollback_deployment(self, deployment_id: str, checkpoint_id: str) -> JsonObject:
-        return ensure_json_object(
-            await self._deployment_req(
-                "POST",
-                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
-                deployment_id=deployment_id,
-                params={"checkpoint_id": checkpoint_id},
-            )
-        )
-
-    async def retry_deployment(self, deployment_id: str) -> JsonObject:
-        """Retry a failed/stuck deployment. ``POST /api/v1/deployments/{id}/retry`` (no body)."""
-        return ensure_json_object(
-            await self._deployment_req(
-                "POST",
-                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/retry",
-                deployment_id=deployment_id,
-            )
-        )
-
     async def get_deployment_metrics(
         self, deployment_id: str, time_range: str = "24h"
     ) -> JsonObject:
@@ -198,22 +206,6 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
                 f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
                 deployment_id=deployment_id,
                 params={"time_range": time_range},
-            )
-        )
-
-    async def collect_deployment_metrics(
-        self, deployment_id: str, backfill_minutes: int = 60
-    ) -> JsonObject:
-        """Trigger an immediate metrics collection (with first-time backfill).
-
-        POST /api/v1/deployments/{id}/metrics/collect
-        """
-        return ensure_json_object(
-            await self._deployment_req(
-                "POST",
-                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics/collect",
-                deployment_id=deployment_id,
-                params={"backfill_minutes": backfill_minutes},
             )
         )
 
@@ -307,7 +299,7 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         """One connection's worth of deployment events (see the training twin)."""
         token = await self.mint_deployment_stream_token(deployment_id)
         dep_path = quote_path_segment(deployment_id)
-        url = f"{self.api_url}/api/v1/streaming/deployments/{dep_path}/stream"
+        url = f"{self.api_url}/api/v1/deployments/{dep_path}/stream"
         headers = {"Accept": "text/event-stream"}
         if cursor:
             headers["Last-Event-ID"] = cursor
@@ -342,7 +334,7 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
         raises ``StreamError`` after repeated failures — so a drop is never
         mistaken for the deployment finishing.
 
-        ``GET /api/v1/streaming/deployments/{deployment_id}/stream?token=...``
+        ``GET /api/v1/deployments/{deployment_id}/stream?token=...``
         """
         return aiter_with_reconnect(
             lambda cursor: self._open_deployment_stream(deployment_id, cursor),

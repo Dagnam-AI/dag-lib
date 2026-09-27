@@ -2,7 +2,7 @@
 
 A small, generic polling primitive used by Phase 4 endpoints whose completion
 is signalled by a resource-state transition (``deployments.create``,
-``deployments.scale``, ``deployments.rollback``, ``codegen.generate``,
+``deployments.pause``, ``deployments.resume``, ``codegen.generate``,
 ``datasets.upload_from_url``, …).
 
 The shape follows GCP/k8s LROs:

@@ -36,18 +36,6 @@ class TestClientVersionQuery:
         client.get_dataset_meta("ds")
         assert requests_mock.last_request.qs == {}
 
-    def test_get_system_dataset_meta_sends_version_query(
-        self, requests_mock: RequestsMocker
-    ) -> None:
-        """version param is sent for system dataset meta."""
-        client = DagnamClient("https://api.test", "key")
-        requests_mock.get(
-            "https://api.test/api/v1/datasets/system/mnist",
-            json={"id": "mnist", "source_type": "system"},
-        )
-        client.get_system_dataset_meta("mnist", version="v3")
-        assert requests_mock.last_request.qs == {"version": ["v3"]}
-
 
 class TestVersionedCacheKey:
     """Tests that versioned datasets use version-aware cache keys."""

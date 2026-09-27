@@ -65,12 +65,12 @@ def test_save_architecture(client: DagnamClient, rmock: RequestsMocker) -> None:
 
 
 def test_import_dag(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/projects/import", json={"id": "p1"})
+    rmock.post(f"{API}/api/v1/projects/import-dag", json={"id": "p1"})
     assert client.import_dag({"dag": "..."}) == {"id": "p1"}
 
 
 def test_import_dag_existing(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.post(f"{API}/api/v1/projects/p1/import", json={"id": "p1"})
+    rmock.post(f"{API}/api/v1/projects/p1/import-dag", json={"id": "p1"})
     assert client.import_dag_existing("p1", {"dag": "..."}) == {"id": "p1"}
 
 
