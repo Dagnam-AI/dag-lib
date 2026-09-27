@@ -31,7 +31,7 @@ def cmd_register(
     """
     import dagnam
     from dagnam._core import config as _cfg
-    from dagnam._core.exceptions import APIError, DagnamError
+    from dagnam._core.exceptions import APIError, DagnamError, QuotaExceededError
 
     api_url = getattr(args, "api_url", None)
 
@@ -63,6 +63,9 @@ def cmd_register(
                 "Your account needs email verification - check your inbox, then run `dagnam login`."
             )
         error(f"Registration failed: {exc}")
+    except QuotaExceededError as exc:
+        # The account exists; only the key step was refused by the plan.
+        error(str(exc))
     except DagnamError as exc:
         error(f"Registration failed: {exc}")
 
@@ -92,7 +95,8 @@ def register_register(subparsers: SubParsersAction) -> None:
         help="Create an account and store an API key.",
         description=(
             "Create a Dagnam.AI account, mint a fresh API key, and save it "
-            "to ~/.dagnam/config.json."
+            "to ~/.dagnam/config.json. API keys need a paid plan, so on the Free plan "
+            "the account is created without a key."
         ),
     )
     register_cmd.add_argument("--api-url", help="API base URL (default: https://api.dagnam.ai).")

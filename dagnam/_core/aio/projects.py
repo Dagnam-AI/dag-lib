@@ -108,14 +108,14 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
 
     async def import_dag(self, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
-            await self._project_req("POST", "/api/v1/projects/import", json_body=payload)
+            await self._project_req("POST", "/api/v1/projects/import-dag", json_body=payload)
         )
 
     async def import_dag_existing(self, project_id: str, payload: JsonObject) -> JsonObject:
         return ensure_json_object(
             await self._project_req(
                 "POST",
-                f"/api/v1/projects/{quote_path_segment(project_id)}/import",
+                f"/api/v1/projects/{quote_path_segment(project_id)}/import-dag",
                 project_id=project_id,
                 json_body=payload,
             )

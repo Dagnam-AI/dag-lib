@@ -30,7 +30,6 @@ _ALLOWED_SITES = {
     ("training.py", "open_training_stream"),  # stream=True SSE read
     # Multipart uploads — _request has no files= parameter.
     ("datasets.py", "upload_dataset"),  # multipart, timeout=None
-    ("account.py", "upload_profile_photo"),  # multipart files={"file": ...}
     ("projects.py", "upload_project_thumbnail"),  # multipart files={"file": ...}
     ("hub.py", "upload_model_file"),  # multipart files={"file": ...}
     ("models.py", "upload_model_artifact_direct"),  # multipart files={"file": ...}

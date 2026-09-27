@@ -40,10 +40,13 @@ def test_top_level_help_includes_workflow_examples(run_cli: CliRunner, capsys: S
     ("args", "expected"),
     [
         (["dataset", "list", "--help"], "image, text, audio, video, tabular, custom"),
-        (["deployments", "create", "--help"], "fastapi, torchserve, vllm, triton, custom"),
         (["deployments", "logs", "--help"], "debug, info, warning, error"),
         (["inference", "run", "--help"], "--input-file"),
         (["inference", "batch", "--help"], "--inputs-file"),
+        (["inference", "--help"], "run, batch and schema need the deployment's own key"),
+        (["training", "restore", "--help"], "the same checks as restart"),
+        (["register", "--help"], "API keys need a paid plan"),
+        (["deployments", "update", "--help"], "Rename a deployment"),
     ],
 )
 def test_help_documents_supported_values_and_file_inputs(

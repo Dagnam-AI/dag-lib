@@ -64,10 +64,24 @@ def test_no_dead_command_references_in_skill_docs() -> None:
     bad: list[str] = []
     for doc in docs:
         for match in pattern.findall(doc.read_text(encoding="utf-8")):
-            top = match.split()[0]
-            if match not in valid and top not in valid:
+            # The whole `<cmd> <sub>` must resolve: a live group must not vouch
+            # for a removed subcommand under it.
+            if match not in valid:
                 bad.append(f"{doc.name}: dagnam {match}")
     assert not bad, f"Dead command references: {bad}"
+
+
+def test_skill_docs_name_only_env_vars_the_sdk_reads() -> None:
+    """Every ``DAGNAM_*`` variable the skill mentions must appear in the package source."""
+    source = "\n".join(p.read_text(encoding="utf-8") for p in _ASSETS.parent.rglob("*.py"))
+    docs = [_ASSETS / "skill" / "SKILL.md", *(_ASSETS / "skill" / "reference").glob("*.md")]
+    named = {
+        name
+        for doc in docs
+        for name in re.findall(r"\bDAGNAM_[A-Z_]+\b", doc.read_text(encoding="utf-8"))
+    }
+    unread = sorted(name for name in named if name not in source)
+    assert not unread, f"Skill documents env vars nothing reads: {unread}"
 
 
 def test_scripts_present() -> None:

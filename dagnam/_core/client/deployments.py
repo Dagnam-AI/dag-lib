@@ -15,6 +15,7 @@ from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
     requests_query_params,
+    response_json_object,
     response_json_value,
     stream_query_params,
 )
@@ -125,16 +126,77 @@ class DeploymentsClientMixin(BaseDagnamClient):
             deployment_id=deployment_id,
         )
 
+    def _post_created_deployment(
+        self, path: str, body: JsonObject, *, idempotency_key: str | None = None
+    ) -> JsonObject:
+        """POST a create route; return the deployment with a usable one-time key.
+
+        The server's idempotency cache never stores the key, so a replayed create
+        (``Idempotency-Replayed: true``) comes back with ``api_key: null``. The
+        caller never saw the original key, so it is re-issued through
+        :meth:`rotate_deployment_key` and merged into the result. That rotation
+        revokes the earlier key: a caller who replays with its own
+        ``idempotency_key`` after storing the first response's key must store
+        the new one.
+        """
+        resp = self._request(
+            "POST",
+            f"{self.api_url}{path}",
+            raise_for=lambda r: raise_for_deployment(r, "deployment"),
+            json=body,
+            timeout=DEFAULT_TIMEOUT,
+            allow_redirects=ALLOW_REDIRECTS,
+            idempotent=True,
+            idempotency_key=idempotency_key,
+        )
+        created = response_json_object(resp)
+        if resp.headers.get("Idempotency-Replayed") == "true" and created.get("api_key") is None:
+            created.update(self.rotate_deployment_key(str(created["id"])))
+        return created
+
     def create_deployment(self, payload: JsonObject) -> JsonObject:
         """POST /api/v1/deployments"""
-        return self._deployment_object(
-            "POST", "/api/v1/deployments", json_body=payload, idempotent=True
+        return self._post_created_deployment("/api/v1/deployments", payload)
+
+    def deploy_model_version(
+        self,
+        model_version_id: str,
+        *,
+        name: str | None = None,
+        project_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> JsonObject:
+        """POST /api/v1/deployments/from-model-version: deploy a registry model version.
+
+        Creates the deployment and its first serving revision in one call and
+        returns the deployment with its one-time ``api_key``. The revision
+        activates asynchronously; poll :meth:`get_deployment_revisions`. The
+        server names the deployment after the model version and uses the model
+        entry's project unless ``name`` / ``project_id`` are given. An
+        ``Idempotency-Key`` is minted when none is given, so a retried request
+        replays instead of creating a second deployment. A replay rotates the
+        key (see :meth:`_post_created_deployment`), so reusing an explicit
+        ``idempotency_key`` revokes the key an earlier call returned.
+        """
+        body: JsonObject = {"model_version_id": model_version_id}
+        if name is not None:
+            body["name"] = name
+        if project_id is not None:
+            body["project_id"] = project_id
+        return self._post_created_deployment(
+            "/api/v1/deployments/from-model-version", body, idempotency_key=idempotency_key
         )
 
-    def estimate_cost(self, payload: JsonObject) -> JsonObject:
-        """Estimate deployment cost. ``POST /api/v1/deployments/estimate-cost``."""
+    def rotate_deployment_key(self, deployment_id: str) -> JsonObject:
+        """POST /api/v1/deployments/{id}/rotate-key: replace the deployment's key.
+
+        Returns ``{key_prefix, api_key}``; the new key is shown only here and
+        the previous one stops working at once.
+        """
         return self._deployment_object(
-            "POST", "/api/v1/deployments/estimate-cost", json_body=payload
+            "POST",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rotate-key",
+            deployment_id=deployment_id,
         )
 
     def validate_deployment(self, payload: JsonObject) -> JsonObject:
@@ -185,55 +247,12 @@ class DeploymentsClientMixin(BaseDagnamClient):
             deployment_id=deployment_id,
         )
 
-    def scale_deployment(self, deployment_id: str, num_instances: int) -> JsonObject:
-        return self._deployment_object(
-            "PUT",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/scale",
-            deployment_id=deployment_id,
-            params={"num_instances": num_instances},
-        )
-
-    def rollback_deployment(self, deployment_id: str, checkpoint_id: str) -> JsonObject:
-        return self._deployment_object(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/rollback",
-            deployment_id=deployment_id,
-            params={"checkpoint_id": checkpoint_id},
-        )
-
-    def retry_deployment(self, deployment_id: str) -> JsonObject:
-        """Retry a failed or stuck deployment. ``POST /api/v1/deployments/{id}/retry``.
-
-        Distinct from :meth:`rollback_deployment` (which redeploys a prior
-        checkpoint) and :meth:`resume_deployment` (which un-pauses): retry
-        re-queues the existing deployment task with no body.
-        """
-        return self._deployment_object(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/retry",
-            deployment_id=deployment_id,
-        )
-
     def get_deployment_metrics(self, deployment_id: str, time_range: str = "24h") -> JsonObject:
         return self._deployment_object(
             "GET",
             f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics",
             deployment_id=deployment_id,
             params={"time_range": time_range},
-        )
-
-    def collect_deployment_metrics(
-        self, deployment_id: str, backfill_minutes: int = 60
-    ) -> JsonObject:
-        """Trigger an immediate metrics collection (with first-time backfill).
-
-        POST /api/v1/deployments/{id}/metrics/collect
-        """
-        return self._deployment_object(
-            "POST",
-            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/metrics/collect",
-            deployment_id=deployment_id,
-            params={"backfill_minutes": backfill_minutes},
         )
 
     def get_deployment_logs(

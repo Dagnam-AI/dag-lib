@@ -23,7 +23,7 @@ import filelock
 from dagnam._core.auth import get_api_key, get_api_url
 from dagnam._core.client import DagnamClient
 from dagnam._core.config import get_config_value
-from dagnam._core.exceptions import ChecksumError, DagnamError
+from dagnam._core.exceptions import ChecksumError, DagnamError, DatasetNotFoundError
 from dagnam._types import JsonObject, ensure_json_object
 from dagnam.data.cache import (
     DEFAULT_CACHE_DIR,
@@ -53,6 +53,22 @@ _UUID_RE = re.compile(
 def _is_uuid(s: str) -> bool:
     """Return True if *s* looks like a standard UUID (8-4-4-4-12 hex)."""
     return bool(_UUID_RE.match(s))
+
+
+def _system_dataset_id(client: DagnamClient, name: str) -> str:
+    """Return the id of the built-in dataset called ``name`` (case-insensitive).
+
+    The API addresses a dataset only by its id, so a name is looked up in the
+    built-in catalog first; a name that is not there raises
+    ``DatasetNotFoundError``.
+    """
+    wanted = name.casefold()
+    for row in client.list_system_datasets():
+        if str(row.get("name", "")).casefold() == wanted:
+            return str(row["id"])
+    raise DatasetNotFoundError(
+        name, hint="No built-in dataset has that name; dagnam.datasets.list_system() lists them."
+    )
 
 
 def _required_meta_str(meta: JsonObject, key: str) -> str:
@@ -113,7 +129,7 @@ def load_dataset(
     binding: dict[str, object] | None = None,
     verify: bool = False,
 ) -> DagnamDataset:
-    """Load a dataset by ID. Auto-downloads and caches if needed.
+    """Load a dataset by id, or a built-in dataset by name. Downloads and caches it.
 
     In server mode (DAGNAM_INTERNAL=true), reads sidecar metadata from
     DAGNAM_META_DIR and loads directly from the filesystem. In client mode,
@@ -133,15 +149,12 @@ def load_dataset(
     resolved_key = get_api_key(override=api_key)
     resolved_url = get_api_url(override=api_url)
     client = DagnamClient(resolved_url, resolved_key)
-    is_system = not _is_uuid(dataset_id)
+    if not _is_uuid(dataset_id):
+        dataset_id = _system_dataset_id(client, dataset_id)
 
-    if is_system:
-        meta = client.get_system_dataset_meta(dataset_id, version=version)
-    else:
-        meta = client.get_dataset_meta(dataset_id, version=version)
+    meta = client.get_dataset_meta(dataset_id, version=version)
 
-    source_type = meta.get("source_type", "")
-    if source_type == "system" or is_system:
+    if meta.get("source_type") == "system":
         try:
             from dagnam.data.loaders.system import load_system_dataset
 
@@ -195,22 +208,15 @@ def load_dataset(
             # overwrite. rmtree(ignore_errors) is a no-op if it is already gone.
             shutil.rmtree(final_dir, ignore_errors=True)
 
-            if is_system:
-                downloaded_file = client.download_system_dataset(
-                    dataset_id,
-                    staging_dir,
-                    show_progress=show_progress,
-                )
-            else:
-                downloaded_file = client.download_dataset(
-                    dataset_id,
-                    staging_dir,
-                    download_url=effective_download_url,
-                    filename=_optional_meta_str(meta, "filename"),
-                    version=version,
-                    resume=resume,
-                    show_progress=show_progress,
-                )
+            downloaded_file = client.download_dataset(
+                dataset_id,
+                staging_dir,
+                download_url=effective_download_url,
+                filename=_optional_meta_str(meta, "filename"),
+                version=version,
+                resume=resume,
+                show_progress=show_progress,
+            )
 
             local_checksum = compute_file_checksum(downloaded_file)
             expected_checksum = checksum.removeprefix("sha256:")

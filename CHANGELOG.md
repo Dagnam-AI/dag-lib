@@ -7,6 +7,148 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-27
+
+### Added
+
+- **Deploy a model version in one call.** `dagnam.deployments.deploy_model_version(
+  model_version_id, *, name=None, project_id=None)` and `dagnam deployments
+  deploy-version VERSION_ID [--name N] [--project-id P] [--json] [--output PATH]`
+  create a deployment and its first serving revision together
+  (`POST /api/v1/deployments/from-model-version`) and return the deployment with
+  its `api_key`, shown this once. The name defaults to the model name and
+  version, and the project to the model entry's project. The client methods are
+  `DagnamClient.deploy_model_version` and `AsyncDagnamClient.deploy_model_version`;
+  both send an `Idempotency-Key`, so a retried request never creates a second
+  deployment. The agent guard hook treats the CLI, `dagnam.deployments` and
+  client method shapes (`deploy_model_version`, `create_deployment`) as costly.
+- **`DagnamClient.rotate_deployment_key(deployment_id)`** (and its async twin)
+  calls `POST /api/v1/deployments/{id}/rotate-key` and returns the new key once.
+
+### Changed
+
+- **Breaking: `predict` sends the input as `{"input": ...}`.**
+  `DagnamClient.predict`, `AsyncDagnamClient.predict`, `dagnam.inference` and
+  `dagnam inference run` now send `{"input": inputs}`, the body
+  `POST /api/v1/inference/{id}/predict` requires, instead of sending `inputs` as
+  the whole body, which the route refused. Pass the model input itself (for
+  example `{"text": "..."}`); a caller that wrapped it in `{"input": ...}` must
+  stop. The `/api/v1/inference` routes `predict`, `predict/batch`, `schema` and
+  `health` take the deployment's own key (the `api_key` returned when the
+  deployment was created), not an account key: pass `api_key=` to the SDK, or set
+  `DAGNAM_API_KEY` to it for `dagnam inference run`, `batch` and `schema`.
+- **Breaking: `dagnam.deployments.update` and `dagnam deployments update` only
+  rename.** `update(deployment_id, *, name)` and `--name` (now required). The
+  instance, capacity and `config` fields are gone: the platform manages serving
+  capacity, so they changed nothing for a model version deployment.
+- **`dagnam register` says when the plan has no API keys.** API keys need a paid
+  plan and a new account starts on Free, so the key step is refused.
+  When the refusal body says so (`feature_gated` or `limit_exceeded`),
+  `dagnam.account.register` now raises `QuotaExceededError` saying the account
+  was created and how to get a key, and `dagnam register` prints that instead
+  of "Registration failed". Any other refusal, such as an unverified email,
+  propagates unchanged.
+- **Restoring a checkpoint works with a personal API key.**
+  `dagnam.restore_checkpoint`, `dagnam training restore` and
+  `restore_from_checkpoint` (sync and async) work with an API key that has write
+  access to training, under the same checks as restart; the platform used to
+  accept only a browser session there.
+- **A replayed deployment create still returns a usable key.** The platform no
+  longer keeps the one-time key in its idempotency cache, so a create that is
+  answered from that cache (`Idempotency-Replayed: true`) arrives with
+  `api_key: null`. `create_deployment` and `deploy_model_version` (sync and
+  async) then rotate the key and return the new one. The rotation revokes the
+  key an earlier response carried, so a caller that replays with its own
+  `idempotency_key` must store the new key.
+- **`dagnam.inference_stream` and `AsyncDagnamClient.stream_predict` use a
+  stream session.** The input is posted to
+  `POST /api/v1/inference/{id}/predict/stream/session` and the events are read
+  from `GET /api/v1/inference/{id}/predict/stream/{session_id}?token=...`, so the
+  input no longer travels in the URL. The deprecated `?input=` route is no longer
+  called. The events are unchanged.
+- **`login_for_bootstrap` explains a two-factor challenge.** When the password
+  login answers with a two-factor challenge, `DagnamClient.login_for_bootstrap`
+  and its async twin raise `AuthError` pointing to the web app instead of a
+  `TypeError`. `dagnam register` never meets one, since a new account has no
+  two-factor authentication.
+
+### Removed
+
+- **Breaking: API key management.** `dagnam keys create`, `dagnam keys list` and
+  `dagnam keys revoke`; `dagnam.account.create_api_key`, `list_api_keys` and
+  `revoke_api_key`; `DagnamClient.list_api_keys` and `revoke_api_key`; and
+  `AsyncDagnamClient.create_api_key`, `list_api_keys` and `revoke_api_key`.
+  These routes accept only a browser session, so they always failed with an API
+  key. Manage keys in the web app under Settings, Security; API keys need a paid
+  plan.
+  `dagnam.account.api_key_usage` stays. `DagnamClient.create_api_key` stays for
+  `dagnam register`, which calls it with the session from its one-time login.
+- **Breaking: account settings, security and data.** The `dagnam account`
+  command group (`settings`, `notifications`, `profile get|set|photo`,
+  `change-password`, `sessions`, `2fa`, `export` and `delete`); the matching
+  `dagnam.account` functions (`get_settings`, `update_settings`,
+  `reset_settings`, `notification_preferences`,
+  `update_notification_preferences`, `get_profile`, `update_profile`,
+  `upload_profile_photo`, `change_password`, `list_sessions`, `revoke_session`,
+  `revoke_all_sessions`, `two_factor_enabled`, `enable_two_factor`,
+  `verify_two_factor`, `disable_two_factor`, `export_data`, `download_export`
+  and `delete_account`); and the same methods on `DagnamClient` and
+  `AsyncDagnamClient` (`get_notification_prefs` and `update_notification_prefs`
+  there). These routes accept only a browser session, so they always failed
+  with an API key; use the web app's Settings. An API key cannot change a
+  password, two-factor authentication or sessions, or delete the account.
+  `dagnam profile show USERNAME` and `dagnam.account.get_public_profile` stay,
+  as do `entitlements`, `storage_quota` and `api_key_usage`.
+- **Breaking: deployment calls the platform no longer performs.** Serving
+  capacity is managed by the platform and a different model is served by
+  deploying its version, so scale, rollback and retry are refused (`409`) and
+  cost estimates and on-demand metrics collection are gone (`410`). Removed:
+  - `dagnam.deployments.scale`, `rollback`, `retry`, `estimate_cost` and
+    `collect_metrics`;
+  - `DagnamClient.scale_deployment`, `rollback_deployment`,
+    `retry_deployment`, `estimate_cost` and `collect_deployment_metrics`, and
+    the same five methods on `AsyncDagnamClient`;
+  - the CLI commands `dagnam deployments scale`, `rollback`, `retry`,
+    `estimate-cost` and `collect-metrics`.
+- **Breaking: `dagnam deployments create` and
+  `dagnam.deployments.create_from_training_job`.** Both made a deployment with no
+  model version behind it, which never served a request. Use `dagnam deployments
+  deploy-version` or `dagnam.deployments.deploy_model_version`. The Python
+  `dagnam.deployments.create` stays; its deployment serves once
+  `dagnam.deployments.create_revision` gives it a model version.
+- **Breaking: `dagnam deployments platforms` and `dagnam deployments validate`.**
+  They served the checkpoint deployment that `dagnam deployments create` made.
+  The Python `dagnam.deployments.platforms` and `validate` stay beside
+  `dagnam.deployments.create`.
+- **Breaking: `get_system_dataset_meta` and `download_system_dataset`** on
+  `DagnamClient` and `AsyncDagnamClient`. They called routes the platform does
+  not have; `dagnam.load_dataset("<name>")` now finds a built-in dataset by name
+  and loads it by id.
+
+### Fixed
+
+- **`dagnam.load_dataset("<name>")` loads a built-in dataset.** The name is
+  matched, ignoring case, against the built-in catalog and the dataset is loaded
+  by its id; an unknown name raises `DatasetNotFoundError`, which points to
+  `dagnam.datasets.list_system()`. Names are the
+  catalog's display names, such as `MNIST Handwritten Digits`.
+  `dagnam.datasets.list_system()` lists them, now from
+  `GET /api/v1/datasets/browse?source_type=system`.
+- **Calls that used a path the platform does not serve.** `dagnam hub starred`,
+  `dagnam.hub.starred` and `list_hub_starred` call
+  `/api/v1/hub/models/starred`; `import_dag` and `import_dag_existing` call
+  `/api/v1/projects/import-dag` and `/api/v1/projects/{id}/import-dag`; and
+  `AsyncDagnamClient.stream_deployment_events` reads
+  `/api/v1/deployments/{id}/stream`, like the sync client.
+- **README and the bundled agent skill.** API keys start with `sk_` and need a
+  paid plan; `download_checkpoint` picks the latest checkpoint unless
+  `prefer_best=True`; deployment log levels are lowercase; the README states
+  the Python version the tests run on, and the package no longer lists a Python
+  3.13 classifier; inference examples pass the deployment's
+  key; `DAGNAM_JOB_ID` and `DAGNAM_DATASET_ID` are documented; and the skill no
+  longer documents `DAGNAM_CACHE_DIR`, which nothing reads (pass `cache_dir=`
+  instead).
+
 ## [0.14.2] - 2026-09-14
 
 ### Fixed

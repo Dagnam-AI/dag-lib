@@ -17,11 +17,12 @@ class AuthError(DagnamError):
 
 
 class DatasetNotFoundError(DagnamError):
-    """Dataset ID not found (404)."""
+    """Dataset ID not found (404), or no built-in dataset has that name."""
 
-    def __init__(self, dataset_id: str):
+    def __init__(self, dataset_id: str, hint: str | None = None):
         self.dataset_id = dataset_id
-        super().__init__(f"Dataset '{dataset_id}' not found")
+        message = f"Dataset '{dataset_id}' not found"
+        super().__init__(f"{message}. {hint}" if hint else message)
 
 
 class DeploymentNotFoundError(DagnamError):

@@ -107,53 +107,16 @@ class DatasetsClientMixin(BaseDagnamClient):
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
 
     def list_system_datasets(self) -> list[JsonObject]:
-        """GET /api/v1/datasets/system — List all system datasets."""
-        url = f"{self.api_url}/api/v1/datasets/system"
+        """GET /api/v1/datasets/browse?source_type=system: the built-in datasets."""
+        url = f"{self.api_url}/api/v1/datasets/browse"
         resp = self._request(
             "GET",
             url,
             raise_for=lambda r: raise_for_dataset(r, "system"),
+            params={"source_type": "system"},
             allow_redirects=ALLOW_REDIRECTS,
         )
         return [item for item in response_json_array(resp) if isinstance(item, dict)]
-
-    def get_system_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
-        """GET /api/v1/datasets/system/{dataset_id} — Get system dataset metadata."""
-        dataset_path = quote_path_segment(dataset_id)
-        url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}"
-        params = {"version": version} if version else None
-        resp = self._request(
-            "GET",
-            url,
-            raise_for=lambda r: raise_for_dataset(r, dataset_id),
-            params=params,
-            allow_redirects=ALLOW_REDIRECTS,
-        )
-        return response_json_object(resp)
-
-    def download_system_dataset(
-        self,
-        dataset_id: str,
-        output_dir: Path,
-        *,
-        show_progress: bool = True,
-    ) -> Path:
-        """Stream-download a system dataset file with a tqdm progress bar.
-
-        GET /api/v1/datasets/system/{dataset_id}/download
-
-        Returns the path to the downloaded file.
-        """
-        dataset_path = quote_path_segment(dataset_id)
-        url = f"{self.api_url}/api/v1/datasets/system/{dataset_path}/download"
-        resp = self._get_stream(url)
-        raise_for_dataset(resp, dataset_id)
-        filename = parse_content_disposition_filename(resp.headers.get("Content-Disposition"))
-        return self._stream_response_to_file(
-            resp,
-            Path(output_dir) / filename,
-            show_progress=show_progress,
-        )
 
     def download_dataset(
         self,

@@ -218,12 +218,14 @@ class TestChecksumMismatch:
 
 class TestSystemDownloadPath:
     def test_system_fallback_downloads_when_resolve_fails(self, tmp_path: Path) -> None:
-        # source_type=system but resolve_system_dataset raises → fallback to
-        # download_system_dataset path (covers download_system_dataset branch).
+        # A name resolves to the system row's id; when the native loader fails
+        # (e.g. tfds missing) the dataset is downloaded by that id instead.
+        system_id = "7d0b3c1e-2f4a-4b6c-9d8e-0f1a2b3c4d5e"
         csv_content = b"a,b\n1,2\n"
         checksum = hashlib.sha256(csv_content).hexdigest()
         meta = {
             **SYS_META,
+            "id": system_id,
             "checksum": f"sha256:{checksum}",
             "source_type": "system",
         }
@@ -238,15 +240,19 @@ class TestSystemDownloadPath:
         with (
             patch("dagnam.data.load.get_api_key", return_value="key"),
             patch("dagnam.data.load.get_api_url", return_value="http://localhost"),
-            patch.object(DagnamClient, "get_system_dataset_meta", return_value=meta),
             patch.object(
-                DagnamClient, "download_system_dataset", side_effect=_fake_download
-            ) as mock_dl,
+                DagnamClient,
+                "list_system_datasets",
+                return_value=[{"id": system_id, "name": "MNIST"}],
+            ),
+            patch.object(DagnamClient, "get_dataset_meta", return_value=meta) as mock_meta,
+            patch.object(DagnamClient, "download_dataset", side_effect=_fake_download) as mock_dl,
             patch(
                 "dagnam.data.loaders.system.load_system_dataset",
                 side_effect=RuntimeError("no tfds"),
             ),
         ):
-            ds = load_dataset("mnist-digits", cache_dir=str(tmp_path))
-            mock_dl.assert_called_once()
+            ds = load_dataset("MNIST", cache_dir=str(tmp_path))
+            mock_meta.assert_called_once_with(system_id, version=None)
+            assert mock_dl.call_args.args[0] == system_id
             assert ds.name == "MNIST"

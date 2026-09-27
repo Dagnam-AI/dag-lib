@@ -230,5 +230,7 @@ class HubClientMixin(BaseDagnamClient):
         self, sort_by: str = "date_starred", page: int = 1, limit: int = 20
     ) -> JsonObject:
         return self._hub_object(
-            "GET", "/api/v1/hub/starred", params={"sort_by": sort_by, "page": page, "limit": limit}
+            "GET",
+            "/api/v1/hub/models/starred",
+            params={"sort_by": sort_by, "page": page, "limit": limit},
         )

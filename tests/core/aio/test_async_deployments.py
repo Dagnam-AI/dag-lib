@@ -15,6 +15,8 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from tests.typing_helpers import JsonObject, PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
@@ -35,8 +37,6 @@ async def test_async_deployments_full_surface(
     mock.delete("/api/v1/deployments/dep1").mock(return_value=httpx.Response(204))
     mock.post("/api/v1/deployments/dep1/pause").mock(return_value=httpx.Response(200, json={}))
     mock.post("/api/v1/deployments/dep1/resume").mock(return_value=httpx.Response(200, json={}))
-    mock.put("/api/v1/deployments/dep1/scale").mock(return_value=httpx.Response(200, json={}))
-    mock.post("/api/v1/deployments/dep1/rollback").mock(return_value=httpx.Response(200, json={}))
     mock.get("/api/v1/deployments/dep1/metrics").mock(return_value=httpx.Response(200, json={}))
     mock.get("/api/v1/deployments/dep1/logs").mock(return_value=httpx.Response(200, json={}))
     mock.get("/api/v1/deployments/dep1/health").mock(return_value=httpx.Response(200, json={}))
@@ -54,8 +54,6 @@ async def test_async_deployments_full_surface(
     await client.delete_deployment("dep1")
     await client.pause_deployment("dep1")
     await client.resume_deployment("dep1")
-    await client.scale_deployment("dep1", 5)
-    await client.rollback_deployment("dep1", "ck-1")
     await client.get_deployment_metrics("dep1")
     await client.get_deployment_logs(
         "dep1",
@@ -75,7 +73,7 @@ async def test_async_get_deployment_404(client: AsyncDagnamClient, mock: RespxMo
 
 # ---------------------------------------------------------------- deployment SSE stream
 
-_DEP_STREAM_URL = "/api/v1/streaming/deployments/dep1/stream"
+_DEP_STREAM_URL = "/api/v1/deployments/dep1/stream"
 
 
 async def test_async_mint_deployment_stream_token(
@@ -145,7 +143,7 @@ async def test_async_stream_deployment_404(
     mock.post("/api/v1/deployments/missing/stream-access-token").mock(
         return_value=httpx.Response(200, json={"token": "t"})
     )
-    mock.get("/api/v1/streaming/deployments/missing/stream").mock(return_value=httpx.Response(404))
+    mock.get("/api/v1/deployments/missing/stream").mock(return_value=httpx.Response(404))
     with pytest.raises(DeploymentNotFoundError):
         _ = [e async for e in client.stream_deployment_events("missing")]
 
@@ -209,57 +207,18 @@ async def test_async_delete_deployment_returns_object(
 
 
 async def test_async_deployment_planning(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
-    mock.post("/api/v1/deployments/estimate-cost").mock(
-        return_value=httpx.Response(200, json={"monthly_cost": 12.0})
-    )
     mock.post("/api/v1/deployments/validate").mock(
         return_value=httpx.Response(200, json={"valid": True, "errors": []})
     )
     mock.get("/api/v1/deployments-platforms").mock(
         return_value=httpx.Response(200, json=[{"platform": "fastapi"}])
     )
-    mock.post("/api/v1/deployments/d1/retry").mock(
-        return_value=httpx.Response(200, json={"id": "d1", "status": "deploying"})
-    )
 
-    assert (await client.estimate_cost({"platform": "fastapi"}))["monthly_cost"] == 12.0
     assert (await client.validate_deployment({"name": "x"}))["valid"] is True
     platforms = await client.list_deployment_platforms()
     first = platforms[0]
     assert isinstance(first, dict)
     assert first["platform"] == "fastapi"
-    assert (await client.retry_deployment("d1"))["status"] == "deploying"
-
-
-async def test_async_retry_deployment_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
-    mock.post("/api/v1/deployments/missing/retry").mock(return_value=httpx.Response(404))
-    with pytest.raises(DeploymentNotFoundError):
-        await client.retry_deployment("missing")
-
-
-async def test_async_collect_deployment_metrics(
-    client: AsyncDagnamClient, mock: RespxMockRouter
-) -> None:
-    route = mock.post("/api/v1/deployments/dep1/metrics/collect").mock(
-        return_value=httpx.Response(
-            200, json={"deployment_id": "dep1", "points_created": 60, "backfilled": True}
-        )
-    )
-    result = await client.collect_deployment_metrics("dep1", backfill_minutes=120)
-    assert result["points_created"] == 60
-    assert "backfill_minutes=120" in str(route.calls[0].request.url)
-
-
-async def test_async_collect_deployment_metrics_409(
-    client: AsyncDagnamClient, mock: RespxMockRouter
-) -> None:
-    from dagnam._core.exceptions import DeploymentStateError
-
-    mock.post("/api/v1/deployments/dep1/metrics/collect").mock(
-        return_value=httpx.Response(409, text="no")
-    )
-    with pytest.raises(DeploymentStateError):
-        await client.collect_deployment_metrics("dep1")
 
 
 # --------------------------------------------------------------------------- transient retry
@@ -362,3 +321,105 @@ async def test_async_get_deployment_revisions(
     url = str(route.calls[0].request.url)
     assert "page=1" in url
     assert "limit=50" in url
+
+
+# --------------------------------------------------------------------------- deploy a model version
+
+
+async def test_async_deploy_model_version_sends_only_the_version_by_default(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments/from-model-version").mock(
+        return_value=httpx.Response(201, json={"id": "dep1", "api_key": "dep-key"})
+    )
+    result = await client.deploy_model_version("mv1")
+    assert result["api_key"] == "dep-key"
+    request = route.calls[0].request
+    assert json.loads(request.content) == {"model_version_id": "mv1"}
+    assert request.headers["Idempotency-Key"]
+
+
+async def test_async_deploy_model_version_sends_name_project_and_explicit_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/deployments/from-model-version").mock(
+        return_value=httpx.Response(201, json={"id": "dep1"})
+    )
+    await client.deploy_model_version("mv1", name="bot", project_id="p1", idempotency_key="key-7")
+    request = route.calls[0].request
+    assert json.loads(request.content) == {
+        "model_version_id": "mv1",
+        "name": "bot",
+        "project_id": "p1",
+    }
+    assert request.headers["Idempotency-Key"] == "key-7"
+
+
+# --------------------------------------------------------------------------- replayed creates
+
+_ROTATED = {"key_prefix": "sk_new12", "api_key": "fresh-key"}
+
+
+async def test_async_rotate_deployment_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/dep1/rotate-key").mock(
+        return_value=httpx.Response(200, json=_ROTATED)
+    )
+    assert await client.rotate_deployment_key("dep1") == _ROTATED
+
+
+@pytest.mark.parametrize(
+    ("path", "call"),
+    [
+        ("/api/v1/deployments/from-model-version", lambda c: c.deploy_model_version("mv1")),
+        ("/api/v1/deployments", lambda c: c.create_deployment({"name": "x"})),
+    ],
+    ids=["deploy_model_version", "create_deployment"],
+)
+async def test_async_replayed_create_rotates_to_restore_the_key(
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    path: str,
+    call: Callable[[AsyncDagnamClient], Awaitable[JsonObject]],
+) -> None:
+    mock.post(path).mock(
+        return_value=httpx.Response(
+            201,
+            json={"id": "dep1", "key_prefix": "sk_old12", "api_key": None},
+            headers={"Idempotency-Replayed": "true"},
+        )
+    )
+    rotate = mock.post("/api/v1/deployments/dep1/rotate-key").mock(
+        return_value=httpx.Response(200, json=_ROTATED)
+    )
+    result = await call(client)
+    assert result == {"id": "dep1", "key_prefix": "sk_new12", "api_key": "fresh-key"}
+    assert len(rotate.calls) == 1
+
+
+async def test_async_first_create_with_its_key_does_not_rotate(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/deployments/from-model-version").mock(
+        return_value=httpx.Response(201, json={"id": "dep1", "api_key": "dep-key"})
+    )
+    rotate = mock.post("/api/v1/deployments/dep1/rotate-key").mock(
+        return_value=httpx.Response(200, json=_ROTATED)
+    )
+    assert (await client.deploy_model_version("mv1"))["api_key"] == "dep-key"
+    assert len(rotate.calls) == 0
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "collect_deployment_metrics",
+        "estimate_cost",
+        "retry_deployment",
+        "rollback_deployment",
+        "scale_deployment",
+    ],
+)
+async def test_async_removed_client_methods_are_gone(name: str) -> None:
+    assert not hasattr(AsyncDagnamClient, name)

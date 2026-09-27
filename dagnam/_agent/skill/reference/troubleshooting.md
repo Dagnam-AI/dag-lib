@@ -28,7 +28,7 @@ except DagnamError as exc:
 
 ## Config & files
 - Credentials/config: `~/.dagnam/config.json` (key is masked in `dagnam whoami` / `config list`).
-- Cache root: `~/.dagnam` by default, or `DAGNAM_CACHE_DIR`.
+- Cache root: `~/.dagnam`; relocate a download with `cache_dir=` (see `reference/cache.md`).
 
 ## Security config keys (`~/.dagnam/config.json`)
 - `max_download_bytes` (int, default 100 GiB) — caps every on-disk download; an oversized body raises `DownloadTooLargeError` and the partial is deleted.

@@ -193,6 +193,26 @@ def test_register_400_email_exists_surfaces_clear_error(
     assert "Registration failed" in err
 
 
+def test_register_on_a_plan_without_keys_says_the_account_exists(
+    tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    config_file = _config_paths(tmp_path, monkeypatch)
+    from dagnam._core.exceptions import QuotaExceededError
+
+    message = "Account created; API keys need a paid plan. Then run `dagnam login`."
+    fake = SimpleNamespace(register=mock.Mock(side_effect=QuotaExceededError(message)))
+    getpass_func, input_func = _prompts("a@b.c", "Secret123!")
+    with mock.patch("dagnam.account", fake), pytest.raises(SystemExit) as exc_info:
+        register_mod.cmd_register(
+            argparse.Namespace(api_url=None), getpass_func=getpass_func, input_func=input_func
+        )
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Account created; API keys need a paid plan." in err
+    assert "Registration failed" not in err
+    assert not config_file.exists()
+
+
 def test_register_403_prints_email_verification_guidance(
     tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:

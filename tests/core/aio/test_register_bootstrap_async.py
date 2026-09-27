@@ -119,3 +119,13 @@ async def test_login_for_bootstrap_missing_access_token_raises_typeerror(
     mock.post(LOGIN).mock(return_value=httpx.Response(200, json={"token_type": "bearer"}))
     with pytest.raises(TypeError, match="access_token"):
         await client.login_for_bootstrap("a@b.c", "Secret123!")
+
+
+async def test_login_for_bootstrap_two_factor_challenge_raises_autherror(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    challenge = {"challenge_token": "c-1", "methods": ["totp"], "two_factor_required": True}
+    mock.post(LOGIN).mock(return_value=httpx.Response(200, json=challenge))
+    with pytest.raises(AuthError, match="two-factor authentication") as exc_info:
+        await client.login_for_bootstrap("a@b.c", "Secret123!")
+    assert "Settings, Security" in str(exc_info.value)

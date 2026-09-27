@@ -118,3 +118,36 @@ def test_account_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) ->
     rmock.get(QUOTA, exc=requests.Timeout("slow"))
     with pytest.raises(APIError, match="Request failed"):
         client.get_storage_quota()
+
+
+@pytest.mark.parametrize("name", ["list_api_keys", "revoke_api_key"])
+def test_key_management_methods_are_gone(name: str) -> None:
+    assert not hasattr(DagnamClient, name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "change_password",
+        "delete_account",
+        "disable_two_factor",
+        "download_export",
+        "enable_two_factor",
+        "export_data",
+        "get_notification_prefs",
+        "get_profile",
+        "get_settings",
+        "list_sessions",
+        "reset_settings",
+        "revoke_all_sessions",
+        "revoke_session",
+        "two_factor_enabled",
+        "update_notification_prefs",
+        "update_profile",
+        "update_settings",
+        "upload_profile_photo",
+        "verify_two_factor",
+    ],
+)
+def test_session_only_methods_are_gone(name: str) -> None:
+    assert not hasattr(DagnamClient, name)

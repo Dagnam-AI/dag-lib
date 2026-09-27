@@ -27,8 +27,9 @@ explicit argument -> `dagnam.configure(...)` -> `DAGNAM_API_KEY` / `DAGNAM_API_U
 
 - **API keys are the programmatic credential** and are the only way the SDK/CLI
   authenticates. They are **unaffected by two-factor authentication (2FA)** — 2FA
-  protects the interactive web login, not API-key requests. Manage keys from the
-  web dashboard; a leaked key is revoked there.
+  protects the interactive web login, not API-key requests. API keys need a paid plan.
+  Create, rotate and revoke keys in the web app under Settings, Security (the CLI and SDK
+  cannot, because those routes accept only a browser session); a leaked key is revoked there.
 - **Expensive actions require a verified email.** Creating a training job,
   uploading a dataset, and creating a deployment require the API key's owning
   account to have a **verified email address**. If it is not verified, these

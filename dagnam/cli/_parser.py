@@ -27,7 +27,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Data", ("dataset", "cache", "audit")),
     ("Models", ("projects", "codegen", "hub", "models", "checkpoint", "inference", "deployments")),
     ("Training", ("training", "stream")),
-    ("Account", ("usage", "account", "profile", "keys", "config", "version", "agent")),
+    ("Account", ("usage", "profile", "config", "version", "agent")),
 )
 
 ALL_GROUPED_COMMANDS: tuple[str, ...] = tuple(
@@ -52,9 +52,7 @@ COMMAND_DESCRIPTIONS: dict[str, str] = {
     "training": "Create, inspect, and manage training jobs.",
     "stream": "Stream live training events.",
     "usage": "Show plan, usage, and remaining limits.",
-    "account": "Manage settings and notification preferences.",
     "profile": "View a user's public profile.",
-    "keys": "Create, list, and revoke API keys.",
     "config": "Inspect and update saved configuration.",
     "version": "Show version and environment info.",
     "agent": "Install the Dagnam Agent Skill into Claude Code / Codex.",

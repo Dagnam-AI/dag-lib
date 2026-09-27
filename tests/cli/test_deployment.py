@@ -94,32 +94,48 @@ def test_deployments_get(run_cli: CliRunner, capsys: StrCapture) -> None:
     assert "secret" not in out
 
 
-def test_deployments_create_wait_result(run_cli: CliRunner, capsys: StrCapture) -> None:
-    create_chain = mock.Mock()
-    create_chain.wait.return_value.result.return_value = {"id": "dep-1"}
-    fake = SimpleNamespace(create=mock.Mock(return_value=create_chain))
+def test_deployments_deploy_version_prints_the_key_once(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    fake = SimpleNamespace(
+        deploy_model_version=mock.Mock(
+            return_value={"id": "dep-1", "status": "not_provisioned", "api_key": "dep-secret"}
+        )
+    )
+    with mock.patch("dagnam.deployments", fake):
+        assert run_cli(["deployments", "deploy-version", "mv-1"]) == 0
+    fake.deploy_model_version.assert_called_once_with("mv-1", name=None, project_id=None)
+    captured = capsys.readouterr()
+    assert captured.out.count("dep-secret") == 1
+    assert "will not be shown again" in captured.out
+    assert "Next: dagnam deployments revisions dep-1" in captured.err
+
+
+def test_deployments_deploy_version_forwards_flags_and_saves_json(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    out_path = tmp_path / "deployment.json"
+    fake = SimpleNamespace(
+        deploy_model_version=mock.Mock(return_value={"id": "dep-1", "api_key": "dep-secret"})
+    )
     with mock.patch("dagnam.deployments", fake):
         run_cli(
             [
                 "deployments",
-                "create",
+                "deploy-version",
+                "mv-1",
                 "--name",
-                "x",
+                "bot",
                 "--project-id",
                 "p1",
-                "--checkpoint-path",
-                "ck/p",
-                "--platform",
-                "aws",
-                "--deployment-type",
-                "production",
-                "--instance-type",
-                "small",
+                "--json",
+                "--output",
+                str(out_path),
             ]
         )
-    captured = capsys.readouterr()
-    assert '"id": "dep-1"' in captured.out
-    assert "Next: dagnam inference dep-1 run ..." in captured.err
+    fake.deploy_model_version.assert_called_once_with("mv-1", name="bot", project_id="p1")
+    assert json.loads(capsys.readouterr().out)["api_key"] == "dep-secret"
+    assert json.loads(out_path.read_text(encoding="utf-8"))["api_key"] == "dep-secret"
 
 
 def test_deployments_pause(run_cli: CliRunner, capsys: StrCapture) -> None:
@@ -166,47 +182,14 @@ def test_deployments_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
     [
         ["deployments", "list"],
         ["deployments", "get", "x"],
-        [
-            "deployments",
-            "create",
-            "--name",
-            "x",
-            "--project-id",
-            "p",
-            "--checkpoint-path",
-            "c",
-            "--platform",
-            "aws",
-            "--deployment-type",
-            "production",
-            "--instance-type",
-            "s",
-        ],
+        ["deployments", "deploy-version", "mv-1"],
         ["deployments", "pause", "x"],
         ["deployments", "resume", "x"],
-        ["deployments", "retry", "x"],
         ["deployments", "delete", "x"],
         ["deployments", "logs", "x"],
         ["deployments", "metrics", "x"],
         ["deployments", "revisions", "x"],
-        ["deployments", "platforms"],
-        ["deployments", "estimate-cost", "--platform", "aws", "--instance-type", "s"],
-        [
-            "deployments",
-            "validate",
-            "--name",
-            "x",
-            "--project-id",
-            "p",
-            "--checkpoint-path",
-            "c",
-            "--platform",
-            "aws",
-            "--deployment-type",
-            "production",
-            "--instance-type",
-            "s",
-        ],
+        ["deployments", "update", "x", "--name", "n"],
     ],
 )
 def test_deployments_apierrors_exit(
@@ -217,17 +200,14 @@ def test_deployments_apierrors_exit(
     fake = SimpleNamespace(
         list=mock.Mock(side_effect=APIError(500, "boom")),
         get=mock.Mock(side_effect=APIError(500, "boom")),
-        create=mock.Mock(side_effect=APIError(500, "boom")),
+        deploy_model_version=mock.Mock(side_effect=APIError(500, "boom")),
         pause=mock.Mock(side_effect=APIError(500, "boom")),
         resume=mock.Mock(side_effect=APIError(500, "boom")),
-        retry=mock.Mock(side_effect=APIError(500, "boom")),
         delete=mock.Mock(side_effect=APIError(500, "boom")),
         logs=mock.Mock(side_effect=APIError(500, "boom")),
         metrics=mock.Mock(side_effect=APIError(500, "boom")),
         revisions=mock.Mock(side_effect=APIError(500, "boom")),
-        platforms=mock.Mock(side_effect=APIError(500, "boom")),
-        estimate_cost=mock.Mock(side_effect=APIError(500, "boom")),
-        validate=mock.Mock(side_effect=APIError(500, "boom")),
+        update=mock.Mock(side_effect=APIError(500, "boom")),
     )
     with mock.patch("dagnam.deployments", fake):
         assert run_cli(cmd_args) == 1
@@ -269,183 +249,27 @@ def test_deployments_list_dict_without_list_items(run_cli: CliRunner, capsys: St
     assert "No deployments found." in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------- planning
+# ---------------------------------------------------------------- update
 
 
-def test_deployments_platforms(run_cli: CliRunner, capsys: StrCapture) -> None:
-    fake = SimpleNamespace(
-        platforms=mock.Mock(return_value=[{"platform": "fastapi", "name": "FastAPI"}])
-    )
-    with mock.patch("dagnam.deployments", fake):
-        run_cli(["deployments", "platforms"])
-    assert "fastapi" in capsys.readouterr().out
-    fake.platforms.assert_called_once_with()
-
-
-def test_deployments_retry(run_cli: CliRunner, capsys: StrCapture) -> None:
-    fake = SimpleNamespace(retry=mock.Mock(return_value={"id": "d1", "status": "deploying"}))
-    with mock.patch("dagnam.deployments", fake):
-        run_cli(["deployments", "retry", "d1"])
-    out = capsys.readouterr().out
-    assert "d1" in out
-    assert "deploying" in out
-    fake.retry.assert_called_once_with("d1")
-
-
-def test_deployments_estimate_cost(run_cli: CliRunner, capsys: StrCapture) -> None:
-    fake = SimpleNamespace(estimate_cost=mock.Mock(return_value={"monthly_cost": 12.0}))
-    with mock.patch("dagnam.deployments", fake):
-        run_cli(
-            [
-                "deployments",
-                "estimate-cost",
-                "--platform",
-                "fastapi",
-                "--instance-type",
-                "cpu.small",
-                "--auto-scaling",
-                "--min-instances",
-                "1",
-                "--max-instances",
-                "3",
-                "--region",
-                "us-east-1",
-            ]
-        )
-    assert "monthly_cost" in capsys.readouterr().out
-    kwargs = fake.estimate_cost.call_args.kwargs
-    assert kwargs["platform"] == "fastapi"
-    assert kwargs["instance_type"] == "cpu.small"
-    assert kwargs["auto_scaling_enabled"] is True
-    assert kwargs["min_instances"] == 1
-    assert kwargs["max_instances"] == 3
-    assert kwargs["region"] == "us-east-1"
-
-
-def test_deployments_validate(run_cli: CliRunner, capsys: StrCapture) -> None:
-    fake = SimpleNamespace(validate=mock.Mock(return_value={"valid": True, "errors": []}))
-    with mock.patch("dagnam.deployments", fake):
-        run_cli(
-            [
-                "deployments",
-                "validate",
-                "--name",
-                "x",
-                "--project-id",
-                "p1",
-                "--checkpoint-path",
-                "/c.pt",
-                "--platform",
-                "fastapi",
-                "--deployment-type",
-                "text",
-                "--instance-type",
-                "cpu.small",
-            ]
-        )
-    assert "valid" in capsys.readouterr().out
-    kwargs = fake.validate.call_args.kwargs
-    assert kwargs["name"] == "x"
-    assert kwargs["deployment_type"] == "text"
-
-
-def test_deployments_collect_metrics(run_cli: CliRunner, capsys: StrCapture) -> None:
-    with mock.patch(
-        "dagnam.deployments.collect_metrics",
-        return_value={"deployment_id": "dep-1", "points_created": 60, "backfilled": True},
-    ) as m:
-        assert run_cli(["deployments", "collect-metrics", "dep-1", "--backfill-minutes", "90"]) == 0
-    m.assert_called_once_with("dep-1", backfill_minutes=90)
-    assert json.loads(capsys.readouterr().out)["points_created"] == 60
-
-
-# ---------------------------------------------------------------- update / scale / rollback
-
-
-def test_deployments_update(run_cli: CliRunner, capsys: StrCapture) -> None:
+def test_deployments_update_renames(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.deployments.update", return_value={"id": "dep-1"}) as m:
-        assert run_cli(["deployments", "update", "dep-1", "--name", "n2", "--auto-scaling"]) == 0
-    m.assert_called_once_with("dep-1", name="n2", auto_scaling_enabled=True)
+        assert run_cli(["deployments", "update", "dep-1", "--name", "n2"]) == 0
+    m.assert_called_once_with("dep-1", name="n2")
+    assert "dep-1" in capsys.readouterr().out
 
 
-def test_deployments_update_no_auto_scaling_flag(run_cli: CliRunner) -> None:
-    with mock.patch("dagnam.deployments.update", return_value={}) as m:
-        run_cli(["deployments", "update", "dep-1", "--no-auto-scaling"])
-    m.assert_called_once_with("dep-1", auto_scaling_enabled=False)
-
-
-def test_deployments_update_all_fields(run_cli: CliRunner) -> None:
-    with mock.patch("dagnam.deployments.update", return_value={}) as m:
-        run_cli(
-            [
-                "deployments",
-                "update",
-                "dep-1",
-                "--instance-type",
-                "t3.large",
-                "--num-instances",
-                "4",
-                "--min-instances",
-                "2",
-                "--max-instances",
-                "8",
-            ]
-        )
-    m.assert_called_once_with(
-        "dep-1",
-        instance_type="t3.large",
-        num_instances=4,
-        min_instances=2,
-        max_instances=8,
-    )
-
-
-def test_deployments_update_requires_a_field(run_cli: CliRunner, capsys: StrCapture) -> None:
+@pytest.mark.parametrize(
+    "extra", [[], ["--num-instances", "4"], ["--instance-type", "t3.large"], ["--auto-scaling"]]
+)
+def test_deployments_update_takes_only_a_name(
+    run_cli: CliRunner, capsys: StrCapture, extra: list[str]
+) -> None:
+    # Serving capacity is managed by the platform, so a name is all there is to change.
     with mock.patch("dagnam.deployments.update") as m, pytest.raises(SystemExit) as exc_info:
-        run_cli(["deployments", "update", "dep-1"])
-    assert exc_info.value.code == 1
+        run_cli(["deployments", "update", "dep-1", *extra])
+    assert exc_info.value.code == 2
     m.assert_not_called()
-    assert "Nothing to update" in capsys.readouterr().err
-
-
-def test_deployments_scale_waits(run_cli: CliRunner, capsys: StrCapture) -> None:
-    op = mock.MagicMock()
-    op.wait.return_value.result.return_value = {"id": "dep-1", "num_instances": 3}
-    with mock.patch("dagnam.deployments.scale", return_value=op) as m:
-        assert run_cli(["deployments", "scale", "dep-1", "--num-instances", "3"]) == 0
-    m.assert_called_once_with("dep-1", 3)
-    op.wait.assert_called_once()
-    assert json.loads(capsys.readouterr().out)["num_instances"] == 3
-
-
-def test_deployments_scale_no_wait(run_cli: CliRunner, capsys: StrCapture) -> None:
-    op = mock.MagicMock()
-    op.initial.return_value = {"id": "dep-1", "status": "scaling"}
-    with mock.patch("dagnam.deployments.scale", return_value=op):
-        assert run_cli(["deployments", "scale", "dep-1", "--num-instances", "2", "--no-wait"]) == 0
-    op.wait.assert_not_called()
-    assert json.loads(capsys.readouterr().out)["status"] == "scaling"
-
-
-def test_deployments_rollback_waits(run_cli: CliRunner, capsys: StrCapture) -> None:
-    op = mock.MagicMock()
-    op.wait.return_value.result.return_value = {"id": "dep-1", "status": "running"}
-    with mock.patch("dagnam.deployments.rollback", return_value=op) as m:
-        assert run_cli(["deployments", "rollback", "dep-1", "--checkpoint-id", "ckpt-best"]) == 0
-    m.assert_called_once_with("dep-1", "ckpt-best")
-    assert json.loads(capsys.readouterr().out)["status"] == "running"
-
-
-def test_deployments_rollback_no_wait(run_cli: CliRunner, capsys: StrCapture) -> None:
-    op = mock.MagicMock()
-    op.initial.return_value = {"id": "dep-1", "status": "rolling_back"}
-    with mock.patch("dagnam.deployments.rollback", return_value=op):
-        assert (
-            run_cli(["deployments", "rollback", "dep-1", "--checkpoint-id", "ckpt-x", "--no-wait"])
-            == 0
-        )
-    op.wait.assert_not_called()
-    assert json.loads(capsys.readouterr().out)["status"] == "rolling_back"
 
 
 def test_deployments_revisions(run_cli: CliRunner, capsys: StrCapture) -> None:
@@ -454,3 +278,25 @@ def test_deployments_revisions(run_cli: CliRunner, capsys: StrCapture) -> None:
         run_cli(["deployments", "revisions", "dep-1", "--page", "2", "--limit", "5"])
     assert "rev1" in capsys.readouterr().out
     fake.revisions.assert_called_once_with("dep-1", page=2, limit=5)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "create",
+        "scale",
+        "rollback",
+        "retry",
+        "estimate-cost",
+        "collect-metrics",
+        "platforms",
+        "validate",
+    ],
+)
+def test_removed_deployment_commands_are_unknown(
+    run_cli: CliRunner, capsys: StrCapture, command: str
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_cli(["deployments", command, "--help"])
+    assert exc_info.value.code == 2
+    assert f"unknown subcommand '{command}'" in capsys.readouterr().err

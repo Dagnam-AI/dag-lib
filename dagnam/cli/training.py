@@ -438,7 +438,7 @@ def register_training(subparsers: SubParsersAction) -> None:
     training_restore = training_sub.add_parser(
         "restore",
         help="Restart a job from a checkpoint.",
-        description="Restart a training job from one of its checkpoints.",
+        description="Start a new job from a checkpoint, under the same checks as restart.",
     )
     training_restore.add_argument("job_id", help="ID of the training job.")
     training_restore.add_argument("checkpoint_id", help="ID of the checkpoint to restore from.")

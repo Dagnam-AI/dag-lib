@@ -11,9 +11,9 @@ The official Python SDK for Dagnam.AI.
 streams, deployments, projects, code generation, and the Model Hub from scripts,
 notebooks, services, and generated training code.
 
-The API is usable today and stays backwards-compatible within a minor (`0.7.x`)
-release line where practical, but the SDK is still marked alpha while the
-platform API continues to mature.
+The API is usable today and stays backwards-compatible within a minor release
+line where practical, but the SDK is still marked alpha while the platform API
+continues to mature.
 
 ## Installation
 
@@ -21,8 +21,7 @@ platform API continues to mature.
 pip install dagnam
 ```
 
-Python 3.12 is supported. The SDK targets this runtime so `dagnam[all]`
-installs every optional integration from the published dependency set.
+Requires Python 3.12 or newer. The test suite runs on Python 3.12.
 
 Optional framework extras:
 
@@ -39,6 +38,10 @@ pip install "dagnam[all]"          # all optional integrations
 
 ## Authentication
 
+Create an API key in the web app under **Settings, Security**. API keys need a
+paid plan. Keys start with `sk_`, are shown once, and are rotated or revoked
+there too.
+
 The SDK resolves credentials in this order:
 
 1. Explicit arguments such as `api_key=...` or `dagnam.configure(api_key=...)`
@@ -48,7 +51,7 @@ The SDK resolves credentials in this order:
 ```python
 import dagnam
 
-dagnam.configure(api_key="dgn_...")
+dagnam.configure(api_key="sk_...")
 ```
 
 You can also save credentials with the CLI:
@@ -119,19 +122,21 @@ train_loader = dataset.to_pytorch_loader(
 )
 ```
 
-Call a deployed model:
+Call a deployed model with the deployment's own key (see [Deployments](#deployments)):
 
 ```python
 result = dagnam.inference(
     deployment_id="dep_abc123",
     inputs={"text": "Classify this sentence."},
+    api_key=deployment_key,
 )
 ```
 
-Download the best checkpoint for a training job:
+Download a training job's latest checkpoint, or its best one with `prefer_best=True`:
 
 ```python
 checkpoint_path = dagnam.download_checkpoint("job_xyz789")
+best_path = dagnam.download_checkpoint("job_xyz789", prefer_best=True)
 ```
 
 Stream training events:
@@ -152,8 +157,8 @@ framework adapter construction.
 # User dataset by UUID
 ds = dagnam.load_dataset("550e8400-e29b-41d4-a716-446655440000")
 
-# System dataset by friendly name
-mnist = dagnam.load_dataset("mnist-digits")
+# Built-in dataset by name (dagnam.datasets.list_system() lists them)
+mnist = dagnam.load_dataset("MNIST Handwritten Digits")
 
 # Specific dataset version
 v2 = dagnam.load_dataset("550e8400-e29b-41d4-a716-446655440000", version="v2")
@@ -248,15 +253,21 @@ the platform.
 
 ## Inference, Training, and Checkpoints
 
+`inference`, `inference_batch`, `deployment_health` and `inference_schema`
+authenticate with the deployment's own key, the `api_key` returned when the
+deployment was created, not with your account key. Pass the model input itself;
+the SDK sends it as `{"input": ...}`.
+
 ```python
-prediction = dagnam.inference("dep_abc123", {"input": "hello"})
+prediction = dagnam.inference("dep_abc123", {"text": "hello"}, api_key=deployment_key)
 
 batch = dagnam.inference_batch(
     "dep_abc123",
-    [{"input": "hello"}, {"input": "world"}],
+    [{"text": "hello"}, {"text": "world"}],
+    api_key=deployment_key,
 )
 
-health = dagnam.deployment_health("dep_abc123")
+health = dagnam.deployment_health("dep_abc123", api_key=deployment_key)
 
 for event in dagnam.stream_training("job_xyz789"):
     print(event.event, event.data)
@@ -269,24 +280,30 @@ verification when the backend provides a checksum.
 
 ## Deployments
 
-```python
-op = dagnam.deployments.create(
-    name="sentiment-api",
-    project_id="proj_123",
-    checkpoint_path="/checkpoints/best.pt",
-    platform="fastapi",
-    deployment_type="text",
-    instance_type="t3.medium",
-)
+Deploy a model version from the model registry (**My models** in the web app) in
+one call. Fine-tuned models and curated base models can be deployed; models
+trained in the Studio cannot be deployed yet.
 
-deployment = op.wait(timeout=300).result()
-dagnam.deployments.scale(deployment["id"], 2).wait(timeout=300)
-logs = dagnam.deployments.logs(deployment["id"], level="ERROR")
+```python
+deployment = dagnam.deployments.deploy_model_version(
+    "mv_abc123",
+    name="support-classifier",
+)
+deployment_key = deployment["api_key"]  # returned once: store it now
+
+revisions = dagnam.deployments.revisions(deployment["id"])
+logs = dagnam.deployments.logs(deployment["id"], level="error")
+
+# once the newest revision reports is_active:
+result = dagnam.inference(deployment["id"], {"text": "hello"}, api_key=deployment_key)
 ```
 
-Lifecycle actions such as `create`, `pause`, `resume`, `scale`, and `rollback`
-return `LongRunningOperation` objects. Read operations such as `list`, `get`,
-`health`, `metrics`, and `logs` return dictionaries from the API.
+The deployment serves once its newest revision reports `is_active`; a failed
+revision carries a `failure_reason`. The platform manages serving capacity, so
+there is no scale, rollback or retry: to serve a different model, deploy that
+version. `pause` and `resume` return `LongRunningOperation` objects. Read
+operations such as `list`, `get`, `health`, `metrics`, `revisions` and `logs`
+return data from the API.
 
 ## Projects, Code Generation, and Model Hub
 
@@ -338,13 +355,17 @@ pip install "dagnam[aio]"
 ```python
 from dagnam.aio import AsyncDagnamClient
 
-async with AsyncDagnamClient("https://api.dagnam.ai", "dgn_...") as client:
+async with AsyncDagnamClient("https://api.dagnam.ai", "sk_...") as client:
     datasets = await client.list_datasets()
-    result = await client.predict("dep_abc123", {"input": "hello"})
+
+# Inference authenticates with the deployment's own key.
+async with AsyncDagnamClient("https://api.dagnam.ai", deployment_key) as serving:
+    result = await serving.predict("dep_abc123", {"text": "hello"})
 ```
 
 The async client mirrors the low-level HTTP client surface. High-level resource
-helpers such as `dagnam.deployments.create()` are currently synchronous.
+helpers such as `dagnam.deployments.deploy_model_version()` are currently
+synchronous.
 
 ## CLI
 
@@ -357,12 +378,13 @@ dagnam dataset download <dataset-id>
 dagnam cache list
 dagnam cache clear
 
-dagnam inference run <deployment-id> --input '{"text":"hello"}'
+DAGNAM_API_KEY=<deployment key> dagnam inference run <deployment-id> --input '{"text":"hello"}'
 dagnam checkpoint list <job-id>
 dagnam checkpoint download <job-id>
 dagnam stream <job-id>
 
 dagnam deployments list
+dagnam deployments deploy-version <version-id> --name support-classifier
 dagnam hub search --search resnet
 dagnam models push --name tiny-chat --slug tiny-chat --description "..." --file weights.safetensors
 dagnam models list
@@ -487,7 +509,7 @@ The config file lives at `~/.dagnam/config.json`.
 
 ```json
 {
-  "api_key": "dgn_...",
+  "api_key": "sk_...",
   "api_url": "https://api.dagnam.ai",
   "max_cache_size": 10737418240,
   "max_checkpoint_cache_size": 10737418240
@@ -502,6 +524,7 @@ Environment variables:
 | `DAGNAM_API_URL` | API base URL override |
 | `DAGNAM_DEBUG` | Any non-empty value re-raises the real traceback instead of the rendered error block (same as `--debug`) |
 | `DAGNAM_CACHE_LOCK_TIMEOUT` | Dataset cache-lock acquisition timeout in seconds; an unparseable value falls back to the default |
+| `DAGNAM_DATASET_ID` | Training dataset id recorded when `dagnam.training.init` registers a local run |
 
 Set by the platform inside training jobs — not intended for manual use:
 
@@ -514,17 +537,22 @@ Set by the platform inside training jobs — not intended for manual use:
 | `DAGNAM_TRAINING_DIR` | Working directory of the running job |
 | `DAGNAM_TOTAL_EPOCHS` | Total epochs, used for progress reporting |
 | `DAGNAM_PROJECT_ID` | Project the running job belongs to |
+| `DAGNAM_JOB_ID` | The platform job the run reports to; also the default `job_id` of `dagnam.models.push_run_artifacts` |
 
 ## Compatibility
 
-| SDK version | Backend version | Notes |
-| --- | --- | --- |
-| `0.7.x` | `>=0.5.0` | Client resilience (retries, idempotency, cache locking) + security hardening |
-| `0.6.x` | `>=0.5.0, <0.7.0` | First public PyPI release line |
+The SDK talks to the hosted Dagnam API (`https://api.dagnam.ai`), which always
+runs its current version. Use the latest SDK release with it.
 
-The SDK follows semantic versioning. Public APIs may still expand quickly while
-the package is alpha, but patch releases should avoid breaking documented
-`0.7.x` behavior.
+| SDK version | Status |
+| --- | --- |
+| The latest release | Current release line |
+| Any earlier release | Superseded: upgrade with `pip install -U dagnam` |
+
+The SDK follows semantic versioning. While the package is alpha, a minor release
+may change or remove public APIs, and [CHANGELOG.md](CHANGELOG.md) lists every
+such change; patch releases should avoid breaking the documented behavior of
+their minor release line.
 
 ## Development
 

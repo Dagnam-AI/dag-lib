@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-import json
 
 import httpx
 from httpx_sse import aconnect_sse
@@ -31,10 +30,11 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
     async def predict(
         self, deployment_id: str, inputs: JsonObject, timeout: int | None = None
     ) -> JsonObject:
+        """Async mirror of ``InferenceClientMixin.predict``: sends ``{"input": inputs}``."""
         resp = await self._request(
             "POST",
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict",
-            json=inputs,
+            json={"input": inputs},
             headers=self._headers(),
             timeout=timeout,
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
@@ -67,17 +67,28 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
     async def _open_inference_stream(
         self, deployment_id: str, inputs: JsonObject
     ) -> AsyncIterator[SSEEvent]:
-        """One (and only) connection's worth of streaming-predict events."""
-        token = await self.mint_inference_stream_token(deployment_id)
-        dep_path = quote_path_segment(deployment_id)
-        url = f"{self.api_url}/api/v1/inference/{dep_path}/predict/stream"
-        params = {**stream_query_params(token), "input": json.dumps(inputs)}
+        """One (and only) connection's worth of streaming-predict events.
+
+        The input goes in a header-authenticated session POST; the stream URL
+        carries only the session id and its short-lived token (see the sync twin).
+        """
+        stream_path = f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict/stream"
+        session = (
+            await self._request(
+                "POST",
+                f"{stream_path}/session",
+                json={"input": inputs},
+                headers=self._headers(),
+                raise_for=lambda r: raise_for_deployment(r, deployment_id),
+            )
+        ).json()
+        url = f"{self.api_url}{stream_path}/{quote_path_segment(str(session['session_id']))}"
         try:
             async with aconnect_sse(
                 self._client,
                 "GET",
                 url,
-                params=params,
+                params=stream_query_params(str(session["token"])),
                 headers={"Accept": "text/event-stream"},
                 timeout=httpx.Timeout(self.timeout, read=SSE_READ_TIMEOUT),
             ) as event_source:

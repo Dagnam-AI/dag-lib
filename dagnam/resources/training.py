@@ -323,7 +323,11 @@ def restore_checkpoint(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Restart a job from one of its checkpoints and return the new job record."""
+    """Start a new job from one of a job's checkpoints and return the new job record.
+
+    An API key with write access to training works, under the same checks as
+    :func:`restart`.
+    """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.restore_from_checkpoint(_stringify_id(job_id), _stringify_id(checkpoint_id))
 

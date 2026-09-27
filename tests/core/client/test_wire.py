@@ -40,7 +40,9 @@ def rmock():
         yield m
 
 
-def test_predict_sends_bearer_only(client: DagnamClient, rmock: RequestsMocker) -> None:
+def test_predict_sends_bearer_only_and_wraps_the_input(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
     url = f"{API}/api/v1/inference/dep_1/predict"
     rmock.post(url, json={"label": "ok"})
 
@@ -50,7 +52,8 @@ def test_predict_sends_bearer_only(client: DagnamClient, rmock: RequestsMocker) 
     req = rmock.last_request
     assert req.headers["Authorization"] == "Bearer k"
     assert "X-API-Key" not in req.headers
-    assert req.json() == {"x": 1}
+    # The route's body is ``{"input": <the model input>}``, like the stream session.
+    assert req.json() == {"input": {"x": 1}}
 
 
 def test_predict_batch_wraps_inputs(client: DagnamClient, rmock: RequestsMocker) -> None:

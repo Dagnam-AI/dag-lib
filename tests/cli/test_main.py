@@ -160,3 +160,19 @@ class TestBuildParser:
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["dataset", "download"])
+
+
+def test_keys_command_is_gone(capsys: StrCapture) -> None:
+    """Key management lives in the web app: its routes accept only a browser session."""
+    with mock.patch("sys.argv", ["dagnam", "keys", "--help"]), pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    assert "unknown command 'keys'" in capsys.readouterr().err
+
+
+def test_account_command_is_gone(capsys: StrCapture) -> None:
+    """Settings, security and data routes accept only a browser session: use the web app."""
+    with mock.patch("sys.argv", ["dagnam", "account", "--help"]), pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    assert "unknown command 'account'" in capsys.readouterr().err

@@ -7,31 +7,68 @@ per-API-key usage counters. These are the building blocks behind
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Callable, Sequence
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
-    content_disposition_safe_name,
     requests,
 )
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
-    raise_for_upload,
     response_json_object,
     response_json_value,
 )
-from dagnam._core.exceptions import ResponseError
-from dagnam._types import JsonArray, JsonObject, JsonValue
+from dagnam._core.exceptions import AuthError, QuotaExceededError, ResponseError
+from dagnam._types import JsonObject, JsonValue
 
-# The backend's required machine confirmation token for account deletion - the
-# SDK supplies this literal itself; the human caller never types it. Defined
-# once here and mirrored (same literal) in the async client.
-_ACCOUNT_DELETION_CONFIRMATION = "DELETE MY ACCOUNT"
+# The backend's plan refusal codes for creating a key: a plan without API keys
+# answers 403 ``feature_gated``; a plan at its key allowance, 402 ``limit_exceeded``.
+_PLAN_REFUSAL_CODES = frozenset({"feature_gated", "limit_exceeded"})
+
+
+class ApiKeyPlanError(QuotaExceededError):
+    """The caller's plan refused to create an API key (its refusal body says so)."""
+
+
+def raise_for_api_key_create(resp: requests.Response) -> None:
+    """Map a plan's refusal to create a key to :class:`ApiKeyPlanError`.
+
+    Keyed on the refusal code in the body, so any other 402 or 403 (an
+    unverified email, a suspended account) maps exactly as everywhere else.
+    """
+    if resp.status_code in (402, 403):
+        try:
+            body = response_json_value(resp)
+        except ResponseError:
+            body = None
+        if isinstance(body, dict) and body.get("error") in _PLAN_REFUSAL_CODES:
+            message = body.get("message")
+            raise ApiKeyPlanError(message if isinstance(message, str) else "Plan limit reached")
+    raise_for_generic(resp)
+
+
+def bootstrap_access_token(body: JsonObject) -> str:
+    """Return the session token from a password login, refusing a 2FA challenge.
+
+    ``POST /api/v1/auth/login`` answers an account with two-factor
+    authentication with a challenge (``two_factor_required: true``) and no
+    token. The CLI cannot complete that challenge, so the caller is sent to the
+    web app instead of failing on a missing field.
+    """
+    if body.get("two_factor_required") is True:
+        raise AuthError(
+            "This account uses two-factor authentication, so it cannot sign in with a "
+            "password here. Sign in at https://dagnam.ai, create an API key in Settings, "
+            "Security, then run `dagnam login`."
+        )
+    token = body.get("access_token")
+    if not isinstance(token, str):
+        raise TypeError("Login response did not include an 'access_token' string")
+    return token
 
 
 class AccountClientMixin(BaseDagnamClient):
@@ -88,11 +125,7 @@ class AccountClientMixin(BaseDagnamClient):
             raise APIError(0, f"Request timed out: {exc}") from exc
 
         raise_for_generic(resp)
-        body = response_json_object(resp)
-        token = body.get("access_token")
-        if not isinstance(token, str):
-            raise TypeError("Login response did not include an 'access_token' string")
-        return token
+        return bootstrap_access_token(response_json_object(resp))
 
     def _account_get(self, path: str) -> JsonValue | str | None:
         return self._account_write("GET", path)
@@ -127,40 +160,39 @@ class AccountClientMixin(BaseDagnamClient):
     ) -> JsonObject:
         """Create an API key. ``POST /api/v1/users/me/api-keys``.
 
-        The returned object contains the plaintext ``key`` exactly once; the
-        backend never returns it again. ``scopes`` maps to the request's
-        ``permissions`` field (omitted when ``None`` so the backend applies its
-        default). ``expires_in_days`` sets an optional expiry.
+        The route accepts only a browser-session token, never an API key, so
+        the one caller is :func:`dagnam.account.register`, which holds the
+        session token from :meth:`login_for_bootstrap`. The returned object
+        contains the plaintext ``key`` exactly once; the backend never returns
+        it again. ``scopes`` maps to the request's ``permissions`` field
+        (omitted when ``None`` so the backend applies its default).
+        ``expires_in_days`` sets an optional expiry. A plan that refuses keys
+        raises :class:`ApiKeyPlanError`.
         """
         body: JsonObject = {"name": name}
         if scopes is not None:
             body["permissions"] = list(scopes)
         if expires_in_days is not None:
             body["expires_in_days"] = expires_in_days
-        return self._expect_object(self._account_write("POST", "/api/v1/users/me/api-keys", body))
-
-    def list_api_keys(self) -> JsonArray:
-        """List the caller's API keys (secrets never included).
-
-        ``GET /api/v1/users/me/api-keys``.
-        """
-        return self._expect_array(self._account_get("/api/v1/users/me/api-keys"))
-
-    def revoke_api_key(self, key_id: str) -> None:
-        """Revoke (soft-delete) one API key.
-
-        ``DELETE /api/v1/users/me/api-keys/{key_id}``.
-        """
-        self._account_write("DELETE", f"/api/v1/users/me/api-keys/{quote_path_segment(key_id)}")
+        return self._expect_object(
+            self._account_write(
+                "POST", "/api/v1/users/me/api-keys", body, raise_for=raise_for_api_key_create
+            )
+        )
 
     def _account_write(
-        self, method: str, path: str, json_body: JsonObject | None = None
+        self,
+        method: str,
+        path: str,
+        json_body: JsonObject | None = None,
+        *,
+        raise_for: Callable[[requests.Response], None] | None = None,
     ) -> JsonValue | str | None:
         url = f"{self.api_url}{path}"
         resp = self._request(
             method,
             url,
-            raise_for=lambda r: raise_for_generic(r),
+            raise_for=raise_for or (lambda r: raise_for_generic(r)),
             json=json_body,
             allow_redirects=ALLOW_REDIRECTS,
         )
@@ -171,66 +203,6 @@ class AccountClientMixin(BaseDagnamClient):
         except ResponseError:
             return resp.text
 
-    def get_settings(self) -> JsonObject:
-        """Return the caller's UI/editor settings. ``GET /api/v1/users/me/settings``."""
-        return self._expect_object(self._account_get("/api/v1/users/me/settings"))
-
-    def update_settings(self, patch: JsonObject) -> JsonObject:
-        """Patch one or more settings fields. ``PUT /api/v1/users/me/settings``."""
-        return self._expect_object(self._account_write("PUT", "/api/v1/users/me/settings", patch))
-
-    def reset_settings(self) -> JsonObject:
-        """Reset settings to defaults. ``POST /api/v1/users/me/settings/reset``."""
-        return self._expect_object(self._account_write("POST", "/api/v1/users/me/settings/reset"))
-
-    def get_notification_prefs(self) -> JsonObject:
-        """Return notification preferences. ``GET /api/v1/users/me/notifications``."""
-        return self._expect_object(self._account_get("/api/v1/users/me/notifications"))
-
-    def update_notification_prefs(self, patch: JsonObject) -> JsonObject:
-        """Patch notification preferences. ``PUT /api/v1/users/me/notifications``."""
-        return self._expect_object(
-            self._account_write("PUT", "/api/v1/users/me/notifications", patch)
-        )
-
-    def get_profile(self) -> JsonObject:
-        """Return the caller's profile. ``GET /api/v1/users/me/profile``."""
-        return self._expect_object(self._account_get("/api/v1/users/me/profile"))
-
-    def update_profile(self, patch: JsonObject) -> JsonObject:
-        """Patch one or more profile fields. ``PUT /api/v1/users/me/profile``."""
-        return self._expect_object(self._account_write("PUT", "/api/v1/users/me/profile", patch))
-
-    def upload_profile_photo(self, file_path: str | Path) -> JsonObject:
-        """Upload a profile photo. ``POST /api/v1/users/me/profile/photo`` (multipart).
-
-        Streams the file as ``multipart/form-data`` under the ``file`` field,
-        mirroring the dataset-upload client method rather than routing through
-        ``_account_write`` (which only sends JSON bodies).
-        """
-        path = Path(file_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"No such file: {path}")
-
-        url = f"{self.api_url}/api/v1/users/me/profile/photo"
-        try:
-            with open(path, "rb") as fh:
-                files = {"file": (path.name, fh)}
-                resp = requests.post(
-                    url,
-                    headers=self._headers(),
-                    files=files,
-                    timeout=None,
-                    allow_redirects=ALLOW_REDIRECTS,
-                )
-        except requests.ConnectionError as exc:
-            raise APIError(0, f"Connection failed: {exc}") from exc
-        except requests.Timeout as exc:
-            raise APIError(0, f"Request timed out: {exc}") from exc
-
-        raise_for_upload(resp)
-        return response_json_object(resp)
-
     def get_public_profile(self, username: str) -> JsonObject:
         """Return a user's public profile. ``GET /api/v1/users/{username}/profile``.
 
@@ -239,138 +211,4 @@ class AccountClientMixin(BaseDagnamClient):
         """
         return self._expect_object(
             self._account_get(f"/api/v1/users/{quote_path_segment(username)}/profile")
-        )
-
-    # ---- Two-factor authentication ------------------------------------------
-    #
-    # There is no dedicated status endpoint: 2FA state is one field on the
-    # caller's profile, so `two_factor_enabled()` reads `get_profile()` rather
-    # than adding a second route that would have to be kept in agreement with
-    # it. One source, so the two can never disagree.
-
-    def two_factor_enabled(self) -> bool:
-        """Whether 2FA is currently active for the caller.
-
-        Reads ``two_factor_enabled`` off ``GET /api/v1/users/me/profile``.
-        A profile that omits the field is reported as ``False``: an unknown
-        state must not read as "protected".
-        """
-        return bool(self.get_profile().get("two_factor_enabled", False))
-
-    def enable_two_factor(self, password: str) -> JsonObject:
-        """Begin 2FA enrollment. ``POST /api/v1/users/me/2fa/enable``.
-
-        Requires the account password, so a stolen session token alone cannot
-        enroll a new factor.
-
-        Returns the enrollment material -- ``secret``, ``qr_code_uri`` and
-        ``backup_codes``. These plaintext values are returned EXACTLY ONCE and
-        are not retrievable afterwards, so a caller that discards them has to
-        restart enrollment. 2FA is not active until :meth:`verify_two_factor`
-        succeeds.
-        """
-        return self._expect_object(
-            self._account_write("POST", "/api/v1/users/me/2fa/enable", {"password": password})
-        )
-
-    def verify_two_factor(self, code: str) -> JsonObject:
-        """Confirm enrollment with a TOTP code, activating 2FA.
-
-        ``POST /api/v1/users/me/2fa/verify``. The second half of
-        :meth:`enable_two_factor`: enrollment that is never verified leaves 2FA
-        inactive, which is what stops a mistyped authenticator from locking the
-        caller out of their own account.
-        """
-        return self._expect_object(
-            self._account_write("POST", "/api/v1/users/me/2fa/verify", {"code": code})
-        )
-
-    def disable_two_factor(self, password: str) -> JsonObject:
-        """Turn 2FA off. ``POST /api/v1/users/me/2fa/disable``.
-
-        Password-gated for the same reason enabling is: removing a factor is as
-        security-relevant as adding one.
-        """
-        return self._expect_object(
-            self._account_write("POST", "/api/v1/users/me/2fa/disable", {"password": password})
-        )
-
-    def change_password(self, current_password: str, new_password: str) -> JsonObject:
-        """Change the caller's password. ``POST /api/v1/users/me/change-password``.
-
-        Sends both values in the JSON request body only; neither is logged or
-        returned in this method's result beyond whatever the backend's own
-        confirmation payload contains (a plain ``message`` field, never a
-        password value).
-        """
-        return self._expect_object(
-            self._account_write(
-                "POST",
-                "/api/v1/users/me/change-password",
-                {"current_password": current_password, "new_password": new_password},
-            )
-        )
-
-    def list_sessions(self) -> JsonArray:
-        """Return the caller's active sessions. ``GET /api/v1/users/me/sessions``."""
-        return self._expect_array(self._account_get("/api/v1/users/me/sessions"))
-
-    def revoke_session(self, session_id: str) -> None:
-        """Revoke one session. ``DELETE /api/v1/users/me/sessions/{session_id}``."""
-        self._account_write("DELETE", f"/api/v1/users/me/sessions/{quote_path_segment(session_id)}")
-
-    def revoke_all_sessions(self) -> JsonObject:
-        """Revoke every session and invalidate every live token for the caller.
-
-        ``POST /api/v1/users/me/revoke-all-sessions`` bumps the caller's
-        ``token_version`` and purges cached refresh tokens, which is what
-        actually invalidates outstanding access/refresh tokens immediately -
-        the real "log out everywhere" primitive. This is distinct from
-        ``DELETE /api/v1/users/me/sessions/{id}`` (``revoke_session``), which
-        only removes ``UserSession`` bookkeeping rows and does not by itself
-        invalidate a live token.
-        """
-        return self._expect_object(
-            self._account_write("POST", "/api/v1/users/me/revoke-all-sessions")
-        )
-
-    def export_data(self) -> JsonObject:
-        """Request a data export of the caller's account. ``POST /api/v1/users/me/export``.
-
-        Returns export metadata (``export_id``, ``status``, ``created_at``,
-        ``expires_at``); pass ``export_id`` to :meth:`download_export` to
-        fetch the archive once it is ready.
-        """
-        return self._expect_object(self._account_write("POST", "/api/v1/users/me/export"))
-
-    def download_export(self, export_id: str, dest_dir: str | Path) -> Path:
-        """Stream-download a data export archive to a file inside ``dest_dir``.
-
-        ``GET /api/v1/users/me/export/{export_id}``. The saved filename is
-        taken from the response's ``Content-Disposition`` header and reduced
-        to a bare basename (see ``content_disposition_safe_name``), so a
-        hostile or malformed header can never write outside ``dest_dir``.
-        The body is streamed straight to disk, never buffered in memory.
-        """
-        url = f"{self.api_url}/api/v1/users/me/export/{quote_path_segment(export_id)}"
-        resp = self._get_stream(url)
-        raise_for_generic(resp)
-        name = content_disposition_safe_name(
-            resp.headers.get("Content-Disposition"), default="export.zip"
-        )
-        return self._stream_response_to_file(resp, Path(dest_dir) / name)
-
-    def delete_account(self, password: str) -> JsonObject:
-        """Permanently delete the caller's account. ``DELETE /api/v1/users/me``.
-
-        Sends the password in the request body only; it is never logged,
-        printed, or returned. The backend also requires a fixed confirmation
-        token, which the SDK supplies automatically.
-        """
-        return self._expect_object(
-            self._account_write(
-                "DELETE",
-                "/api/v1/users/me",
-                {"password": password, "confirmation": _ACCOUNT_DELETION_CONFIRMATION},
-            )
         )

@@ -104,7 +104,11 @@ def register_inference(subparsers: SubParsersAction) -> None:
     inference = subparsers.add_parser(
         "inference",
         help="Run inference against a deployment.",
-        description="Run single or batch inference and check deployment health.",
+        description=(
+            "Run single or batch inference and check deployment health. "
+            "run, batch and schema need the deployment's own key, not your account key: "
+            "set DAGNAM_API_KEY to it for those commands."
+        ),
     )
     inference_sub = inference.add_subparsers(dest="inference_command", required=True)
     run = inference_sub.add_parser(

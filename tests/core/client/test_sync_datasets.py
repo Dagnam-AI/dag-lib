@@ -114,33 +114,9 @@ def test_list_dataset_versions_404(client: DagnamClient, rmock: RequestsMocker) 
 
 
 def test_list_system_datasets(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.get(f"{API}/api/v1/datasets/system", json=[{"id": "iris"}])
+    rmock.get(f"{API}/api/v1/datasets/browse", json=[{"id": "iris"}])
     assert client.list_system_datasets() == [{"id": "iris"}]
-
-
-def test_get_system_dataset_meta(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.get(f"{API}/api/v1/datasets/system/iris", json={"id": "iris"})
-    client.get_system_dataset_meta("iris", version="2.0")
-    assert rmock.last_request.qs == {"version": ["2.0"]}
-
-
-def test_get_system_dataset_meta_no_version(client: DagnamClient, rmock: RequestsMocker) -> None:
-    rmock.get(f"{API}/api/v1/datasets/system/iris", json={"id": "iris"})
-    client.get_system_dataset_meta("iris")
-    assert rmock.last_request.qs == {}
-
-
-def test_download_system_dataset_writes_file(
-    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
-) -> None:
-    rmock.get(
-        f"{API}/api/v1/datasets/system/iris/download",
-        content=b"hello",
-        headers={"Content-Disposition": 'attachment; filename="iris.csv"'},
-    )
-    out = client.download_system_dataset("iris", tmp_path)
-    assert out.name == "iris.csv"
-    assert out.read_bytes() == b"hello"
+    assert rmock.last_request.qs == {"source_type": ["system"]}
 
 
 def test_upload_dataset_streams_file(
@@ -366,28 +342,6 @@ def test_download_dataset_404(client: DagnamClient, rmock: RequestsMocker, tmp_p
     rmock.get(f"{API}/api/v1/datasets/missing/download", status_code=404)
     with pytest.raises(DatasetNotFoundError):
         client.download_dataset("missing", tmp_path)
-
-
-def test_download_system_dataset_connectionerror(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.ConnectionError("nope")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Connection failed"):
-        client.download_system_dataset("iris", tmp_path)
-
-
-def test_download_system_dataset_timeout(
-    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
-) -> None:
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise requests.Timeout("slow")
-
-    monkeypatch.setattr(requests, "get", _boom)
-    with pytest.raises(APIError, match="Request timed out"):
-        client.download_system_dataset("iris", tmp_path)
 
 
 def test_download_dataset_absolute_filename_cannot_escape_output_dir(

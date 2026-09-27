@@ -117,7 +117,7 @@ def test_hub_categories_featured_trending_starred(
     rmock.get(f"{API}/api/v1/hub/categories", json=["a"])
     rmock.get(f"{API}/api/v1/hub/featured", json=["f"])
     rmock.get(f"{API}/api/v1/hub/trending", json=["t"])
-    rmock.get(f"{API}/api/v1/hub/starred", json={"items": []})
+    rmock.get(f"{API}/api/v1/hub/models/starred", json={"items": []})
     assert client.list_hub_categories() == ["a"]
     assert client.get_hub_featured() == ["f"]
     assert client.get_hub_trending(days=14) == ["t"]

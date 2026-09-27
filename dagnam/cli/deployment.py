@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from dagnam.cli.common import (
     add_collection_output_args,
-    error,
     format_local,
     print_json,
     print_next_step,
@@ -15,6 +14,7 @@ from dagnam.cli.common import (
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 
 if TYPE_CHECKING:
+    from dagnam._types import JsonObject
     from dagnam.cli.common import SubParsersAction
 
 
@@ -100,25 +100,30 @@ def cmd_deployments_get(args: argparse.Namespace) -> None:
     print_json(_redact_deployment_secrets(result))
 
 
-def cmd_deployments_create(args: argparse.Namespace) -> None:
+def _render_deployed(deployment: JsonObject) -> str:
+    return "\n".join(
+        [
+            f"Deployment {deployment.get('id')} created; it serves once its revision is active.",
+            "Store this deployment key now; it will not be shown again:",
+            "",
+            f"  {deployment.get('api_key')}",
+        ]
+    )
+
+
+def cmd_deployments_deploy_version(args: argparse.Namespace) -> None:
     import dagnam
 
-    result = (
-        dagnam.deployments.create(
-            name=args.name,
-            project_id=args.project_id,
-            checkpoint_path=args.checkpoint_path,
-            platform=args.platform,
-            deployment_type=args.deployment_type,
-            instance_type=args.instance_type,
-            num_instances=args.num_instances,
-        )
-        .wait()
-        .result()
+    deployment = dagnam.deployments.deploy_model_version(
+        args.version_id, name=args.name, project_id=args.project_id
     )
-    print_json(result)
-    deployment_id = result.get("id") if isinstance(result, dict) else None
-    print_next_step(f"dagnam inference {deployment_id or '<deployment-id>'} run ...")
+    emit_result(
+        deployment,
+        output=args.output,
+        json_stdout=args.json,
+        render_human=lambda _result: _render_deployed(deployment),
+    )
+    print_next_step(f"dagnam deployments revisions {deployment.get('id')}")
 
 
 def cmd_deployments_pause(args: argparse.Namespace) -> None:
@@ -168,100 +173,10 @@ def cmd_deployments_metrics(args: argparse.Namespace) -> None:
     print_json(result)
 
 
-def cmd_deployments_collect_metrics(args: argparse.Namespace) -> None:
-    import dagnam
-
-    result = dagnam.deployments.collect_metrics(
-        args.deployment_id, backfill_minutes=args.backfill_minutes
-    )
-    print_json(result)
-
-
-def cmd_deployments_platforms(args: argparse.Namespace) -> None:
-    import dagnam
-
-    result = dagnam.deployments.platforms()
-    print_json(result)
-
-
-def cmd_deployments_retry(args: argparse.Namespace) -> None:
-    import dagnam
-
-    result = dagnam.deployments.retry(args.deployment_id)
-    print_json(result)
-
-
-def cmd_deployments_estimate_cost(args: argparse.Namespace) -> None:
-    import dagnam
-
-    result = dagnam.deployments.estimate_cost(
-        platform=args.platform,
-        instance_type=args.instance_type,
-        num_instances=args.num_instances,
-        auto_scaling_enabled=args.auto_scaling,
-        min_instances=args.min_instances,
-        max_instances=args.max_instances,
-        region=args.region,
-    )
-    print_json(result)
-
-
-def cmd_deployments_validate(args: argparse.Namespace) -> None:
-    import dagnam
-
-    result = dagnam.deployments.validate(
-        name=args.name,
-        project_id=args.project_id,
-        checkpoint_path=args.checkpoint_path,
-        platform=args.platform,
-        deployment_type=args.deployment_type,
-        instance_type=args.instance_type,
-        num_instances=args.num_instances,
-        auto_scaling_enabled=args.auto_scaling,
-        min_instances=args.min_instances,
-        max_instances=args.max_instances,
-        region=args.region,
-    )
-    print_json(result)
-
-
 def cmd_deployments_update(args: argparse.Namespace) -> None:
     import dagnam
 
-    fields: dict[str, object] = {}
-    if args.name is not None:
-        fields["name"] = args.name
-    if args.instance_type is not None:
-        fields["instance_type"] = args.instance_type
-    if args.num_instances is not None:
-        fields["num_instances"] = args.num_instances
-    if args.min_instances is not None:
-        fields["min_instances"] = args.min_instances
-    if args.max_instances is not None:
-        fields["max_instances"] = args.max_instances
-    if args.auto_scaling is not None:
-        fields["auto_scaling_enabled"] = args.auto_scaling
-    if not fields:
-        error(
-            "Nothing to update: pass at least one of --name/--instance-type/--num-instances/"
-            "--min-instances/--max-instances/--auto-scaling/--no-auto-scaling."
-        )
-    result = dagnam.deployments.update(args.deployment_id, **cast("dict[str, Any]", fields))
-    print_json(result)
-
-
-def cmd_deployments_scale(args: argparse.Namespace) -> None:
-    import dagnam
-
-    op = dagnam.deployments.scale(args.deployment_id, args.num_instances)
-    print_json(op.initial() if args.no_wait else op.wait().result())
-
-
-def cmd_deployments_rollback(args: argparse.Namespace) -> None:
-    import dagnam
-
-    op = dagnam.deployments.rollback(args.deployment_id, args.checkpoint_id)
-    print_json(op.initial() if args.no_wait else op.wait().result())
+    print_json(dagnam.deployments.update(args.deployment_id, name=args.name))
 
 
 def register_deployments(subparsers: SubParsersAction) -> None:
@@ -290,33 +205,29 @@ def register_deployments(subparsers: SubParsersAction) -> None:
     )
     deployment_get.add_argument("deployment_id", help="ID of the deployment.")
     deployment_get.set_defaults(func=cmd_deployments_get)
-    deployment_create = deployment_sub.add_parser(
-        "create", help="Create a deployment.", description="Create a new deployment."
+    deploy_version = deployment_sub.add_parser(
+        "deploy-version",
+        help="Deploy a model version.",
+        description=(
+            "Deploy a servable model version from the registry in one call. "
+            "Prints the deployment key once."
+        ),
     )
-    deployment_create.add_argument("--project-id", required=True, help="Project ID (required).")
-    deployment_create.add_argument("--name", required=True, help="Deployment name (required).")
-    deployment_create.add_argument(
-        "--checkpoint-path", required=True, help="Checkpoint path to deploy (required)."
+    deploy_version.add_argument(
+        "version_id", metavar="VERSION_ID", help="ID of the model version to deploy."
     )
-    deployment_create.add_argument(
-        "--platform",
-        required=True,
-        help="Target platform: fastapi, torchserve, vllm, triton, or custom (required).",
+    deploy_version.add_argument(
+        "--name", help="Deployment name (default: the model name and version)."
     )
-    deployment_create.add_argument(
-        "--deployment-type", required=True, help="Deployment type (required)."
+    deploy_version.add_argument(
+        "--project-id", help="Project for the deployment (default: the model's project)."
     )
-    deployment_create.add_argument(
-        "--instance-type", required=True, help="Compute instance type (required)."
-    )
-    deployment_create.add_argument(
-        "--num-instances", type=int, default=1, help="Instance count (default: 1)."
-    )
-    deployment_create.set_defaults(func=cmd_deployments_create)
+    deploy_version.add_argument("--json", action="store_true", help="Print raw JSON.")
+    deploy_version.add_argument("--output", help="Write the raw JSON to this path.")
+    deploy_version.set_defaults(func=cmd_deployments_deploy_version)
     deployment_help = {
         "pause": ("Pause a deployment.", "Pause a running deployment."),
         "resume": ("Resume a deployment.", "Resume a paused deployment."),
-        "retry": ("Retry a deployment.", "Retry a failed or stuck deployment."),
         "delete": ("Delete a deployment.", "Delete a deployment permanently."),
         "logs": ("Show deployment logs.", "Fetch logs for a deployment."),
         "metrics": ("Show deployment metrics.", "Fetch metrics for a deployment."),
@@ -325,7 +236,6 @@ def register_deployments(subparsers: SubParsersAction) -> None:
     for command_name, handler in {
         "pause": cmd_deployments_pause,
         "resume": cmd_deployments_resume,
-        "retry": cmd_deployments_retry,
         "delete": cmd_deployments_delete,
         "logs": cmd_deployments_logs,
         "metrics": cmd_deployments_metrics,
@@ -351,127 +261,9 @@ def register_deployments(subparsers: SubParsersAction) -> None:
             )
         command.set_defaults(func=handler)
 
-    collect = deployment_sub.add_parser(
-        "collect-metrics",
-        help="Collect deployment metrics now.",
-        description="Trigger an immediate metrics collection (backfills on first run).",
-    )
-    collect.add_argument("deployment_id", help="ID of the deployment.")
-    collect.add_argument(
-        "--backfill-minutes",
-        type=int,
-        default=60,
-        help="Minutes of history to backfill when no metrics exist yet (default: 60).",
-    )
-    collect.set_defaults(func=cmd_deployments_collect_metrics)
-
-    platforms = deployment_sub.add_parser(
-        "platforms",
-        help="List deployment platforms.",
-        description="List available serving platforms and their capabilities.",
-    )
-    platforms.set_defaults(func=cmd_deployments_platforms)
-
-    estimate = deployment_sub.add_parser(
-        "estimate-cost",
-        help="Estimate deployment cost.",
-        description="Estimate hourly/daily/monthly cost for a deployment shape.",
-    )
-    estimate.add_argument("--platform", required=True, help="Serving platform.")
-    estimate.add_argument(
-        "--instance-type", required=True, dest="instance_type", help="Compute instance type."
-    )
-    estimate.add_argument(
-        "--num-instances", type=int, default=1, dest="num_instances", help="Instance count."
-    )
-    estimate.add_argument(
-        "--auto-scaling", action="store_true", dest="auto_scaling", help="Enable auto-scaling."
-    )
-    estimate.add_argument("--min-instances", type=int, default=None, dest="min_instances")
-    estimate.add_argument("--max-instances", type=int, default=None, dest="max_instances")
-    estimate.add_argument("--region", default=None, help="Deployment region.")
-    estimate.set_defaults(func=cmd_deployments_estimate_cost)
-
-    validate = deployment_sub.add_parser(
-        "validate",
-        help="Validate a deployment config.",
-        description="Validate a deployment configuration without creating it.",
-    )
-    validate.add_argument("--name", required=True, help="Deployment name.")
-    validate.add_argument("--project-id", required=True, dest="project_id", help="Project ID.")
-    validate.add_argument(
-        "--checkpoint-path", required=True, dest="checkpoint_path", help="Checkpoint path."
-    )
-    validate.add_argument("--platform", required=True, help="Serving platform.")
-    validate.add_argument(
-        "--deployment-type", required=True, dest="deployment_type", help="Deployment type."
-    )
-    validate.add_argument(
-        "--instance-type", required=True, dest="instance_type", help="Compute instance type."
-    )
-    validate.add_argument(
-        "--num-instances", type=int, default=1, dest="num_instances", help="Instance count."
-    )
-    validate.add_argument(
-        "--auto-scaling", action="store_true", dest="auto_scaling", help="Enable auto-scaling."
-    )
-    validate.add_argument("--min-instances", type=int, default=None, dest="min_instances")
-    validate.add_argument("--max-instances", type=int, default=None, dest="max_instances")
-    validate.add_argument("--region", default=None, help="Deployment region.")
-    validate.set_defaults(func=cmd_deployments_validate)
-
     dep_update = deployment_sub.add_parser(
-        "update", help="Update a deployment.", description="Update mutable deployment fields."
+        "update", help="Rename a deployment.", description="Rename a deployment."
     )
     dep_update.add_argument("deployment_id", help="ID of the deployment.")
-    dep_update.add_argument("--name", help="New name.")
-    dep_update.add_argument("--instance-type", dest="instance_type", help="New instance type.")
-    dep_update.add_argument(
-        "--num-instances", type=int, default=None, dest="num_instances", help="Instance count."
-    )
-    dep_update.add_argument("--min-instances", type=int, default=None, dest="min_instances")
-    dep_update.add_argument("--max-instances", type=int, default=None, dest="max_instances")
-    auto = dep_update.add_mutually_exclusive_group()
-    auto.add_argument(
-        "--auto-scaling",
-        action="store_true",
-        dest="auto_scaling",
-        default=None,
-        help="Enable auto-scaling.",
-    )
-    auto.add_argument(
-        "--no-auto-scaling",
-        action="store_false",
-        dest="auto_scaling",
-        help="Disable auto-scaling.",
-    )
+    dep_update.add_argument("--name", required=True, help="New name.")
     dep_update.set_defaults(func=cmd_deployments_update)
-
-    dep_scale = deployment_sub.add_parser(
-        "scale", help="Scale a deployment.", description="Change a deployment's instance count."
-    )
-    dep_scale.add_argument("deployment_id", help="ID of the deployment.")
-    dep_scale.add_argument(
-        "--num-instances", type=int, required=True, dest="num_instances", help="Target count."
-    )
-    dep_scale.add_argument(
-        "--no-wait", action="store_true", help="Return immediately without polling."
-    )
-    dep_scale.set_defaults(func=cmd_deployments_scale)
-
-    dep_rollback = deployment_sub.add_parser(
-        "rollback",
-        help="Roll back a deployment.",
-        description="Redeploy a previous checkpoint.",
-    )
-    dep_rollback.add_argument("deployment_id", help="ID of the deployment.")
-    dep_rollback.add_argument(
-        "--checkpoint-id",
-        required=True,
-        dest="checkpoint_id",
-        help="ID of the checkpoint to redeploy.",
-    )
-    dep_rollback.add_argument(
-        "--no-wait", action="store_true", help="Return immediately without polling."
-    )
-    dep_rollback.set_defaults(func=cmd_deployments_rollback)

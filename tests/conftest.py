@@ -29,6 +29,7 @@ from collections.abc import Callable
 import importlib
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -40,6 +41,40 @@ try:  # pragma: no cover - depends on whether the pytorch extra is installed
     importlib.import_module("torchvision")
 except ImportError:  # pragma: no cover - torch-less installs skip those tests anyway
     pass
+
+
+# The process's real home, read once while this conftest is imported, before any
+# fixture can move it.
+_REAL_DAGNAM_DIR = Path.home() / ".dagnam"
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Give every test an empty home and no credential variables.
+
+    The SDK reads the stored API key from ``~/.dagnam/config.json`` and caches
+    under ``~/.dagnam``. Without this, a test that reaches a real command path
+    would send the developer's key to the live API, and a cache test could write
+    into the real ``~/.dagnam``. Moving ``HOME``/``USERPROFILE`` moves
+    ``Path.home()`` for code that asks at call time; the module constants
+    computed from it at import (``CONFIG_FILE``, the cache roots, and the copies
+    other modules took with ``from ... import``) are re-pointed here, because
+    moving ``HOME`` cannot change a value that already exists.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("DAGNAM_API_KEY", raising=False)
+    monkeypatch.delenv("DAGNAM_API_URL", raising=False)
+    modules = [m for name, m in list(sys.modules.items()) if name.split(".")[0] == "dagnam"]
+    for module in modules:
+        for attr, value in list(vars(module).items()):
+            if isinstance(value, Path) and value.is_relative_to(_REAL_DAGNAM_DIR):
+                moved = home / ".dagnam" / value.relative_to(_REAL_DAGNAM_DIR)
+                monkeypatch.setattr(module, attr, moved)
+    return home
 
 
 @pytest.fixture(autouse=True)

@@ -57,6 +57,8 @@ def test_restart_404_raises_not_found(client: DagnamClient, rmock: RequestsMocke
 def test_restore_returns_new_job(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(RESTORE, status_code=201, json={"id": "j2"})
     assert client.restore_from_checkpoint("j1", "c1") == {"id": "j2"}
+    # The route takes the account's API key, like restart.
+    assert rmock.last_request.headers["Authorization"] == "Bearer k"
 
 
 def test_restore_404_raises_not_found(client: DagnamClient, rmock: RequestsMocker) -> None:

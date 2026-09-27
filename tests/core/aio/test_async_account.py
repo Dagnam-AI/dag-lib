@@ -130,3 +130,36 @@ async def test_async_get_entitlements_401_not_retried(
     with pytest.raises(AuthError):
         await client.get_entitlements()
     assert route.call_count == 1
+
+
+@pytest.mark.parametrize("name", ["create_api_key", "list_api_keys", "revoke_api_key"])
+async def test_async_key_management_methods_are_gone(name: str) -> None:
+    assert not hasattr(AsyncDagnamClient, name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "change_password",
+        "delete_account",
+        "disable_two_factor",
+        "download_export",
+        "enable_two_factor",
+        "export_data",
+        "get_notification_prefs",
+        "get_profile",
+        "get_settings",
+        "list_sessions",
+        "reset_settings",
+        "revoke_all_sessions",
+        "revoke_session",
+        "two_factor_enabled",
+        "update_notification_prefs",
+        "update_profile",
+        "update_settings",
+        "upload_profile_photo",
+        "verify_two_factor",
+    ],
+)
+async def test_async_session_only_methods_are_gone(name: str) -> None:
+    assert not hasattr(AsyncDagnamClient, name)
