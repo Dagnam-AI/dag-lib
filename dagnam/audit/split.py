@@ -59,29 +59,28 @@ def cap_train(
     limit: int,
     max_strata: int | None = None,
 ) -> list[int]:
-    """At most about ``limit`` of the ``train`` row indices, a proportional stratified sample.
+    """At most ``limit`` training rows, sampled proportionally by content.
 
-    ``strata[i]`` / ``order_keys[i]`` belong to row ``i`` (its target: a
-    label, a router's route; a digest of the row). Each stratum keeps
-    ``ceil(limit * its share)`` rows, so every class survives and the classes
-    keep their proportions; within a stratum, rows are taken in ``order_keys``
-    order, so the sample depends on the content and never on the input order.
-    The ceilings can exceed ``limit`` by fewer rows than there are strata, so
-    past ``max_strata`` of them -- targets that are not classes, as an
-    extraction's answers are not -- they are sampled as one stratum (m4);
-    ``None`` keeps every stratum, as labels need (N1).
+    Keep each class when the cap can fit all strata. Remove ceiling surplus
+    from the most overrepresented class; too many strata are sampled together.
     """
     if len(train) <= limit:
         return list(train)
     by_stratum: dict[str, list[int]] = {}
     for i in train:
         by_stratum.setdefault(strata[i], []).append(i)
-    if max_strata is not None and len(by_stratum) > max_strata:
+    if len(by_stratum) > limit or (max_strata is not None and len(by_stratum) > max_strata):
         by_stratum = {"": list(train)}
+    quotas = {key: math.ceil(limit * len(rows) / len(train)) for key, rows in by_stratum.items()}
+    while sum(quotas.values()) > limit:
+        key = max(
+            (key for key in quotas if quotas[key] > 1),
+            key=lambda key: (quotas[key] * len(train) - limit * len(by_stratum[key]), key),
+        )
+        quotas[key] -= 1
     kept: list[int] = []
-    for rows in by_stratum.values():
-        quota = math.ceil(limit * len(rows) / len(train))
-        kept += sorted(rows, key=lambda i: order_keys[i])[:quota]
+    for key, rows in by_stratum.items():
+        kept += sorted(rows, key=lambda i: order_keys[i])[: quotas[key]]
     return sorted(kept)
 
 

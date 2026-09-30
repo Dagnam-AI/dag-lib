@@ -95,7 +95,7 @@ def credits_spent(state: AuditState, audit_dir: Path | None = None) -> float:
     hold with every submitted run finishing at its dearest. ``audit_dir`` is
     where an interrupted replay's answers are read from.
     """
-    total = 0.0
+    total = state.retired_cost_credits
     for workload_id, candidates in state.workloads.items():
         for kind, step in candidates.items():
             training = step.training_cost_credits or 0.0

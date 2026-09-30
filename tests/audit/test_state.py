@@ -126,3 +126,30 @@ def test_one_command_at_a_time_holds_an_audit_directory(tmp_path: Path) -> None:
         raise RuntimeError("crash")
     with lock_audit(root):  # released on the way out, crash or not
         assert (root / LOCK_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    ("retired", "match"),
+    [
+        ({}, "retired must be a JSON array"),
+        ([1], r"retired\[0\] must be a JSON object"),
+        ([{"bogus": 1}], r"unknown step keys.*retired\[0\]"),
+    ],
+)
+def test_invalid_retired_candidates_are_rejected(
+    tmp_path: Path, retired: object, match: str
+) -> None:
+    (tmp_path / STATE_FILE).write_text(json.dumps({"schema": SCHEMA, "retired": retired}))
+    with pytest.raises(ValueError, match=match):
+        load_state(tmp_path)
+
+
+def test_retired_candidates_round_trip_without_becoming_active(tmp_path: Path) -> None:
+    state = _state()
+    state.retired = [StepState(dataset_id="old", training_job_id="old-job")]
+    state.retired_cost_credits = 19.0
+    save_state(tmp_path, state)
+    restored = load_state(tmp_path)
+    assert restored == state
+    assert list(restored.all_steps())[-1] == state.retired[0]
+    assert restored.candidate("old", CandidateKind.HEAD_TUNE) == StepState()

@@ -533,3 +533,21 @@ def test_a_server_failure_during_a_cancel_still_raises(
     monkeypatch.setattr(platform, "cancel_training_job", broken)  # a fault is not a refusal
     with pytest.raises(APIError, match="boom"):
         cancel_recorded(_live_state(), as_cleanup_client(platform))
+
+
+def test_retired_candidates_are_cancelled_and_deleted(
+    prepared: Path, platform: FakeCleanup
+) -> None:
+    state = load_state(prepared)
+    state.retired = list(state.all_steps())
+    state.workloads.clear()
+    assert recorded_ids(state) == recorded_ids(_state())
+    cancel_recorded(state, as_cleanup_client(platform))
+    assert ("cancel_training_job", "job-1") in platform.call_log
+    assert ("pause_deployment", "dep-1") in platform.call_log
+    assert state.retired[1].run_status == "cancelled"
+    save_state(prepared, state)
+    delete_audit(prepared, as_cleanup_client(platform))
+    assert all(not ids for ids in platform.present.values())
+    assert SecretStore(prepared).load("w1/head_tune") is None
+    assert load_state(prepared).retired == state.retired

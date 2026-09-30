@@ -23,7 +23,8 @@ from dagnam.audit.economics import Verdict, customer_verdict, price_workload, re
 from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers.messages import TOOL_CALL_NOTE
 from dagnam.audit.redact import PII_POLICY
-from dagnam.audit.state import load_state
+from dagnam.audit.state import AuditState, load_state, save_state
+from dagnam.audit.steps_train import credits_spent
 from dagnam.audit.thresholds import (
     MAX_UNSTRUCTURED_SHARE,
     MIN_HOLDOUT,
@@ -208,10 +209,28 @@ def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset])
     replays that workload's ``eval_holdout`` against the model it trained. A
     scan of another export that rewrote the rows under it would score the
     model on data it never saw and pair one export's spend with another's
-    agreement. Re-scanning the same export writes the same rows, so it passes.
+    agreement. A published scan also protects every derived dataset before
+    the first candidate starts. Re-scanning unchanged rows and splits passes.
     """
+    state = load_state(out_dir)
+    protected = dict.fromkeys(state.workloads)
+    added: set[str] = set()
+    if state.audit_id is not None:
+        scan_path = out_dir / "scan-report.json"
+        if scan_path.exists():
+            scan = json.loads(scan_path.read_text(encoding="utf-8"))
+            published = {
+                entry["id"] for entry in scan["workloads"] if entry.get("dataset") is not None
+            }
+        else:
+            published = {
+                path.parent.name for path in (out_dir / "workloads").glob("*/dataset.jsonl")
+            }
+        protected.update(dict.fromkeys(sorted(published)))
+        added = set(datasets) - published
+        protected.update(dict.fromkeys(datasets))
     changed: list[str] = []
-    for workload_id in load_state(out_dir).workloads:
+    for workload_id in protected:
         folder = out_dir / "workloads" / workload_id
         dataset = datasets.get(workload_id)
         try:
@@ -219,9 +238,13 @@ def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset])
             split = json.loads((folder / "split.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
             lines, split = [], {}
-        same = dataset is not None and (
-            [json.loads(line) for line in lines] == dataset.rows
-            and split.get("member_row_indices") == dataset.split
+        same = (
+            workload_id not in added
+            and dataset is not None
+            and (
+                [json.loads(line) for line in lines] == dataset.rows
+                and split.get("member_row_indices") == dataset.split
+            )
         )
         if not same:
             changed.append(workload_id)
@@ -231,11 +254,14 @@ def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset])
 class SupersededRunError(DagnamError):
     """``out`` holds a run whose training rows this scan would rewrite (see :func:`superseded_workloads`)."""
 
-    def __init__(self, out_dir: Path, workload_ids: Sequence[str]) -> None:
+    def __init__(
+        self, out_dir: Path, workload_ids: Sequence[str], *, published: bool = False
+    ) -> None:
         self.workload_ids = tuple(workload_ids)
+        action = "Scan into a new --out" if published else "Scan into a new --out, or pass --force"
         super().__init__(
             f"{out_dir} holds a run of another scan: this export would change"
-            f" {', '.join(workload_ids)}. Scan into a new --out, or pass --force."
+            f" {', '.join(workload_ids)}. {action}."
         )
 
 
@@ -253,11 +279,23 @@ def write_scan(
 
     Refuses (:class:`SupersededRunError`) to rewrite the rows of a run's
     workloads unless ``force``; forced, the answers a rewritten holdout's replay
-    had already kept are stale and are removed. The caller holds ``out_dir``'s lock.
+    had already kept are stale and are removed. Old candidates are retired for
+    cleanup; the next run starts fresh. Published runs require a new ``--out``
+    even with ``force``. The caller holds ``out_dir``'s lock.
     """
     changed = superseded_workloads(out_dir, datasets)
-    if changed and not force:
-        raise SupersededRunError(out_dir, changed)
+    state = load_state(out_dir)
+    if changed and (not force or state.audit_id is not None):
+        raise SupersededRunError(out_dir, changed, published=state.audit_id is not None)
+    if changed:
+        superseded = AuditState(workloads={key: state.workloads[key] for key in changed})
+        state.retired_cost_credits += credits_spent(superseded, out_dir)
+        for workload_id in changed:
+            state.retired.extend(state.workloads.pop(workload_id).values())
+        state.halted = None
+        save_state(out_dir, state)
+        for suffix in ("json", "md"):
+            (out_dir / f"audit-report.{suffix}").unlink(missing_ok=True)
     for workload_id in changed:
         for stale in (out_dir / "workloads" / workload_id).glob("replay-*.jsonl"):
             stale.unlink()

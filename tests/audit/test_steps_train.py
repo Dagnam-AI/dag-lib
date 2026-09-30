@@ -352,3 +352,10 @@ def test_a_replay_file_a_crash_cut_short_never_breaks_the_budget(tmp_path: Path)
     assert credits_spent(state, tmp_path) == projected_replay(1)  # its answers still count
     answers.write_text("", encoding="utf-8")
     assert credits_spent(state, tmp_path) == 0.0
+
+
+def test_credits_spent_keeps_retired_spend_in_the_directory_budget() -> None:
+    state = AuditState(retired_cost_credits=17.0)
+    assert credits_spent(state) == 17.0
+    state.candidate("w1", CandidateKind.HEAD_TUNE).training_cost_credits = 3.0
+    assert credits_spent(state) == 20.0

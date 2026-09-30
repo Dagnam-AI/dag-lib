@@ -203,16 +203,15 @@ needs no entry -- it is the job's ``ON DELETE CASCADE`` child.
 def recorded_ids(state: AuditState) -> dict[str, list[str]]:
     """Every platform id in the state by kind, in deletion order, without duplicates."""
     ids: dict[str, list[str]] = {kind: [] for kind, *_ in KINDS}
-    for steps in state.workloads.values():
-        for step in steps.values():
-            for kind, value in (
-                ("deployment", step.deployment_id),
-                ("model_version", step.model_version_id),
-                ("training_job", step.training_job_id),
-                ("dataset", step.dataset_id),
-            ):
-                if value is not None and value not in ids[kind]:
-                    ids[kind].append(value)
+    for step in state.all_steps():
+        for kind, value in (
+            ("deployment", step.deployment_id),
+            ("model_version", step.model_version_id),
+            ("training_job", step.training_job_id),
+            ("dataset", step.dataset_id),
+        ):
+            if value is not None and value not in ids[kind]:
+                ids[kind].append(value)
     if state.project_id is not None:
         ids["project"].append(state.project_id)
     return ids
@@ -316,24 +315,23 @@ def cancel_recorded(
     """
     entries = receipt_rows(server) if server is not None else []
     seen = {(row.get("kind"), row.get("id")) for row in entries}
-    for candidates in state.workloads.values():
-        for step in candidates.values():
-            live = (
-                (
-                    "training_job",
-                    None if step.run_status in TERMINAL_RUN else step.training_job_id,
-                    _stop_job,
-                ),
-                (
-                    "deployment",
-                    None if step.deploy_status == DEPLOY_PAUSED else step.deployment_id,
-                    _stop_deployment,
-                ),
-            )
-            for kind, item_id, stop in live:
-                if item_id is not None and (kind, item_id) not in seen:
-                    entries.append(stop(client, item_id))
-                    seen.add((kind, item_id))
+    for step in state.all_steps():
+        live = (
+            (
+                "training_job",
+                None if step.run_status in TERMINAL_RUN else step.training_job_id,
+                _stop_job,
+            ),
+            (
+                "deployment",
+                None if step.deploy_status == DEPLOY_PAUSED else step.deployment_id,
+                _stop_deployment,
+            ),
+        )
+        for kind, item_id, stop in live:
+            if item_id is not None and (kind, item_id) not in seen:
+                entries.append(stop(client, item_id))
+                seen.add((kind, item_id))
     mark_cancelled(state, {str(row.get("id")) for row in entries if row.get("status") == STOPPED})
     header = dict(server) if server is not None else {"schema": CANCELLED_SCHEMA}
     return {**header, "deleted_at": header.get("deleted_at") or _now(), "entries": entries}
@@ -347,9 +345,8 @@ def mark_cancelled(state: AuditState, stopped: Collection[str]) -> None:
     job that is gone -- while a run that had already finished, or a deployment
     the platform refused to pause, keeps the status it really has.
     """
-    for candidates in state.workloads.values():
-        for step in candidates.values():
-            _cancel_step(step, stopped)
+    for step in state.all_steps():
+        _cancel_step(step, stopped)
     state.halted = {"reason": RUN_CANCELLED}
 
 
@@ -382,10 +379,9 @@ def forget_locally(audit_dir: Path, state: AuditState) -> None:
     second ``audit delete`` needs to finish what the platform refused.
     """
     secrets = SecretStore(audit_dir)
-    for steps in state.workloads.values():
-        for step in steps.values():
-            if step.key_ref is not None:
-                secrets.forget(step.key_ref)
+    for step in state.all_steps():
+        if step.key_ref is not None:
+            secrets.forget(step.key_ref)
     (audit_dir / SECRETS_FILE).unlink(missing_ok=True)
     shutil.rmtree(audit_dir / "workloads", ignore_errors=True)
     state.halted = {"reason": "deleted"}

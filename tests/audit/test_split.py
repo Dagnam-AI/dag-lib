@@ -105,7 +105,9 @@ def test_cap_train_keeps_a_proportional_stratified_sample() -> None:
     kept = cap_train(list(range(100)), strata, keys, limit=10)
 
     assert [strata[i] for i in kept].count("billing") == 8
-    assert [strata[i] for i in kept].count("refund") == 2  # ceil(10 * 18 / 100)
+    assert [strata[i] for i in kept].count(
+        "refund"
+    ) == 1  # ceiling surplus is removed to honor the cap
     assert [strata[i] for i in kept].count("rare") == 1
     assert kept == sorted(kept)
     assert cap_train(list(range(100)), strata, keys[::-1], limit=10) != kept  # by content
@@ -119,8 +121,17 @@ def test_cap_train_samples_targets_that_are_not_classes_as_one_stratum() -> None
     rows = list(range(100))
     classes = [f"route{i % ENUM_MAX_DISTINCT}" for i in range(100)]
     capped = cap_train(rows, classes, keys, limit=10, max_strata=ENUM_MAX_DISTINCT)
-    assert len(capped) == ENUM_MAX_DISTINCT
+    assert len(capped) == 10
     answers = [f"answer {i}" for i in range(100)]
     assert cap_train(rows, answers, keys, limit=10, max_strata=ENUM_MAX_DISTINCT) == rows[:10]
-    # N1: without a bound (labels), every stratum keeps its ceiling, however many.
-    assert cap_train(rows, answers, keys, limit=10) == rows
+    # A cap smaller than the class count cannot retain every class.
+    assert cap_train(rows, answers, keys, limit=10) == rows[:10]
+
+
+def test_cap_train_enforces_exact_5000_across_uneven_strata() -> None:
+    strata = ["a"] * 2500 + ["b"] * 2501
+    keys = [f"{i:04d}" for i in range(5001)]
+    kept = cap_train(list(range(5001)), strata, keys, limit=5000)
+    assert len(kept) == 5000
+    assert {strata[i] for i in kept} == {"a", "b"}
+    assert cap_train(list(reversed(range(5001))), strata, keys, limit=5000) == kept

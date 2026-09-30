@@ -99,7 +99,17 @@ def _output(value: object) -> Any:
         and all(isinstance(item, Mapping) and "role" in item for item in decoded)
     ):
         return decoded[-1]
-    return value
+    if (
+        isinstance(decoded, list)
+        and decoded
+        and all(
+            isinstance(item, Mapping)
+            and item.get("type") in {"reasoning", "message", "function_call"}
+            for item in decoded
+        )
+    ):
+        return decoded
+    return text(value) if isinstance(decoded, list) else value
 
 
 def _latency_ms(row: Row, start: datetime) -> float:

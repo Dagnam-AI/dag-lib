@@ -399,6 +399,11 @@ dagnam agent install          # install the Agent Skill into Claude Code / Codex
 dagnam agent uninstall --all
 ```
 
+Rescanning the same export preserves a run's progress. A changed export requires a new
+`--out`, or `--force` for a local-only run: the old candidates are retired for cleanup,
+and subsequent training and scoring start fresh. Once an audit has been published,
+changed rows always require a new `--out`, even with `--force`.
+
 **`audit scan` prices the providers your agent actually calls.** The bundled price table
 (`dagnam/audit/prices/2026-09.json`, copied from each vendor's own pricing page on the table's
 `as_of` date) carries OpenAI, Anthropic, Google Gemini, Mistral, DeepSeek, xAI and Cohere rows,

@@ -82,10 +82,20 @@ class AuditState:
     price_table_version: str | None = None
     workloads: dict[str, dict[CandidateKind, StepState]] = field(default_factory=dict)
     halted: dict[str, JsonValue] | None = None
+    retired_cost_credits: float = 0.0
+    """Spend and conservative reservations captured before old replay files are removed."""
+    retired: list[StepState] = field(default_factory=list)
+    """Superseded local candidates, kept only for cancellation and deletion."""
 
     def candidate(self, workload_id: str, kind: CandidateKind) -> StepState:
         """The step state for one candidate, created empty on first access."""
         return self.workloads.setdefault(workload_id, {}).setdefault(kind, StepState())
+
+    def all_steps(self) -> Generator[StepState]:
+        """Active and retired candidates, so cleanup never loses a remote handle."""
+        for candidates in self.workloads.values():
+            yield from candidates.values()
+        yield from self.retired
 
     def to_json(self) -> dict[str, Any]:
         """The on-disk shape of spec section 7."""
@@ -101,6 +111,8 @@ class AuditState:
                 for workload_id, candidates in self.workloads.items()
             },
             "halted": self.halted,
+            "retired": [asdict(step) for step in self.retired],
+            "retired_cost_credits": self.retired_cost_credits,
         }
 
 
@@ -131,6 +143,16 @@ def _from_json(raw: object) -> AuditState:
                     f"state.json: unknown step keys {unknown} under {workload_id}/{kind}"
                 )
             workloads[workload_id][CandidateKind(kind)] = StepState(**step_fields)
+    retired = data.get("retired", [])
+    if not isinstance(retired, list):
+        raise ValueError("state.json: retired must be a JSON array")
+    retired_steps: list[StepState] = []
+    for index, raw_step in enumerate(retired):
+        step_fields = _object(raw_step, f"retired[{index}]")
+        unknown = sorted(set(step_fields) - _STEP_KEYS)
+        if unknown:
+            raise ValueError(f"state.json: unknown step keys {unknown} under retired[{index}]")
+        retired_steps.append(StepState(**step_fields))
     halted = data.get("halted")
     return AuditState(
         project_id=data.get("project_id"),
@@ -138,6 +160,8 @@ def _from_json(raw: object) -> AuditState:
         price_table_version=data.get("price_table_version"),
         workloads=workloads,
         halted=_object(halted, "halted") if halted is not None else None,
+        retired=retired_steps,
+        retired_cost_credits=data.get("retired_cost_credits", 0.0),
     )
 
 

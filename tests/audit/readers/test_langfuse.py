@@ -13,6 +13,7 @@ from dagnam.audit import Message, TraceRecord, read_traces
 from dagnam.audit.derive import build_dataset
 from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers import langfuse
+from dagnam.audit.readers.messages import effective_response
 
 # Row counts of ``fixtures/langfuse_sample.jsonl`` (see fixtures/README.md).
 LINES = 15
@@ -454,3 +455,31 @@ def test_a_text_outcome_in_the_metadata_is_ignored() -> None:
     record = langfuse.to_record({**_generation(), "metadata": {"outcome": "resolved"}})
     assert record is not None
     assert record.outcome is None
+
+
+@pytest.mark.parametrize("serialized", [False, True])
+def test_responses_output_array_keeps_calls_and_drops_reasoning(serialized: bool) -> None:
+    output = [
+        {"type": "reasoning", "summary": [{"type": "summary_text", "text": "secret"}]},
+        {"type": "function_call", "name": "route", "arguments": '{"team":"billing"}'},
+    ]
+    record = langfuse.to_record(
+        {**_generation(), "output": json.dumps(output) if serialized else output}
+    )
+    assert record is not None
+    assert record.response == ""
+    assert (
+        effective_response(record.response, record.response_tool_calls)
+        == '{"arguments": {"team": "billing"}, "name": "route"}'
+    )
+
+
+@pytest.mark.parametrize("serialized", [False, True])
+def test_serialized_arbitrary_array_stays_answer_text(serialized: bool) -> None:
+    output = '[{"type": "refund", "amount": 12}, {"type": "reasoning", "amount": 9}]'
+    record = langfuse.to_record(
+        {**_generation(), "output": output if serialized else json.loads(output)}
+    )
+    assert record is not None
+    assert record.response == output
+    assert record.response_tool_calls == ()
