@@ -5,9 +5,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
 from tests.audit._publish import entry
 
-from dagnam.audit.publish_body import MAX_WORKLOADS, capped, too_many_selected, workload_body
+from dagnam.audit.publish_body import (
+    MAX_WORKLOADS,
+    capped,
+    patch_body,
+    too_many_selected,
+    workload_body,
+)
+from dagnam.audit.scoring import score_labels
+from dagnam.audit.state import StepState
 
 
 def test_a_workload_without_numbers_still_publishes_a_valid_body() -> None:
@@ -28,7 +37,16 @@ def test_a_workload_without_numbers_still_publishes_a_valid_body() -> None:
         "ratio": None,
         "pii_counts": {},
         "selected": False,
+        "response_mode": "text",
     }
+
+
+def test_a_tool_call_workload_publishes_its_response_mode() -> None:
+    # P4: the page tells the customer the replacement answers in message.content.
+    entry_ = {"id": "w1", "structure_class": "json_object", "response_mode": "tool_call"}
+    assert workload_body(entry_, selected=True, pii_counts={})["response_mode"] == "tool_call"
+    stray = {"id": "w1", "structure_class": "json_object", "response_mode": "tools"}
+    assert workload_body(stray, selected=True, pii_counts={})["response_mode"] == "text"
 
 
 def test_the_cap_keeps_every_selected_workload_and_drops_the_cheapest_others() -> None:
@@ -56,3 +74,17 @@ def test_only_more_selected_workloads_than_the_page_holds_refuses_a_publish() ->
     assert refusal is not None
     assert str(MAX_WORKLOADS + 1) in refusal
     assert "--workloads" in refusal  # it says how to make the run publishable
+
+
+def test_a_label_candidate_publishes_its_weakest_class_recall() -> None:
+    # Q4: a constant "ok" student on a 1%-fraud holdout clears the interval (exact 0.99)
+    # and misses every fraud row; the published block says so, and the page shows it.
+    truth = ["ok"] * 990 + ["fraud"] * 10
+    agreement = score_labels(["ok"] * 1_000, truth)
+    step = StepState(agreement={**agreement.to_json(), "floor": 0.97}, scored=True)
+
+    published = patch_body("replay_and_score", step, None, 12.5)["agreement"]
+
+    assert isinstance(published, dict)
+    assert published["min_class_recall"] == 0.0
+    assert published["value"] == pytest.approx(0.99)

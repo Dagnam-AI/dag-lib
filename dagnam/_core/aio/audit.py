@@ -1,6 +1,6 @@
 """Async workload-audit publish client methods.
 
-Async mirror of ``dagnam._core.client.audit.AuditClientMixin``: the same six
+Async mirror of ``dagnam._core.client.audit.AuditClientMixin``: the same
 routes, the same bodies, the same uniform 404 for a key without the ``write``
 scope. The shared ``_request`` transport wraps connect/timeout failures into
 ``APIError``, so this mixin only maps the response body.
@@ -18,14 +18,21 @@ class AsyncAuditMixin(BaseAsyncDagnamClient):
     """Async workload-audit publish methods for AsyncDagnamClient."""
 
     async def _audit_req(
-        self, method: str, path: str, json_body: JsonObject | None = None
+        self,
+        method: str,
+        path: str,
+        json_body: JsonObject | None = None,
+        *,
+        idempotent: bool = False,
     ) -> JsonObject:
-        resp = await self._request(method, path, json=json_body, raise_for=raise_for_generic)
+        resp = await self._request(
+            method, path, json=json_body, raise_for=raise_for_generic, idempotent=idempotent
+        )
         return ensure_json_object(resp.json())
 
     async def create_audit(self, payload: JsonObject) -> JsonObject:
-        """``POST /api/v1/audits``: the scan header and every workload it found."""
-        return await self._audit_req("POST", AUDITS_PATH, payload)
+        """``POST /api/v1/audits`` with an ``Idempotency-Key`` (see the sync twin)."""
+        return await self._audit_req("POST", AUDITS_PATH, payload, idempotent=True)
 
     async def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
         """``POST /api/v1/audits/{id}/candidates`` (idempotent per workload x kind)."""
@@ -45,6 +52,14 @@ class AsyncAuditMixin(BaseAsyncDagnamClient):
             ),
             payload,
         )
+
+    async def get_audit(self, audit_id: str) -> JsonObject:
+        """``GET /api/v1/audits/{id}``: the audit with its status."""
+        return await self._audit_req("GET", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}")
+
+    async def resume_audit(self, audit_id: str) -> JsonObject:
+        """``POST /api/v1/audits/{id}/resume``: un-halt the audit (K1b)."""
+        return await self._audit_req("POST", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/resume")
 
     async def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
         """``POST /api/v1/audits/{id}/halt``: the run stopped short, and why."""

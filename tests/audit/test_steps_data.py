@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.audit._platform import FakePlatform
+from tests.audit._records import T0, make_record
 from tests.audit.conftest import HOLDOUT, TRAIN
 
+from dagnam._types import JsonObject
+from dagnam.audit import build_dataset, write_workload
 from dagnam.audit.state import AuditState
 from dagnam.audit.steps import StepContext
 from dagnam.audit.steps_data import (
@@ -24,6 +30,41 @@ def _through_split(state: AuditState, ctx: StepContext) -> AuditState:
     for step in (upload, resolve_version, split, wait_split):
         state = step(state, ctx)
     return state
+
+
+def test_a_tool_argument_secret_is_redacted_before_it_is_uploaded(
+    make_ctx: Callable[..., StepContext],
+    platform: FakePlatform,
+    audit_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """N4 (C2b): P4 trains on tool arguments, so a `login` call's password was in the rows.
+
+    The assignment pattern needed an unquoted `key:`/`key=`, and inside JSON the
+    key and the value were redacted as separate strings -- `{"password": ...}`
+    matched neither way and went up to the platform as it was.
+    """
+    call = {
+        "function": {"name": "login", "arguments": '{"user": "ana", "password": "hunter2secret"}'}
+    }
+    records = [
+        make_record(response="", tool_calls=(call,), ts=T0 + timedelta(minutes=i)) for i in range(5)
+    ]
+    dataset = build_dataset(records, structure_class="json_object", max_seq_length=2_048)
+    write_workload(audit_dir, "w9", dataset.rows, dataset.split, dataset.stats)
+    sent: list[str] = []
+    real_upload = platform.upload_dataset
+
+    def upload_and_keep(file_path: str | Path, **kwargs: Any) -> JsonObject:
+        sent.append(Path(file_path).read_text(encoding="utf-8"))
+        return real_upload(file_path, **kwargs)
+
+    monkeypatch.setattr(platform, "upload_dataset", upload_and_keep)
+    upload(AuditState(), make_ctx(workload_id="w9"))
+    assert sent
+    assert "hunter2secret" not in sent[0]
+    assert "<SECRET>" in sent[0]
+    assert dataset.stats["redact"]["counts"]["PII_SECRET"] == 5
 
 
 def test_upload_sends_the_derived_file_as_json_and_skips_when_done(

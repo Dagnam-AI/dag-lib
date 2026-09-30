@@ -8,7 +8,8 @@ from hypothesis import given, strategies as st
 import pytest
 
 from dagnam.audit import TraceRecord
-from dagnam.audit.split import HOLDOUT_SHARE, split_boundary, time_split
+from dagnam.audit.split import HOLDOUT_SHARE, cap_train, split_boundary, time_split
+from dagnam.audit.thresholds import ENUM_MAX_DISTINCT
 
 
 def _rec(ts: int, session: str | None) -> TraceRecord:
@@ -94,3 +95,32 @@ def test_split_is_a_partition_and_sessions_never_straddle(
     holdout = {recs[i].session_id for i in split["eval_holdout"]} - {None}
     assert train.isdisjoint(holdout)
     assert time_split(recs, holdout_share=share) == split
+
+
+def test_cap_train_keeps_a_proportional_stratified_sample() -> None:
+    # R3-15: 23,465 train rows ran past the recipe's 1-hour ceiling; a capped sample
+    # keeps every class, in proportion, chosen by content so any input order agrees.
+    strata = ["billing"] * 80 + ["refund"] * 18 + ["rare"] * 2
+    keys = [f"{i:03d}" for i in range(100)]
+    kept = cap_train(list(range(100)), strata, keys, limit=10)
+
+    assert [strata[i] for i in kept].count("billing") == 8
+    assert [strata[i] for i in kept].count("refund") == 2  # ceil(10 * 18 / 100)
+    assert [strata[i] for i in kept].count("rare") == 1
+    assert kept == sorted(kept)
+    assert cap_train(list(range(100)), strata, keys[::-1], limit=10) != kept  # by content
+    assert cap_train([3, 5], ["a", "a"], ["x", "y"], limit=10) == [3, 5]  # under the cap
+
+
+def test_cap_train_samples_targets_that_are_not_classes_as_one_stratum() -> None:
+    # m4: a stratum per distinct answer keeps a router's rare routes; an extraction's
+    # answers are all distinct, and a stratum each would keep every row past the cap.
+    keys = [f"{i:03d}" for i in range(100)]
+    rows = list(range(100))
+    classes = [f"route{i % ENUM_MAX_DISTINCT}" for i in range(100)]
+    capped = cap_train(rows, classes, keys, limit=10, max_strata=ENUM_MAX_DISTINCT)
+    assert len(capped) == ENUM_MAX_DISTINCT
+    answers = [f"answer {i}" for i in range(100)]
+    assert cap_train(rows, answers, keys, limit=10, max_strata=ENUM_MAX_DISTINCT) == rows[:10]
+    # N1: without a bound (labels), every stratum keeps its ceiling, however many.
+    assert cap_train(rows, answers, keys, limit=10) == rows

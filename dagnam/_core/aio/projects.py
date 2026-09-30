@@ -33,6 +33,7 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         json_body: JsonValue = None,
         data: FormData | None = None,
         files: UploadFiles | None = None,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
         resp = await self._request(
             method,
@@ -42,6 +43,7 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
             data=data,
             files=files,
             raise_for=lambda r: raise_for_project(r, project_id),
+            idempotent=idempotent,
         )
         if not resp.content:
             return None
@@ -66,8 +68,9 @@ class AsyncProjectsMixin(BaseAsyncDagnamClient):
         )
 
     async def create_project(self, payload: JsonObject) -> JsonObject:
+        """``POST /api/v1/projects`` with an ``Idempotency-Key``, retried like the sync twin."""
         return ensure_json_object(
-            await self._project_req("POST", "/api/v1/projects", json_body=payload)
+            await self._project_req("POST", "/api/v1/projects", json_body=payload, idempotent=True)
         )
 
     async def update_project(self, project_id: str, payload: JsonObject) -> JsonObject:

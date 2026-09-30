@@ -110,3 +110,23 @@ def test_forget_removes_the_key_from_both_backends(
     store.forget("w1/sft_small")
     store.forget("never-stored")
     assert json.loads((tmp_path / SECRETS_FILE).read_text()) == {"w2/sft_small": "sk-file-2"}
+
+
+def test_a_crash_mid_rewrite_leaves_every_stored_key_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B14: the rewrite goes through a same-directory temp file, never over the live one."""
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    store = SecretStore(tmp_path)
+    store.store("w1/head_tune", "sk-1")
+
+    def crash(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(json, "dump", crash)
+    with pytest.raises(OSError, match="disk full"):
+        store.store("w1/sft_small", "sk-2")
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    assert store.load("w1/head_tune") == "sk-1"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [SECRETS_FILE]

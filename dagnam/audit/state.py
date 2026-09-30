@@ -3,22 +3,34 @@
 The file is written atomically after every step, so a crash or a Ctrl+C
 leaves the state the previous step reached and the next ``run`` resumes from
 it. Deployment keys never appear here -- :mod:`dagnam.audit.secrets` holds
-them; the state records only a ``key_ref``.
+them; the state records only a ``key_ref``. One command at a time holds the
+directory (:func:`lock_audit`): two runs over it would each see no ``run_id``
+and each pay for one.
 """
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
 import json
 from pathlib import Path
 from typing import Any
 
+import filelock
+
+from dagnam._core.exceptions import DagnamError
 from dagnam._types import JsonValue
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.workspace import write_atomic
 
 SCHEMA = "dagnam.audit.state/1"
 STATE_FILE = "state.json"
+LOCK_FILE = "state.json.lock"
+
+
+class AuditBusyError(DagnamError):
+    """Another ``dagnam audit`` command holds this audit directory."""
 
 
 @dataclass(slots=True)
@@ -46,6 +58,8 @@ class StepState:
     replay_cost_credits: float | None = None
     error: str | None = None
     published_candidate_id: str | None = None
+    published_step: str | None = None
+    """The last step the account acknowledged; a resumed run publishes what came after it."""
 
 
 _STEP_KEYS = frozenset(f.name for f in fields(StepState))
@@ -140,10 +154,44 @@ def load_state(audit_dir: Path) -> AuditState:
     return _from_json(json.loads(path.read_text(encoding="utf-8")))
 
 
+@contextmanager
+def lock_audit(audit_dir: Path) -> Generator[None]:
+    """Hold ``audit_dir`` for this process until the block ends; the OS drops it if the process dies.
+
+    Raises:
+        AuditBusyError: another command holds it -- a second ``audit run`` over
+            the same directory, or a ``delete`` under a live run.
+        FileNotFoundError: there is no such directory; a mistyped one is never created.
+    """
+    if not audit_dir.is_dir():
+        raise FileNotFoundError(f"{audit_dir} is not an audit directory: run `dagnam audit scan`")
+    lock = filelock.FileLock(str(audit_dir / LOCK_FILE), timeout=0)
+    try:
+        lock.acquire()
+    except filelock.Timeout:
+        raise AuditBusyError(
+            f"{audit_dir} is in use by another `dagnam audit` command; let it finish first"
+        ) from None
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def save_state(audit_dir: Path, state: AuditState) -> None:
     """Write the state atomically (``.tmp`` + ``os.replace``) so a reader never sees a partial file."""
     audit_dir.mkdir(parents=True, exist_ok=True)
     write_atomic(audit_dir / STATE_FILE, json.dumps(state.to_json(), indent=2, ensure_ascii=False))
 
 
-__all__ = ["SCHEMA", "STATE_FILE", "AuditState", "StepState", "load_state", "save_state"]
+__all__ = [
+    "LOCK_FILE",
+    "SCHEMA",
+    "STATE_FILE",
+    "AuditBusyError",
+    "AuditState",
+    "StepState",
+    "load_state",
+    "lock_audit",
+    "save_state",
+]

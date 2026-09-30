@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,12 +23,13 @@ from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
     from dagnam._core.client import DagnamClient
-    from dagnam.audit.derive import WorkloadDataset
+    from dagnam.audit.record import TraceRecord
     from dagnam.audit.state import AuditState
     from dagnam.cli.common import SubParsersAction
 
 SOURCES = ("langfuse", "langsmith", "openai", "jsonl", "csv")
 DEFAULT_OUT = "./audit"
+NOT_FOUND = 404
 METRICS_RANGE = "7d"
 """The longest range the metrics endpoint serves; a 30-day view waits on the backend."""
 
@@ -75,6 +76,20 @@ def parse_credits(value: str) -> int:
     return int(value)
 
 
+def parse_sample_rate(value: str) -> float:
+    """The share of the traffic the export holds, ``0.1`` or ``10%``: in ``(0, 1]``."""
+    try:
+        rate = float(value[:-1]) / 100 if value.endswith("%") else float(value)
+    except ValueError:
+        rate = float("nan")
+    if not 0 < rate <= 1:
+        raise argparse.ArgumentTypeError(
+            f"--sample-rate expects the share of traffic the export holds, like 0.1 or 10%,"
+            f" not {value!r}"
+        )
+    return rate
+
+
 def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
     """``["field=column", ...]`` -> ``{"field": "column"}``; ``None`` when no pair was given."""
     if not pairs:
@@ -86,18 +101,6 @@ def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
             raise argparse.ArgumentTypeError(f"--map expects field=column, not {pair!r}")
         mapping[field] = column
     return mapping
-
-
-def _dataset_entry(dataset: WorkloadDataset) -> dict[str, Any]:
-    """The contract's ``dataset`` object for one derived workload."""
-    stats = dataset.stats
-    return {
-        "rows": len(dataset.rows),
-        "dedup_removed": stats["dedup"]["removed"],
-        "redactions": sum(stats["redact"]["counts"].values()),
-        "truncated": stats["derive"]["truncated"],
-        "split": {name: len(rows) for name, rows in dataset.split.items()},
-    }
 
 
 def _render_scan(result: object) -> str:
@@ -130,57 +133,52 @@ def _render_scan(result: object) -> str:
 
 
 def cmd_audit_scan(args: argparse.Namespace) -> None:
-    """Read the export, discover and price workloads, derive rows; no network."""
-    from dagnam.audit import (
-        build_dataset,
-        build_scan_report,
-        discover_workloads,
-        read_traces,
-        replaceability,
-        write_scan_report,
-        write_workload,
-    )
+    """Read the export, discover and price workloads, derive rows; no network.
+
+    The export is streamed, never held whole (R3-16): once to discover the
+    workloads, then twice more to plan and derive the rows of the ones worth
+    auditing.
+    """
+    from dagnam.audit import discover_workloads, read_traces, replaceability
+    from dagnam.audit.derive import derive_workloads
+    from dagnam.audit.discover import by_spend
     from dagnam.audit.economics import price_workload
     from dagnam.audit.orchestrate import AUDITED_VERDICTS
     from dagnam.audit.prices import PriceTable
-    from dagnam.audit.redact import PII_POLICY
-    from dagnam.audit.scan_report import Window
+    from dagnam.audit.scan_report import SupersededRunError, scan_window, write_scan
+    from dagnam.audit.state import AuditBusyError, lock_audit
     from dagnam.audit.thresholds import MAX_SEQ_LENGTH
 
-    out = Path(args.out)
-    stream, _stats = read_traces(
-        Path(args.export), source=args.source, column_map=parse_map(args.map)
-    )
-    records = list(stream)
-    if not records:
+    out, export, column_map = Path(args.out), Path(args.export), parse_map(args.map)
+
+    def records() -> Iterator[TraceRecord]:
+        return read_traces(export, source=args.source, column_map=column_map)[0]
+
+    found = discover_workloads(records(), window_days=args.window, sample_rate=args.sample_rate)
+    if not found:
         fail(args, f"{args.export}: no traces to audit")
     table = PriceTable.load(Path(args.price_table) if args.price_table else None)
-    workloads = discover_workloads(records, window_days=args.window)
-    datasets: dict[str, dict[str, Any]] = {}
-    pii_counts: Counter[str] = Counter()
-    for w in workloads:
-        if replaceability(price_workload(w, table)).status not in AUDITED_VERDICTS:
-            continue
-        dataset = build_dataset(
-            [records[i] for i in w.record_indices],
-            structure_class=w.structure_class.value,
-            max_seq_length=MAX_SEQ_LENGTH,
-        )
-        write_workload(out, w.id, dataset.rows, dataset.split, dataset.stats)
-        datasets[w.id] = _dataset_entry(dataset)
-        pii_counts.update(dataset.stats["redact"]["counts"])
-    stamps = [r.ts for r in records]
-    span = (max(stamps) - min(stamps)).total_seconds() / 86_400
-    report = build_scan_report(
-        workloads,
-        source=args.source,
-        window=Window(min(stamps), max(stamps), max(float(args.window), span)),
-        price_table=table,
-        pii_pass_list=list(PII_POLICY),
-        pii_counts=dict(pii_counts),
-        datasets=datasets,
-    )
-    write_scan_report(report, out)
+    workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
+    audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
+    datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        # Not under a live run: a workload it has not reached yet is in no
+        # `state.json` to protect, and its rows would change mid-run.
+        with lock_audit(out):
+            report = write_scan(
+                out,
+                workloads,
+                datasets,
+                source=args.source,
+                window=scan_window(
+                    workloads, window_days=args.window, sample_rate=args.sample_rate
+                ),
+                price_table=table,
+                force=args.force,
+            )
+    except (AuditBusyError, SupersededRunError) as exc:
+        fail(args, str(exc))
     emit_result(report.to_json(), output=None, json_stdout=args.json, render_human=_render_scan)
     if datasets:
         print_next_step(f"dagnam audit run {out}")
@@ -299,120 +297,85 @@ def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
 
 def cmd_audit_cancel(args: argparse.Namespace) -> None:
     """Cancel every in-flight run and pause every deployment the state records; delete nothing."""
-    from dagnam._core.exceptions import DeploymentStateError
-    from dagnam.audit.cleanup import (
-        CANCELLED_FILE,
-        DEPLOY_PAUSED,
-        TERMINAL_RUN,
-        mark_cancelled,
-        receipt_rows,
-        write_receipt,
-    )
-    from dagnam.audit.state import load_state, save_state
+    from dagnam.audit.cleanup import CANCELLED_FILE, cancel_recorded, write_receipt
+    from dagnam.audit.state import AuditBusyError, load_state, lock_audit, save_state
 
     audit_dir = Path(args.audit_dir)
-    state = load_state(audit_dir)
     client = client_from_env()
-    if state.audit_id is not None:
-        # The run published: the account knows every artifact it created, so the
-        # server stops them all in one call and answers with the receipt.
+    try:
+        with lock_audit(audit_dir):
+            state = load_state(audit_dir)
+            # A published run: the account stops every artifact it heard about
+            # in one call; whatever it never heard about is stopped here.
+            server = client.cancel_audit(state.audit_id) if state.audit_id is not None else None
+            receipt = cancel_recorded(state, client, server)
+            path = write_receipt(audit_dir, receipt, CANCELLED_FILE)
+            save_state(audit_dir, state)
+    except FileNotFoundError as exc:
+        fail(args, str(exc))
+    except AuditBusyError as exc:
+        # A live run owns `state.json`. A published one is cancelled in the
+        # account, and its next publish meets the halt and stops it (K1b).
+        state = load_state(audit_dir)
+        if state.audit_id is None:
+            fail(args, f"{exc}: stop that `dagnam audit run` (Ctrl+C) first, then cancel")
         receipt = client.cancel_audit(state.audit_id)
         path = write_receipt(audit_dir, receipt, CANCELLED_FILE)
-        # A deployment the server could not pause is not paused here either:
-        # the two cancel paths must leave the same state for the same situation.
-        mark_cancelled(
-            state,
-            [
-                str(row["id"])
-                for row in receipt_rows(receipt)
-                if row.get("kind") == "deployment"
-                and row.get("status") == "blocked"
-                and row.get("id")
-            ],
-        )
-        save_state(audit_dir, state)
-        emit_result(
-            receipt,
-            output=None,
-            json_stdout=args.json,
-            render_human=lambda _: _render_receipt(receipt, path),
-        )
-        return
-    actions: list[dict[str, str]] = []
-    unpaused: list[str] = []
-    for workload_id, candidates in state.workloads.items():
-        for kind, step in candidates.items():
-            label = f"{workload_id}/{kind.value}"
-            job = step.training_job_id
-            if job is not None and step.run_status not in TERMINAL_RUN:
-                client.cancel_training_job(job)
-                actions.append({"candidate": label, "action": "cancelled_job", "id": job})
-            if step.deployment_id is not None and step.deploy_status != DEPLOY_PAUSED:
-                # A deployment whose revision never activated sits in ``not_provisioned``
-                # and the platform refuses the transition; record it and carry on.
-                try:
-                    client.pause_deployment(step.deployment_id)
-                except DeploymentStateError as exc:
-                    unpaused.append(step.deployment_id)
-                    actions.append(
-                        {
-                            "candidate": label,
-                            "action": "pause_refused",
-                            "id": step.deployment_id,
-                            "reason": str(exc),
-                        }
-                    )
-                else:
-                    actions.append(
-                        {
-                            "candidate": label,
-                            "action": "paused_deployment",
-                            "id": step.deployment_id,
-                        }
-                    )
-    mark_cancelled(state, unpaused)
-    save_state(audit_dir, state)
+        # Once the run has stopped, this stops what it never published.
+        print_next_step(f"dagnam audit cancel {audit_dir}")
     emit_result(
-        {"halted": state.halted, "actions": actions},
+        receipt,
         output=None,
         json_stdout=args.json,
-        render_human=lambda _: "\n".join(
-            [*(f"{a['action']} {a['id']} ({a['candidate']})" for a in actions), "Cancelled."]
-        ),
+        render_human=lambda _: _render_receipt(receipt, path),
     )
+
+
+def _server_delete(client: DagnamClient, audit_id: str) -> dict[str, Any] | None:
+    """The account's delete receipt, or ``None`` when it already deleted the audit (its 404)."""
+    from dagnam._core.exceptions import APIError
+
+    try:
+        return client.delete_audit(audit_id)
+    except APIError as exc:
+        if exc.status_code != NOT_FOUND:
+            raise
+        return None
 
 
 def cmd_audit_delete(args: argparse.Namespace) -> None:
     """Delete every platform artifact the run created and write ``deleted.json``."""
-    from dagnam.audit.cleanup import (
-        DELETED_FILE,
-        delete_audit,
-        forget_locally,
-        receipt_rows,
-        recorded_ids,
-        write_receipt,
-    )
-    from dagnam.audit.state import load_state
+    from dagnam.audit.cleanup import DELETED_FILE, delete_audit, recorded_ids
+    from dagnam.audit.state import AuditBusyError, load_state, lock_audit
 
     audit_dir = Path(args.audit_dir)
-    state = load_state(audit_dir)
-    ids = recorded_ids(state)
-    listing = "\n".join(f"  {kind}: {', '.join(found)}" for kind, found in ids.items() if found)
-    if state.audit_id is not None:
-        listing = f"{listing}\n  audit: {state.audit_id} (and its published report)".lstrip("\n")
-    confirm_or_abort(
-        f"This deletes from your account:\n{listing or '  (nothing recorded)'}", assume_yes=args.yes
-    )
-    client = client_from_env()
-    if state.audit_id is None:
-        receipt = delete_audit(audit_dir, client)
-    else:
-        # The published audit owns the same artifacts; the server walks them and
-        # answers with the receipt, and only the local rows are left to drop.
-        receipt = client.delete_audit(state.audit_id)
-        write_receipt(audit_dir, receipt)
-        if not any(row.get("status") == "blocked" for row in receipt_rows(receipt)):
-            forget_locally(audit_dir, state)
+    try:
+        # Held from before the listing: a live run would go on creating what
+        # this deletes, and one that finished during the prompt would leave the
+        # listing stale.
+        with lock_audit(audit_dir):
+            state = load_state(audit_dir)
+            lines = [
+                f"  {kind}: {', '.join(ids)}" for kind, ids in recorded_ids(state).items() if ids
+            ]
+            if state.audit_id is not None:
+                lines.append(f"  audit: {state.audit_id} (and its published report)")
+            listing = "\n".join(lines) or "  (nothing recorded)"
+            confirm_or_abort(f"This deletes from your account:\n{listing}", assume_yes=args.yes)
+            client = client_from_env()
+            # The published audit owns what it heard about and the server walks
+            # those; every recorded id it did not settle is deleted here too.
+            server = None if state.audit_id is None else _server_delete(client, state.audit_id)
+            receipt = delete_audit(
+                audit_dir,
+                client,
+                server,
+                # Deleted in the account already (the website, another machine):
+                # it decided about the project then, so that is only read here.
+                account_deleted=state.audit_id is not None and server is None,
+            )
+    except (AuditBusyError, FileNotFoundError) as exc:
+        fail(args, str(exc))
     emit_result(
         receipt,
         output=None,
@@ -451,10 +414,18 @@ def register_audit(subparsers: SubParsersAction) -> None:
         help="Export window the per-day rates assume when the timestamps span less.",
     )
     scan.add_argument(
+        "--sample-rate",
+        type=parse_sample_rate,
+        default=1.0,
+        metavar="0.1",
+        help="The share of traffic a sampled export holds; volume and spend are scaled up.",
+    )
+    scan.add_argument(
         "--out", default=DEFAULT_OUT, help=f"Audit directory (default {DEFAULT_OUT})."
     )
     scan.add_argument("--price-table", help="Override the bundled vendor price table (JSON).")
     scan.add_argument("--json", action="store_true", help="Print scan-report.json to stdout.")
+    scan.add_argument("--force", action="store_true", help="Rewrite rows a run in --out used.")
     scan.set_defaults(func=cmd_audit_scan)
 
     run = sub.add_parser(
@@ -473,8 +444,8 @@ def register_audit(subparsers: SubParsersAction) -> None:
         "--max-credits",
         type=parse_credits,
         default=None,
-        help="Credit ceiling for training plus the metered holdout replay; stop before"
-        " exceeding it.",
+        help="Credit ceiling for training plus the metered holdout replay; nothing that could"
+        " pass it is started (default: the plan's estimate, rounded up to 100).",
     )
     run.add_argument(
         "--local-only",

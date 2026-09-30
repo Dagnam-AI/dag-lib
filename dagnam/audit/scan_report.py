@@ -3,10 +3,12 @@
 :func:`build_scan_report` folds discovered workloads, their verdicts and the
 price table into the design's JSON shape; :func:`write_scan_report` writes the
 JSON and renders the markdown from that JSON object, never from live values.
+:func:`write_scan` writes a whole scan -- every workload's rows, then the report.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -14,12 +16,25 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dagnam._core.exceptions import DagnamError
+from dagnam.audit.derive import WorkloadDataset
 from dagnam.audit.discover import Workload
 from dagnam.audit.economics import Verdict, customer_verdict, price_workload, replaceability
 from dagnam.audit.prices import PriceTable
-from dagnam.audit.thresholds import MAX_UNSTRUCTURED_SHARE, MIN_HOLDOUT, PRICE_TABLE_STALE_DAYS
+from dagnam.audit.readers.messages import TOOL_CALL_NOTE
+from dagnam.audit.redact import PII_POLICY
+from dagnam.audit.state import load_state
+from dagnam.audit.thresholds import (
+    MAX_UNSTRUCTURED_SHARE,
+    MIN_HOLDOUT,
+    PRICE_TABLE_STALE_DAYS,
+    SFT_MAX_TOKENS,
+    SFT_MIN_TRAIN_ROWS,
+)
+from dagnam.audit.workspace import write_workload
 
 SCHEMA = "dagnam.audit.scan/1"
+_SECONDS_PER_DAY = 86_400
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +44,16 @@ class Window:
     start: datetime
     end: datetime
     days: float
+    sample_rate: float = 1.0
+    """The share of the traffic the export holds (``--sample-rate``)."""
+
+
+def scan_window(workloads: Sequence[Workload], *, window_days: int, sample_rate: float) -> Window:
+    """The window the workloads' calls span, at least ``window_days`` long."""
+    first = min(w.first_ts for w in workloads if w.first_ts is not None)
+    last = max(w.last_ts for w in workloads if w.last_ts is not None)
+    span = (last - first).total_seconds() / _SECONDS_PER_DAY
+    return Window(first, last, max(float(window_days), span), sample_rate)
 
 
 @dataclass(frozen=True)
@@ -73,8 +98,10 @@ def build_scan_report(
     """Price what the export did not, judge every workload, and assemble the report.
 
     ``datasets`` carries the derived dataset's numbers per workload id (the
-    contract's ``dataset`` object); a holdout under :data:`MIN_HOLDOUT` turns
-    that workload's verdict into ``too_few_samples``.
+    contract's ``dataset`` object); a holdout under :data:`MIN_HOLDOUT`, or
+    fewer than :data:`SFT_MIN_TRAIN_ROWS` training rows once the ones over the
+    student's context are left out, turns that workload's verdict into
+    ``too_few_samples``.
     """
     now = datetime.now(UTC)
     priced = [price_workload(w, price_table) for w in workloads]
@@ -97,6 +124,30 @@ def build_scan_report(
             f"{low_confidence / calls:.0%} of traces have no system prompt (over"
             f" {MAX_UNSTRUCTURED_SHARE:.0%}); discovery is low-confidence for this export"
         )
+    warnings.extend(
+        f"workload {w.id}: {TOOL_CALL_NOTE}" for w in priced if w.response_mode == "tool_call"
+    )
+    warnings.extend(
+        f"workload {workload_id}: redaction rewrote {dataset['truths_redacted']:,} of"
+        f" {dataset['rows']:,} training targets; the holdout is scored against the redacted"
+        " values, so agreement can overstate how well a replacement reproduces them"
+        for workload_id, dataset in (datasets or {}).items()
+        if dataset.get("truths_redacted")
+    )
+    warnings.extend(
+        f"workload {workload_id} trains on a {dataset['split']['train']:,}-row sample of its"
+        f" {dataset['split']['train'] + dataset['train_rows_capped']:,} training rows, so a"
+        " candidate finishes inside its recipe's 1-hour ceiling"
+        for workload_id, dataset in (datasets or {}).items()
+        if dataset.get("train_rows_capped")
+    )
+    warnings.extend(
+        f"workload {workload_id}: {dataset['train_rows_over_budget']:,} training rows exceed the"
+        f" student's {SFT_MAX_TOKENS:,}-token context (by an estimate) and are left"
+        " out of its training; the holdout keeps them"
+        for workload_id, dataset in (datasets or {}).items()
+        if dataset.get("train_rows_over_budget")
+    )
     return ScanReport(
         generated_at=now.isoformat(),
         source=source,
@@ -104,6 +155,7 @@ def build_scan_report(
             "start": window.start.isoformat(),
             "end": window.end.isoformat(),
             "days": window.days,
+            "sample_rate": window.sample_rate,
         },
         price_table_version=price_table.version,
         totals={
@@ -118,13 +170,112 @@ def build_scan_report(
     )
 
 
+def dataset_entry(dataset: WorkloadDataset) -> dict[str, Any]:
+    """The contract's ``dataset`` object for one derived workload."""
+    stats = dataset.stats
+    return {
+        "rows": len(dataset.rows),
+        "dedup_removed": stats["dedup"]["removed"],
+        "redactions": sum(stats["redact"]["counts"].values()),
+        "truncated": stats["derive"]["truncated"],
+        "truths_redacted": stats["redact"]["truths_changed"],
+        "train_rows_capped": stats["cap"]["dropped"],
+        "train_rows_over_budget": stats["budget"]["dropped"],
+        "split": {name: len(rows) for name, rows in dataset.split.items()},
+    }
+
+
 def _verdict(w: Workload, dataset: Mapping[str, Any] | None) -> Verdict:
     verdict = replaceability(w)
-    holdout = dataset["split"].get("eval_holdout", 0) if dataset is not None else None
-    if holdout is not None and holdout < MIN_HOLDOUT:
+    if dataset is None:
+        return verdict
+    holdout = dataset["split"].get("eval_holdout", 0)
+    if holdout < MIN_HOLDOUT:
         reason = f"{holdout} holdout rows after the split; {MIN_HOLDOUT} needed"
         return Verdict("too_few_samples", None, None, reason)
+    over = dataset.get("train_rows_over_budget", 0)
+    if over and dataset["split"]["train"] < SFT_MIN_TRAIN_ROWS:
+        # B2-3: the recipe drops these rows at train time, after the credits are spent.
+        reason = f"{over:,} rows exceed the student's {SFT_MAX_TOKENS:,}-token context"
+        return Verdict("too_few_samples", None, None, reason)
     return verdict
+
+
+def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset]) -> list[str]:
+    """The workloads a run in ``out_dir`` started whose rows this scan would change.
+
+    ``state.json`` records every workload a run trained, and a resumed run
+    replays that workload's ``eval_holdout`` against the model it trained. A
+    scan of another export that rewrote the rows under it would score the
+    model on data it never saw and pair one export's spend with another's
+    agreement. Re-scanning the same export writes the same rows, so it passes.
+    """
+    changed: list[str] = []
+    for workload_id in load_state(out_dir).workloads:
+        folder = out_dir / "workloads" / workload_id
+        dataset = datasets.get(workload_id)
+        try:
+            lines = (folder / "dataset.jsonl").read_text(encoding="utf-8").splitlines()
+            split = json.loads((folder / "split.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            lines, split = [], {}
+        same = dataset is not None and (
+            [json.loads(line) for line in lines] == dataset.rows
+            and split.get("member_row_indices") == dataset.split
+        )
+        if not same:
+            changed.append(workload_id)
+    return changed
+
+
+class SupersededRunError(DagnamError):
+    """``out`` holds a run whose training rows this scan would rewrite (see :func:`superseded_workloads`)."""
+
+    def __init__(self, out_dir: Path, workload_ids: Sequence[str]) -> None:
+        self.workload_ids = tuple(workload_ids)
+        super().__init__(
+            f"{out_dir} holds a run of another scan: this export would change"
+            f" {', '.join(workload_ids)}. Scan into a new --out, or pass --force."
+        )
+
+
+def write_scan(
+    out_dir: Path,
+    workloads: Sequence[Workload],
+    datasets: Mapping[str, WorkloadDataset],
+    *,
+    source: str,
+    window: Window,
+    price_table: PriceTable,
+    force: bool = False,
+) -> ScanReport:
+    """Write every workload's rows, then ``scan-report.{json,md}``, into ``out_dir``.
+
+    Refuses (:class:`SupersededRunError`) to rewrite the rows of a run's
+    workloads unless ``force``; forced, the answers a rewritten holdout's replay
+    had already kept are stale and are removed. The caller holds ``out_dir``'s lock.
+    """
+    changed = superseded_workloads(out_dir, datasets)
+    if changed and not force:
+        raise SupersededRunError(out_dir, changed)
+    for workload_id in changed:
+        for stale in (out_dir / "workloads" / workload_id).glob("replay-*.jsonl"):
+            stale.unlink()
+    pii_counts: Counter[str] = Counter()
+    for workload_id, dataset in datasets.items():
+        write_workload(out_dir, workload_id, dataset.rows, dataset.split, dataset.stats)
+        pii_counts.update(dataset.stats["redact"]["counts"])
+    report = build_scan_report(
+        workloads,
+        source=source,
+        window=window,
+        price_table=price_table,
+        pii_pass_list=list(PII_POLICY),
+        pii_counts=dict(pii_counts),
+        datasets={workload_id: dataset_entry(d) for workload_id, d in datasets.items()},
+    )
+    write_scan_report(report, out_dir)
+    return report
 
 
 def write_scan_report(report: ScanReport, out_dir: Path) -> None:
@@ -172,7 +323,12 @@ def render_markdown(js: Mapping[str, Any]) -> str:
         "",
         f"- generated: {js['generated_at']}",
         f"- source: {js['source']}",
-        f"- window: {window['start']} to {window['end']} ({window['days']:g} days)",
+        f"- window: {window['start']} to {window['end']} ({window['days']:g} days)"
+        + (
+            f", sampled at {window['sample_rate']:.0%} and scaled up"
+            if window.get("sample_rate", 1.0) < 1
+            else ""
+        ),
         f"- price table: {js['price_table_version']}",
         f"- totals: {totals['calls']:,} calls, ${_usd(totals['cost_usd_month'])}/month,"
         f" {totals['prompt_tokens']:,} prompt + {totals['completion_tokens']:,} completion tokens",

@@ -2,18 +2,36 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
-from tests.audit._records import make_workload
+from tests.audit._records import make_record, make_workload
 
+from dagnam.audit.candidates import CandidateKind
+from dagnam.audit.derive import build_dataset
 from dagnam.audit.discover import Workload
 from dagnam.audit.prices import PriceRow, PriceTable
-from dagnam.audit.scan_report import ScanReport, Window, build_scan_report, write_scan_report
+from dagnam.audit.readers.messages import TOOL_CALL_NOTE
+from dagnam.audit.scan_report import (
+    ScanReport,
+    Window,
+    build_scan_report,
+    dataset_entry,
+    superseded_workloads,
+    write_scan_report,
+)
+from dagnam.audit.state import AuditState, StepState, save_state
 from dagnam.audit.structure import StructureClass
-from dagnam.audit.thresholds import MAX_UNSTRUCTURED_SHARE, PRICE_TABLE_STALE_DAYS
+from dagnam.audit.thresholds import (
+    MAX_UNSTRUCTURED_SHARE,
+    PRICE_TABLE_STALE_DAYS,
+    SFT_MIN_TRAIN_ROWS,
+)
+from dagnam.audit.workspace import write_workload
 
 WINDOW = Window(
     start=datetime(2026, 8, 1, tzinfo=UTC), end=datetime(2026, 8, 31, tzinfo=UTC), days=30.0
@@ -64,6 +82,7 @@ def test_report_follows_the_contract() -> None:
         "start": "2026-08-01T00:00:00+00:00",
         "end": "2026-08-31T00:00:00+00:00",
         "days": 30.0,
+        "sample_rate": 1.0,
     }
     assert js["price_table_version"] == "2026-09"
     assert js["pii"] == {"pass_list": PASS_LIST, "counts": COUNTS}
@@ -199,3 +218,224 @@ def test_dataset_numbers_ride_along_and_a_thin_holdout_is_too_few_samples() -> N
         "savings_usd_month": None,
         "reason": "100 holdout rows after the split; 200 needed",
     }
+
+
+def test_a_tool_call_workload_is_named_in_a_warning() -> None:
+    w = replace(make_workload(calls_per_day=5_000, cost_month=4_000.0), response_mode="tool_call")
+    (warning,) = _report([w]).warnings
+    assert warning == f"workload w1: {TOOL_CALL_NOTE}"
+
+
+def test_targets_rewritten_by_redaction_are_counted_and_warned(tmp_path: Path) -> None:
+    dataset = {
+        "rows": 1_200,
+        "dedup_removed": 0,
+        "redactions": 2_400,
+        "truncated": 0,
+        "truths_redacted": 1_200,
+        "split": {"train": 960, "eval_holdout": 240},
+    }
+    clean = {**dataset, "truths_redacted": 0}
+    workloads = [
+        make_workload(calls_per_day=5_000, cost_month=4_000.0),
+        replace(make_workload(calls_per_day=5_000, cost_month=4_000.0), id="w2"),
+    ]
+    report = build_scan_report(
+        workloads,
+        source="openai",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": dataset, "w2": clean},
+    )
+    (warning,) = report.warnings
+    assert "w1: redaction rewrote 1,200 of 1,200 training targets" in warning
+    write_scan_report(report, tmp_path)
+    assert warning in (tmp_path / "scan-report.md").read_text()
+
+
+def test_dataset_entry_carries_the_scan_numbers() -> None:
+    records = [
+        make_record(system=f"Label ticket {i}.", response=f"{i}@x.io", trace_id=str(i))
+        for i in range(5)
+    ]
+    built = build_dataset(records, structure_class="enum_label", max_seq_length=2_048)
+    assert dataset_entry(built) == {
+        "rows": 5,
+        "dedup_removed": 0,
+        "redactions": 5,
+        "truncated": 0,
+        "truths_redacted": 5,
+        "train_rows_capped": 0,
+        "train_rows_over_budget": 0,
+        "split": {"train": 4, "eval_holdout": 1},
+    }
+    capped = build_dataset(
+        records, structure_class="enum_label", max_seq_length=2_048, max_train_rows=2
+    )
+    assert dataset_entry(capped)["train_rows_capped"] == 2
+
+
+def test_a_capped_training_set_is_warned() -> None:
+    # R3-15: counted in the report, so a reader knows the candidate saw a sample.
+    dataset = {
+        "rows": 5_800,
+        "dedup_removed": 0,
+        "redactions": 0,
+        "truncated": 0,
+        "truths_redacted": 0,
+        "train_rows_capped": 18_465,
+        "split": {"train": 5_000, "eval_holdout": 800},
+    }
+    report = build_scan_report(
+        [make_workload(calls_per_day=5_000, cost_month=4_000.0)],
+        source="openai",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": dataset},
+    )
+    (warning,) = report.warnings
+    assert warning.startswith("workload w1 trains on a 5,000-row sample of its 23,465")
+
+
+def _over_budget(over: int, train: int) -> ScanReport:
+    dataset = {
+        "rows": train + 1_000,
+        "dedup_removed": 0,
+        "redactions": 0,
+        "truncated": 0,
+        "truths_redacted": 0,
+        "train_rows_capped": 0,
+        "train_rows_over_budget": over,
+        "split": {"train": train, "eval_holdout": 1_000},
+    }
+    return build_scan_report(
+        [make_workload(calls_per_day=5_000, cost_month=4_000.0, cls=StructureClass.JSON_OBJECT)],
+        source="langfuse",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": dataset},
+    )
+
+
+def test_training_rows_over_the_student_s_context_are_counted_and_can_leave_too_few() -> None:
+    # B2-3: long-document extraction trained on few or no rows once the recipe dropped
+    # its over-budget rows, and the scan had called it a candidate.
+    (entry,) = _over_budget(3_990, SFT_MIN_TRAIN_ROWS - 1).to_json()["workloads"]
+    assert entry["dataset"]["train_rows_over_budget"] == 3_990
+    assert entry["verdict"] == {
+        "status": "too_few_samples",
+        "ratio": None,
+        "savings_usd_month": None,
+        "reason": "3,990 rows exceed the student's 2,048-token context",
+    }
+    report = _over_budget(40, SFT_MIN_TRAIN_ROWS)
+    (entry,) = report.to_json()["workloads"]
+    assert entry["verdict"]["status"] == "candidate"
+    assert report.warnings == (
+        "workload w1: 40 training rows exceed the student's 2,048-token context (by an"
+        " estimate) and are left out of its training; the holdout keeps them",
+    )
+    assert _over_budget(0, 10).to_json()["workloads"][0]["verdict"]["status"] == "candidate"
+
+
+POLICY_SENTENCES = (
+    "Refunds are issued to the original payment method within five business days of approval.",
+    "A customer may return any unopened item within thirty days of delivery for a full refund.",
+    "Opened items can be exchanged for store credit when they arrive damaged or defective.",
+    "Shipping fees are not refundable unless the order arrived late or in the wrong condition.",
+    "Escalate every complaint that mentions a safety hazard to the quality team immediately.",
+    "Loyalty members receive free returns and priority handling on every support request.",
+    "Never promise a delivery date that the carrier has not confirmed in its tracking data.",
+    "When a customer asks to cancel, confirm whether the order has already left the warehouse.",
+)
+
+
+def _policy(chars: int) -> str:
+    """A support-triage system prompt: ``chars`` characters of plain English policy."""
+    text, i = "You triage support messages for an online store. Company policy follows.\n\n", 0
+    while len(text) < chars:
+        sentence = POLICY_SENTENCES[i % len(POLICY_SENTENCES)]
+        text, i = text + sentence + (" " if i % 4 != 3 else "\n\n"), i + 1
+    return text
+
+
+def _scanned(system: str) -> dict[str, Any]:
+    """1,000 extraction calls under ``system``, derived and judged the way the scan does."""
+    records = [
+        make_record(
+            system=system,
+            response=json.dumps({"intent": ["refund", "cancel"][i % 2], "ticket": i}),
+            ts=datetime(2026, 8, 1, tzinfo=UTC) + timedelta(minutes=i),
+            trace_id=f"t{i}",
+        )
+        for i in range(1_000)
+    ]
+    dataset = build_dataset(records, structure_class="json_object", max_seq_length=2_048)
+    workload = make_workload(
+        calls_per_day=5_000, cost_month=4_000.0, cls=StructureClass.JSON_OBJECT
+    )
+    report = build_scan_report(
+        [workload],
+        source="langfuse",
+        window=WINDOW,
+        price_table=FRESH,
+        pii_pass_list=PASS_LIST,
+        pii_counts=COUNTS,
+        datasets={"w1": dataset_entry(dataset)},
+    )
+    (entry,) = report.to_json()["workloads"]
+    return entry
+
+
+def test_a_long_system_prompt_that_fits_is_trained_and_a_row_that_does_not_is_dropped() -> None:
+    # RR-1: the estimate counted English at 1.6x, so a support-triage workload whose
+    # 7.5k-character policy made rows of ~1,550 real tokens read too_few_samples with
+    # every training row "over" 2,048. This 8,207-character policy measures 1,552
+    # Qwen2.5 tokens a row (template included); the estimate says 1,562.
+    fits = _scanned(_policy(8_200))
+    assert fits["verdict"]["status"] == "candidate"
+    assert fits["dataset"]["train_rows_over_budget"] == 0
+    assert fits["dataset"]["split"] == {"train": 800, "eval_holdout": 200}
+    # A 12k-character invoice is ~6,500 real tokens: every training row is really over.
+    over = _scanned(
+        "Extract the invoice total as JSON.\n" + "Line 17: widget, 12 x 3.50 EUR\n" * 400
+    )
+    assert over["verdict"]["status"] == "too_few_samples"
+    assert over["verdict"]["reason"] == "800 rows exceed the student's 2,048-token context"
+
+
+def test_superseded_workloads_names_every_run_workload_this_scan_would_change(
+    tmp_path: Path,
+) -> None:
+    records = [
+        make_record(system=f"Label ticket {i}.", response="ab"[i % 2], trace_id=str(i))
+        for i in range(5)
+    ]
+    built = build_dataset(records, structure_class="enum_label", max_seq_length=2_048)
+    assert superseded_workloads(tmp_path, {"w1": built}) == []  # no run, nothing to protect
+
+    write_workload(tmp_path, "w1", built.rows, built.split, built.stats)
+    write_workload(tmp_path, "w2", built.rows, built.split, built.stats)
+    steps = {CandidateKind.HEAD_TUNE: StepState(dataset_id="ds")}
+    save_state(tmp_path, AuditState(workloads={"w1": steps, "w2": steps, "gone": steps}))
+    fewer = build_dataset(records[:4], structure_class="enum_label", max_seq_length=2_048)
+
+    # w1 is unchanged; w2's rows would change; "gone" has no files and no rows any more.
+    assert superseded_workloads(tmp_path, {"w1": built, "w2": fewer}) == ["w2", "gone"]
+    assert superseded_workloads(tmp_path, {"w1": built, "w2": built, "gone": built}) == ["gone"]
+
+
+def test_chinese_policy_that_fits_keeps_its_training_rows() -> None:
+    # RR2-1: the reviewer's 2.6k-character policy yielded ~1,549 Qwen tokens per row.
+    policy = "客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏\uff0c客户可以在收到后七天内申请全额退款。对于缺少的商品\uff0c我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利\uff0c一般会在二十四小时内得到回复。请注意\uff0c定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址\uff0c必须在商品发货之前提交申请。所有退款将原路返回\uff0c到账时间通常为三到五个工作日。当客户情绪激动时\uff0c请保持礼貌并先表示理解\uff0c再说明处理方案。涉及金额超过一千元的赔偿\uff0c需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障\uff0c应告知客户预计恢复时间并记录工单编号。每次对话结束前\uff0c请确认客户的问题是否已经完全解决。"
+    system = (policy * 10)[:2600]
+    fits = _scanned(system)
+    assert fits["verdict"]["status"] == "candidate"
+    assert fits["dataset"]["train_rows_over_budget"] == 0
+    assert fits["dataset"]["split"] == {"train": 800, "eval_holdout": 200}

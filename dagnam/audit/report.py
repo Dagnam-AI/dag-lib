@@ -7,8 +7,10 @@ candidates the run produced, the frontier's winner and the switch values
 markdown renders from the JSON, never a second computation. The derived blocks
 themselves -- the winner, the switch, the snippet -- come from
 ``dagnam_contracts.audit.report``, so the platform renders the same report
-from the same candidates. A deployment key never appears: the switch names a
-``key_ref``.
+from the same candidates: a candidate flagged ``unreliable`` never wins, and
+each is held to the floor its agreement records. A workload's
+``verdict.savings_usd_month`` counts a REPLACE only, never below zero. A
+deployment key never appears: the switch names a ``key_ref``.
 """
 
 from __future__ import annotations
@@ -29,9 +31,11 @@ from dagnam_contracts.audit.report import (
 
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
 from dagnam.audit.cleanup import DEPLOY_PAUSED
-from dagnam.audit.economics import customer_verdict, serving_cost_usd_month
+from dagnam.audit.economics import customer_verdict
 from dagnam.audit.orchestrate import FLOOR_BY_STRUCTURE
 from dagnam.audit.prices import PriceTable
+from dagnam.audit.publish_body import number, student_cost
+from dagnam.audit.readers.messages import TOOL_CALL_NOTE
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import error_code
 from dagnam.audit.steps_serve import DEPLOY_RUNNING
@@ -49,12 +53,17 @@ from dagnam.audit.thresholds import (
 
 SCHEMA = REPORT_SCHEMA
 """The ``schema`` value of ``audit-report.json``."""
+UNTESTED = "untested"
+TOOL_CALL = "tool_call"
+"""A scan entry's ``response_mode`` when the workload answers with tool calls (spec P4)."""
+UNRELIABLE = "unreliable"
+"""The error code of a replay where more than 10% of calls failed: shown, never a winner (P2)."""
 
 
 def _hosted_floor(entry: Mapping[str, Any], table: PriceTable) -> tuple[str | None, float | None]:
     """The cheaper hosted variant of the workload's one model and its monthly cost."""
     models = entry.get("models") or []
-    row = table.rows.get(str(models[0])) if len(models) == 1 else None
+    row = table.row(str(models[0])) if len(models) == 1 else None
     variant = row.cheaper_variant if row is not None else None
     if variant is None:
         return None, None
@@ -69,7 +78,7 @@ def _hosted_floor(entry: Mapping[str, Any], table: PriceTable) -> tuple[str | No
 def candidate_status(spec: CandidateSpec, step: StepState) -> str:
     """One word for where a candidate got to: its error code, else its furthest step."""
     if spec.recipe_key is None:
-        return "untested"
+        return UNTESTED
     code = error_code(step)
     if code is not None:
         return code
@@ -92,13 +101,7 @@ def _candidate(
     if spec.serving_rate_key is None:  # the hosted floor: priced from the table, never run
         base, cost = _hosted_floor(entry, table)
     else:
-        base = step.base
-        cost = serving_cost_usd_month(
-            spec.serving_rate_key,
-            calls_per_day=float(entry["calls_per_day"]),
-            completion_tokens=int(entry["tokens"]["completion"]),
-            calls=int(entry["calls"]),
-        )
+        base, cost = step.base, student_cost(spec.serving_rate_key, entry)
     latency = step.latency or {}
     return {
         "kind": spec.kind.value,
@@ -120,12 +123,27 @@ def _candidate(
         # `--local-only` run): `winner_of` passes it through, which is what
         # lets the audit page link a winner to the candidate the run published.
         "candidate_id": step.published_candidate_id,
+        # K5: what `winner_of` skips -- more than 10% of the replay failed.
+        "unreliable": error_code(step) == UNRELIABLE,
     }
 
 
 def _winner(candidates: list[dict[str, Any]], default_floor: float) -> dict[str, Any] | None:
     """The contract's ``winner`` block over this workload's candidate dicts."""
     return winner_of(candidates, floor=default_floor)
+
+
+def _savings(entry: Mapping[str, Any], winner: Mapping[str, Any] | None) -> float:
+    """What replacing the workload saves a month (P9): a REPLACE only, and never below zero.
+
+    Spend, less the winner's serving, less maintenance. A KEEP that still has a
+    winner (too few samples, say) and a workload with no winner save nothing,
+    and one that would cost more to replace does not net off another's saving.
+    """
+    if winner is None or customer_verdict(entry["verdict"]["status"], winner=True) != "REPLACE":
+        return 0.0
+    spend = number(entry.get("cost_usd_month")) or 0.0
+    return max(0.0, spend - winner["cost_usd_month"] - MAINTENANCE_USD_MONTH)
 
 
 def build_audit_report(
@@ -140,7 +158,15 @@ def build_audit_report(
     for entry in scan["workloads"]:
         steps = state.workloads.get(str(entry["id"]))
         if steps is None:
-            workloads.append({**entry, "candidates": [], "winner": None, "switch": None})
+            workloads.append(
+                {
+                    **entry,
+                    "verdict": {**entry["verdict"], "savings_usd_month": 0.0},
+                    "candidates": [],
+                    "winner": None,
+                    "switch": None,
+                }
+            )
             continue
         cls = StructureClass(str(entry["structure_class"]))
         candidates = [
@@ -150,7 +176,15 @@ def build_audit_report(
         winner = _winner(candidates, FLOOR_BY_STRUCTURE[cls])
         key_ref = None if winner is None else steps[CandidateKind(winner["kind"])].key_ref
         switch = switch_block(winner, key_ref, base_url=base_url)
-        workloads.append({**entry, "candidates": candidates, "winner": winner, "switch": switch})
+        workloads.append(
+            {
+                **entry,
+                "verdict": {**entry["verdict"], "savings_usd_month": _savings(entry, winner)},
+                "candidates": candidates,
+                "winner": winner,
+                "switch": switch,
+            }
+        )
     return {
         **scan,
         "schema": SCHEMA,
@@ -226,8 +260,27 @@ def _candidate_section(w: Mapping[str, Any]) -> list[str]:
         )
     lines += ["", *_CANDIDATE_HEAD, *(_candidate_row(c, w["winner"]) for c in w["candidates"]), ""]
     if w["winner"] is None:
-        lines += ["No candidate cleared the floor in this audit; retested on the next one.", ""]
+        lines += [no_winner_reason(w), ""]
     return lines
+
+
+def no_winner_reason(w: Mapping[str, Any]) -> str:
+    """Why a workload has no winner, in one sentence: nothing measured yet, or nothing cleared.
+
+    A candidate that failed to deploy, or is still training, measured nothing,
+    so it did not "miss the floor"; and one that did clear it is named when its
+    replay was unreliable, since that is why it earned no switch.
+    """
+    tried = [c for c in w["candidates"] if c["status"] != UNTESTED]
+    measured = [c for c in tried if c["agreement"] is not None]
+    if not measured:
+        states = ", ".join(f"{c['kind']}: {c['status']}" for c in tried)
+        return f"No candidate was measured in this audit ({states})."
+    return "No candidate cleared the floor in this audit; retested on the next one." + "".join(
+        f" {c['kind']} is unreliable: more than 10% of its replay calls failed."
+        for c in measured
+        if c["unreliable"]
+    )
 
 
 def _artifacts(w: Mapping[str, Any]) -> list[str]:
@@ -275,6 +328,8 @@ def render_markdown(js: Mapping[str, Any]) -> str:
                 base_url=w["switch"]["base_url"],
             )
             lines += [f"### {w['id']}", "", "```python", snippet, "```", ""]
+            if w.get("response_mode") == TOOL_CALL:
+                lines += [TOOL_CALL_NOTE, ""]
     lines += ["## Artifacts", ""]
     for w in audited:
         lines += _artifacts(w)
@@ -302,6 +357,7 @@ __all__ = [
     "SCHEMA",
     "build_audit_report",
     "candidate_status",
+    "no_winner_reason",
     "render_markdown",
     "render_switch_snippet",
     "write_audit_report",

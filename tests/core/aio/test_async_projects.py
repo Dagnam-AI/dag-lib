@@ -155,3 +155,21 @@ async def test_async_get_project_404_not_retried(
     with pytest.raises(ProjectNotFoundError):
         await client.get_project("missing")
     assert route.call_count == 1
+
+
+async def test_async_create_project_retries_a_blip_into_the_same_idempotency_key(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """K3: the server deduplicates the create, so a transient failure is safe to retry."""
+
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    route = mock.post("/api/v1/projects").mock(
+        side_effect=[httpx.Response(502, json={}), httpx.Response(201, json={"id": "p1"})]
+    )
+    assert await client.create_project({"title": "t"}) == {"id": "p1"}
+    keys = [call.request.headers.get("Idempotency-Key") for call in route.calls]
+    assert len(keys) == 2
+    assert keys[0] is not None
+    assert keys[0] == keys[1]

@@ -17,18 +17,21 @@ object reference (https://developers.openai.com/api/docs/api-reference/chat/obje
 | record field | source (aliases in priority order) |
 |---|---|
 | kept rows | ``error`` is null and ``response.status_code``, when present, is 200 |
+| shapes | Chat Completions, and the Responses API (``instructions`` + ``input``; an ``output`` item list; ``created_at``) |
 | request body | ``body`` / ``request`` / the row itself |
 | completion | ``response.body`` / ``response`` / the row itself |
 | ``trace_id`` | completion ``id`` / ``custom_id`` |
 | ``session_id`` | request ``metadata.session_id`` / completion ``metadata.session_id`` |
-| ``ts`` | completion ``created`` (Unix seconds) |
+| ``ts`` | completion ``created`` / ``created_at`` (Unix seconds) |
 | ``latency_ms`` | top-level ``latency_ms`` when the exporter recorded one, else 0 |
 | ``model`` | completion ``model`` / request ``model`` |
-| ``system`` / ``messages`` | request ``messages`` |
-| ``response`` | ``choices[0].message.content`` (+ ``tool_calls``) |
+| ``system`` / ``messages`` | request ``messages``, or Responses ``instructions`` / ``input`` |
+| ``response`` | ``choices[0].message`` (``content`` without inline ``<think>``, + ``tool_calls``), or the Responses ``output`` items |
 | ``prompt_tokens`` / ``completion_tokens`` | ``usage.prompt_tokens`` / ``usage.completion_tokens`` |
+| ``cached_prompt_tokens`` | ``usage.prompt_tokens_details.cached_tokens`` (already inside ``prompt_tokens``) |
 | ``cost_usd`` | never present (``None``) |
-| ``outcome`` / ``workload_hint`` | ``metadata.outcome`` / ``metadata.workload`` on the request, then the completion |
+| ``outcome`` / ``workload_hint`` | ``metadata.outcome`` / ``metadata.workload`` on the request, then the completion; a Responses request's ``prompt.id`` names the workload too |
+| ``has_media`` / ``signature`` | an image/audio/file part in the prompt; the request's ``response_format`` schema or forced ``tool_choice`` name (never its ``tools``) |
 """
 
 from __future__ import annotations
@@ -41,16 +44,17 @@ from dagnam.audit.readers.base import (
     Reader,
     Row,
     as_int,
+    cached_prompt_tokens,
     completion_tokens,
     get,
     optional_float,
+    optional_outcome,
     parse_ts,
     prompt_tokens,
     require,
-    split_prompt,
     text,
-    tool_calls,
 )
+from dagnam.audit.readers.messages import has_media, reply_of, split_prompt, task_signature
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ()
@@ -72,27 +76,34 @@ def to_record(row: Row) -> TraceRecord | None:
     if row.get("error") is not None or (status is not None and as_int(status) != 200):
         return None
     request, completion = _request(row), _completion(row)
-    system, messages = split_prompt(require(request, "messages"))
-    message = require(completion, "choices")[0]["message"]
+    prompt = require(request, "messages", "input")
+    system, messages = split_prompt(request)
+    choices = get(completion, "choices")
+    # A Responses API completion has no ``choices``: its reply is the ``output`` item list.
+    reply = choices[0]["message"] if choices is not None else require(completion, "output")
+    response, calls = reply_of(reply)
     meta = (get(request, "metadata"), get(completion, "metadata"))
     metadata = {**_mapping(meta[1]), **_mapping(meta[0])}
     return TraceRecord(
         trace_id=text(
             require(completion, "id") if get(completion, "id") else require(row, "custom_id")
         ),
-        ts=parse_ts(require(completion, "created")),
+        ts=parse_ts(require(completion, "created", "created_at")),
         model=text(get(completion, "model") or get(request, "model") or UNKNOWN_MODEL),
         system=system,
         messages=messages,
-        response=text(get(message, "content")),
-        response_tool_calls=tool_calls(get(message, "tool_calls")),
+        response=response,
+        response_tool_calls=calls,
         prompt_tokens=prompt_tokens(completion, "usage"),
         completion_tokens=completion_tokens(completion, "usage"),
+        cached_prompt_tokens=cached_prompt_tokens(completion, "usage"),
         latency_ms=optional_float(get(row, "latency_ms")) or 0.0,
         cost_usd=None,
         session_id=_optional_text(metadata.get("session_id")),
-        outcome=optional_float(metadata.get("outcome")),
-        workload_hint=_optional_text(metadata.get("workload")),
+        outcome=optional_outcome(metadata.get("outcome")),
+        workload_hint=_optional_text(metadata.get("workload") or get(request, "prompt.id")),
+        has_media=has_media(prompt),
+        signature=task_signature(request),
     )
 
 

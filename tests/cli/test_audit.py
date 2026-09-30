@@ -11,11 +11,19 @@ from unittest import mock
 
 from dagnam_contracts.audit import CANCELLED_SCHEMA
 import pytest
-from tests.audit._platform import FakeCleanup
+from tests.audit._cleanup import FakeCleanup
 
 from dagnam._core.exceptions import DeploymentNotFoundError
+from dagnam._types import JsonObject, JsonValue
 from dagnam.audit.candidates import CandidateKind
-from dagnam.audit.state import AuditState, StepState, load_state, save_state
+from dagnam.audit.state import (
+    AuditBusyError,
+    AuditState,
+    StepState,
+    load_state,
+    lock_audit,
+    save_state,
+)
 from dagnam.cli.audit import status_rows
 from dagnam.cli.audit_run import client_from_env
 
@@ -156,9 +164,9 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
         mock.call.pause_deployment("dep-1"),
     ]
     out = capsys.readouterr().out
-    assert "cancelled_job job-1 (w1/head_tune)" in out
-    assert "paused_deployment dep-1 (w1/head_tune)" in out
-    assert out.rstrip().endswith("Cancelled.")
+    assert "training_job job-1: stopped" in out
+    assert "deployment dep-1: stopped" in out
+    assert f"Receipt: {audit_dir / 'cancelled.json'}" in out
     state = load_state(audit_dir)
     assert state.halted == {"reason": "cancelled"}
     head = state.workloads["w1"][HEAD]
@@ -167,10 +175,8 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
     with mock.patch("dagnam._core.client.DagnamClient") as client:
         assert run_cli(["audit", "cancel", str(audit_dir), "--json"]) == 0
     assert client.return_value.method_calls == []  # idempotent: nothing left in flight
-    assert json.loads(capsys.readouterr().out) == {
-        "halted": {"reason": "cancelled"},
-        "actions": [],
-    }
+    receipt = json.loads(capsys.readouterr().out)
+    assert (receipt["schema"], receipt["entries"]) == (CANCELLED_SCHEMA, [])
 
 
 def test_cancel_records_a_deployment_the_platform_refuses_to_pause(
@@ -184,22 +190,60 @@ def test_cancel_records_a_deployment_the_platform_refuses_to_pause(
     with mock.patch("dagnam._core.client.DagnamClient") as client:
         client.return_value.pause_deployment.side_effect = refusal
         assert run_cli(["audit", "cancel", str(audit_dir), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "halted": {"reason": "cancelled"},
-        "actions": [
-            {"candidate": "w1/head_tune", "action": "cancelled_job", "id": "job-1"},
-            {
-                "candidate": "w1/head_tune",
-                "action": "pause_refused",
-                "id": "dep-1",
-                "reason": "Invalid status transition from not_provisioned to paused",
-            },
-        ],
-    }
+    assert json.loads(capsys.readouterr().out)["entries"] == [
+        {"kind": "training_job", "id": "job-1", "status": "stopped"},
+        {
+            "kind": "deployment",
+            "id": "dep-1",
+            "status": "blocked",
+            "reason": "Invalid status transition from not_provisioned to paused",
+        },
+    ]
     state = load_state(audit_dir)
     assert state.halted == {"reason": "cancelled"}
     head = state.workloads["w1"][HEAD]
     assert (head.run_status, head.deploy_status) == ("cancelled", "deploying")
+
+
+def test_a_run_that_finished_while_nobody_watched_does_not_crash_the_cancel(
+    run_cli: CliRunner, tmp_path: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """B3: `--no-wait` left job-1 `queued`; the job completed, so the platform answers 400.
+
+    That 400 escaped the command: no receipt, no saved marks, and the live
+    endpoint of the next candidate never paused -- on every retry.
+    """
+    root = tmp_path / "audit"
+    state = AuditState(project_id="proj-1")
+    state.workloads["w1"] = {HEAD: StepState(training_job_id="job-1", run_status="queued")}
+    state.workloads["w2"] = {
+        SFT: StepState(
+            training_job_id="job-2",
+            run_status="completed",
+            deployment_id="dep-2",
+            deploy_status="running",
+            scored=True,
+        )
+    }
+    save_state(root, state)
+    fake = FakeCleanup(job=["job-1", "job-2"], deployment=["dep-2"])
+    fake.finished = {"job-1"}
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: fake)
+
+    for _ in range(2):  # and running it again changes nothing
+        assert run_cli(["audit", "cancel", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "training_job job-1: blocked (Cannot cancel job with status completed)" in out
+    assert "deployment dep-2: stopped" in out
+    assert ("pause_deployment", "dep-2") in fake.call_log
+    assert (root / "cancelled.json").exists()
+    saved = load_state(root)
+    assert saved.halted == {"reason": "cancelled"}
+    assert saved.workloads["w2"][SFT].deploy_status == "paused"
+    assert (saved.workloads["w1"][HEAD].run_status, saved.workloads["w1"][HEAD].error) == (
+        "queued",
+        None,
+    )
 
 
 @pytest.fixture
@@ -244,16 +288,89 @@ def test_delete_asks_first_and_writes_the_receipt(
     assert {i["status"] for i in again["items"]} == {"already_absent"}
 
 
+def test_delete_holds_the_directory_from_before_it_lists_what_it_deletes(
+    run_cli: CliRunner, audit_dir: Path, cleanup: FakeCleanup
+) -> None:
+    """M8: the listing the user confirms is the state no run can change until the delete ends."""
+    seen: list[bool] = []
+
+    def answer(_prompt: str) -> str:
+        try:
+            with lock_audit(audit_dir):
+                seen.append(False)
+        except AuditBusyError:
+            seen.append(True)
+        return "no"
+
+    with mock.patch("builtins.input", side_effect=answer), pytest.raises(SystemExit):
+        run_cli(["audit", "delete", str(audit_dir)])
+    assert seen == [True]
+
+
+@pytest.mark.parametrize("command", ["delete", "cancel"])
+def test_a_mistyped_directory_is_refused_and_never_created(
+    run_cli: CliRunner, tmp_path: Path, cleanup: FakeCleanup, capsys: StrCapture, command: str
+) -> None:
+    """M8: the lock used to `mkdir` whatever path it was given."""
+    typo = tmp_path / "adit"
+    with pytest.raises(SystemExit) as exc:
+        run_cli(
+            ["audit", command, str(typo), "--yes"]
+            if command == "delete"
+            else ["audit", command, str(typo)]
+        )
+    assert exc.value.code == 1
+    assert "is not an audit directory" in capsys.readouterr().err
+    assert not typo.exists()
+    assert cleanup.call_log == []
+
+
+def test_cancel_under_a_live_published_run_cancels_in_the_account_only(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """M7: the live run owns `state.json`; the account's cancel stops it at its next publish."""
+    fake = _published_cleanup(monkeypatch, CANCEL_RECEIPT)
+    before = (published_dir / "state.json").read_text(encoding="utf-8")
+    with lock_audit(published_dir):
+        assert run_cli(["audit", "cancel", str(published_dir)]) == 0
+    assert fake.call_log == [("cancel_audit", "audit-1")]
+    captured = capsys.readouterr()
+    assert "training_job job-1: stopped" in captured.out
+    assert f"Next: dagnam audit cancel {published_dir}" in captured.err
+    assert (published_dir / "state.json").read_text(encoding="utf-8") == before
+    assert (published_dir / "cancelled.json").exists()
+
+
+def test_cancel_under_a_live_local_only_run_says_to_stop_it_first(
+    run_cli: CliRunner, audit_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", mock.Mock)
+    with lock_audit(audit_dir), pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "cancel", str(audit_dir)])
+    assert exc.value.code == 1
+    assert "stop that `dagnam audit run` (Ctrl+C) first" in capsys.readouterr().err
+
+
+def test_delete_waits_for_a_live_run_to_finish(
+    run_cli: CliRunner, audit_dir: Path, cleanup: FakeCleanup, capsys: StrCapture
+) -> None:
+    with lock_audit(audit_dir), pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "delete", str(audit_dir), "--yes"])
+    assert exc.value.code == 1
+    assert "is in use by another `dagnam audit` command" in capsys.readouterr().err
+    assert cleanup.call_log == []
+
+
 def test_delete_names_the_reason_an_artifact_is_blocked(
     run_cli: CliRunner, audit_dir: Path, cleanup: FakeCleanup, capsys: StrCapture
 ) -> None:
-    cleanup.running = {"job-1"}  # w1 is still training, so its dataset is still referenced
-    cleanup.held_by_job = {"ds-1": "job-1"}
+    cleanup.present["job"].add("job-9")  # a run this audit never recorded still reads ds-1
+    cleanup.held_by_job = {"ds-1": "job-9"}
 
     assert run_cli(["audit", "delete", str(audit_dir), "--yes"]) == 0
 
     out = capsys.readouterr().out
-    assert "Cannot delete job with status running" in out
+    assert "training_job job-1: deleted" in out  # still running: cancelled, then deleted
     assert "dataset ds-1: blocked (Dataset is referenced by a training run" in out
     assert "dataset ds-2: deleted" in out
 
@@ -269,7 +386,7 @@ def test_audit_is_grouped_and_described() -> None:
 # ------------------------------------- a run that published: the server cleans up
 
 
-CANCEL_RECEIPT: dict[str, object] = {
+CANCEL_RECEIPT: JsonObject = {
     # The server's own receipt, written through verbatim: a cancel stops
     # artifacts, so it is not the `deleted/1` document a delete returns.
     "schema": CANCELLED_SCHEMA,
@@ -280,7 +397,7 @@ CANCEL_RECEIPT: dict[str, object] = {
         {"kind": "deployment", "id": "dep-2", "status": "stopped", "reason": None},
     ],
 }
-DELETE_RECEIPT: dict[str, object] = {
+DELETE_RECEIPT: JsonObject = {
     "schema": "dagnam.audit.deleted/1",
     "deleted_at": "2026-09-07T10:00:00+00:00",
     "entries": [
@@ -344,39 +461,145 @@ def test_cancel_of_a_published_run_goes_to_the_server_and_writes_its_receipt(
     ]
 
 
+def _published_cleanup(monkeypatch: PytestMonkeyPatch, receipt: JsonObject) -> FakeCleanup:
+    """Every artifact of :func:`_state` still on the platform, the server answering ``receipt``."""
+    fake = FakeCleanup(
+        deployment=["dep-1", "dep-2"],
+        model=["entry-2"],
+        job=["job-1", "job-2"],
+        dataset=["ds-1", "ds-2"],
+        project=["proj-1"],
+    )
+    fake.entry_of = {"mv-2": "entry-2"}
+    fake.server_receipt = dict(receipt)
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: fake)
+    return fake
+
+
 def test_delete_of_a_published_run_names_the_audit_and_drops_the_local_rows(
     run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
-    client = mock.Mock()
-    client.delete_audit.return_value = DELETE_RECEIPT
-    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+    fake = _published_cleanup(monkeypatch, DELETE_RECEIPT)
 
     with mock.patch("builtins.input", return_value="no"), pytest.raises(SystemExit):
         run_cli(["audit", "delete", str(published_dir)])
     assert "audit: audit-1 (and its published report)" in capsys.readouterr().out
-    assert client.method_calls == []
+    assert fake.call_log == []
 
     assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 0
-    assert client.method_calls == [mock.call.delete_audit("audit-1")]
+    assert fake.call_log[0] == ("delete_audit", "audit-1")
     out = capsys.readouterr().out
     assert "project proj-1: deleted" in out
-    assert json.loads((published_dir / "deleted.json").read_text(encoding="utf-8")) == (
-        DELETE_RECEIPT
-    )
+    # B5: what the server's receipt never named is deleted here and joins it.
+    assert "dataset ds-1: deleted" in out
+    receipt = json.loads((published_dir / "deleted.json").read_text(encoding="utf-8"))
+    assert receipt["entries"][:2] == DELETE_RECEIPT["entries"]
+    assert {(r["kind"], r["id"]) for r in receipt["entries"]} >= {
+        ("training_job", "job-1"),
+        ("dataset", "ds-1"),
+        ("dataset", "ds-2"),
+    }
     assert not (published_dir / "workloads").exists()
 
 
-def test_delete_of_a_published_run_keeps_the_local_rows_when_something_is_blocked(
+def test_delete_of_a_published_run_drops_the_local_rows_even_when_something_is_blocked(
     run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
-    client = mock.Mock()
-    client.delete_audit.return_value = CANCEL_RECEIPT  # carries a `blocked` entry
-    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: client)
+    fake = _published_cleanup(monkeypatch, DELETE_RECEIPT)
+    fake.present["job"].add("job-9")
+    fake.held_by_job = {"ds-1": "job-9"}
 
     assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 0
 
-    assert (published_dir / "workloads" / "w1" / "dataset.jsonl").exists()
-    assert "deployment dep-1: blocked (not provisioned)" in capsys.readouterr().out
+    assert not (published_dir / "workloads").exists()
+    assert "dataset ds-1: blocked (Dataset is referenced" in capsys.readouterr().out
+
+
+SERVED = "a live deployment serves these weights; delete it, then run the delete again"
+"""The platform's ``WEIGHTS_SERVED`` reason for weights it keeps (its ``audit/receipts.py``)."""
+
+
+def test_delete_shows_the_weights_the_server_kept_with_their_kind_and_reason(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    # The server soft-deletes the entry but keeps its weights while a live deployment
+    # serves them, so its registry rows are ``blocked``. The CLI re-deleted the version,
+    # read the soft delete's 404 and wrote "already_absent" over weights still stored.
+    kept: list[JsonValue] = [
+        {"kind": "model_entry", "id": "entry-2", "status": "blocked", "reason": SERVED},
+        {"kind": "model_version", "id": "mv-2", "status": "blocked", "reason": SERVED},
+    ]
+    deployment: JsonValue = {
+        "kind": "deployment",
+        "id": "dep-1",
+        "status": "deleted",
+        "reason": None,
+    }
+    fake = _published_cleanup(monkeypatch, {**DELETE_RECEIPT, "entries": [deployment, *kept]})
+    fake.present["model"].discard("entry-2")  # soft-deleted: the version now reads 404
+
+    assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"model_entry entry-2: blocked ({SERVED})" in out
+    assert f"model_version mv-2: blocked ({SERVED})" in out
+    receipt = json.loads((published_dir / "deleted.json").read_text(encoding="utf-8"))
+    assert [r for r in receipt["entries"] if r["kind"].startswith("model_")] == kept
+    assert ("get_model_version", "mv-2") not in fake.call_log
+
+
+def test_deleting_an_audit_the_account_already_deleted_finishes_the_local_cleanup(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """R1: the server answers the uniform 404 once the audit is deleted; that is not a failure."""
+    from dagnam._core.exceptions import APIError
+
+    fake = _published_cleanup(monkeypatch, DELETE_RECEIPT)
+
+    def gone(audit_id: str) -> JsonObject:
+        fake.call_log.append(("delete_audit", audit_id))
+        raise APIError(404, "Audit not found")
+
+    monkeypatch.setattr(fake, "delete_audit", gone)
+    assert run_cli(["audit", "delete", str(published_dir), "--yes", "--json"]) == 0
+    rows = {(row["kind"], row["id"]): row for row in json.loads(capsys.readouterr().out)["items"]}
+    # RR1: the account decided about the project and its registry; they are only read.
+    assert rows.pop(("project", "proj-1"))["reason"] == "kept by the account"
+    assert rows.pop(("model_version", "mv-2"))["reason"] == "kept by the account"
+    assert {row["status"] for row in rows.values()} == {"deleted"}
+    assert ("delete_project", "proj-1") not in fake.call_log
+    assert not (published_dir / "workloads").exists()
+
+    def broken(audit_id: str) -> JsonObject:
+        raise APIError(500, "server error")
+
+    monkeypatch.setattr(fake, "delete_audit", broken)  # any other refusal is still an error
+    assert run_cli(["audit", "delete", str(published_dir), "--yes"]) == 1
+    assert "server error" in capsys.readouterr().err
+
+
+def test_cancel_of_a_published_run_stops_a_job_the_server_never_heard_of(
+    run_cli: CliRunner, published_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """B4: the `submit` patch was lost, so the server's cancel does not name job-1."""
+    fake = _published_cleanup(
+        monkeypatch,
+        {
+            "schema": CANCELLED_SCHEMA,
+            "deleted_at": "2026-09-07T10:00:00+00:00",
+            "entries": [{"kind": "deployment", "id": "dep-2", "status": "stopped"}],
+        },
+    )
+
+    assert run_cli(["audit", "cancel", str(published_dir)]) == 0
+
+    assert fake.call_log == [
+        ("cancel_audit", "audit-1"),
+        ("cancel_training_job", "job-1"),
+        ("pause_deployment", "dep-1"),
+    ]
+    assert "training_job job-1: stopped" in capsys.readouterr().out
+    assert load_state(published_dir).workloads["w1"][HEAD].run_status == "cancelled"
 
 
 def test_a_cancelled_candidate_is_not_resumed_into_wait_run(published_dir: Path) -> None:
@@ -385,7 +608,7 @@ def test_a_cancelled_candidate_is_not_resumed_into_wait_run(published_dir: Path)
     from dagnam.audit.steps_train import wait_run
 
     state = load_state(published_dir)
-    mark_cancelled(state)
+    mark_cancelled(state, {"job-1"})
     step = state.workloads["w1"][HEAD]
     assert step.run_status == "cancelled"
 

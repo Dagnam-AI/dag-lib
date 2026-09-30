@@ -2,10 +2,11 @@
 
 One loop, no branching on kind: for each selected workload, for each
 candidate in :data:`~dagnam.audit.candidates.CANDIDATES`, run the step list.
-The state is saved after every step, so an interrupt or a crash leaves the
-last completed step on disk and the next call resumes from it -- and a
-``KeyboardInterrupt`` is never caught. A hard failure inside a step is
-recorded as ``halted: error`` before it propagates.
+The state is saved after every step -- before anything is published, so a
+Ctrl+C on a slow publish never loses a step that was paid for -- and the
+next call resumes from it; a ``KeyboardInterrupt`` is never caught. A hard
+failure inside a step is recorded as ``halted: error`` before it propagates,
+and a cancel in the account ends the run as ``halted: cancelled`` (K1).
 
 Verdicts and prices belong to the scan report and Task 5's economics: this
 module reads ``scan-report.json`` for each workload's structure class and
@@ -18,14 +19,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
 import json
+import math
 from pathlib import Path
 import time
 from typing import Any
 
 from dagnam.audit.candidates import CANDIDATES
-from dagnam.audit.publish import Publisher, installed_version
+from dagnam.audit.publish import DELETED, Publisher, installed_version
 from dagnam.audit.secrets import SecretStore
-from dagnam.audit.state import AuditState, load_state, save_state
+from dagnam.audit.state import AuditState, StepState, load_state, lock_audit, save_state
 from dagnam.audit.steps import (
     DEPLOY_TIMEOUT_SECONDS,
     RUN_TIMEOUT_SECONDS,
@@ -41,14 +43,21 @@ from dagnam.audit.steps_serve import (
     replay_and_score,
     wait_active,
 )
-from dagnam.audit.steps_train import resolve_model_version, submit, wait_run
+from dagnam.audit.steps_train import (
+    credits_spent,
+    projected_replay,
+    resolve_model_version,
+    submit,
+    wait_run,
+)
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import FLOOR_JSON, FLOOR_LABEL
 
 SCAN_REPORT = "scan-report.json"
 AUDITED_VERDICTS = frozenset({"candidate", "marginal"})
 """Verdict statuses the audit runs when no workload list is given (spec section 7a)."""
-DEFAULT_MAX_CREDITS = 500
+PLAN_ROUNDING = 100
+"""The default ceiling is the plan's estimate rounded up to a multiple of this (spec P5)."""
 
 STEPS: tuple[Step, ...] = (
     upload,
@@ -129,6 +138,36 @@ def select_workloads(
     return _select(audit_dir, _scan(audit_dir)[1], workloads)
 
 
+def plan_credits(
+    audit_dir: Path,
+    selected: Sequence[tuple[str, StructureClass]],
+    state: AuditState | None = None,
+) -> int:
+    """The ceiling a run without ``--max-credits`` is held to (spec P5).
+
+    What the audit already spent, plus every trained candidate of every
+    selected workload still to finish at its projected cost -- its run's
+    ceiling unless it was already submitted, plus its replay -- rounded up to
+    :data:`PLAN_ROUNDING`, so the listing the user confirms names it. A
+    candidate that scored or stopped on an error adds nothing more.
+    """
+    state = AuditState() if state is None else state
+    total = credits_spent(state, audit_dir)
+    for workload_id, structure_class in selected:
+        meta = json.loads(
+            (audit_dir / "workloads" / workload_id / "meta.json").read_text(encoding="utf-8")
+        )
+        replay = projected_replay(int(meta["splits"]["eval_holdout"]))
+        for spec in CANDIDATES[structure_class]:
+            if spec.training_credits_max is None:
+                continue
+            step = state.workloads.get(workload_id, {}).get(spec.kind, StepState())
+            if step.scored or step.error is not None:
+                continue
+            total += replay + (spec.training_credits_max if step.run_id is None else 0)
+    return math.ceil(total / PLAN_ROUNDING) * PLAN_ROUNDING
+
+
 def run_audit(
     audit_dir: Path,
     *,
@@ -152,16 +191,53 @@ def run_audit(
     ``floor`` overrides the per-class default on the agreement lower bound;
     ``workloads`` names the workload ids to run (``None`` runs every
     ``candidate``/``marginal`` workload the scan derived); ``max_credits``
-    halts the frontier before a submit that would exceed it, counting each
-    candidate's training run and its holdout replay; ``wait=False``
+    halts the frontier before a submit or a replay that could take the credits
+    spent past it, projecting each at the most it can cost; ``wait=False``
     returns as soon as a step would block on a run or a deployment, and the
     next call resumes. ``sleep``/``now`` are the clock every wait uses.
 
     Idempotent: a second call over a finished audit makes no platform call.
+    One call at a time holds ``audit_dir``: a second raises ``AuditBusyError``.
     """
+    with lock_audit(audit_dir):
+        return _run_audit(
+            audit_dir,
+            floor=floor,
+            workloads=workloads,
+            max_credits=max_credits,
+            wait=wait,
+            client=client,
+            publisher=publisher,
+            sleep=sleep,
+            now=now,
+            run_timeout=run_timeout,
+            deploy_timeout=deploy_timeout,
+        )
+
+
+def _run_audit(
+    audit_dir: Path,
+    *,
+    floor: float | None,
+    workloads: Sequence[str] | None,
+    max_credits: int,
+    wait: bool,
+    client: PlatformClient,
+    publisher: Publisher | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    run_timeout: float = RUN_TIMEOUT_SECONDS,
+    deploy_timeout: float = DEPLOY_TIMEOUT_SECONDS,
+) -> AuditState:
+    """:func:`run_audit`, with ``audit_dir`` held."""
     state = load_state(audit_dir)
     if publisher is not None:
         publisher.follow(state)
+        # Before anything that can wait: a cancel landing from here on sticks (K1b),
+        # and an audit the account already deleted stops the run here.
+        publisher.resume()
+        if publisher.stopped is not None:
+            return _stopped(audit_dir, state, publisher.stopped)
     scan, scanned = _scan(audit_dir)
     selected = _select(audit_dir, scanned, workloads)
     price_table_version = scan.get("price_table_version")
@@ -179,6 +255,7 @@ def run_audit(
             }
         )
         state.project_id = str(created["id"])
+        save_state(audit_dir, state)
     if publisher is not None:
         # Without --floor each class keeps its own default, so the audit header
         # records the strictest of them; every candidate's agreement carries
@@ -217,10 +294,13 @@ def run_audit(
             )
             if publisher is not None:
                 publisher.candidate(ctx, step)
-                # A run whose first publish failed reaches the account with work
-                # already done; without this the candidate would sit at
-                # `uploading` until a step it has not reached yet moves it.
+                # A step the account never acknowledged -- all of them when the
+                # audit only reached it now -- goes out before the next one;
+                # without this the candidate would sit at its last acknowledged
+                # status until a step it has not reached yet moves it.
                 publisher.backfill(ctx, step)
+                if publisher.stopped is not None:
+                    return _stopped(audit_dir, state, publisher.stopped)
             if step.error:
                 # A recorded failure is terminal for this audit (delete the state
                 # to retry) -- but the publisher above still had to see it, or a
@@ -232,11 +312,15 @@ def run_audit(
                 continue
             for run_step in STEPS:
                 if run_step in LONG_WAITS and not wait:
-                    return state
+                    return _finish(audit_dir, state, publisher)
                 before = asdict(step)
                 try:
                     state = run_step(state, ctx)
                 except Exception as exc:
+                    if publisher is not None and publisher.gone():
+                        # The owner deleted the audit and the platform took the
+                        # job or the endpoint this step was polling with it.
+                        return _stopped(audit_dir, state, DELETED)
                     state.halted = {
                         "reason": "error",
                         "workload_id": workload_id,
@@ -247,6 +331,9 @@ def run_audit(
                     save_state(audit_dir, state)
                     _halt(publisher, "error")
                     raise
+                # On disk before it is published: the publish is a network call
+                # that can hang, and a step it loses must not be paid for twice.
+                save_state(audit_dir, state)
                 if publisher is not None and state.halted is None and asdict(step) != before:
                     # Only a step that recorded something is published: a resumed
                     # run walks every step again and the ones already done change
@@ -254,14 +341,16 @@ def run_audit(
                     # name says (the budget check refuses the submit), so it is
                     # the halt that is published, never the step it stopped.
                     publisher.step(ctx, run_step.__name__, step)
-                save_state(audit_dir, state)
+                    save_state(audit_dir, state)  # what the account acknowledged
+                    if publisher.stopped is not None:
+                        return _stopped(audit_dir, state, publisher.stopped)
                 if state.halted is not None:
                     _halt(publisher, str(state.halted["reason"]))
                     return state
                 if step.error:
                     stop_workload = error_code(step) in WORKLOAD_STOPPING
                     break
-    return state
+    return _finish(audit_dir, state, publisher)
 
 
 def _halt(publisher: Publisher | None, reason: str) -> None:
@@ -270,14 +359,31 @@ def _halt(publisher: Publisher | None, reason: str) -> None:
         publisher.halt(reason)
 
 
+def _finish(audit_dir: Path, state: AuditState, publisher: Publisher | None) -> AuditState:
+    """End a run that was not halted: flush what the account has not heard yet, and save it."""
+    if publisher is None:
+        return state
+    publisher.flush()
+    save_state(audit_dir, state)
+    return state if publisher.stopped is None else _stopped(audit_dir, state, publisher.stopped)
+
+
+def _stopped(audit_dir: Path, state: AuditState, reason: str) -> AuditState:
+    """Stop where the account's cancel or delete caught the run: nothing more is run or published."""
+    state.halted = {"reason": reason}
+    save_state(audit_dir, state)
+    return state
+
+
 __all__ = [
     "AUDITED_VERDICTS",
-    "DEFAULT_MAX_CREDITS",
     "FLOOR_BY_STRUCTURE",
     "LONG_WAITS",
+    "PLAN_ROUNDING",
     "SCAN_REPORT",
     "STEPS",
     "WORKLOAD_STOPPING",
+    "plan_credits",
     "run_audit",
     "select_workloads",
 ]

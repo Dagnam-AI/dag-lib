@@ -419,14 +419,25 @@ finishes. When the audit is created the run prints where to watch it
 (`published: <audit-id> — watch it at https://dagnam.ai/audits/<audit-id>`), and
 `dagnam audit status ./audit` repeats the link. The derived rows, the raw traces and the
 deployment keys stay on your machine; the run itself never depends on the upload, and a publish
-that fails is retried with the next step rather than stopping the audit. A run that stopped
-short is published as halted, and the account resumes it by itself when the next `dagnam audit
-run` publishes its first step. `dagnam audit run ./audit --local-only` publishes nothing;
+that fails is retried with the next step, at the end of the run, or on the next `dagnam audit
+run`, rather than stopping the audit. A run that stopped short is published as halted, and the
+account resumes it when the next `dagnam audit run` publishes its first step; Cancel on the
+audit page stops a live run, which halts as `cancelled` and spends nothing more.
+`dagnam audit run ./audit --local-only` publishes nothing;
 `dagnam audit cancel ./audit` stops the jobs and pauses the endpoints, writing `cancelled.json`;
-and `dagnam audit delete ./audit` deletes everything the run created on the platform, writes
-`deleted.json`, and then removes the local `workloads/` rows and the deployment keys — the
-audit's own files (`state.json`, `scan-report.json`, `audit-report.json`, `deleted.json`) stay
-where they are.
+and `dagnam audit delete ./audit` deletes everything the run created on the platform (a run
+still going is cancelled first), writes `deleted.json`, and then removes the local `workloads/`
+rows and the deployment keys — the audit's own files (`state.json`, `scan-report.json`,
+`audit-report.json`, `deleted.json`) stay where they are. Both act on every artifact
+`state.json` records, including any the account never heard about, and each receipt row is
+`stopped`/`deleted`, `already_absent`, or `blocked` with the platform's reason.
+
+**`--max-credits` is a hard ceiling.** `dagnam audit run` never starts a training run or a
+holdout replay that could take the credits spent past it: a run is budgeted at the most its
+recipe can charge (120 credits) and a replay at one credit per holdout row plus 10%. Without
+the flag the ceiling is the plan's own estimate rounded up to 100, printed in the listing you
+confirm. A candidate whose replay saw more than 10% of its calls fail is reported
+`unreliable` and never becomes the winner.
 
 Run `dagnam --help` or `dagnam <command> --help` for command-specific options.
 

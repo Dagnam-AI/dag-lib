@@ -7,6 +7,7 @@ from dagnam.audit.candidates import (
     HEAD_TUNE,
     HOSTED_FLOOR,
     SFT_SMALL,
+    TRAINING_CREDITS_MAX,
     CandidateKind,
     CandidateSpec,
 )
@@ -24,27 +25,39 @@ def test_registry_matches_the_design_table() -> None:
     assert set(CANDIDATES) == set(StructureClass)
 
 
-def test_trained_candidates_name_their_recipe_base_and_serving_rate() -> None:
+def test_trained_candidates_name_their_recipe_base_serving_rate_and_ceiling() -> None:
     assert (
         CandidateSpec(
             CandidateKind.HEAD_TUNE,
-            "head-tune-text-classification@1.1",
+            "head-tune-text-classification@1.2",
             "bert",
             None,
             "cpu-classifier",
+            TRAINING_CREDITS_MAX,
         )
         == HEAD_TUNE
     )
     assert (
         CandidateSpec(
-            CandidateKind.SFT_SMALL, "qlora-sft-chat@1.1", "qwen2", 3_000_000_000, "gpu-small-llm"
+            CandidateKind.SFT_SMALL,
+            "qlora-sft-chat@1.2",
+            "qwen2",
+            3_000_000_000,
+            "gpu-small-llm",
+            TRAINING_CREDITS_MAX,
         )
         == SFT_SMALL
     )
+
+
+def test_a_run_is_budgeted_at_its_recipe_bound_on_the_gpu_it_lands_on() -> None:
+    """An hour (the recipes' own ``max_duration_seconds``) at the A10G's 2 credits a minute."""
+    assert TRAINING_CREDITS_MAX == 120
 
 
 def test_hosted_floor_needs_no_run() -> None:
     assert HOSTED_FLOOR.recipe_key is None
     assert HOSTED_FLOOR.base_family is None
     assert HOSTED_FLOOR.serving_rate_key is None
+    assert HOSTED_FLOOR.training_credits_max is None
     assert CandidateKind("head_tune") is CandidateKind.HEAD_TUNE

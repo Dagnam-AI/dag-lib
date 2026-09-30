@@ -8,7 +8,9 @@ import pytest
 from tests.audit._platform import FakePlatform
 from tests.audit._publish import AUDIT_ID, start
 
+from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import APIError
+from dagnam._types import JsonObject
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.cleanup import DEPLOY_PAUSED
 from dagnam.audit.publish import (
@@ -24,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.typing_helpers import PytestMonkeyPatch
+    from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
     from dagnam.audit.steps import StepContext
 
@@ -233,8 +235,110 @@ def test_the_backfill_is_silent_on_a_fresh_run_and_on_a_resumed_published_one(
     resumed_state = AuditState(project_id="proj-1", audit_id=AUDIT_ID)
     resumed = Publisher(platform, resumed_state)
     start(resumed, audit_dir)  # returns before the POST: the audit already exists
-    resumed.backfill(ctx, _completed_upload(StepState()))
+    acknowledged = _completed_upload(StepState(published_candidate_id="cand-1"))
+    acknowledged.published_step = "resolve_version"
+    resumed.backfill(ctx, acknowledged)
     assert platform.patches == []
+
+
+def test_a_step_whose_patch_never_landed_goes_out_on_the_next_run(
+    platform: FakePlatform, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    """B10: the queue dies with the process, the acknowledgement mark does not."""
+    step = _completed_upload(StepState(published_candidate_id="cand-1"))
+    step.published_step = "upload"  # `resolve_version`'s patch was lost to a blip or a Ctrl+C
+    resumed = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    resumed.backfill(make_ctx(), step)
+    assert [body["step"] for _, body in platform.patches] == ["resolve_version"]
+    assert step.published_step == "resolve_version"
+
+
+def test_the_last_patch_of_a_run_is_flushed_before_the_run_ends(
+    publisher: Publisher,
+    platform: FakePlatform,
+    audit_dir: Path,
+    make_ctx: Callable[..., StepContext],
+) -> None:
+    """B10: nothing comes after the last step to carry a failed patch out with it."""
+    start(publisher, audit_dir)
+    step = StepState()
+    platform.publish_errors["patch_audit_candidate"] = [APIError(503, "blip")]
+    publisher.step(make_ctx(), "upload", step)
+    assert platform.patches == []
+    assert step.published_step is None
+    publisher.flush()
+    assert [body["step"] for _, body in platform.patches] == ["upload"]
+    assert step.published_step == "upload"
+
+
+def test_an_acknowledged_failure_is_not_published_again(
+    platform: FakePlatform, audit_dir: Path, make_ctx: Callable[..., StepContext]
+) -> None:
+    step = _completed_upload(StepState(published_candidate_id="cand-1"))
+    step.split_task_id, step.error = "split-1", "split_failed: the task never started"
+    step.published_step = "wait_split"  # the step it died on, published `failed`
+    resumed = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    resumed.backfill(make_ctx(), step)
+    assert platform.patches == []
+
+
+# ------------------------------------------------------ K1: resume, and a cancel that sticks
+
+
+def test_only_the_first_request_of_a_run_asks_to_resume(
+    publisher: Publisher,
+    platform: FakePlatform,
+    audit_dir: Path,
+    make_ctx: Callable[..., StepContext],
+) -> None:
+    platform.publish_errors["create_audit"] = [APIError(503, "down")]
+    start(publisher, audit_dir)  # never reached the account: the resume is not spent
+    start(publisher, audit_dir)
+    step = StepState()
+    publisher.step(make_ctx(), "upload", step)
+    publisher.step(make_ctx(), "split", step)
+    assert platform.resumes == [
+        ("create_audit", True),
+        ("create_audit_candidate", False),
+        ("patch_audit_candidate", False),
+        ("patch_audit_candidate", False),
+    ]
+
+
+def test_a_cancel_on_the_website_ends_the_publishing_and_says_so(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext], caplog: pytest.LogCaptureFixture
+) -> None:
+    """P6: the halted 409 a non-resuming publish gets is the website's cancel."""
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    step = StepState(published_candidate_id="cand-1")
+    publisher.step(make_ctx(), "upload", step)
+    assert publisher.stopped is None
+
+    platform.audit_halted = True  # somebody pressed Cancel on the audit page
+    publisher.step(make_ctx(), "resolve_version", step)
+    assert publisher.stopped == "cancelled"
+    assert "the audit was cancelled in your account" in caplog.text
+    assert step.published_step == "upload"
+
+    publisher.step(make_ctx(), "split", step)
+    publisher.candidate(make_ctx(workload_id="w2"), StepState())
+    publisher.flush()
+    publisher.halt("error")
+    assert [body["step"] for _, body in platform.patches] == ["upload"]
+    assert platform.halts == []
+
+
+def test_the_first_request_of_a_new_run_resumes_a_halted_audit(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext]
+) -> None:
+    platform.audit_halted = True
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    step = StepState(published_candidate_id="cand-1")
+    publisher.step(make_ctx(), "upload", step)
+    publisher.step(make_ctx(), "resolve_version", step)
+    assert publisher.stopped is None
+    assert [flag for _, flag in platform.resumes] == [True, False]
+    assert platform.audit_halted is False
 
 
 def test_every_step_of_the_frontier_has_a_done_guard() -> None:
@@ -255,6 +359,7 @@ def test_the_halt_the_previous_run_published_is_not_sent_again(
     platform: FakePlatform, state: AuditState
 ) -> None:
     """The account already shows this audit halted; repeating it says nothing new."""
+    platform.audit_halted = True
     publisher = Publisher(platform, _halted(state))
     publisher.halt("budget")
     assert platform.halts == []
@@ -334,3 +439,141 @@ def test_the_backfill_of_an_errored_candidate_ends_at_its_terminal_failure(
         ("wait_split", "failed"),
     ]
     assert platform.patches[-1][1]["error"] == "split_failed: the task never started"
+
+
+def test_the_platform_s_own_halted_409_reads_as_the_cancel(
+    requests_mock: RequestsMocker, make_ctx: Callable[..., StepContext]
+) -> None:
+    """The wire form, through the real client: FastAPI's ``{"detail": "audit is halted"}``."""
+    requests_mock.patch(
+        "https://x/api/v1/audits/audit-1/candidates/cand-1",
+        status_code=409,
+        json={"detail": "audit is halted"},
+    )
+    publisher = Publisher(
+        DagnamClient("https://x", "k"), AuditState(project_id="proj-1", audit_id=AUDIT_ID)
+    )
+    publisher.step(make_ctx(), "upload", StepState(published_candidate_id="cand-1"))
+    assert publisher.stopped == "cancelled"
+    assert requests_mock.last_request.json() == {
+        "step": "upload",
+        "status": "uploading",
+        "resume": True,
+    }
+
+
+# ------------------------------------------- K1b: resume up front; a delete or a cancel stops
+
+
+def test_a_run_resumes_its_audit_once_up_front_and_never_again(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext]
+) -> None:
+    """N1: the resume is spent before any wait, so a cancel landing during one sticks."""
+    platform.audit_halted = True  # the last run stopped on its budget
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    publisher.resume()
+    assert platform.audit_halted is False
+
+    platform.audit_halted = True  # the owner cancels while this run trains
+    publisher.step(make_ctx(), "wait_run", StepState(published_candidate_id="cand-1"))
+    assert publisher.stopped == "cancelled"
+    assert platform.resumes == [("patch_audit_candidate", False)]
+
+
+def test_an_older_platform_without_the_resume_route_resumes_on_the_first_publish(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext], caplog: pytest.LogCaptureFixture
+) -> None:
+    platform.resume_route = False
+    platform.audit_halted = True
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    publisher.resume()
+    step = StepState(published_candidate_id="cand-1")
+    publisher.step(make_ctx(), "upload", step)
+    publisher.step(make_ctx(), "resolve_version", step)
+    assert publisher.stopped is None
+    assert [flag for _, flag in platform.resumes] == [True, False]
+    assert "the first publish resumes it" in caplog.text
+
+
+def test_a_run_with_nothing_published_yet_has_nothing_to_resume_or_lose(
+    platform: FakePlatform, state: AuditState
+) -> None:
+    publisher = Publisher(platform, state)
+    publisher.resume()
+    assert publisher.gone() is False
+    assert platform.call_log == []
+
+
+def test_an_audit_deleted_in_the_account_stops_the_run(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Backend review N3: every publish 404s after a delete; the old queue retried forever."""
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    platform.audit_deleted = True
+    publisher.step(make_ctx(), "upload", StepState(published_candidate_id="cand-1"))
+    assert publisher.stopped == "deleted"
+    assert "the audit was deleted in your account" in caplog.text
+    publisher.candidate(make_ctx(workload_id="w2"), StepState())
+    publisher.halt("error")
+    assert platform.call_log.count("patch_audit_candidate") == 1
+    assert "halt_audit" not in platform.call_log
+
+
+def test_a_read_that_fails_for_another_reason_is_not_a_deleted_audit(
+    platform: FakePlatform,
+) -> None:
+    platform.publish_errors["get_audit"] = [APIError(503, "busy")]
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    assert publisher.gone() is False
+    assert publisher.stopped is None
+
+
+def test_a_404_for_one_artifact_is_dropped_not_taken_for_a_deleted_audit(
+    platform: FakePlatform,
+    make_ctx: Callable[..., StepContext],
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    """A patch naming a deployment the owner deleted is the same uniform 404: the read settles it."""
+    real_patch = platform.patch_audit_candidate
+    refused: list[bool] = []
+
+    def patch(audit_id: str, candidate_id: str, payload: JsonObject) -> JsonObject:
+        if not refused:
+            refused.append(True)
+            raise APIError(404, "Audit not found")
+        return real_patch(audit_id, candidate_id, payload)
+
+    monkeypatch.setattr(platform, "patch_audit_candidate", patch)
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    step = StepState(published_candidate_id="cand-1")
+    publisher.step(make_ctx(), "upload", step)
+    publisher.step(make_ctx(), "resolve_version", step)
+    assert publisher.stopped is None
+    assert [body["step"] for _, body in platform.patches] == ["resolve_version"]
+
+
+def test_a_halt_never_overwrites_the_account_s_cancel(
+    platform: FakePlatform, make_ctx: Callable[..., StepContext]
+) -> None:
+    """M1: the owner cancelled, then the next submit failed the budget check -- nothing queued.
+
+    The account's halt reason is the owner's `cancelled`; a `budget` halt over it
+    would tell them the run ran out of money.
+    """
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    publisher.resume()
+    platform.audit_halted = True
+    publisher.halt("budget")
+    assert platform.halts == []
+
+    # And when it is the halt's own flush that meets the cancel: a patch a blip
+    # left queued goes out first, gets the 409, and nothing overwrites it.
+    publisher = Publisher(platform, AuditState(project_id="proj-1", audit_id=AUDIT_ID))
+    publisher.resume()
+    platform.publish_errors["patch_audit_candidate"] = [APIError(503, "blip")]
+    publisher.step(make_ctx(), "upload", StepState(published_candidate_id="cand-1"))
+    platform.audit_halted = True
+    publisher.halt("budget")
+    assert publisher.stopped == "cancelled"
+    assert platform.halts == []
+    assert platform.call_log.count("get_audit") == 1  # the first halt's read only

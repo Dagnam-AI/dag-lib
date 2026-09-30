@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from tests.audit._platform import Clock, FakePlatform
 
 from dagnam._core.exceptions import APIError, QuotaExceededError
-from dagnam.audit.candidates import HEAD_TUNE, SFT_SMALL, CandidateKind
+from dagnam.audit.candidates import HEAD_TUNE, SFT_SMALL, TRAINING_CREDITS_MAX, CandidateKind
 from dagnam.audit.state import AuditState, StepState
-from dagnam.audit.steps import StepContext
+from dagnam.audit.steps import StepContext, replay_file
 from dagnam.audit.steps_train import (
-    _instant,
-    _newest_version_since,
     credits_spent,
     pick_base,
+    projected_replay,
     resolve_model_version,
     submit,
     wait_run,
@@ -46,16 +45,26 @@ def test_pick_base_is_the_smallest_ungated_sized_base_of_the_family(
     assert pick_base(make_ctx(spec=SFT_SMALL)) is None  # qwen-7b is over max_params
 
 
-def test_credits_spent_sums_training_and_replay_for_every_candidate() -> None:
+def test_credits_spent_counts_a_settled_run_at_its_charge_and_a_live_one_at_its_ceiling() -> None:
+    """B8: a run still going can cost up to its recipe ceiling, whatever the server first quoted."""
     state = AuditState()
-    assert credits_spent(state) == (0.0, 0.0)
+    assert credits_spent(state) == 0.0
     head = state.candidate("w1", CandidateKind.HEAD_TUNE)
-    head.training_cost_credits = 100.0
-    head.replay_cost_credits = 396.0
-    sft = state.candidate("w2", CandidateKind.SFT_SMALL)
-    sft.training_cost_credits = 250.0
+    head.run_id, head.run_status = "run-1", "completed"
+    head.training_cost_credits, head.replay_cost_credits = 7.0, 396.0
+    live = state.candidate("w2", CandidateKind.SFT_SMALL)
+    live.run_id, live.run_status, live.training_cost_credits = "run-2", "running", 4.0
     state.candidate("w2", CandidateKind.HOSTED_FLOOR).replay_cost_credits = 4.0
-    assert credits_spent(state) == (750.0, 496.0)
+    assert credits_spent(state) == 7.0 + 396.0 + TRAINING_CREDITS_MAX + 4.0
+    live.training_cost_credits = 500.0
+    assert credits_spent(state) == 7.0 + 396.0 + 500.0 + 4.0
+    live.run_status = "failed"
+    live.training_cost_credits = None
+    assert credits_spent(state) == 7.0 + 396.0 + 4.0
+
+
+def test_a_replay_is_projected_at_a_credit_a_row_plus_ten_percent() -> None:
+    assert [projected_replay(n) for n in (0, 3, 4, 10, 8_000)] == [0, 4, 5, 11, 8_800]
 
 
 def test_submit_sends_the_frozen_payload_and_records_the_run(
@@ -69,7 +78,7 @@ def test_submit_sends_the_frozen_payload_and_records_the_run(
             "project_id": "proj-1",
             "base_catalog_entry_id": "bert-small",
             "dataset_version_id": "ds-1-v2",
-            "recipe_key": "head-tune-text-classification@1.1",
+            "recipe_key": "head-tune-text-classification@1.2",
             "hyperparameters": {},
             "dataset_field_bindings": {},
         }
@@ -132,6 +141,41 @@ def test_the_budget_projection_counts_the_previous_replay(
         "next": "w1/head_tune",
     }
     assert platform.call_log == []
+
+
+def test_the_first_submit_is_held_to_the_ceiling(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    """B8: `--max-credits 10` never submits a run whose own ceiling is 120 credits."""
+    state = submit(_ready(), make_ctx(max_credits=10))
+    assert state.halted == {
+        "reason": "budget",
+        "spent_credits": 0.0,
+        "max_credits": 10,
+        "next": "w1/head_tune",
+    }
+    assert platform.call_log == []
+
+
+def test_the_next_submit_is_projected_at_its_own_ceiling_not_the_largest_so_far(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    """B8: a cheap first candidate no longer vouches for a dearer second one.
+
+    9 spent, then 120 for this run's ceiling and 5 for its 4-row replay: 134.
+    """
+    state = _ready()
+    done = state.candidate("w0", CandidateKind.HEAD_TUNE)
+    done.run_id, done.run_status = "run-0", "completed"
+    done.training_cost_credits, done.replay_cost_credits = 5.0, 4.0
+    submit(state, make_ctx(max_credits=133))
+    assert state.halted is not None
+    assert state.halted["spent_credits"] == 9.0
+    assert platform.submits == 0
+    state.halted = None
+    submit(state, make_ctx(max_credits=134))
+    assert state.halted is None
+    assert platform.submits == 1
 
 
 def test_submit_records_no_base(
@@ -226,56 +270,85 @@ def test_wait_run_records_a_failed_run(
     assert step.error == "run_cancelled: no reason given"
 
 
-def test_instant_parses_z_naive_and_aware() -> None:
-    assert _instant("2026-09-06T10:00:00Z") == datetime(2026, 9, 6, 10, tzinfo=UTC)
-    assert _instant("2026-09-06T10:00:00") == datetime(2026, 9, 6, 10, tzinfo=UTC)
-    assert _instant("2026-09-06T12:00:00+02:00") == datetime(2026, 9, 6, 10, tzinfo=UTC)
-
-
-def test_newest_version_since_scans_the_registry(
+def test_a_failed_run_is_charged_what_the_server_reports_not_its_estimate(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
+    """B12: the estimate is a ceiling, not a charge -- a run that died early cost what it used."""
+    platform.run_final_status = "failed"
+    platform.run_extra = {"credits_consumed": 3}
     ctx = make_ctx()
-    assert _newest_version_since(ctx, "2026-09-06T10:00:00Z") == "mv-pushed"
-    assert _newest_version_since(ctx, None) == "mv-pushed"
-    assert _newest_version_since(ctx, "2026-09-06T11:00:00Z") is None
-    platform.pushes_version = False
-    assert _newest_version_since(ctx, None) == "mv-2020"
+    step = ctx.step(wait_run(submit(_ready(), ctx), ctx))
+    assert step.run_status == "failed"
+    assert step.training_cost_credits == 3.0
 
 
-def test_resolve_model_version_prefers_the_run_field_then_scans(
+def test_resolve_model_version_takes_the_version_the_run_reports(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
     ctx = make_ctx()
     platform.run_polls = 0
-    platform.run_extra = {"model_version_id": "mv-from-run"}
     state = resolve_model_version(wait_run(submit(_ready(), ctx), ctx), ctx)
-    assert ctx.step(state).model_version_id == "mv-from-run"
+    assert ctx.step(state).model_version_id == "mv-pushed"
     calls = len(platform.call_log)
     resolve_model_version(state, ctx)
     assert len(platform.call_log) == calls
 
-    platform.run_extra = {"pushed_version_id": "mv-pushed-field"}
-    state = _ready()
-    assert (
-        ctx.step(resolve_model_version(wait_run(submit(state, ctx), ctx), ctx)).model_version_id
-        == "mv-pushed-field"
-    )
 
-    platform.run_extra = {}
-    state = _ready()
-    assert (
-        ctx.step(resolve_model_version(wait_run(submit(state, ctx), ctx), ctx)).model_version_id
-        == "mv-pushed"
-    )
-
-
-def test_resolve_model_version_records_a_missing_push(
-    make_ctx: Callable[..., StepContext], platform: FakePlatform
+@pytest.mark.parametrize("reported", [{}, {"model_version_id": None}])
+def test_a_run_that_reports_no_version_is_an_error_never_a_registry_guess(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, reported: dict[str, None]
 ) -> None:
+    """B7: the account's newest version can be another run's -- a Studio retrain, say.
+
+    So a completed run that does not name the version it pushed is recorded as
+    such, and nothing reads the registry to guess.
+    """
     platform.pushes_version = False
+    platform.run_extra = dict(reported)
     platform.run_polls = 0
     ctx = make_ctx()
-    step = ctx.step(resolve_model_version(wait_run(submit(_ready(), ctx), ctx), ctx))
+    state = wait_run(submit(_ready(), ctx), ctx)
+    before = list(platform.call_log)
+    step = ctx.step(resolve_model_version(state, ctx))
     assert step.model_version_id is None
-    assert step.error == "no_model_version: the run completed but no registry version was pushed"
+    assert step.error == ("no_model_version: the server did not report the version this run pushed")
+    assert platform.call_log == [*before, "get_foundation_run"]
+
+
+def test_a_replay_whose_cost_was_never_read_counts_at_its_projection(tmp_path: Path) -> None:
+    """M2: a failed balance read left `replay_cost_credits` unset, which the budget read as 0."""
+    state = AuditState()
+    scored = state.candidate("w1", CandidateKind.HEAD_TUNE)
+    scored.scored = True
+    scored.latency = {"p50": 1.0, "p95": 2.0, "calls": 200, "errors": 0}
+    assert credits_spent(state) == projected_replay(200)
+
+    # A replay a Ctrl+C cut short, whose candidate never resumed: two rows answered.
+    cut = state.candidate("w2", CandidateKind.SFT_SMALL)
+    cut.deployment_id = "dep-2"
+    answers = replay_file(tmp_path, "w2", CandidateKind.SFT_SMALL)
+    answers.parent.mkdir(parents=True)
+    answers.write_text(
+        '{"deployment_id": "dep-2", "balance_before": 100}\n'
+        '{"row": 0, "answer": "a", "ms": 1.0}\n'
+        '{"row": 1, "answer": null, "ms": 0.0}\n'
+        '{"row": 2, "answer": "b", "ms": 1.0}\n',
+        encoding="utf-8",
+    )
+    assert credits_spent(state, tmp_path) == projected_replay(200) + projected_replay(2)
+    assert credits_spent(state) == projected_replay(200)  # no directory: nothing to read
+
+
+def test_a_replay_file_a_crash_cut_short_never_breaks_the_budget(tmp_path: Path) -> None:
+    """R4: a head line cut mid-write made every budget check -- and the listing -- raise."""
+    state = AuditState()
+    cut = state.candidate("w2", CandidateKind.SFT_SMALL)
+    cut.deployment_id = "dep-2"
+    answers = replay_file(tmp_path, "w2", CandidateKind.SFT_SMALL)
+    answers.parent.mkdir(parents=True)
+    answers.write_text(
+        '{"deployment_id": "de\n{"row": 0, "answer": "a", "ms": 1.0}\n', encoding="utf-8"
+    )
+    assert credits_spent(state, tmp_path) == projected_replay(1)  # its answers still count
+    answers.write_text("", encoding="utf-8")
+    assert credits_spent(state, tmp_path) == 0.0

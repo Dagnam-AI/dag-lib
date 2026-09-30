@@ -30,7 +30,7 @@ PRICES_DIR = Path(__file__).parent / "prices"
 _ONE_MILLION = 1_000_000
 _ROW_FIELDS = ("input_per_m", "output_per_m", "cached_input_per_m", "cheaper_variant")
 # Vendor/gateway namespaces (``anthropic/``, ``anthropic.``, ``anthropic:``) and the
-# Bedrock region prefixes, none of which are part of the model's identity.
+# Bedrock inference-profile regions, none of which are part of the model's identity.
 _PROVIDER_PREFIXES = frozenset(
     {
         "openai",
@@ -50,13 +50,20 @@ _PROVIDER_PREFIXES = frozenset(
         "openrouter",
         "us",
         "eu",
+        "global",
+        "apac",
+        "jp",
+        "au",
+        "ca",
     }
 )
 _PREFIX_RE = re.compile(r"^([a-z_]+)[/:.]")
-# A trailing release date and/or a Bedrock version suffix: ``-20250929``,
-# ``-2024-08-06``, ``-v1:0``, ``:0``. Every part is optional, so an id without
-# one is left alone.
-_DATED_SUFFIX_RE = re.compile(r"(?:-\d{8}|-\d{4}-\d{2}-\d{2})?(?:-v\d+)?(?::\d+)?$")
+# A trailing release date, a Gemini stable version and/or a Bedrock version
+# suffix: ``-20250929``, ``-2024-08-06``, ``-001``, ``-v1:0``, ``:0``. Every part
+# is optional, so an id without one is left alone.
+_DATED_SUFFIX_RE = re.compile(r"(?:-\d{8}|-\d{4}-\d{2}-\d{2}|-\d{3})?(?:-v\d+)?(?::\d+)?$")
+_RESOURCE_PATH = "/models/"
+"""Vertex ``projects/…/publishers/google/models/X`` and Fireworks ``accounts/…/models/X``."""
 
 
 class PriceTableError(DagnamError):
@@ -110,8 +117,8 @@ class PriceTable:
             raise PriceTableError(path, "'rows' must be an object keyed by model id")
         return cls(version, as_of_date, {m: _row(path, m, raw) for m, raw in rows.items()})
 
-    def cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
-        """USD for the given token counts, or ``None`` when ``model`` has no row.
+    def row(self, model: str) -> PriceRow | None:
+        """The row ``model`` is priced by, or ``None`` when it has none.
 
         The id is looked up exactly first, then as its :func:`canonical_model_id`
         form, then with a trailing release date or Bedrock version suffix dropped
@@ -119,15 +126,33 @@ class PriceTable:
         only an unlisted one falls back to the undated model.
         """
         canonical = canonical_model_id(model)
-        row = (
+        return (
             self.rows.get(model)
             or self.rows.get(canonical)
             or self.rows.get(_DATED_SUFFIX_RE.sub("", canonical, count=1))
         )
+
+    def cost(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cached_prompt_tokens: int = 0,
+    ) -> float | None:
+        """USD for the given token counts, or ``None`` when ``model`` has no :meth:`row`.
+
+        The ``cached_prompt_tokens`` among the prompt tokens are priced at the
+        row's cached-input rate (its input rate when it has none).
+        """
+        row = self.row(model)
         if row is None:
             return None
+        cached = min(cached_prompt_tokens, prompt_tokens)
+        cached_rate = row.input_per_m if row.cached_input_per_m is None else row.cached_input_per_m
         return (
-            prompt_tokens * row.input_per_m + completion_tokens * row.output_per_m
+            (prompt_tokens - cached) * row.input_per_m
+            + cached * cached_rate
+            + completion_tokens * row.output_per_m
         ) / _ONE_MILLION
 
     def age_days(self, today: date) -> int:
@@ -138,11 +163,13 @@ class PriceTable:
 def canonical_model_id(model: str) -> str:
     """Reduce a model id to the price table's key.
 
-    Lowercases, strips any run of provider/region namespaces (``openrouter:``,
-    ``vertex_ai/``, ``us.anthropic.``) and drops a floating ``-latest``. An id
-    that is already a table key is returned unchanged.
+    Lowercases, keeps the model of a resource path (``…/models/X``), strips any
+    run of provider/region namespaces (``openrouter:``, ``vertex_ai/``,
+    ``global.anthropic.``), reads Vertex's ``@`` release date as a dated
+    suffix and drops a floating ``-latest``. An id that is already a table key
+    is returned unchanged.
     """
-    model = model.strip().lower()
+    model = model.strip().lower().rpartition(_RESOURCE_PATH)[2].replace("@", "-")
     while (match := _PREFIX_RE.match(model)) and match.group(1) in _PROVIDER_PREFIXES:
         model = model[match.end() :]
     return model.removesuffix("-latest")

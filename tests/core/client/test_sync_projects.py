@@ -180,3 +180,19 @@ def test_get_project_version_404(client: DagnamClient, rmock: RequestsMocker) ->
     rmock.get(f"{API}/api/v1/projects/p1/versions/missing", status_code=404)
     with pytest.raises(ProjectNotFoundError):
         client.get_project_version("p1", "missing")
+
+
+def test_create_project_retries_a_blip_into_the_same_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    """K3: the audit's project create is deduplicated server-side, so a 502 is safe to retry."""
+    client._sleep = lambda _s: None
+    rmock.post(
+        f"{API}/api/v1/projects",
+        [{"status_code": 502, "json": {"detail": "bad gateway"}}, {"json": {"id": "p1"}}],
+    )
+    assert client.create_project({"title": "t"}) == {"id": "p1"}
+    keys = [r.headers.get("Idempotency-Key") for r in rmock.request_history]
+    assert len(keys) == 2
+    assert keys[0] is not None
+    assert keys[0] == keys[1]

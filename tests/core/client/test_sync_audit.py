@@ -73,3 +73,34 @@ def test_an_expired_key_is_an_auth_error(client: DagnamClient, rmock: RequestsMo
     rmock.delete(f"{AUDITS}/a1", status_code=401, json={"detail": "nope"})
     with pytest.raises(AuthError):
         client.delete_audit("a1")
+
+
+def test_create_audit_retries_a_blip_into_the_same_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    """K3: a read timeout after the server created the audit must not open a second one."""
+    client._sleep = lambda _s: None
+    rmock.post(
+        AUDITS, [{"status_code": 503, "json": {}}, {"json": {"id": "a1"}, "status_code": 201}]
+    )
+    assert client.create_audit({"project_id": "p1"}) == {"id": "a1"}
+    keys = [r.headers.get("Idempotency-Key") for r in rmock.request_history]
+    assert len(keys) == 2
+    assert keys[0] is not None
+    assert keys[0] == keys[1]
+
+
+def test_the_other_audit_routes_carry_no_idempotency_key(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{AUDITS}/a1/candidates", json={"id": "c1"}, status_code=201)
+    client.create_audit_candidate("a1", {"kind": "head_tune"})
+    assert "Idempotency-Key" not in rmock.last_request.headers
+
+
+def test_resume_and_read_an_audit(client: DagnamClient, rmock: RequestsMocker) -> None:
+    """K1b: a run un-halts its audit once, up front; a read settles what a uniform 404 meant."""
+    rmock.post(f"{AUDITS}/a1/resume", json={"id": "a1", "status": "running"})
+    rmock.get(f"{AUDITS}/a1", json={"id": "a1", "status": "halted"})
+    assert client.resume_audit("a1")["status"] == "running"
+    assert client.get_audit("a1")["status"] == "halted"

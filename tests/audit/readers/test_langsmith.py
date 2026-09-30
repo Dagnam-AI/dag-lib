@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import UTC
 import importlib.util
+import json
 from pathlib import Path
 
 import polars as pl
@@ -128,7 +129,11 @@ def test_langchain_serialized_messages_and_generations() -> None:
 
     assert record is not None
     assert record.system == "sys"
-    assert [(m.role, m.content) for m in record.messages] == [("user", "hi")]
+    # The earlier AI turn is context (N5), not dropped.
+    assert [(m.role, m.content) for m in record.messages] == [
+        ("user", "hi"),
+        ("assistant", "prior"),
+    ]
     assert record.response == "hello again"
     assert (record.prompt_tokens, record.completion_tokens) == (11, 4)
     assert record.cost_usd is None
@@ -311,3 +316,139 @@ def test_wrap_gemini_run_lifts_the_system_instruction_into_a_system_turn() -> No
     record = langsmith.to_record(row)
     assert record is not None
     assert record.system == "Be terse."
+
+
+def test_errored_runs_are_skipped_not_malformed(tmp_path: Path) -> None:
+    # A rate-limited day: 10% of the llm runs are 429s with null outputs. The scan
+    # used to fail with "20 of 200 rows are malformed" and write nothing.
+    runs: list[dict[str, object]] = []
+    for i in range(200):
+        run = {**_llm_run(), "id": f"r{i}", "status": "success", "error": None}
+        if i % 10 == 0:
+            run.update({"outputs": None, "status": "error", "error": "RateLimitError: 429"})
+        runs.append(run)
+    path = tmp_path / "ls.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in runs), encoding="utf-8")
+
+    records, stats = read_traces(path, source="langsmith")
+
+    assert len(list(records)) == 180
+    assert (stats.rows_seen, stats.rows_kept, stats.rows_malformed) == (200, 180, 0)
+    # An errored run that kept an empty ``outputs`` is no answer either.
+    assert langsmith.to_record({**_llm_run(), "outputs": {}, "status": "error"}) is None
+    assert langsmith.to_record({**_llm_run(), "error": "boom"}) is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"inputs": {"messages": [{"lc": 1, "id": [], "kwargs": {"content": "hi"}}]}},
+        {"outputs": {"generations": [[]]}},
+    ],
+    ids=["empty-lc-id", "empty-generation"],
+)
+def test_one_unexpected_run_shape_is_counted_malformed(
+    tmp_path: Path, change: dict[str, object]
+) -> None:
+    runs = [{**_llm_run(), "id": f"r{i}"} for i in range(99)] + [{**_llm_run(), **change}]
+    path = tmp_path / "ls.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in runs), encoding="utf-8")
+
+    records, stats = read_traces(path, source="langsmith")
+
+    assert len(list(records)) == 99
+    assert (stats.rows_malformed, stats.first_malformed) == (1, (99,))
+
+
+def test_a_responses_api_run_reads_its_instructions_and_output_items() -> None:
+    # wrap_openai on the Responses API: the system prompt is ``instructions`` and the
+    # reply an ``output`` item list, so every run was unstructured free text.
+    row = {
+        **_llm_run(),
+        "inputs": {
+            "instructions": "Classify the ticket intent. Reply with one word.",
+            "input": [{"role": "user", "content": "ticket 7"}],
+            "model": "gpt-5-mini",
+        },
+        "outputs": {
+            "id": "resp_7",
+            "object": "response",
+            "output": [
+                {"type": "reasoning", "id": "rs_7", "summary": []},
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "billing", "annotations": []}],
+                },
+            ],
+        },
+    }
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.system == "Classify the ticket intent. Reply with one word."
+    assert record.messages == (Message("user", "ticket 7"),)
+    assert record.response == "billing"
+
+
+def test_gemini_thought_parts_are_not_the_answer() -> None:
+    row = {
+        **_llm_run(),
+        "outputs": {
+            "content": [
+                {"text": "The user seems upset, so this is urgent.", "thought": True},
+                {"text": "low"},
+            ]
+        },
+    }
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.response == "low"
+
+
+def test_tool_results_and_the_calls_they_answer_stay_in_the_prompt() -> None:
+    # Anthropic tool_result blocks were blanked, and the assistant turn that made
+    # the call was dropped: the label depended on text the student never saw.
+    row = {
+        **_llm_run(),
+        "inputs": {
+            "messages": [
+                {"role": "system", "content": "Summarize the tool output as a label."},
+                {"role": "user", "content": "order 3"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "x", "name": "lookup", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "x", "content": "status=shipped 3"}
+                    ],
+                },
+            ]
+        },
+        "outputs": {"role": "assistant", "content": [{"type": "text", "text": "shipped"}]},
+    }
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.messages == (
+        Message("user", "order 3"),
+        Message("assistant", '{"arguments": {}, "name": "lookup"}'),
+        Message("user", "status=shipped 3"),
+    )
+    assert record.response == "shipped"
+
+
+def test_an_anthropic_tool_use_reply_is_a_tool_call() -> None:
+    # Forced-tool JSON through a raw Anthropic Message: 0 of 300 rows derived.
+    block = {"type": "tool_use", "id": "t", "name": "record_contact", "input": {"city": "Berlin"}}
+    row = {**_llm_run(), "outputs": {"role": "assistant", "content": [block]}}
+    record = langsmith.to_record(row)
+    assert record is not None
+    assert record.response == ""
+    assert record.response_tool_calls == (block,)
+
+
+def test_a_text_outcome_in_the_metadata_is_ignored() -> None:
+    record = langsmith.to_record({**_llm_run(), "extra": {"metadata": {"outcome": "thumbs up"}}})
+    assert record is not None
+    assert record.outcome is None

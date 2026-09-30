@@ -7,16 +7,17 @@ Field mapping, from the run data format reference
 
 | record field | run field (aliases in priority order) |
 |---|---|
-| kept rows | ``run_type == "llm"`` |
+| kept rows | ``run_type == "llm"`` with a non-empty ``outputs``, no ``error`` and a ``status`` other than ``"error"`` |
 | ``trace_id`` | ``id`` (the run id, unique per call) |
 | ``session_id`` | ``extra.metadata.session_id`` / ``extra.metadata.thread_id`` (the documented thread keys), else ``trace_id``. LangSmith's own top-level ``session_id`` is the tracing *project* id and is deliberately not used |
 | ``ts`` | ``start_time`` |
 | ``latency_ms`` | ``end_time - start_time``; 0 when ``end_time`` is absent |
 | ``model`` | ``extra.invocation_params.model`` / ``extra.invocation_params.model_name`` / ``extra.metadata.ls_model_name`` / ``outputs.model`` |
-| ``system`` / ``messages`` | ``inputs.messages`` / ``inputs.contents``: OpenAI-style ``{role, content}`` dicts (the ``wrap_openai`` shape, and what ``wrap_anthropic`` produces once it folds its ``system`` kwarg in as a system turn), LangChain-serialized messages (``{"lc": 1, "id": [..., "HumanMessage"], "kwargs": {"content"}}``, possibly nested one list deep), or Gemini ``{role, parts: [{text}]}`` turns; a bare ``inputs.prompt`` / ``inputs.input`` string is one user turn |
-| ``response`` | ``outputs.choices[0].message`` / ``outputs.messages[-1]`` / ``outputs.generations[0][0]`` (``text`` or its serialized ``message``) / ``outputs`` itself when it carries ``content`` (the ``wrap_anthropic`` / ``wrap_gemini`` shape: a string, or typed blocks whose ``text`` is joined) / ``outputs.output`` |
+| ``system`` / ``messages`` | the Responses API's ``inputs.instructions`` / ``inputs.input``, else ``inputs.messages`` / ``inputs.contents``: OpenAI-style ``{role, content}`` dicts (the ``wrap_openai`` shape, and what ``wrap_anthropic`` produces once it folds its ``system`` kwarg in as a system turn), LangChain-serialized messages (``{"lc": 1, "id": [..., "HumanMessage"], "kwargs": {"content"}}``, possibly nested one list deep), or Gemini ``{role, parts: [{text}]}`` turns; a bare ``inputs.prompt`` / ``inputs.input`` string is one user turn |
+| ``response`` | ``outputs.choices[0].message`` / ``outputs.messages[-1]`` / ``outputs.generations[0][0]`` (``text`` or its serialized ``message``) / ``outputs`` itself when it carries ``content`` (the ``wrap_anthropic`` / ``wrap_gemini`` shape: a string, or typed blocks whose ``text`` is joined, ``thinking`` and Gemini ``thought`` parts dropped, ``tool_use`` blocks read as tool calls) / ``outputs.output`` (a string, or the Responses API's item list) |
 | ``prompt_tokens`` | any vendor spelling at the top level or under ``usage_metadata`` / ``outputs.usage`` / ``outputs.usage_metadata`` / ``outputs.llm_output.token_usage`` (see :func:`~dagnam.audit.readers.base.prompt_tokens`) |
 | ``completion_tokens`` | the same, for the completion count |
+| ``cached_prompt_tokens`` | the cache-read count in any vendor spelling (see :func:`~dagnam.audit.readers.base.cached_prompt_tokens`) |
 | ``cost_usd`` | ``total_cost`` |
 | ``outcome`` | ``extra.metadata.outcome`` (a convention, not a LangSmith field) |
 | ``workload_hint`` | ``extra.metadata.workload`` (a convention, not a LangSmith field) |
@@ -34,17 +35,17 @@ from dagnam.audit.readers.base import (
     MalformedRowError,
     Reader,
     Row,
+    cached_prompt_tokens,
     completion_tokens,
-    content_text,
     get,
     optional_float,
+    optional_outcome,
     parse_ts,
     prompt_tokens,
     require,
-    split_prompt,
     text,
-    tool_calls,
 )
+from dagnam.audit.readers.messages import has_media, reply_of, split_prompt, task_signature
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ("id", "run_type", "start_time", "inputs", "outputs")
@@ -79,10 +80,14 @@ def _plain_message(message: object) -> Any:
     return message
 
 
-def _messages(inputs: Mapping[str, Any]) -> list[Any] | str:
+def _messages(inputs: Mapping[str, Any]) -> list[Any] | str | Mapping[str, Any]:
     # ``wrap_gemini`` normalizes ``contents`` to ``messages``; a run that kept the
     # raw Gemini request carries ``contents`` instead.
     raw = get(inputs, "messages", "contents")
+    if raw is None and (
+        get(inputs, "instructions") is not None or isinstance(get(inputs, "input"), list)
+    ):
+        return inputs  # the Responses API: ``instructions`` beside the ``input`` items
     if raw is None:
         return text(require(inputs, "prompt", "input"))
     if not isinstance(raw, list):
@@ -128,18 +133,21 @@ def _response(outputs: Mapping[str, Any]) -> Any:
 
 
 def to_record(row: Row) -> TraceRecord | None:
-    """Convert one run row; ``None`` for runs that are not LLM calls."""
+    """Convert one run row; ``None`` for runs that are not LLM calls or that errored.
+
+    An errored run (a 429, a timeout) carries ``outputs: null`` or an empty
+    ``outputs``: it is a call that produced no answer, skipped the way the
+    Langfuse and OpenAI readers skip theirs, never a malformed row.
+    """
     if row.get("run_type") != "llm":
         return None
+    if not row.get("outputs") or row.get("error") or row.get("status") == "error":
+        return None
     ts = parse_ts(require(row, "start_time"))
-    inputs, outputs = require(row, "inputs"), require(row, "outputs")
-    system, messages = split_prompt(_messages(inputs))
-    reply = _response(outputs)
-    if isinstance(reply, Mapping):
-        response = content_text(reply.get("content"))
-        calls = tool_calls(reply.get("tool_calls"))
-    else:
-        response, calls = text(reply), ()
+    inputs, outputs = require(row, "inputs"), row["outputs"]
+    prompt = _messages(inputs)
+    system, messages = split_prompt(prompt)
+    response, calls = reply_of(_response(outputs))
     end = get(row, "end_time")
     return TraceRecord(
         trace_id=text(require(row, "id")),
@@ -160,13 +168,16 @@ def to_record(row: Row) -> TraceRecord | None:
         response_tool_calls=calls,
         prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
         completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
+        cached_prompt_tokens=cached_prompt_tokens(row, *_USAGE_ROOTS),
         latency_ms=0.0 if end is None else (parse_ts(end) - ts).total_seconds() * 1000.0,
         cost_usd=optional_float(get(row, "total_cost")),
         session_id=text(
             require(row, "extra.metadata.session_id", "extra.metadata.thread_id", "trace_id")
         ),
-        outcome=optional_float(get(row, "extra.metadata.outcome")),
+        outcome=optional_outcome(get(row, "extra.metadata.outcome")),
         workload_hint=_optional_text(get(row, "extra.metadata.workload")),
+        has_media=has_media(prompt),
+        signature=task_signature(inputs) or task_signature(get(row, "extra.invocation_params")),
     )
 
 

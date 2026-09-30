@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 import json
+from pathlib import Path
 from typing import Any
 
 from dagnam_contracts.audit.verdict import UNRELIABLE_ERROR_SHARE
@@ -28,11 +29,20 @@ from dagnam._core.exceptions import (
     LROTimeoutError,
 )
 from dagnam._types import JsonObject
-from dagnam.audit.frontier import Endpoint, replay_holdout
+from dagnam.audit.frontier import Endpoint, latency_of, replay_holdout
 from dagnam.audit.scoring import Agreement, modal_keys, score_json, score_labels
 from dagnam.audit.state import AuditState
-from dagnam.audit.steps import StepContext, required, string_field, wait_for
+from dagnam.audit.steps import (
+    StepContext,
+    read_replay,
+    replay_file,
+    required,
+    string_field,
+    wait_for,
+)
+from dagnam.audit.steps_train import over_budget, projected_replay
 from dagnam.audit.structure import StructureClass
+from dagnam.audit.workspace import write_atomic
 
 PLATFORM = "vllm"
 DEPLOYMENT_TYPE = "text"
@@ -178,12 +188,24 @@ def _balance(ctx: StepContext) -> int | None:
         return None
 
 
+def _replay_file(ctx: StepContext) -> Path:
+    """This candidate's answers file (:func:`~dagnam.audit.steps.replay_file`)."""
+    return replay_file(ctx.audit_dir, ctx.workload_id, ctx.spec.kind)
+
+
 def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
     """Replay the holdout, record agreement, latency and the replay's credit cost; done once ``scored``.
 
     Every served prediction is metered, so the replay -- not the training --
-    is most of what an audit spends. Its cost is measured from the account
-    balance either side of the replay rather than assumed from a rate card.
+    is most of what an audit spends. It is refused outright when its
+    projected cost (spec P5) could take the credits spent past the ceiling,
+    and its cost is measured from the account balance either side of it
+    rather than assumed from a rate card.
+
+    Each answer is written to :func:`_replay_file` as it lands, beside the
+    balance read before the first attempt, so an interrupted replay resumes
+    with only the rows it never heard back from -- and its cost still counts
+    what the interrupted attempt burned.
     """
     step = ctx.step(state)
     if step.scored:
@@ -193,20 +215,49 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
         step.error = "no_key: the deployment key is in neither the keyring nor the secrets file"
         return state
     rows = holdout(ctx)
-    endpoint = Endpoint(ctx.client.api_url, required(step.deployment_id, "deployment_id"), key)
-    before = _balance(ctx)
-    answers, latency = replay_holdout(endpoint, [{"messages": m} for m, _ in rows])
+    deployment_id = required(step.deployment_id, "deployment_id")
+    path = _replay_file(ctx)
+    earlier = read_replay(path, deployment_id)
+    before, answers = (None, {}) if earlier is None else earlier
+    # A row an earlier attempt never heard back from is sent again -- and so is
+    # one that failed: an outage a Ctrl+C cut short must not freeze into
+    # `unreliable`. What was answered is already counted as spent.
+    todo = [index for index in range(len(rows)) if answers.get(index, (None, 0.0))[0] is None]
+    if over_budget(state, ctx, projected_replay(len(todo)), f"{ctx.label} replay"):
+        return state
+    if earlier is None:
+        # A file this replay cannot trust (a crash cut its head, or another
+        # endpoint's) spent what nobody can say: the cost stays unknown, and
+        # the budget counts it at its projection.
+        before = None if path.exists() else _balance(ctx)
+        head = {"deployment_id": deployment_id, "balance_before": before}
+        write_atomic(path, json.dumps(head) + "\n")
+    with path.open("a", encoding="utf-8") as sink:
+
+        def landed(position: int, answer: str | None, ms: float) -> None:
+            index = todo[position]
+            answers[index] = (answer, ms)
+            sink.write(json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
+            sink.flush()
+
+        replay_holdout(
+            Endpoint(ctx.client.api_url, deployment_id, key),
+            [{"messages": rows[index][0]} for index in todo],
+            on_result=landed,
+        )
     after = _balance(ctx)
     if before is not None and after is not None:
         # Clamped: a grant landing mid-replay would otherwise read as a refund.
         step.replay_cost_credits = max(0.0, float(before - after))
-    scored = [(a, t) for a, (_, t) in zip(answers, rows, strict=True) if a is not None]
+    results = [answers[index] for index in range(len(rows))]
+    scored = [(a, t) for (a, _), (_, t) in zip(results, rows, strict=True) if a is not None]
     agreement = _SCORERS[ctx.structure_class]([a for a, _ in scored], [t for _, t in scored])
     step.agreement = {
         **agreement.to_json(),
         "floor": ctx.floor,
         "passes_floor": agreement.ci95[0] >= ctx.floor,
     }
+    latency = latency_of(results)
     step.latency = latency.to_json()
     step.scored = True
     if latency.calls == 0 or latency.errors / latency.calls > UNRELIABLE_ERROR_SHARE:

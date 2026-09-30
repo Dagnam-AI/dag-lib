@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import sys
+import threading
 import time
-from typing import Any
+from typing import Any, ClassVar, override
 
 import pytest
 import requests
@@ -22,6 +24,7 @@ from dagnam.audit.frontier import (
     Latency,
     Winner,
     frontier,
+    latency_of,
     percentile,
     replay_holdout,
 )
@@ -94,6 +97,40 @@ def test_replay_with_nothing_succeeding_has_no_latency(requests_mock: RequestsMo
     answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=0)
     assert answers == [None, None]
     assert latency == Latency(p50_ms=None, p95_ms=None, calls=2, errors=2)
+
+
+def test_replay_reports_each_row_as_it_lands(requests_mock: RequestsMocker) -> None:
+    _serve(requests_mock, fail_on="q1")
+    landed: list[tuple[int, str | None]] = []
+    replay_holdout(
+        ENDPOINT, _rows(3), concurrency=1, on_result=lambda i, a, _ms: landed.append((i, a))
+    )
+    assert landed == [(0, "a:q0"), (1, None), (2, "a:q2")]
+
+
+def test_an_interrupted_replay_raises_after_reporting_what_already_landed(
+    requests_mock: RequestsMocker,
+) -> None:
+    """B9: a Ctrl+C mid-replay must not take the answers already paid for with it."""
+
+    def answer(request: Any, context: Any) -> dict[str, Any]:
+        if json.loads(request.text)["messages"][-1]["content"] == "q1":
+            raise KeyboardInterrupt
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    requests_mock.post(CHAT_URL, json=answer)
+    landed: list[int] = []
+    with pytest.raises(KeyboardInterrupt):
+        replay_holdout(
+            ENDPOINT, _rows(3), concurrency=1, on_result=lambda i, _a, _ms: landed.append(i)
+        )
+    assert landed == [0]
+
+
+def test_latency_is_over_the_answered_calls_only() -> None:
+    assert latency_of([("a", 10.0), (None, 0.0), ("b", 30.0)]) == Latency(
+        p50_ms=10.0, p95_ms=30.0, calls=3, errors=1
+    )
 
 
 def test_percentile_is_nearest_rank() -> None:
@@ -299,3 +336,44 @@ def test_a_504_on_every_attempt_exhausts_the_budget_and_counts_one_error(
     # The full doubling sequence, and no wait after the attempt that gives up.
     assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
     assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
+
+
+class _ChatHandler(BaseHTTPRequestHandler):
+    """A keep-alive OpenAI-compatible endpoint that records which connection each call used."""
+
+    protocol_version = "HTTP/1.1"
+    connections: ClassVar[set[tuple[str, int]]] = set()
+
+    def do_POST(self) -> None:
+        length = int(self.headers["Content-Length"])
+        content = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+        type(self).connections.add(self.client_address)
+        body = json.dumps({"choices": [{"message": {"content": f"a:{content}"}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    @override
+    def log_message(self, format: str, *args: Any) -> None:
+        return  # the test output is not an access log
+
+
+def test_the_replay_reuses_its_connections() -> None:
+    # R3-20: a new TCP+TLS connection per call; the latency the report put beside the
+    # vendor's was mostly the handshake. One pool: at most `concurrency` connections.
+    _ChatHandler.connections = set()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ChatHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = Endpoint(f"http://127.0.0.1:{server.server_address[1]}", "dep-1", "dk")
+        answers, latency = replay_holdout(endpoint, _rows(12), concurrency=2)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert answers == [f"a:q{i}" for i in range(12)]
+    assert latency.errors == 0
+    assert len(_ChatHandler.connections) <= 2

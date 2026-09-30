@@ -137,3 +137,78 @@ def test_missing_required_value_is_malformed() -> None:
     row = {"trace_id": "1", "ts": "2026-08-01T00:00:00Z", "messages": "hi", "response": ""}
     with pytest.raises(generic.MalformedRowError, match="missing response"):
         to_record(row)  # an empty CSV cell is an absent value
+
+
+def test_a_plain_prompt_that_starts_with_a_bracket_is_a_prompt() -> None:
+    # 10% of a CSV's prompts began "[URGENT] ..." and the scan aborted as malformed.
+    to_record = generic.bind(None).to_record
+    row = {"trace_id": "1", "ts": "2026-08-01T00:00:00Z", "response": "r"}
+    for prompt in ("[URGENT] my card was charged twice", "{no json here"):
+        record = to_record({**row, "messages": prompt})
+        assert record is not None
+        assert record.messages == (Message("user", prompt),)
+
+
+BEDROCK_LOG = {
+    "schemaVersion": "1.0",
+    "timestamp": "2026-09-01T00:00:00Z",
+    "requestId": "r1",
+    "operation": "Converse",
+    "modelId": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "input": {
+        "inputBodyJson": {
+            "system": [{"text": "Label: a/b"}],
+            "messages": [{"role": "user", "content": [{"text": "hi"}]}],
+        },
+        "inputTokenCount": 10,
+    },
+    "output": {
+        "outputBodyJson": {
+            "output": {"message": {"role": "assistant", "content": [{"text": "a"}]}}
+        },
+        "outputTokenCount": 1,
+    },
+}
+BEDROCK_MAP = {
+    "trace_id": "requestId",
+    "ts": "timestamp",
+    "model": "modelId",
+    "system": "input.inputBodyJson.system",
+    "messages": "input.inputBodyJson.messages",
+    "response": "output.outputBodyJson.output.message.content",
+    "prompt_tokens": "input.inputTokenCount",
+    "completion_tokens": "output.outputTokenCount",
+}
+
+
+def test_map_reaches_nested_fields_with_dotted_paths(tmp_path: Path) -> None:
+    # A Bedrock invocation log is nested: top-level-only --map could not read it at all.
+    path = tmp_path / "bedrock.jsonl"
+    path.write_text(json.dumps(BEDROCK_LOG) + "\n")
+
+    records, stats = read_traces(path, source="jsonl", column_map=BEDROCK_MAP)
+    (record,) = list(records)
+
+    assert stats.rows_malformed == 0
+    assert record.system == "Label: a/b"
+    assert record.messages == (Message("user", "hi"),)
+    assert record.response == "a"
+    assert (record.prompt_tokens, record.completion_tokens) == (10, 1)
+    assert record.model == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+
+def test_a_dotted_column_name_is_read_as_a_column_first() -> None:
+    # A flattened CSV header like ``usage.prompt_tokens`` is one column, not a path.
+    to_record = generic.bind({"prompt_tokens": "usage.prompt_tokens"}).to_record
+    row = {"trace_id": "1", "ts": "2026-08-01T00:00:00Z", "messages": "hi", "response": "r"}
+    record = to_record({**row, "usage.prompt_tokens": "7"})
+    assert record is not None
+    assert record.prompt_tokens == 7
+
+
+def test_a_missing_dotted_required_field_is_an_unsupported_export(tmp_path: Path) -> None:
+    path = tmp_path / "bedrock.jsonl"
+    path.write_text(json.dumps({**BEDROCK_LOG, "output": {}}) + "\n")
+    records, _ = read_traces(path, source="jsonl", column_map=BEDROCK_MAP)
+    with pytest.raises(UnsupportedExportError, match=r"output\.outputBodyJson"):
+        next(records)

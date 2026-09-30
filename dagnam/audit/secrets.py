@@ -52,11 +52,19 @@ class SecretStore:
     def _write_file(self, secrets: dict[str, str]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self._path()
-        # Created 0600 from the first byte; chmod covers a file that already existed wider.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(secrets, handle, indent=2)
-        os.chmod(path, 0o600)
+        tmp = path.with_name(path.name + ".tmp")
+        # Written beside the live file and promoted only once complete, so a
+        # crash mid-write leaves every key the file already held readable.
+        # Created 0600 from the first byte; chmod covers a leftover wider temp.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(secrets, handle, indent=2)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def store(self, key_ref: str, value: str) -> str:
         """Store ``value`` under ``key_ref`` and return the mode used (``keyring`` or ``file``)."""

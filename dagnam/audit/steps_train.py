@@ -1,22 +1,31 @@
 """Training steps: pick the base, submit the recipe run, follow it, find the version it pushed.
 
 The credit budget is enforced here, before a submit: the frontier halts with
-``halted: budget`` rather than start a run it cannot pay for (spec U4). What
-it counts is a candidate's whole cost -- the training run plus the metered
-predictions of its holdout replay, which is the larger half. The
-platform's own preflight still runs on every submit; its verdicts are recorded
-per candidate and the frontier continues (spec section 9).
+``halted: budget`` rather than start a run it cannot pay for (spec U4, P5). What
+it counts is a candidate's whole cost -- the most its training run can charge
+plus the metered predictions of its holdout replay, which is the larger half.
+The platform's own preflight still runs on every submit; its verdicts are
+recorded per candidate and the frontier continues (spec section 9).
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import math
+from pathlib import Path
 
 from dagnam._core._retry import parse_retry_after
 from dagnam._core.exceptions import APIError, LROFailedError, QuotaExceededError
-from dagnam._types import JsonObject
-from dagnam.audit.state import AuditState
-from dagnam.audit.steps import StepContext, required, string_field, wait_for
+from dagnam._types import JsonMapping, JsonObject
+from dagnam.audit.candidates import CANDIDATES, CandidateKind
+from dagnam.audit.state import AuditState, StepState
+from dagnam.audit.steps import (
+    StepContext,
+    answered_rows,
+    replay_file,
+    required,
+    string_field,
+    wait_for,
+)
 
 CAPACITY_STATUS = 503
 """A capacity refusal: retried on the server's ``Retry-After`` until ``run_timeout``."""
@@ -25,6 +34,16 @@ REJECTED_STATUS = frozenset({400, 422})
 """Contract/preflight rejections: recorded as ``rejected_preflight``; the frontier continues."""
 RUN_COMPLETED = "completed"
 RUN_FAILED = frozenset({"failed", "cancelled", "timeout"})
+RUN_SETTLED = frozenset({RUN_COMPLETED, *RUN_FAILED})
+"""A run in one of these has stopped, and its recorded cost is what it charged."""
+REPLAY_CREDITS_PER_ROW = 1
+"""Every served prediction is metered at one credit."""
+REPLAY_MARGIN = 1.1
+"""P5: a replay is budgeted 10% over its row count."""
+
+_TRAINING_CEILING: dict[CandidateKind, int] = {
+    spec.kind: spec.training_credits_max or 0 for specs in CANDIDATES.values() for spec in specs
+}
 
 
 def _parameter_count(base: JsonObject) -> int | None:
@@ -47,14 +66,58 @@ def pick_base(ctx: StepContext) -> JsonObject | None:
     return min(candidates, key=lambda pair: pair[0])[1] if candidates else None
 
 
-def credits_spent(state: AuditState) -> tuple[float, float]:
-    """``(total, largest)`` over every candidate's training plus measured replay credits."""
-    costs = [
-        (step.training_cost_credits or 0.0) + (step.replay_cost_credits or 0.0)
-        for candidates in state.workloads.values()
-        for step in candidates.values()
-    ]
-    return sum(costs), max(costs, default=0.0)
+def projected_replay(rows: int) -> int:
+    """What replaying ``rows`` holdout rows is budgeted at, in whole credits."""
+    return math.ceil(rows * REPLAY_CREDITS_PER_ROW * REPLAY_MARGIN)
+
+
+def _replay_spent(step: StepState, answers: Path | None) -> float:
+    """What a candidate's replay spent: measured, else projected -- never 0 because unread.
+
+    A replay whose balance read failed is counted at its projection over the
+    calls it made; one a Ctrl+C cut short that never resumed, at its
+    projection over the rows its answers file shows answered.
+    """
+    if step.replay_cost_credits is not None:
+        return step.replay_cost_credits
+    if step.scored:
+        calls = (step.latency or {}).get("calls")
+        return projected_replay(calls if isinstance(calls, int) else 0)
+    return projected_replay(0 if answers is None else answered_rows(answers))
+
+
+def credits_spent(state: AuditState, audit_dir: Path | None = None) -> float:
+    """Training plus replay credits over every candidate, counting what may still come.
+
+    A settled run costs what was recorded for it (the charge the server
+    reported, else its estimate). A run still going can cost up to its
+    recipe's ceiling, so it is counted at no less than that -- the budget must
+    hold with every submitted run finishing at its dearest. ``audit_dir`` is
+    where an interrupted replay's answers are read from.
+    """
+    total = 0.0
+    for workload_id, candidates in state.workloads.items():
+        for kind, step in candidates.items():
+            training = step.training_cost_credits or 0.0
+            if step.run_id is not None and step.run_status not in RUN_SETTLED:
+                training = max(training, _TRAINING_CEILING[kind])
+            answers = None if audit_dir is None else replay_file(audit_dir, workload_id, kind)
+            total += training + _replay_spent(step, answers)
+    return total
+
+
+def over_budget(state: AuditState, ctx: StepContext, cost: float, next_step: str) -> bool:
+    """Halt with ``budget`` when spending ``cost`` more would pass ``max_credits`` (spec P5)."""
+    spent = credits_spent(state, ctx.audit_dir)
+    if spent + cost <= ctx.max_credits:
+        return False
+    state.halted = {
+        "reason": "budget",
+        "spent_credits": spent,
+        "max_credits": ctx.max_credits,
+        "next": next_step,
+    }
+    return True
 
 
 def _create_run(ctx: StepContext, payload: JsonObject) -> JsonObject:
@@ -77,23 +140,16 @@ def _create_run(ctx: StepContext, payload: JsonObject) -> JsonObject:
 def submit(state: AuditState, ctx: StepContext) -> AuditState:
     """Submit the recipe run for this candidate; done once ``run_id`` is set.
 
-    Before submitting, the budget check assumes the next candidate costs at
-    least as much as the most expensive one so far -- training plus the
-    credits its holdout replay was measured to burn: ``spent + largest >
-    max_credits`` (or ``spent >= max_credits``) halts the audit with
-    ``halted: budget``.
+    Before submitting, the budget check projects this candidate at its own
+    whole cost -- the most its run can charge plus its replay, one credit a
+    holdout row and 10% more -- and halts the audit with ``halted: budget``
+    when that would take the credits spent past ``max_credits``.
     """
     step = ctx.step(state)
     if step.run_id is not None:
         return state
-    spent, largest = credits_spent(state)
-    if spent >= ctx.max_credits or spent + largest > ctx.max_credits:
-        state.halted = {
-            "reason": "budget",
-            "spent_credits": spent,
-            "max_credits": ctx.max_credits,
-            "next": ctx.label,
-        }
+    ceiling = _TRAINING_CEILING[ctx.spec.kind]
+    if over_budget(state, ctx, ceiling + projected_replay(ctx.holdout_rows()), ctx.label):
         return state
     base = pick_base(ctx)
     if base is None:
@@ -131,7 +187,11 @@ def submit(state: AuditState, ctx: StepContext) -> AuditState:
 
 
 def wait_run(state: AuditState, ctx: StepContext) -> AuditState:
-    """Follow the run to a terminal status; a failure is recorded, the frontier continues."""
+    """Follow the run to a terminal status; a failure is recorded, the frontier continues.
+
+    Either way the run's cost becomes what the server says it charged
+    (``credits_consumed``) when it says -- the estimate is only a ceiling.
+    """
     step = ctx.step(state)
     if step.run_status == RUN_COMPLETED:
         return state
@@ -142,10 +202,16 @@ def wait_run(state: AuditState, ctx: StepContext) -> AuditState:
         step.error = f"run_{step.run_status}: the run was already terminal when this audit resumed"
         return state
     run_id = required(step.run_id, "run_id")
+    seen: list[JsonMapping] = []
+
+    def poll() -> JsonMapping:
+        seen.append(ctx.client.get_foundation_run(run_id))
+        return seen[-1]
+
     try:
-        run = wait_for(
+        wait_for(
             ctx,
-            lambda: ctx.client.get_foundation_run(run_id),
+            poll,
             success={RUN_COMPLETED},
             failure=RUN_FAILED,
             timeout=ctx.run_timeout,
@@ -154,58 +220,28 @@ def wait_run(state: AuditState, ctx: StepContext) -> AuditState:
     except LROFailedError as exc:
         step.run_status = exc.state
         step.error = f"run_{exc.state}: {exc.detail or 'no reason given'}"
-        return state
-    step.run_status = RUN_COMPLETED
-    measured = run.get("credits_consumed")
+    else:
+        step.run_status = RUN_COMPLETED
+    measured = seen[-1].get("credits_consumed")
     if isinstance(measured, int | float) and not isinstance(measured, bool):
         step.training_cost_credits = float(measured)
     return state
 
 
-def _instant(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-def _newest_version_since(ctx: StepContext, created_at: str | None) -> str | None:
-    """The registry version this account pushed most recently after ``created_at``.
-
-    The run read carries no version id (G0), so this is the same scan the G0
-    driver used: every entry the account owns, newest version created after
-    the run was.
-    """
-    since = _instant(created_at) if created_at else None
-    newest: tuple[datetime, str] | None = None
-    for entry in ctx.client.list_model_entries(limit=100):
-        if not isinstance(entry, dict):
-            continue
-        for version in ctx.client.list_model_versions(str(entry["id"])):
-            if not isinstance(version, dict):
-                continue
-            stamp = string_field(version, "created_at")
-            if stamp is None:
-                continue
-            when = _instant(stamp)
-            if since is not None and when < since:
-                continue
-            if newest is None or when > newest[0]:
-                newest = (when, str(version["id"]))
-    return newest[1] if newest else None
-
-
 def resolve_model_version(state: AuditState, ctx: StepContext) -> AuditState:
-    """Find the model version the completed run pushed; done once ``model_version_id`` is set."""
+    """Record the model version the completed run pushed; done once ``model_version_id`` is set.
+
+    Only the run's own answer counts (K2): the account's newest version may be
+    another run's -- a Studio retrain of a sibling workload -- so a run that
+    does not name one is a recorded error, never a guess from the registry.
+    """
     step = ctx.step(state)
     if step.model_version_id is not None:
         return state
     run = ctx.client.get_foundation_run(required(step.run_id, "run_id"))
-    found = (
-        string_field(run, "model_version_id")
-        or string_field(run, "pushed_version_id")
-        or _newest_version_since(ctx, string_field(run, "created_at"))
-    )
+    found = string_field(run, "model_version_id")
     if found is None:
-        step.error = "no_model_version: the run completed but no registry version was pushed"
+        step.error = "no_model_version: the server did not report the version this run pushed"
         return state
     step.model_version_id = found
     return state
@@ -215,10 +251,15 @@ __all__ = [
     "CAPACITY_RETRY_DEFAULT_SECONDS",
     "CAPACITY_STATUS",
     "REJECTED_STATUS",
+    "REPLAY_CREDITS_PER_ROW",
+    "REPLAY_MARGIN",
     "RUN_COMPLETED",
     "RUN_FAILED",
+    "RUN_SETTLED",
     "credits_spent",
+    "over_budget",
     "pick_base",
+    "projected_replay",
     "resolve_model_version",
     "submit",
     "wait_run",
