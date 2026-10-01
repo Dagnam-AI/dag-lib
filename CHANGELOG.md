@@ -155,9 +155,11 @@ and a candidate's submit names a recipe version the platform does not have.
   (which stops the run at its next publish) and says to run it again afterwards;
   under a live `--local-only` run it says to stop the run first. A mistyped
   directory is refused, never created.
-- **`dagnam audit scan` refuses to rewrite the rows of a workload a run in
-  `--out` already started** unless `--force` is passed, and `--force` drops that
-  workload's stale replay answers. Re-scanning the same export still works.
+- **`dagnam audit scan` requires a new output directory when changed rows
+  belong to a published audit**, including when `--force` is passed. Before
+  publication, `--force` retires stale run state and replay answers, preserves
+  remote resource handles for cleanup, and carries spent credits into the fresh
+  run. Re-scanning an unchanged export preserves the current run state.
 - **Requires `dagnam-contracts` 0.4.0.** Its `winner_of` skips unreliable
   candidates and is order-independent, and the JSON agreement interval is
   computed over scored rows, so it is wider than before.
