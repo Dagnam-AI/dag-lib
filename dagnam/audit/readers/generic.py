@@ -27,15 +27,22 @@ from dagnam.audit.readers.base import (
     Reader,
     Row,
     as_int,
+    field,
     optional_float,
+    optional_outcome,
     parse_ts,
-    split_prompt,
     text,
+)
+from dagnam.audit.readers.messages import (
+    content_text,
+    has_media,
+    reply_text,
+    split_prompt,
     tool_calls,
 )
 from dagnam.audit.record import TraceRecord
 
-TARGETS = tuple(field.name for field in fields(TraceRecord))
+TARGETS = tuple(f.name for f in fields(TraceRecord) if f.name != "has_media")  # read off the prompt
 REQUIRED_TARGETS = ("trace_id", "ts", "messages", "response")
 
 
@@ -49,6 +56,14 @@ def _decoded(value: object) -> object:
     return value
 
 
+def _prompt(value: object) -> object:
+    """A message list, JSON-encoded or not; a plain prompt that merely starts ``[URGENT]`` stays text."""
+    try:
+        return _decoded(value)
+    except MalformedRowError:
+        return value
+
+
 def bind(column_map: Mapping[str, str] | None) -> Reader:
     """Validate ``column_map`` and return the reader that applies it."""
     columns = {target: target for target in TARGETS}
@@ -60,27 +75,31 @@ def bind(column_map: Mapping[str, str] | None) -> Reader:
         columns[target] = source
 
     def value(row: Row, target: str) -> object:
-        raw = row.get(columns[target])
-        return None if raw == "" else raw  # an empty CSV cell is an absent value
+        raw = field(row, columns[target])
+        return None if raw == "" else raw  # an empty CSV cell (or a null) is an absent value
 
     def to_record(row: Row) -> TraceRecord:
-        system, messages = split_prompt(_decoded(_required(row, "messages")))
+        prompt = _prompt(_required(row, "messages"))
+        system, messages = split_prompt(prompt)
         explicit_system = value(row, "system")
         return TraceRecord(
             trace_id=text(_required(row, "trace_id")),
             ts=parse_ts(_required(row, "ts")),
             model=text(value(row, "model") or UNKNOWN_MODEL),
-            system=text(explicit_system) if explicit_system is not None else system,
+            system=content_text(explicit_system) if explicit_system is not None else system,
             messages=messages,
-            response=text(_required(row, "response")),
+            response=reply_text(_required(row, "response")),
             response_tool_calls=tool_calls(_decoded(value(row, "response_tool_calls"))),
             prompt_tokens=as_int(value(row, "prompt_tokens") or 0),
             completion_tokens=as_int(value(row, "completion_tokens") or 0),
+            cached_prompt_tokens=as_int(value(row, "cached_prompt_tokens") or 0),
             latency_ms=optional_float(value(row, "latency_ms")) or 0.0,
             cost_usd=optional_float(value(row, "cost_usd")),
             session_id=_optional_text(value(row, "session_id")),
-            outcome=optional_float(value(row, "outcome")),
+            outcome=optional_outcome(value(row, "outcome")),
             workload_hint=_optional_text(value(row, "workload_hint")),
+            has_media=has_media(prompt),
+            signature=_optional_text(value(row, "signature")),
         )
 
     def _required(row: Row, target: str) -> object:

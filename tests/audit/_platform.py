@@ -18,23 +18,11 @@ from typing import Any
 from dagnam_contracts.prompts import render_chat_prompt
 from tests.typing_helpers import RequestsMocker
 
-from dagnam._core.exceptions import (
-    APIError,
-    DagnamError,
-    DatasetNotFoundError,
-    DeploymentNotFoundError,
-    ModelNotFoundError,
-    ProjectNotFoundError,
-    TrainingJobNotFoundError,
-)
-from dagnam._types import JsonArray, JsonObject, QueryValue
-from dagnam.audit.cleanup import CleanupClient
+from dagnam._core.exceptions import APIError
+from dagnam._types import JsonArray, JsonObject
 from dagnam.audit.steps import PlatformClient
 
 CHAT_URL = "https://x/v1/chat/completions"
-
-DATASET_IN_USE = "Dataset is referenced by a training run and cannot be deleted"
-"""The platform's own 409 wording, from its dataset service."""
 
 
 class PublishLeak(BaseException):
@@ -111,6 +99,17 @@ class FakePlatform:
         self.patches: list[tuple[str, dict[str, Any]]] = []
         """``(candidate_id, payload)`` per ``patch_audit_candidate``."""
         self.halts: list[tuple[str, str]] = []
+        self.resumes: list[tuple[str, bool]] = []
+        """(route, K1 ``resume`` flag) per audit create / candidate / patch, in order."""
+        self.audit_halted = False
+        """The account shows the audit halted (a website cancel, or a halt a run published).
+
+        A ``resume: false`` publish is then a 409, and ``get_audit`` says ``halted``.
+        """
+        self.audit_deleted = False
+        """The audit was deleted in the account: every audit route answers the uniform 404."""
+        self.resume_route = True
+        """K1b: the platform has ``POST /audits/{id}/resume``; ``False`` is an older one (404)."""
         self.cancelled: list[str] = []
         self.deleted_audits: list[str] = []
         self.publish_errors: dict[str, list[BaseException]] = {}
@@ -247,6 +246,7 @@ class FakePlatform:
         }
 
     def get_foundation_run(self, run_id: str) -> JsonObject:
+        """The run read (K2): a completed run names the version it pushed, unless it pushed none."""
         self._log("get_foundation_run")
         self._polls[run_id] += 1
         if self._polls[run_id] <= self.run_polls:
@@ -257,27 +257,9 @@ class FakePlatform:
             "error_message": self.run_error,
             "created_at": "2026-09-06T10:00:00Z",
             "credits_estimate_max": self.credits_estimate_max,
+            **({"model_version_id": "mv-pushed"} if self.pushes_version else {}),
             **self.run_extra,
         }
-
-    def list_model_entries(self, **filter_params: QueryValue) -> JsonArray:
-        self._log("list_model_entries")
-        return [{"id": "entry-1"}, {"id": "entry-2"}, "not-an-entry"]
-
-    def list_model_versions(self, model_id: str) -> JsonArray:
-        self._log("list_model_versions")
-        if model_id != "entry-1":
-            return [
-                "junk",
-                {"id": "mv-undated"},
-                {"id": "mv-2020", "created_at": "2020-01-01T00:00:00"},
-            ]
-        if not self.pushes_version:
-            return []
-        return [
-            {"id": "mv-pushed", "created_at": "2026-09-06T10:05:00+00:00"},
-            {"id": "mv-earlier", "created_at": "2026-09-06T10:01:00+00:00"},
-        ]
 
     # -- deployments ------------------------------------------------------------
 
@@ -330,13 +312,42 @@ class FakePlatform:
         if errors:
             raise errors.pop(0)
 
+    def _resume(self, name: str, payload: JsonObject) -> None:
+        """K1: every publish says whether it resumes; only a resuming one gets past a halt."""
+        self._gone()
+        resume = bool(payload.pop("resume"))
+        self.resumes.append((name, resume))
+        if self.audit_halted and not resume:
+            raise APIError(409, "audit is halted")
+        self.audit_halted = False
+
+    def _gone(self) -> None:
+        if self.audit_deleted:
+            raise APIError(404, "Audit not found")
+
+    def get_audit(self, audit_id: str) -> JsonObject:
+        self._publish("get_audit")
+        self._gone()
+        return {"id": audit_id, "status": "halted" if self.audit_halted else "running"}
+
+    def resume_audit(self, audit_id: str) -> JsonObject:
+        """K1b: un-halt the audit; an older platform has no such route."""
+        self._publish("resume_audit")
+        if not self.resume_route:
+            raise APIError(404, "Not Found")
+        self._gone()
+        self.audit_halted = False
+        return {"id": audit_id, "status": "running"}
+
     def create_audit(self, payload: JsonObject) -> JsonObject:
         self._publish("create_audit")
+        self._resume("create_audit", payload)
         self.audits.append(payload)
         return {"id": self._next("audit")}
 
     def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
         self._publish("create_audit_candidate")
+        self._resume("create_audit_candidate", payload)
         self.candidates.append((audit_id, payload))
         return {"id": self._next("cand")}
 
@@ -344,12 +355,15 @@ class FakePlatform:
         self, audit_id: str, candidate_id: str, payload: JsonObject
     ) -> JsonObject:
         self._publish("patch_audit_candidate")
+        self._resume("patch_audit_candidate", payload)
         self.patches.append((candidate_id, payload))
         return {"id": candidate_id, "status": payload["status"]}
 
     def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
         self._publish("halt_audit")
+        self._gone()
         self.halts.append((audit_id, reason))
+        self.audit_halted = True
         return {"id": audit_id, "status": "halted", "halted_reason": reason}
 
     def cancel_audit(self, audit_id: str) -> JsonObject:
@@ -361,102 +375,6 @@ class FakePlatform:
         self._publish("delete_audit")
         self.deleted_audits.append(audit_id)
         return dict(self.receipt)
-
-
-class FakeCleanup:
-    """A platform holding ids to delete: each ``get`` raises not-found once its id is gone."""
-
-    def __init__(self, **present: list[str]) -> None:
-        self.present: dict[str, set[str]] = {
-            kind: set(present.get(kind, []))
-            for kind in ("deployment", "model", "job", "dataset", "project")
-        }
-        self.entry_of: dict[str, str] = {}
-        """model version id -> entry id (a deleted entry takes its versions with it)."""
-        self.call_log: list[tuple[str, str]] = []
-        self.sticky: set[str] = set()
-        """Ids whose delete succeeds but which a re-read still finds (a server bug to surface)."""
-        self.running: set[str] = set()
-        """Job ids the platform refuses to delete: it deletes terminal jobs only."""
-        self.held_by_job: dict[str, str] = {}
-        """dataset id -> job id: the live FK, a 409 for as long as that job exists."""
-        self.dataset_error: DagnamError | None = None
-        """Raised by ``delete_dataset`` whatever else is true (a server failure)."""
-
-    def _take(self, kind: str, item_id: str, absent: type[DagnamError]) -> None:
-        if item_id not in self.present[kind]:
-            raise absent(item_id)
-        if item_id not in self.sticky:
-            self.present[kind].discard(item_id)
-
-    def _need(self, kind: str, item_id: str, absent: type[DagnamError]) -> JsonObject:
-        if item_id not in self.present[kind]:
-            raise absent(item_id)
-        return {"id": item_id}
-
-    def get_deployment(self, deployment_id: str) -> JsonObject:
-        self.call_log.append(("get_deployment", deployment_id))
-        return self._need("deployment", deployment_id, DeploymentNotFoundError)
-
-    def delete_deployment(self, deployment_id: str) -> JsonObject | None:
-        self.call_log.append(("delete_deployment", deployment_id))
-        self._take("deployment", deployment_id, DeploymentNotFoundError)
-        return None
-
-    def get_model_version(self, version_id: str) -> JsonObject:
-        self.call_log.append(("get_model_version", version_id))
-        entry = self.entry_of.get(version_id)
-        if entry is None or entry not in self.present["model"]:
-            raise ModelNotFoundError(version_id)
-        return {"id": version_id, "entry_id": entry}
-
-    def delete_model_entry(self, model_id: str) -> None:
-        self.call_log.append(("delete_model_entry", model_id))
-        self._take("model", model_id, ModelNotFoundError)
-
-    def get_training_job(self, job_id: str) -> JsonObject:
-        self.call_log.append(("get_training_job", job_id))
-        return self._need("job", job_id, TrainingJobNotFoundError)
-
-    def bulk_delete_training_jobs(self, job_ids: list[str]) -> JsonObject:
-        """The real route answers 200 with a per-id ``errors`` list, never a 404."""
-        self.call_log.append(("bulk_delete_training_jobs", ",".join(job_ids)))
-        deleted = 0
-        errors: JsonArray = []
-        for job_id in job_ids:
-            if job_id not in self.present["job"]:
-                errors.append({"job_id": job_id, "error": "Not found or not authorized"})
-            elif job_id in self.running:
-                errors.append({"job_id": job_id, "error": "Cannot delete job with status running"})
-            else:
-                self._take("job", job_id, TrainingJobNotFoundError)
-                deleted += 1
-        return {"deleted": deleted, "errors": errors}
-
-    def get_dataset_meta(self, dataset_id: str, version: str | None = None) -> JsonObject:
-        self.call_log.append(("get_dataset_meta", dataset_id))
-        return self._need("dataset", dataset_id, DatasetNotFoundError)
-
-    def delete_dataset(self, dataset_id: str) -> None:
-        self.call_log.append(("delete_dataset", dataset_id))
-        if self.dataset_error is not None:
-            raise self.dataset_error
-        if self.held_by_job.get(dataset_id) in self.present["job"]:
-            raise APIError(409, DATASET_IN_USE)
-        self._take("dataset", dataset_id, DatasetNotFoundError)
-
-    def get_project(self, project_id: str) -> JsonObject:
-        self.call_log.append(("get_project", project_id))
-        return self._need("project", project_id, ProjectNotFoundError)
-
-    def delete_project(self, project_id: str) -> None:
-        self.call_log.append(("delete_project", project_id))
-        self._take("project", project_id, ProjectNotFoundError)
-
-
-def as_cleanup_client(platform: FakeCleanup) -> CleanupClient:
-    """The cleanup fake, typed as the protocol ``delete_audit`` takes."""
-    return platform
 
 
 def as_client(platform: FakePlatform) -> PlatformClient:

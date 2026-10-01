@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from dagnam.audit import Message, TraceRecord, Workload
+from dagnam.audit.discover import ModelUsage
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import STRUCTURE_SAMPLE
 
@@ -24,6 +25,9 @@ def make_record(
     latency_ms: float = 500.0,
     cost_usd: float | None = 0.001,
     trace_id: str = "t",
+    workload_hint: str | None = None,
+    signature: str | None = None,
+    has_media: bool = False,
 ) -> TraceRecord:
     return TraceRecord(
         trace_id=trace_id,
@@ -39,7 +43,9 @@ def make_record(
         cost_usd=cost_usd,
         session_id=None,
         outcome=None,
-        workload_hint=None,
+        workload_hint=workload_hint,
+        has_media=has_media,
+        signature=signature,
     )
 
 
@@ -97,4 +103,14 @@ def make_workload(
         sample_size=min(n, STRUCTURE_SAMPLE),
         models=models,
         record_indices=tuple(range(n)),
+        usage_by_model=tuple(
+            ModelUsage(
+                model,
+                calls=calls,
+                prompt_tokens=calls * prompt_per_call,
+                completion_tokens=calls * completion_per_call,
+            )
+            for i, model in enumerate(models)
+            for calls in [n // len(models) + (i < n % len(models))]
+        ),
     )

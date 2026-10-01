@@ -14,6 +14,7 @@ from dagnam.audit.candidates import HEAD_TUNE, HOSTED_FLOOR, SFT_SMALL, Candidat
 from dagnam.audit.cleanup import DEPLOY_PAUSED
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.prices import PriceRow, PriceTable
+from dagnam.audit.readers.messages import TOOL_CALL_NOTE
 from dagnam.audit.report import (
     SCHEMA,
     build_audit_report,
@@ -132,7 +133,9 @@ def test_report_follows_the_contract() -> None:
         "replay_cost_credits",
         "status",
         "candidate_id",
+        "unreliable",
     }
+    assert head["unreliable"] is False
     assert (head["run_id"], head["model_version_id"], head["deployment_id"]) == (
         "run-1",
         "mv-1",
@@ -204,6 +207,13 @@ def test_hosted_floor_needs_one_priced_model_with_a_variant() -> None:
     assert hosted(("nope",))["base"] is None  # not in the table
     ghost = hosted(("orphan",))
     assert (ghost["base"], ghost["serving_cost_usd_month"]["value"]) == ("ghost", None)
+
+
+@pytest.mark.parametrize("model", ["BIG", "big-2024-07-18", "big-20240718", "openrouter:big"])
+def test_a_dated_or_namespaced_model_id_finds_its_hosted_floor(model: str) -> None:
+    """The report finds the row the scan priced the workload by, not only an exact key."""
+    js = build_audit_report(_state(), _scan((model,)), price_table=TABLE)
+    assert js["workloads"][0]["candidates"][0]["base"] == "mini"
 
 
 def test_winner_uses_the_recorded_floor_and_a_custom_base_url() -> None:
@@ -312,3 +322,111 @@ def test_switch_snippet_names_base_url_model_and_key_ref() -> None:
     assert "from openai import OpenAI" in snippet
     assert "<deployment key" not in snippet
     assert 'base_url="https://x/v1"' in render_switch_snippet("d", "k", base_url="https://x/v1")
+
+
+# ------------------------------------------------ audit hardening: P2/K5, B11, P9, P10, C-F10
+
+
+def test_an_unreliable_candidate_never_wins_but_still_shows() -> None:
+    """P2: 30 of 200 replay calls failed; agreement over the 170 that answered clears the floor.
+
+    That used to be the REPLACE winner, with a switch block pointing a customer
+    at an endpoint that fails one call in seven.
+    """
+    state = _state()
+    state.workloads["w1"][HEAD] = _scored(
+        (0.98, 1.0), error="unreliable: 30 of 200 replay calls failed"
+    )
+    js = build_audit_report(state, _scan(), price_table=TABLE)
+    w1 = js["workloads"][0]
+    head = w1["candidates"][1]
+    assert (head["status"], head["unreliable"]) == ("unreliable", True)
+    assert (w1["winner"], w1["switch"]) == (None, None)
+    md = render_markdown(js)
+    assert "### w1 - NOT YET" in md
+    assert "head_tune is unreliable: more than 10% of its replay calls failed" in md
+
+
+def test_a_workload_whose_candidate_never_ran_says_so_not_that_it_missed_the_floor() -> None:
+    """B11: a deploy that failed, or a run still training, measured nothing yet."""
+    state = _state()
+    state.workloads["w1"][HEAD] = StepState(run_id="run-1", run_status="queued")
+    state.workloads["w2"][SFT] = StepState(
+        run_id="run-2", run_status="completed", error="deploy_failed: no gpu"
+    )
+    md = render_markdown(build_audit_report(state, _scan(), price_table=TABLE))
+    assert "No candidate cleared the floor" not in md
+    w1 = md[md.index("### w1") : md.index("### w2")]
+    assert "No candidate was measured in this audit (head_tune: queued)." in w1
+    w2 = md[md.index("### w2") : md.index("## Switch")]
+    assert "No candidate was measured in this audit (sft_small: deploy_failed)." in w2
+
+
+def test_savings_count_only_a_replace_and_never_go_negative() -> None:
+    """P9: spend less the winner's serving less maintenance -- for a REPLACE, and only there."""
+    scan = _scan()
+    js = build_audit_report(_state(), scan, price_table=TABLE)
+    w1, w2, w3, _ = js["workloads"]
+    winner_cost = w1["winner"]["cost_usd_month"]
+    assert w1["verdict"]["savings_usd_month"] == pytest.approx(4_000.0 - winner_cost - 50.0)
+    assert w2["verdict"]["savings_usd_month"] == 0.0  # NOT YET: no winner
+    assert w3["verdict"]["savings_usd_month"] == 0.0  # KEEP
+
+    scan["workloads"][0]["verdict"]["status"] = "too_few_samples"  # KEEP, winner or not
+    kept = build_audit_report(_state(), scan, price_table=TABLE)["workloads"][0]
+    assert kept["winner"] is not None
+    assert kept["verdict"]["savings_usd_month"] == 0.0
+
+    scan = _scan()
+    scan["workloads"][0]["cost_usd_month"] = 20.0  # cheaper than serving it plus maintenance
+    scan["workloads"][0]["verdict"]["status"] = "candidate"
+    thin = build_audit_report(_state(), scan, price_table=TABLE)["workloads"][0]
+    assert thin["verdict"]["savings_usd_month"] == 0.0
+
+
+def test_each_candidate_is_held_to_its_own_class_floor() -> None:
+    """P10: a JSON candidate at 0.955 passes its 0.95 floor though the audit's header says 0.97."""
+    state = _state()
+    state.workloads["w2"][SFT] = _scored(
+        (0.955, 0.99),
+        deployment_id="dep-2",
+        key_ref="w2/sft_small",
+        agreement={
+            "metric": "field_f1",
+            "value": 0.97,
+            "ci95": [0.955, 0.99],
+            "n": 200,
+            "floor": 0.95,
+            "passes_floor": True,
+        },
+    )
+    w2 = build_audit_report(state, _scan(), price_table=TABLE)["workloads"][1]
+    assert w2["winner"] is not None
+    assert w2["winner"]["deployment_id"] == "dep-2"
+
+
+def test_a_gpu_student_with_no_output_tokens_has_no_price_and_cannot_win() -> None:
+    """C-F10: an export with a cost but no token usage priced the GPU student at $0."""
+    scan = _scan()
+    scan["workloads"][1]["tokens"]["completion"] = 0
+    state = _state()
+    state.workloads["w2"][SFT] = _scored((0.99, 1.0), deployment_id="dep-2")
+    w2 = build_audit_report(state, scan, price_table=TABLE)["workloads"][1]
+    assert w2["candidates"][1]["serving_cost_usd_month"]["value"] is None
+    assert w2["winner"] is None
+
+
+def test_a_tool_call_workload_s_switch_says_what_the_endpoint_returns() -> None:
+    """P4: the replacement answers with the call's name and arguments as message.content."""
+    scan = _scan()
+    scan["workloads"][0]["response_mode"] = "tool_call"
+    md = render_markdown(build_audit_report(_state(), scan, price_table=TABLE))
+    switch = md[md.index("## Switch") : md.index("## Artifacts")]
+    # The exact sentence the website's Markdown download renders too.
+    assert f"\n{TOOL_CALL_NOTE}\n" in switch
+    assert TOOL_CALL_NOTE == (
+        "This workload answers with tool calls: the replacement returns the call as"
+        ' {"name", "arguments"} JSON (an ordered list of them when the teacher made several)'
+        " in message.content, not in tool_calls."
+    )
+    assert switch.count("answers with tool calls") == 1

@@ -50,6 +50,7 @@ def test_start_publishes_every_workload_and_records_the_audit_id(
         "ratio": 12.0,
         "pii_counts": {},
         "selected": True,
+        "response_mode": "text",
     }
     assert w2["selected"] is False  # scanned, but not one of the workloads this run took
 
@@ -217,3 +218,13 @@ def test_a_console_that_cannot_print_the_link_does_not_end_the_run(
 
     assert state.audit_id == "audit-1"
     assert "the audit's link failed" in caplog.text
+
+
+def test_a_404_on_the_create_is_a_warning_not_a_deleted_audit(
+    publisher: Publisher, platform: FakePlatform, audit_dir: Path
+) -> None:
+    """No audit exists yet, so a 404 here (a project the key cannot see) ends nothing."""
+    platform.publish_errors["create_audit"] = [APIError(404, "Project not found")]
+    start(publisher, audit_dir)
+    assert publisher.stopped is None
+    assert "get_audit" not in platform.call_log

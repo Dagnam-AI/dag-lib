@@ -182,3 +182,45 @@ def test_optional_row_fields_are_optional(tmp_path: Path) -> None:
         ' "output_per_m": 2, "cached_input_per_m": 0.5, "cheaper_variant": "m"}}}'
     )
     assert PriceTable.load(path).rows["m"] == PriceRow("m", 1.0, 2.0, 0.5, "m")
+
+
+def test_cache_reads_are_priced_at_the_cached_input_rate() -> None:
+    table = PriceTable.load(None)
+    # gpt-5.4: $2.50 input, $0.25 cached input, $15 output per million tokens. A call
+    # with 9,900 of its 10,000 prompt tokens cached was priced 9.1x its list price.
+    per_call = (100 * 2.5 + 9_900 * 0.25 + 1 * 15.0) / ONE_MILLION
+    assert table.cost("gpt-5.4", 10_000, 1, cached_prompt_tokens=9_900) == pytest.approx(per_call)
+    # More cached tokens than prompt tokens is a bad count: never a negative price.
+    assert table.cost("gpt-5.4", 10, 0, cached_prompt_tokens=50) == pytest.approx(10 * 0.25 / 1e6)
+    no_cache_rate = PriceTable("t", date(2026, 9, 6), {"m": PriceRow("m", 1.0, 2.0, None, None)})
+    assert no_cache_rate.cost("m", ONE_MILLION, 0, cached_prompt_tokens=ONE_MILLION) == 1.0
+
+
+@pytest.mark.parametrize(
+    ("model", "priced_like"),
+    [
+        # Bedrock cross-region inference profiles beyond us./eu.
+        ("global.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        ("apac.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        ("jp.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        ("au.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        ("ca.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"),
+        # Vertex: the @-dated Claude id and a full publisher resource path.
+        ("claude-sonnet-4-5@20250929", "claude-sonnet-4-5-20250929"),
+        (
+            "projects/p/locations/us-central1/publishers/google/models/gemini-2.5-flash",
+            "gemini-2.5-flash",
+        ),
+        ("publishers/anthropic/models/claude-sonnet-4-5@20250929", "claude-sonnet-4-5-20250929"),
+        # Gemini's stable-version suffix and a Fireworks account path.
+        ("gemini-2.5-flash-001", "gemini-2.5-flash"),
+        ("accounts/fireworks/models/deepseek-v4-pro", "deepseek-v4-pro"),
+    ],
+)
+def test_bedrock_vertex_and_fireworks_ids_price_as_their_row(model: str, priced_like: str) -> None:
+    # Every one of these was unknown_cost: the teacher looked free to audit.
+    table = PriceTable.load(None)
+    assert table.cost(model, ONE_MILLION, ONE_MILLION) is not None
+    assert table.cost(model, ONE_MILLION, ONE_MILLION) == table.cost(
+        priced_like, ONE_MILLION, ONE_MILLION
+    )

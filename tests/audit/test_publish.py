@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.audit._platform import FakePlatform
-from tests.audit._publish import start
+from tests.audit._publish import SCAN, start
 
 from dagnam._core.exceptions import APIError
 from dagnam.audit.candidates import HEAD_TUNE, SFT_SMALL
 from dagnam.audit.economics import serving_cost_usd_month
 from dagnam.audit.publish import STATUS_BY_STEP, Publisher
-from dagnam.audit.state import StepState
+from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.structure import StructureClass
 
 if TYPE_CHECKING:
@@ -262,6 +262,22 @@ def test_a_json_candidate_is_priced_as_the_student_that_serves_it(
     assert platform.patches[1][1]["serving_cost_usd_month"] == serving_cost_usd_month(
         "gpu-small-llm", calls_per_day=100.0, completion_tokens=6_000, calls=3_000
     )
+
+
+def test_a_json_candidate_of_an_export_without_token_counts_has_no_price(
+    platform: FakePlatform,
+    audit_dir: Path,
+    state: AuditState,
+    make_ctx: Callable[..., StepContext],
+) -> None:
+    """C-F10: a cost but no usage left 0 completion tokens, and the GPU student at $0."""
+    publisher = Publisher(platform, state)
+    scan = {**SCAN, "workloads": [dict(w) for w in SCAN["workloads"]]}
+    scan["workloads"][1]["tokens"] = {"prompt": 300_000, "completion": 0}
+    publisher.start(audit_dir, scan, ["w2"], floor=0.97, max_credits=500, sdk_version="9")
+    ctx = make_ctx(workload_id="w2", spec=SFT_SMALL, structure_class=StructureClass.JSON_OBJECT)
+    publisher.step(ctx, "replay_and_score", StepState(scored=True))
+    assert "serving_cost_usd_month" not in platform.patches[1][1]
 
 
 # --------------------------------------------- nothing in the publisher can raise

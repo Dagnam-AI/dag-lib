@@ -11,8 +11,8 @@ the same winner from the same points.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import math
 import time
@@ -20,9 +20,11 @@ from typing import Any
 
 from dagnam_contracts.audit.verdict import CandidateResult, Winner, frontier
 import requests
+from requests.adapters import HTTPAdapter
 
 from dagnam._core._retry import parse_retry_after
 from dagnam._types import JsonValue
+from dagnam.audit.steps import Answer
 
 CHAT_TIMEOUT_SECONDS = 180.0
 """Per-call ceiling; a serverless replica's cold start is inside it."""
@@ -88,7 +90,7 @@ def percentile(values: Sequence[float], q: float) -> float | None:
 
 
 def _completion(
-    endpoint: Endpoint, messages: JsonValue, timeout: float
+    session: requests.Session, endpoint: Endpoint, messages: JsonValue, timeout: float
 ) -> tuple[str | None, float]:
     """The answer, and the milliseconds the round trip that produced it took.
 
@@ -102,7 +104,7 @@ def _completion(
     for attempt in range(RATE_LIMIT_RETRIES):
         started = time.perf_counter()
         try:
-            response = requests.post(
+            response = session.post(
                 f"{endpoint.base_url}/v1/chat/completions",
                 json={"model": endpoint.model, "messages": messages},
                 headers={"Authorization": f"Bearer {endpoint.api_key}"},
@@ -127,33 +129,56 @@ def _completion(
     return None, 0.0
 
 
+def latency_of(results: Sequence[Answer]) -> Latency:
+    """Percentiles over the answered calls; every call, answered or not, counts toward ``calls``."""
+    timings = [ms for content, ms in results if content is not None]
+    return Latency(
+        p50_ms=percentile(timings, 0.5),
+        p95_ms=percentile(timings, 0.95),
+        calls=len(results),
+        errors=len(results) - len(timings),
+    )
+
+
 def replay_holdout(
     endpoint: Endpoint,
     rows: Sequence[Mapping[str, Any]],
     *,
     concurrency: int = 4,
     timeout: float = CHAT_TIMEOUT_SECONDS,
+    on_result: Callable[[int, str | None, float], None] | None = None,
 ) -> tuple[list[str | None], Latency]:
     """Send each row's ``messages`` to the endpoint; ``None`` where the call failed.
 
     Results keep the rows' order. At most ``concurrency`` calls are in flight,
     so the replay never becomes a load test of a serverless replica.
+    ``on_result(index, answer, ms)`` hears each row the moment it lands, so a
+    caller can keep what an interrupted replay already paid for; an interrupt
+    cancels the rows not yet sent and propagates. Every call goes through one
+    keep-alive pool of ``concurrency`` connections (R3-20), so a call's time is
+    the model's and the gateway's, not a fresh TCP and TLS handshake.
     """
+    workers = max(1, concurrency)
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=workers))
+    session.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=workers))
 
-    def call(row: Mapping[str, Any]) -> tuple[str | None, float]:
-        return _completion(endpoint, row["messages"], timeout)
+    def call(row: Mapping[str, Any]) -> Answer:
+        return _completion(session, endpoint, row["messages"], timeout)
 
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        results = list(pool.map(call, rows))
-    answers = [content for content, _ in results]
-    timings = [ms for content, ms in results if content is not None]
-    latency = Latency(
-        p50_ms=percentile(timings, 0.5),
-        p95_ms=percentile(timings, 0.95),
-        calls=len(results),
-        errors=len(results) - len(timings),
-    )
-    return answers, latency
+    results: list[Answer] = [(None, 0.0)] * len(rows)
+    with session, ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(call, row): index for index, row in enumerate(rows)}
+        try:
+            for future in as_completed(futures):
+                index = futures[future]
+                results[index] = future.result()
+                if on_result is not None:
+                    on_result(index, *results[index])
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+    return [content for content, _ in results], latency_of(results)
 
 
 __all__ = [
@@ -162,11 +187,13 @@ __all__ = [
     "RATE_LIMIT_SLEEP_MAX_SECONDS",
     "RATE_LIMIT_SLEEP_SECONDS",
     "TRANSIENT_STATUSES",
+    "Answer",
     "CandidateResult",
     "Endpoint",
     "Latency",
     "Winner",
     "frontier",
+    "latency_of",
     "percentile",
     "replay_holdout",
 ]

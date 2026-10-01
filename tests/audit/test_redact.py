@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+import json
+
 from dagnam_contracts.hygiene import PII_CODES
 
-from dagnam.audit.redact import PII_POLICY, RedactStats, redact_rows
+from dagnam.audit import Message, TraceRecord
+from dagnam.audit.redact import PII_POLICY, RedactStats, redact_records, redact_rows
 
 
 def test_policy_redacts_every_class_the_contract_knows() -> None:
@@ -34,7 +38,7 @@ def test_nested_chat_messages_are_redacted_and_rows_never_dropped() -> None:
     )
     assert redacted[1] == rows[1]
     assert stats == RedactStats(
-        counts={"PII_EMAIL": 1, "PII_PHONE": 1, "PII_PAYMENT_CARD": 0, "PII_NATIONAL_ID": 0},
+        counts={**dict.fromkeys(PII_CODES, 0), "PII_EMAIL": 1, "PII_PHONE": 1},
         pass_list=PII_CODES,
         rows_changed=1,
     )
@@ -44,3 +48,51 @@ def test_input_rows_are_not_mutated() -> None:
     rows = [{"input": "a@b.co", "label": "x"}]
     redact_rows(rows)
     assert rows == [{"input": "a@b.co", "label": "x"}]
+
+
+def test_secrets_are_always_redacted() -> None:
+    # P3: a key in a system prompt reached every uploaded row's system turn.
+    rows, stats = redact_rows(
+        [
+            {
+                "messages": [
+                    {"role": "system", "content": "Auth: Bearer sk-live-AbCdEfGhIjKlMnOpQrStUvWx"}
+                ]
+            }
+        ]
+    )
+    assert rows[0]["messages"][0]["content"] == "Auth: Bearer <SECRET>"
+    assert stats.counts["PII_SECRET"] == 1
+    assert "PII_SECRET" in PII_POLICY
+
+
+def test_a_json_target_stays_json_when_a_number_in_it_is_redacted() -> None:
+    # A Luhn-valid card as an unquoted JSON number became
+    # ``"card": [REDACTED:PII_PAYMENT_CARD]`` -- no longer JSON, so unscoreable.
+    records = [
+        TraceRecord(
+            trace_id="t",
+            ts=datetime(2026, 8, 1, tzinfo=UTC),
+            model="m",
+            system="Extract the contact as JSON.",
+            messages=(Message("user", "hi"),),
+            response=json.dumps({"card": 4111111111111111, "email": "a@b.co", "n": 7}),
+            response_tool_calls=(),
+            prompt_tokens=1,
+            completion_tokens=1,
+            latency_ms=1.0,
+            cost_usd=None,
+            session_id=None,
+            outcome=None,
+            workload_hint=None,
+        )
+    ]
+
+    (redacted,), stats = redact_records(records)
+
+    assert json.loads(redacted.response) == {
+        "card": "[REDACTED:PII_PAYMENT_CARD]",
+        "email": "[REDACTED:PII_EMAIL]",
+        "n": 7,
+    }
+    assert stats.rows_changed == 1

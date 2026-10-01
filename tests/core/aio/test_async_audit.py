@@ -84,3 +84,21 @@ async def test_an_expired_key_is_an_auth_error(
     mock.delete(f"{AUDITS}/a1").mock(return_value=httpx.Response(401, json={"detail": "nope"}))
     with pytest.raises(AuthError):
         await client.delete_audit("a1")
+
+
+async def test_create_audit_sends_an_idempotency_key(
+    client: AsyncDagnamClient, mock: respx.MockRouter
+) -> None:
+    """K3: the async twin keys the create the same way."""
+    route = mock.post(AUDITS).mock(return_value=httpx.Response(201, json={"id": "a1"}))
+    await client.create_audit({"project_id": "p1"})
+    assert route.calls.last.request.headers.get("Idempotency-Key")
+
+
+async def test_resume_and_read_an_audit(client: AsyncDagnamClient, mock: respx.MockRouter) -> None:
+    mock.post(f"{AUDITS}/a1/resume").mock(
+        return_value=httpx.Response(200, json={"id": "a1", "status": "running"})
+    )
+    mock.get(f"{AUDITS}/a1").mock(return_value=httpx.Response(200, json={"status": "halted"}))
+    assert (await client.resume_audit("a1"))["status"] == "running"
+    assert (await client.get_audit("a1"))["status"] == "halted"

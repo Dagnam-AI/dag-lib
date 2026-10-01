@@ -399,17 +399,49 @@ dagnam agent install          # install the Agent Skill into Claude Code / Codex
 dagnam agent uninstall --all
 ```
 
+Rescanning the same export preserves a run's progress. A changed export requires a new
+`--out`, or `--force` for a local-only run: the old candidates are retired for cleanup,
+and subsequent training and scoring start fresh. Once an audit has been published,
+changed rows always require a new `--out`, even with `--force`.
+
 **`audit scan` prices the providers your agent actually calls.** The bundled price table
 (`dagnam/audit/prices/2026-09.json`, copied from each vendor's own pricing page on the table's
 `as_of` date) carries OpenAI, Anthropic, Google Gemini, Mistral, DeepSeek, xAI and Cohere rows,
 and a model id is matched against it after normalization: lowercased, with the provider or
 region namespace stripped (`anthropic/claude-sonnet-5`, `models/gemini-2.5-flash`,
-`openrouter:mistral/mistral-large-latest`, `us.anthropic.claude-...`), a floating `-latest`
-dropped, and -- only when the exact id has no row of its own -- a trailing release date or
-Bedrock version suffix dropped too (`gpt-4o-2024-08-06`, `...-v1:0`). Token usage is read in
-every vendor's spelling, so Anthropic's `input_tokens` plus its cache-read counts, Gemini's
-`promptTokenCount` and LangSmith's `usage_metadata.input_tokens` are counted exactly like
-OpenAI's `prompt_tokens`. A model the table does not list still prices to nothing, never a guess.
+`openrouter:mistral/mistral-large-latest`, `us.`/`eu.`/`global.`/`apac.anthropic.claude-...`),
+the model of a resource path kept (`projects/.../publishers/google/models/gemini-2.5-flash`,
+`accounts/fireworks/models/...`), a floating `-latest` dropped, and -- only when the exact id
+has no row of its own -- a trailing release date, Vertex `@date`, Gemini `-001` or Bedrock
+version suffix dropped too (`gpt-4o-2024-08-06`, `claude-sonnet-4-5@20250929`, `...-v1:0`).
+Token usage is read in every vendor's spelling, so Anthropic's `input_tokens` plus its
+cache-read counts, Gemini's `promptTokenCount` and LangSmith's `usage_metadata.input_tokens`
+are counted exactly like OpenAI's `prompt_tokens`, and cache reads are priced at the cached
+rate. A model the table does not list still prices to nothing, never a guess, and an export
+with neither a cost nor token counts is `unknown_cost`, never a free teacher.
+
+**`audit scan` reads what your tools export, and streams it.** Langfuse (the observations API,
+its blob export and its UI CSV/JSON exports), LangSmith runs, OpenAI Batch and stored
+completions -- Chat Completions or the Responses API -- and any JSONL, JSON or CSV file through
+`--source jsonl|csv --map target=column`, where a column may be a dotted path into a nested
+record (`--map messages=input.inputBodyJson.messages` reads a Bedrock invocation log). Files
+may be gzipped; timestamps may be ISO text or an epoch in seconds, milliseconds, microseconds
+or nanoseconds. The export is streamed, not held in memory (a `.json` document, one JSON
+value, is the exception): one pass discovers the workloads, and two more derive the rows of
+the ones worth auditing. A workload is keyed by the name you gave the step
+(`metadata.workload`, or a registered prompt's name) when there is one, else by its system
+prompt's template plus the name of the request's response schema or forced tool (never the
+tools it offers, which an agent changes from call to call), else, without a system prompt, by
+the shape of its answers. A tool-calling workload is audited on its calls, as
+`{"name", "arguments"}` JSON (a list when the teacher made several), and the scan says what its
+replacement returns; reasoning (`<think>`, thinking blocks, Gemini thoughts) is never taken
+for the answer; a workload whose calls carry images, audio or files is not audited. When the
+export holds a sample of your traffic, `--sample-rate 0.1` scales volume and spend back up.
+Each candidate trains on at most 5,000 rows (a sample by label or route), so it finishes
+inside its recipe's one-hour limit; the scan report says when a workload was sampled. An SFT
+candidate's student reads 2,048 tokens, so training rows the scan estimates are longer are
+left out and counted, and a workload left with fewer than 32 is `too_few_samples`. The
+estimate is within about 10% of the student's own tokenizer on English, JSON and code.
 
 **Watch it on the website.** `dagnam audit run` mirrors the audit into your account as it
 goes -- the scan's workloads (ids, verdicts, spend, masked template excerpts and the redaction
@@ -419,14 +451,30 @@ finishes. When the audit is created the run prints where to watch it
 (`published: <audit-id> — watch it at https://dagnam.ai/audits/<audit-id>`), and
 `dagnam audit status ./audit` repeats the link. The derived rows, the raw traces and the
 deployment keys stay on your machine; the run itself never depends on the upload, and a publish
-that fails is retried with the next step rather than stopping the audit. A run that stopped
-short is published as halted, and the account resumes it by itself when the next `dagnam audit
-run` publishes its first step. `dagnam audit run ./audit --local-only` publishes nothing;
-`dagnam audit cancel ./audit` stops the jobs and pauses the endpoints, writing `cancelled.json`;
-and `dagnam audit delete ./audit` deletes everything the run created on the platform, writes
-`deleted.json`, and then removes the local `workloads/` rows and the deployment keys — the
-audit's own files (`state.json`, `scan-report.json`, `audit-report.json`, `deleted.json`) stay
-where they are.
+that fails is retried with the next step, at the end of the run, or on the next `dagnam audit
+run`, rather than stopping the audit. A run that stopped short is published as halted, and each
+`dagnam audit run` resumes its audit when it starts, before it waits on anything. Cancel or
+Delete on the audit page stops a live run at its next step: the platform stops the jobs and
+endpoints it knows about at once, the run's next publish meets the halt (or the missing
+audit), and the run halts as `cancelled` (or `deleted`) and starts nothing more.
+`dagnam audit run ./audit --local-only` publishes nothing;
+`dagnam audit cancel ./audit` stops the jobs and pauses the endpoints, writing `cancelled.json`
+(under a live published run it cancels in the account and asks you to run it again once the
+run has stopped); and `dagnam audit delete ./audit` deletes everything the run created on the
+platform (a run still going is cancelled first; a project the platform keeps because it holds
+your own work is left alone), writes `deleted.json`, and then removes the local `workloads/`
+rows and the deployment keys, even when the platform blocked something — the audit's own files
+(`state.json`, `scan-report.json`, `audit-report.json`, `deleted.json`) stay where they are,
+and running it again retries whatever was blocked. Both act on every artifact
+`state.json` records, including any the account never heard about, and each receipt row is
+`stopped`/`deleted`, `already_absent`, or `blocked` with the platform's reason.
+
+**`--max-credits` is a hard ceiling.** `dagnam audit run` never starts a training run or a
+holdout replay that could take the credits spent past it: a run is budgeted at the most its
+recipe can charge (120 credits) and a replay at one credit per holdout row plus 10%. Without
+the flag the ceiling is what the audit already spent plus the plan's estimate for what is
+left, rounded up to 100, printed in the listing you confirm. A candidate whose replay saw more than 10% of its calls fail is reported
+`unreliable` and never becomes the winner.
 
 Run `dagnam --help` or `dagnam <command> --help` for command-specific options.
 

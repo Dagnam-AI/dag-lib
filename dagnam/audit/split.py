@@ -4,15 +4,26 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+import math
+from typing import Protocol
 
-from dagnam.audit.record import TraceRecord
+
+class Stamped(Protocol):
+    """A row's record, as far as the split reads it: when it happened, and its session."""
+
+    @property
+    def ts(self) -> datetime: ...
+
+    @property
+    def session_id(self) -> str | None: ...
+
 
 # Spec U3: the last 20% of rows by time is ``eval_holdout``, the earlier 80% ``train``.
 HOLDOUT_SHARE = 0.2
 
 
 def time_split(
-    records_in_row_order: Sequence[TraceRecord], *, holdout_share: float = HOLDOUT_SHARE
+    records_in_row_order: Sequence[Stamped], *, holdout_share: float = HOLDOUT_SHARE
 ) -> dict[str, list[int]]:
     """Split row indices into ``train`` and ``eval_holdout`` by ``ts``.
 
@@ -40,12 +51,45 @@ def time_split(
     return {"train": train, "eval_holdout": sorted(holdout)}
 
 
+def cap_train(
+    train: Sequence[int],
+    strata: Sequence[str],
+    order_keys: Sequence[str],
+    *,
+    limit: int,
+    max_strata: int | None = None,
+) -> list[int]:
+    """At most ``limit`` training rows, sampled proportionally by content.
+
+    Keep each class when the cap can fit all strata. Remove ceiling surplus
+    from the most overrepresented class; too many strata are sampled together.
+    """
+    if len(train) <= limit:
+        return list(train)
+    by_stratum: dict[str, list[int]] = {}
+    for i in train:
+        by_stratum.setdefault(strata[i], []).append(i)
+    if len(by_stratum) > limit or (max_strata is not None and len(by_stratum) > max_strata):
+        by_stratum = {"": list(train)}
+    quotas = {key: math.ceil(limit * len(rows) / len(train)) for key, rows in by_stratum.items()}
+    while sum(quotas.values()) > limit:
+        key = max(
+            (key for key in quotas if quotas[key] > 1),
+            key=lambda key: (quotas[key] * len(train) - limit * len(by_stratum[key]), key),
+        )
+        quotas[key] -= 1
+    kept: list[int] = []
+    for key, rows in by_stratum.items():
+        kept += sorted(rows, key=lambda i: order_keys[i])[: quotas[key]]
+    return sorted(kept)
+
+
 def split_boundary(
-    records_in_row_order: Sequence[TraceRecord], split: Mapping[str, Sequence[int]]
+    records_in_row_order: Sequence[Stamped], split: Mapping[str, Sequence[int]]
 ) -> datetime | None:
     """The earliest holdout timestamp, or ``None`` when the holdout is empty."""
     holdout = split["eval_holdout"]
     return min(records_in_row_order[i].ts for i in holdout) if holdout else None
 
 
-__all__ = ["HOLDOUT_SHARE", "split_boundary", "time_split"]
+__all__ = ["HOLDOUT_SHARE", "cap_train", "split_boundary", "time_split"]

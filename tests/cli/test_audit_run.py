@@ -16,8 +16,10 @@ import pytest
 from tests.audit._platform import Clock, FakePlatform, json_row, label_row, serve_chat, teacher
 
 from dagnam.audit.orchestrate import run_audit
+from dagnam.audit.readers.messages import TOOL_CALL_NOTE
+from dagnam.audit.state import lock_audit
 from dagnam.audit.workspace import write_workload
-from dagnam.cli.audit_run import PUBLISH_LINE
+from dagnam.cli.audit_run import PUBLISH_LINE, _render_run
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, RequestsMocker, StrCapture
@@ -142,7 +144,11 @@ def test_run_lists_exactly_what_will_be_uploaded_and_needs_yes(
     assert "redactions: none found in 0 rows" in listing
     assert "w3" not in listing
     assert "  to: a new private project 'workload-audit-audit'" in listing
-    assert "credit ceiling: 500" in captured.out
+    # P5: no --max-credits, so the ceiling is the plan's own estimate rounded up to
+    # 100 -- per workload a 120-credit training ceiling plus 5 for a 4-row replay.
+    assert (
+        "credit ceiling: 300 (the plan's estimate, rounded up to 100; --max-credits sets your own)"
+    ) in captured.out
     assert "refusing to upload without confirmation on a non-interactive terminal" in captured.err
     assert f"dagnam audit run {prepared_dir} --yes" in captured.err
     assert platform.call_log == []  # nothing left the machine
@@ -152,12 +158,12 @@ def test_run_declined_at_the_prompt_uploads_nothing(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, tty: None, capsys: StrCapture
 ) -> None:
     with mock.patch("builtins.input", return_value="no"), pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "run", str(prepared_dir), "--workloads", "w1", "--max-credits", "50"])
+        run_cli(["audit", "run", str(prepared_dir), "--workloads", "w1", "--max-credits", "130"])
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert "w1 (enum_label)" in captured.out
     assert "w2" not in captured.out
-    assert "credit ceiling: 50" in captured.out
+    assert "credit ceiling: 130 (training and the metered holdout replay)" in captured.out
     assert "confirmation not received" in captured.err
     assert platform.call_log == []
 
@@ -188,12 +194,13 @@ def test_run_confirmed_runs_the_frontier_and_writes_the_report(
     assert f"Report: {prepared_dir / 'audit-report.md'}" in out
     assert "  to: existing project" not in out  # the project was created by this run
 
-    # A second run resumes: the listing names the existing project and no platform call is made.
+    # A second run resumes: the listing names the existing project, and the one
+    # platform call is the resume of its audit (K1b) -- no step moved.
     calls = list(platform.call_log)
     assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--json"]) == 0
     printed = json.loads(capsys.readouterr().out.partition("\n{")[2].join(["{", ""]))
     assert printed["workloads"][0]["winner"]["kind"] == "head_tune"
-    assert platform.call_log == calls
+    assert platform.call_log == [*calls, "resume_audit"]
 
 
 def test_run_json_listing_then_report(
@@ -212,16 +219,17 @@ def test_run_halted_exits_nonzero_with_the_reason(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
 ) -> None:
     with pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert "audit halted: budget" in captured.err
     assert f"dagnam audit status {prepared_dir}" in captured.err
     assert (prepared_dir / "audit-report.md").exists()
-    assert platform.submits == 1  # w1 was submitted; its 100-credit estimate halts w2
+    # w1 fits (a 120-credit ceiling and a 5-credit replay); after its 104 credits, w2 does not.
+    assert platform.submits == 1
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50", "--json"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130", "--json"])
     assert exc.value.code == 1
     out = capsys.readouterr().out
     error = json.loads(out[out.index("\n{") + 1 :])
@@ -237,7 +245,10 @@ def test_run_no_wait_returns_early_and_says_how_to_resume(
     assert platform.submits == 1
     assert "get_foundation_run" not in platform.call_log
     assert f"Next: dagnam audit run {prepared_dir} --yes" in captured.err
-    assert "w1: NOT YET" in captured.out
+    # B11: a run still training is not a candidate that missed the floor.
+    assert "w1: NOT YET - No candidate was measured in this audit (head_tune: queued)." in (
+        captured.out
+    )
 
 
 def test_run_refuses_unknown_workloads_missing_scan_and_nothing_to_run(
@@ -327,10 +338,10 @@ def test_run_publishes_the_scan_the_candidates_and_every_step(
     assert scored["replay_cost_credits"] == 4.0
     assert platform.halts == []
 
-    # A resumed run republishes nothing: the audit exists and no step moved.
+    # A resumed run republishes nothing but its resume: the audit exists and no step moved.
     calls = list(platform.call_log)
     assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 0
-    assert platform.call_log == calls
+    assert platform.call_log == [*calls, "resume_audit"]
 
 
 def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
@@ -367,20 +378,32 @@ def test_run_halted_tells_the_account_why(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
 ) -> None:
     with pytest.raises(SystemExit):
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
     assert platform.halts == [("audit-1", "budget")]
     # w1 submitted; the submit w2's budget check refused is not published as a
     # step that happened, so exactly one `submit` reached the account.
     assert [body["step"] for _, body in platform.patches].count("submit") == 1
 
 
-def test_a_resumed_run_that_stops_again_the_same_way_does_not_repeat_the_halt(
+def test_a_resumed_run_that_stops_again_publishes_its_own_halt(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
 ) -> None:
-    """The account still shows the first halt; the server resumes it on the next applied publish."""
+    """K1b: the second run un-halted the audit when it started, so its halt is a new one."""
     for _ in range(2):
         with pytest.raises(SystemExit):
-            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "50"])
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
+    assert platform.halts == [("audit-1", "budget"), ("audit-1", "budget")]
+    assert platform.call_log.count("resume_audit") == 1  # the first run created the audit
+
+
+def test_on_an_older_platform_a_run_that_stops_again_does_not_repeat_the_halt(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
+) -> None:
+    """No resume route and nothing published before the halt: the account still shows the first."""
+    platform.resume_route = False
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
     assert platform.halts == [("audit-1", "budget")]
 
 
@@ -467,3 +490,35 @@ def test_a_run_that_publishes_late_backfills_the_steps_it_already_took(
         "replay_and_score",
     ]
     assert head[-1]["status"] == "scored"
+
+
+def test_run_refuses_a_directory_another_command_holds(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
+) -> None:
+    """B13: a second `audit run` over one directory would submit every run a second time."""
+    with lock_audit(prepared_dir), pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--json"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    error = json.loads(out[out.index("\n{") + 1 :])
+    assert "is in use by another `dagnam audit` command" in error["error"]
+    assert platform.call_log == []
+
+
+def test_a_tool_call_winner_is_told_what_its_replacement_returns(tmp_path: Path) -> None:
+    # P4 / N3: the same sentence the scan warning and the report's switch carry.
+    winner = {
+        "kind": "sft_small",
+        "cost_usd_month": 4.0,
+        "agreement_lo": 0.97,
+        "deployment_id": "d",
+    }
+    workload = {
+        "id": "w1",
+        "candidates": [winner],
+        "winner": winner,
+        "verdict": {"status": "candidate"},
+        "response_mode": "tool_call",
+    }
+    text = _render_run(tmp_path)({"workloads": [workload, {**workload, "response_mode": "text"}]})
+    assert text.count(f"\n  {TOOL_CALL_NOTE}\n") == 1

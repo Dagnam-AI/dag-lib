@@ -35,6 +35,7 @@ class ProjectsClientMixin(BaseDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
+        idempotent: bool = False,
     ) -> JsonValue | str | None:
         url = f"{self.api_url}{path}"
         resp = self._request(
@@ -45,6 +46,7 @@ class ProjectsClientMixin(BaseDagnamClient):
             json=json_body,
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
+            idempotent=idempotent,
         )
         if not resp.content:
             return None
@@ -68,7 +70,15 @@ class ProjectsClientMixin(BaseDagnamClient):
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
     def create_project(self, payload: JsonObject) -> JsonObject:
-        value = self._project_request("POST", "/api/v1/projects", json_body=payload)
+        """``POST /api/v1/projects``, with an ``Idempotency-Key``.
+
+        The platform deduplicates the create on it, so a transient failure --
+        a read timeout after the project already exists -- is retried into a
+        replay of the first answer rather than a second, orphaned project.
+        """
+        value = self._project_request(
+            "POST", "/api/v1/projects", json_body=payload, idempotent=True
+        )
         if isinstance(value, dict):
             return value
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")

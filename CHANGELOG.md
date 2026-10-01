@@ -7,6 +7,264 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-29
+
+Needs the platform release that runs `dagnam-contracts` 0.4.0 and has
+`POST /api/v1/audits/{id}/resume`, the run read's `model_version_id` and
+`credits_consumed`, the `resume` publish field, a workload publish body that
+accepts `response_mode` and agreement blocks that carry `min_class_recall`, and
+the recipes `head-tune-text-classification@1.2` and `qlora-sft-chat@1.2`.
+**Deploy the backend first.** Against an older platform the server's PII check
+lacks `PII_SECRET`, so every workload stops at `pii_disagreement`; its strict
+schemas refuse the new publish fields; a completed run is `no_model_version`;
+and a candidate's submit names a recipe version the platform does not have.
+
+### Changed
+
+- **Breaking: workloads without a system prompt get new ids.** They fall into
+  `unstructured-json`, `unstructured-short` and `unstructured-long` by the shape
+  of their answers instead of one mixed `unstructured` workload. Template
+  normalization now also masks weekday and month names, clock times and
+  ordinals, so a dated system prompt is one workload (and one id); a one-line
+  `{...}` schema keeps its keys, so different extraction tasks stay apart.
+  Workload ids are not validated as hex anywhere.
+- **Breaking: `--max-credits` is a hard ceiling.** `dagnam audit run` never
+  submits a candidate whose own cost could take the credits spent past it, and
+  never starts a replay that could: a run is budgeted at the most its recipe can
+  charge (an hour at 2 credits a minute, 120 credits, since the platform offers
+  no pre-submit estimate), and a replay at one credit per holdout row plus 10%.
+  The old check compared against the dearest candidate *so far*, so the first
+  submit and every replay were never checked: `--max-credits 10` still submitted
+  a 300-credit run. A run still going counts at no less than its ceiling; a
+  replay whose cost was never read counts at its projection, and an interrupted
+  one at the rows it had answered.
+- **Breaking: without `--max-credits` the ceiling is the plan's own estimate**:
+  what the audit already spent plus every selected candidate still to finish,
+  rounded up to 100, printed in the listing you confirm. It was a flat 500.
+  `dagnam.audit.orchestrate.DEFAULT_MAX_CREDITS` is gone;
+  `plan_credits(audit_dir, selected, state)` computes the default, and
+  `dagnam.audit.steps_train.credits_spent` returns one number.
+- **Breaking: `dagnam audit cancel` always answers with a receipt.** A local
+  cancel now writes `cancelled.json` too, and prints (or, with `--json`, emits)
+  the same `{schema, deleted_at, entries}` receipt a published cancel does,
+  instead of `{"halted", "actions"}`. Each row is `stopped`, `already_absent` or
+  `blocked` with the platform's reason. `dagnam.audit.cleanup.mark_cancelled`
+  takes the ids that actually stopped.
+- **A cancel or a delete on the website stops a live `dagnam audit run`.** Each
+  run resumes its audit once, before it waits on anything
+  (`POST /api/v1/audits/{id}/resume`), and every publish after that says
+  `resume: false`. From then on the next publish after a cancel gets the 409
+  "audit is halted", and the next one after a delete the 404 of an audit that
+  is gone: the run stops with `halted: cancelled` or `halted: deleted`, and runs
+  and publishes nothing more -- nothing is paid for after the next step. A
+  delete that lands while the run waits on training or a deployment ends it as
+  `deleted` too, not as an error, and a later run over a deleted audit stops
+  before its first step. On a platform without the resume route the run's first
+  publish resumes the audit instead, as 0.15 did. A halt the run publishes
+  never overwrites the account's own `cancelled`.
+- **Tool-calling workloads are audited on their tool calls.** `dagnam audit
+  scan` trains and scores a tool-calling workload on its call's name and
+  arguments as one `{"name", "arguments"}` JSON object -- the ordered list of
+  them when the teacher made several calls in one reply -- marks it
+  `response_mode: "tool_call"` (published with the workload), and says, in the
+  scan's warning, the run report's switch and `dagnam audit run`'s output, in
+  one sentence: "This workload answers with tool calls: the replacement returns
+  the call as {"name", "arguments"} JSON (an ordered list of them when the
+  teacher made several) in message.content, not in tool_calls." The contract
+  scores such a call per row: a wrong tool name scores 0 whatever its arguments.
+- **Breaking: a named step is its own workload.** A trace's `workload_hint`
+  (`metadata.workload`), else its registered prompt's name (Langfuse
+  `promptName` / `prompt_name`, a Responses request's `prompt.id`), keys its
+  workload ahead of the system prompt, as the spec's open question decided; the
+  scan report carries it as `name`, and the id is a hash of it. The name of the
+  request's structured-output schema, or of the tool its `tool_choice` forces
+  (OpenAI, Anthropic, LangChain's `with_structured_output`), joins the template
+  key, so two extraction tasks under one system prompt stay apart; the tools a
+  request offers do not, since an agent's tool set changes from call to call.
+  Ids of named, schema'd or forced-tool workloads change.
+- **Breaking: earlier assistant turns stay in the prompt as context**, each
+  with the tool calls it made (as the JSON the student answers with), so a later
+  step's tool result answers a call the student can see. Tool results sent as
+  content parts (Anthropic `tool_result`, Gemini `functionResponse`, Vercel
+  `tool-result`, OTel `tool_call_response`) are read instead of blanked.
+- **Candidates train with `head-tune-text-classification@1.2` and
+  `qlora-sft-chat@1.2`**: a label absent from train is a miss instead of a
+  crash, and the SFT trains on the completion only and drops, never
+  right-truncates, a row over its token budget.
+- **A candidate trains on at most 5,000 rows** (`MAX_TRAIN_ROWS`), a
+  proportional sample by target (a label, or a router's route) chosen by
+  content, so it finishes inside its recipe's 1-hour ceiling instead of being
+  killed after an hour of paid GPU. The holdout is kept whole. The scan report
+  counts the rows the cap dropped (`dataset.train_rows_capped`) and warns.
+- **An SFT candidate's training rows must fit the student's 2,048 tokens.**
+  `qlora-sft-chat@1.2` drops a longer row at train time, after the credits are
+  spent, so the scan estimates each training row's tokens and leaves out rows
+  estimated over the budget. Measured script rates correct false rejection of
+  Chinese, Japanese and Thai rows and improve Korean and Hindi estimates.
+  This remains approximate: Italian, Dutch and Indonesian measured about 0.7x
+  real Qwen2.5 tokens, and base64/emoji can under-count further. If every row
+  only appears to fit, training can still fail after model startup consumes
+  credits; over-counting can reject rows that fit. The scan report counts them
+  (`dataset.train_rows_over_budget`) and warns; the holdout keeps them. Under 32
+  training rows left, the workload is `too_few_samples`: "N rows exceed the
+  student's 2,048-token context".
+- **A workload whose calls carry images, audio or files is `not_audited`**
+  ("multimodal input") once more than 10% of its calls do: a text student
+  cannot see what its answers depend on.
+- **No token usage and no cost is `unknown_cost`, never a $0 teacher** (a
+  stream without `include_usage`, say); calls without usage are extrapolated
+  from the priced ones when some have it, within one model's calls too.
+- **`dagnam audit scan --sample-rate 0.1`** (or `10%`) scales the volume and
+  spend of an export that holds a sample of the traffic back up; the scan
+  report's `window.sample_rate` records it.
+- **Secrets are always redacted** (`PII_SECRET`, from `dagnam-contracts` 0.4.0):
+  provider keys, JWTs, bearer tokens, private-key blocks and credential
+  assignments, quoted keys included, from the rows, the template excerpt and
+  tool-call arguments. Redaction runs before truncation, and a redacted JSON
+  target stays valid JSON; the scan report counts, and warns about, training
+  targets that redaction rewrote.
+- **An unreliable candidate never wins.** Every candidate in `audit-report.json`
+  carries `unreliable` (more than 10% of its replay calls failed). It still shows,
+  with its status, but earns no winner, no switch and no savings. Each candidate
+  is held to the floor its own agreement recorded.
+- **`verdict.savings_usd_month` in `audit-report.json` counts a REPLACE only**,
+  as the spend less the winner's serving cost less maintenance, never below zero.
+  Every other workload reports 0.
+- **The model version a run pushed comes from the run.** The run read's
+  `model_version_id` is recorded as it is; the "newest version this account
+  pushed since the run started" fallback, which could deploy another run's model
+  (a Studio retrain, say), is gone. A completed run that does not name one is
+  `no_model_version`.
+- **A run's training cost is what the platform charged**, from the run read's
+  `credits_consumed`, for a failed run as much as a completed one; the estimate
+  stands only until then.
+- **Pricing.** `short_span` workloads are priced as the GPU SFT student the run
+  trains, and a token-priced student with no completion tokens is
+  `unknown_cost` instead of $0. Each spelling of a model is priced on its own,
+  and calls on an unpriced model are extrapolated from the priced ones instead
+  of making the whole workload `unknown_cost`. The scan report lists workloads
+  by monthly spend once they are priced.
+- **`DagnamClient.create_project` and `create_audit` (and their async twins) send
+  an `Idempotency-Key`**, so a transient failure retries into the platform's
+  replay of the first answer instead of a second, orphaned project or audit.
+  New client methods `get_audit` and `resume_audit` (sync and async).
+- **One command at a time holds an audit directory.** A second `dagnam audit
+  run`, a `scan` into it, or an `audit delete` under a live run fails with
+  `dagnam.audit.state.AuditBusyError` instead of paying for every run twice or
+  swapping rows under it. `audit cancel` under a live run cancels in the account
+  (which stops the run at its next publish) and says to run it again afterwards;
+  under a live `--local-only` run it says to stop the run first. A mistyped
+  directory is refused, never created.
+- **`dagnam audit scan` requires a new output directory when changed rows
+  belong to a published audit**, including when `--force` is passed. Before
+  publication, `--force` retires stale run state and replay answers, preserves
+  remote resource handles for cleanup, and carries spent credits into the fresh
+  run. Re-scanning an unchanged export preserves the current run state.
+- **Requires `dagnam-contracts` 0.4.0.** Its `winner_of` skips unreliable
+  candidates and is order-independent, and the JSON agreement interval is
+  computed over scored rows, so it is wider than before.
+
+### Added
+
+- **`dagnam audit scan` reads what the tools export.** The OpenAI Responses API
+  (the Agents SDK's default) through the `openai` reader and in LangSmith and
+  Langfuse runs; Langfuse's blob export (`observations_v2/`, snake_case, JSON
+  strings) and its UI CSV/JSON exports, whose usage buckets are summed as
+  Langfuse defines them; `.json` array files; gzipped JSON and JSONL, read as
+  they stream instead of inflated to disk; `--map` columns as dotted paths into
+  nested records (`input.inputBodyJson.messages`, for a Bedrock invocation log);
+  epoch timestamps in seconds, milliseconds, microseconds or nanoseconds, as
+  numbers or in text (a basic ISO date like `20260927` stays a date); Anthropic
+  `tool_use` and Gemini `functionCall` replies as
+  tool calls. Bedrock `global.` / `apac.` / `jp.` / `au.` / `ca.` inference
+  profiles, Vertex `@date` ids and resource paths, Gemini `-001` versions and
+  Fireworks `accounts/*/models/*` ids price as their model.
+
+### Fixed
+
+- **Reasoning is never taken for the answer.** Gemini `thought` parts,
+  Anthropic `thinking` blocks, Responses `reasoning` items and a leading inline
+  `<think>...</think>` are dropped from replies (their tokens stay priced).
+- **Chinese, Japanese and Thai replies are measured in tokens, not
+  whitespace words**, so a long reply is free text instead of a short span.
+- **`dagnam audit scan` streams the export.** It no longer holds every record:
+  discovery reads the export once, and the rows of the workloads worth auditing
+  are planned and then derived in two more passes that keep only those rows. On
+  a 200 MB export the peak memory fell from 890 MB to 315 MB (692 MB to 90 MB
+  when nothing is audited), and the scan got faster. Discovery keeps each
+  template's masked excerpt, never its system prompt.
+- **The holdout replay reuses its connections**: one keep-alive pool per replay
+  instead of a new TCP and TLS connection per call, so the latency it reports is
+  the model's and the gateway's, not a handshake's.
+- **A text `outcome`** (`metadata.outcome: "resolved"`) is ignored instead of
+  making its row malformed.
+- **A Langfuse reply that is itself a JSON object** (`{"type": "refund",
+  "amount": 12}`, `{"name": "Bob", "role": "admin"}`) is read as that answer, as
+  JSON text, instead of as an empty message that left its workload without a
+  single row; a reply is what carries one (`content`, `parts` or `tool_calls`), so
+  a LangChain `AIMessage` a generation returned is read as its content.
+- **`dagnam audit delete` shows the weights the platform kept.** When a live
+  deployment still serves a model, the platform keeps its weights and says so
+  (`blocked`, with the reason); the receipt and the output now show that row as
+  the platform wrote it instead of re-deleting the version and reporting it
+  `already_absent`.
+- **A Ctrl+C during a slow publish no longer loses a paid step.** The state is
+  saved before anything is published, so the rerun resumes a submitted run
+  instead of paying for a second one that no `cancel` or `delete` could find.
+- **The last step of a run reaches the account.** What is queued is flushed
+  before the run ends, and each candidate remembers the last step the account
+  acknowledged, so a patch a blip or a Ctrl+C stranded goes out on the next run
+  instead of leaving the audit page stuck. A patch naming an artifact the owner
+  deleted is dropped instead of blocking every later one.
+- **An interrupted replay resumes where it stopped.** Each answer is written down
+  as it lands (`workloads/<id>/replay-<kind>.jsonl`), so the rerun sends only the
+  rows that never answered or failed, and the replay's cost still counts what
+  the interrupted attempt burned.
+- **`dagnam audit cancel` no longer crashes on a run that finished while nobody
+  watched.** The platform's 400 is a `blocked` row; the cancel goes on to pause
+  every deployment, writes its receipt, and the finished run stays resumable.
+- **A published cancel only marks what it stopped, and stops what the server
+  never heard of.** A run whose `submit` never reached the account is cancelled
+  from the state; a run the server could not cancel because it had completed is
+  no longer marked cancelled and skipped.
+- **A published delete removes what the server never heard of.** Every recorded
+  id the server's receipt does not settle -- a dataset whose upload failed before
+  its version was published, say -- is deleted here and joins the receipt, before
+  the local rows and keys go. A run still going is cancelled before it is
+  deleted. A project the server kept because it holds what the audit did not
+  record, and the registry entries kept with it, are never deleted here.
+- **`dagnam audit delete` always finishes on this machine.** The redacted rows,
+  the replay answers, the deployment keys and `secrets.json` go in the same
+  delete even when the platform blocked something; `state.json` keeps the ids,
+  marked deleted, so running it again retries what was blocked. Once the account
+  has deleted the audit (an earlier delete, or the website's), the delete
+  finishes with `already_absent` rows instead of failing on the account's 404,
+  and only reads the project and its registry entries: the account decided about
+  those, so one it kept is reported `blocked` ("kept by the account").
+- **A damaged replay file no longer breaks every budget check.** One whose head
+  a crash cut short is not trusted: its answers still count toward the budget,
+  every row is sent again, and the replay's cost is unknown (counted at its
+  projection). The head is now written atomically.
+- **The report says why a workload has no winner.** A candidate that failed to
+  deploy, or is still training, measured nothing: "No candidate was measured in
+  this audit (sft_small: deploy_failed)", not "No candidate cleared the floor".
+  `dagnam audit run` prints the same reason beside `NOT YET`.
+- **Prompt-cache reads are priced at the cached-input rate** (OpenAI, Anthropic,
+  LangChain and Gemini spellings), and Anthropic cache counts are no longer
+  double-counted beside LangChain usage. Gemini thinking tokens count as
+  completion tokens.
+- **The readers.** The Langfuse reader keeps an Anthropic `system` beside
+  `messages` and flattens content blocks; a Gemini `model` turn is an assistant
+  turn; LangSmith errored runs are skipped, not malformed; an
+  Anthropic `tool_use` block's `input` is read as the call's arguments. One
+  unexpected row shape, a plain prompt starting with `[`, or an implausible
+  timestamp (before 2020 or in the future) is counted as a malformed row instead
+  of aborting the scan or stretching its window.
+- **The hosted floor finds a dated or namespaced model id** (`gpt-4o-mini-2024-07-18`,
+  `openrouter:...`) through the price table's own lookup (`PriceTable.row`).
+- **`secrets.json` is replaced atomically**, so a crash mid-write can no longer
+  truncate it and lose every deployment key in file mode.
+
 ## [0.15.0] - 2026-09-27
 
 ### Added

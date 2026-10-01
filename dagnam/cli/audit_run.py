@@ -62,8 +62,12 @@ def upload_listing(
     max_credits: int,
     *,
     local_only: bool = False,
+    planned: bool = False,
 ) -> list[str]:
-    """The lines the user confirms: every workload, its rows and redactions, the project, the ceiling."""
+    """The lines the user confirms: every workload, its rows and redactions, the project, the ceiling.
+
+    ``planned`` says the ceiling is the plan's own estimate (no ``--max-credits``).
+    """
     lines = ["About to upload (redacted, derived rows only; raw traces stay here):"]
     for workload_id, structure_class in selected:
         meta = json.loads(
@@ -82,7 +86,12 @@ def upload_listing(
         else f"a new private project 'workload-audit-{audit_dir.resolve().name}'"
     )
     lines.append(f"  to: {project}")
-    lines.append(f"  credit ceiling: {max_credits} (training and the metered holdout replay)")
+    basis = (
+        "the plan's estimate, rounded up to 100; --max-credits sets your own"
+        if planned
+        else "training and the metered holdout replay"
+    )
+    lines.append(f"  credit ceiling: {max_credits} ({basis})")
     if not local_only:
         lines.append(PUBLISH_LINE)
     return lines
@@ -90,6 +99,8 @@ def upload_listing(
 
 def _render_run(audit_dir: Path) -> Any:
     from dagnam.audit.economics import customer_verdict
+    from dagnam.audit.readers.messages import TOOL_CALL_NOTE
+    from dagnam.audit.report import TOOL_CALL, no_winner_reason
 
     def render(result: object) -> str:
         js: Mapping[str, Any] = result if isinstance(result, dict) else {}
@@ -99,13 +110,19 @@ def _render_run(audit_dir: Path) -> Any:
                 continue
             winner = w["winner"]
             label = customer_verdict(w["verdict"]["status"], winner=winner is not None)
-            detail = (
-                f" - {winner['kind']} at ${winner['cost_usd_month']:.2f}/month,"
-                f" agreement >= {winner['agreement_lo']:.3f}; switch model {winner['deployment_id']}"
-                if winner is not None
-                else ""
-            )
+            if winner is not None:
+                detail = (
+                    f" - {winner['kind']} at ${winner['cost_usd_month']:.2f}/month,"
+                    f" agreement >= {winner['agreement_lo']:.3f};"
+                    f" switch model {winner['deployment_id']}"
+                )
+            else:
+                # Said, not left to the status column: a failed deploy or a run
+                # still training measured nothing, which is not missing the floor.
+                detail = f" - {no_winner_reason(w)}" if label == "NOT YET" else ""
             lines.append(f"{w['id']}: {label}{detail}")
+            if winner is not None and w.get("response_mode") == TOOL_CALL:
+                lines.append(f"  {TOOL_CALL_NOTE}")
         lines.append(f"Report: {audit_dir / 'audit-report.md'}")
         return "\n".join(lines)
 
@@ -115,19 +132,18 @@ def _render_run(audit_dir: Path) -> Any:
 def cmd_audit_run(args: argparse.Namespace) -> None:
     """List what will be uploaded, confirm, run (or resume) the frontier, write the report."""
     from dagnam.audit.orchestrate import (
-        DEFAULT_MAX_CREDITS,
         SCAN_REPORT,
+        plan_credits,
         run_audit,
         select_workloads,
     )
     from dagnam.audit.prices import PriceTable
     from dagnam.audit.publish import Publisher
     from dagnam.audit.report import build_audit_report, write_audit_report
-    from dagnam.audit.state import load_state
+    from dagnam.audit.state import AuditBusyError, load_state
 
     audit_dir = Path(args.audit_dir)
     workloads = args.workloads.split(",") if args.workloads else None
-    max_credits = DEFAULT_MAX_CREDITS if args.max_credits is None else args.max_credits
     try:
         selected = select_workloads(audit_dir, workloads)
     except (FileNotFoundError, ValueError) as exc:
@@ -135,11 +151,12 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
     if not selected:
         fail(args, "nothing to run: the scan found no workload worth auditing")
     state = load_state(audit_dir)
-    print(
-        "\n".join(
-            upload_listing(audit_dir, selected, state, max_credits, local_only=args.local_only)
-        )
+    planned = args.max_credits is None
+    max_credits = plan_credits(audit_dir, selected, state) if planned else args.max_credits
+    listing = upload_listing(
+        audit_dir, selected, state, max_credits, local_only=args.local_only, planned=planned
     )
+    print("\n".join(listing))
     if not args.yes and not sys.stdin.isatty():
         fail(
             args,
@@ -149,15 +166,18 @@ def cmd_audit_run(args: argparse.Namespace) -> None:
     confirm_or_abort("Upload the rows listed above?", assume_yes=args.yes)
 
     client = client_from_env()
-    state = run_audit(
-        audit_dir,
-        floor=args.floor,
-        workloads=workloads,
-        max_credits=max_credits,
-        wait=not args.no_wait,
-        client=client,
-        publisher=None if args.local_only else Publisher(client, state, announce),
-    )
+    try:
+        state = run_audit(
+            audit_dir,
+            floor=args.floor,
+            workloads=workloads,
+            max_credits=max_credits,
+            wait=not args.no_wait,
+            client=client,
+            publisher=None if args.local_only else Publisher(client, state, announce),
+        )
+    except AuditBusyError as exc:
+        fail(args, str(exc))
     scan = json.loads((audit_dir / SCAN_REPORT).read_text(encoding="utf-8"))
     # ponytail: the report prices the hosted floor from the bundled table; a
     # scan run with --price-table gets its version noted but not its rows.

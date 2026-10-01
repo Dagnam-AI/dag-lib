@@ -28,6 +28,8 @@ JSON_KEY_STABILITY = 0.8
 """Minimum Jaccard similarity of an object's key set to the modal key set."""
 MAX_UNSTRUCTURED_SHARE = 0.2
 """Above this share of traces without a system prompt, discovery is flagged low-confidence."""
+MAX_MEDIA_SHARE = 0.1
+"""Above this share of calls carrying image/audio/file parts, a workload is not audited."""
 STRUCTURE_SAMPLE = 200
 """Responses (first in time order) the structure class is decided on."""
 
@@ -43,8 +45,16 @@ EXCERPT_CHARS = 200
 """Length cap of the masked template excerpt a report may show."""
 PRICE_TABLE_STALE_DAYS = 60
 """A price table older than this (days since its ``as_of`` date) puts a warning in the report."""
+MAX_TRAIN_ROWS = 5_000
+"""Training rows a candidate trains on at most: a sample that fits the recipes' 1-hour ceiling
+(1,583 rows trained in ~400 s; learning curves for labels and extraction flatten long before)."""
 MAX_SEQ_LENGTH = 2048
 """Characters of rendered prompt a derived row keeps (the recipes' ``max_seq_length`` default)."""
+SFT_MAX_TOKENS = 2048
+"""Tokens a ``qlora-sft-chat@1.2`` row may span (its ``max_seq_length`` default): the recipe drops,
+never cuts, a longer training row, so the scan leaves out the rows it estimates are longer."""
+SFT_MIN_TRAIN_ROWS = 32
+"""Training rows ``qlora-sft-chat`` needs at least: the platform recipe's ``min_rows``."""
 
 __all__ = [
     "DAYS_PER_MONTH",
@@ -56,13 +66,17 @@ __all__ = [
     "JSON_KEY_STABILITY",
     "JSON_OBJECT_SHARE",
     "MAINTENANCE_USD_MONTH",
+    "MAX_MEDIA_SHARE",
     "MAX_SEQ_LENGTH",
+    "MAX_TRAIN_ROWS",
     "MAX_UNSTRUCTURED_SHARE",
     "MIN_HOLDOUT",
     "MIN_TRACES_PER_WORKLOAD",
     "PRICE_TABLE_STALE_DAYS",
     "RATIO_CANDIDATE",
     "RATIO_NOT_WORTH_IT",
+    "SFT_MAX_TOKENS",
+    "SFT_MIN_TRAIN_ROWS",
     "SPAN_MAX_MEDIAN_TOKENS",
     "SPAN_MIN_DISTINCT_RATIO",
     "STRUCTURE_SAMPLE",

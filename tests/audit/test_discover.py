@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import fields
+from collections.abc import Callable, Iterator
+from dataclasses import fields, replace
 from datetime import timedelta
 import json
 import math
+from pathlib import Path
+import tracemalloc
 
 from hypothesis import given, settings, strategies as st
 import pytest
 from tests.audit._records import T0, make_record, make_records
 
-from dagnam.audit import TraceRecord
-from dagnam.audit.discover import Workload, discover_workloads, template_excerpt
-from dagnam.audit.normalize import UNSTRUCTURED, template_hash
+from dagnam.audit import TraceRecord, discover, read_traces
+from dagnam.audit.discover import (
+    ModelUsage,
+    Workload,
+    by_spend,
+    discover_workloads,
+    template_excerpt,
+)
+from dagnam.audit.normalize import UNSTRUCTURED, normalize_template, template_hash
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import EXCERPT_CHARS, STRUCTURE_SAMPLE, WINDOW_DAYS
 
@@ -38,7 +47,9 @@ def test_discovery_recovers_the_four_dogfood_workloads(
     assert {w.template_hash for w in found} == set(by_hash)  # recall = 1, precision = 1
     assert all(w.structure_class.value == GROUND_TRUTH[by_hash[w.template_hash]] for w in found)
     assert all(w.confidence == "high" for w in found)
-    assert all(w.id == w.template_hash for w in found)
+    # The fixture names its steps (``metadata.workload``), and the name keys them (N11).
+    assert {w.name for w in found} == set(GROUND_TRUTH)
+    assert all(w.name == by_hash[w.template_hash] for w in found)
     for workload in found:
         assert workload.calls == 3
         assert {langfuse_records[i].workload_hint for i in workload.record_indices} == {
@@ -80,7 +91,7 @@ def test_unstructured_bucket_is_low_confidence() -> None:
         (UNSTRUCTURED, "low"),
     ]
     unstructured = found[1]
-    assert unstructured.id == UNSTRUCTURED
+    assert unstructured.id == f"{UNSTRUCTURED}-short"
     assert unstructured.template_excerpt == ""
     assert unstructured.record_indices == (0, 1, 2, 3)
     assert unstructured.stability == 1.0
@@ -165,7 +176,18 @@ def test_template_excerpt_is_redacted_and_capped() -> None:
     assert template_excerpt("x" * (EXCERPT_CHARS + 50)) == "x" * EXCERPT_CHARS
     assert template_excerpt("") == ""
     (workload,) = discover_workloads([make_record(system="Order 42, email a@b.co")], window_days=30)
-    assert workload.template_excerpt == "Order <NUM>, email <EMAIL>"
+    assert workload.template_excerpt == "Order <NUM>, email [REDACTED:PII_EMAIL]"
+
+
+def test_the_excerpt_is_redacted_before_it_is_normalized() -> None:
+    # Normalization turns the digits of an identifier into <NUM>, after which no
+    # detector can recognise what is left of it; redaction must see the raw text.
+    card = "4111 1111 1111 1111"
+    assert template_excerpt(f"Refund card {card} today") == (
+        "Refund card [REDACTED:PII_PAYMENT_CARD] today"
+    )
+    phone = "Escalate to Jane (+1 415 555 0100)."
+    assert template_excerpt(phone) == "Escalate to Jane ([REDACTED:PII_PHONE])."
 
 
 def test_to_json_uses_the_report_field_names() -> None:
@@ -187,6 +209,9 @@ def test_to_json_uses_the_report_field_names() -> None:
         "distinct_outputs",
         "entropy",
         "models",
+        "response_mode",
+        "name",
+        "media_calls",
     ]
     assert payload["models"] == ["gpt-4o-mini"]
     assert payload["structure_class"] == "enum_label"
@@ -215,6 +240,12 @@ def test_workload_is_frozen_with_the_planned_fields() -> None:
         "sample_size",
         "models",
         "record_indices",
+        "response_mode",
+        "usage_by_model",
+        "name",
+        "media_calls",
+        "first_ts",
+        "last_ts",
     ]
     assert not hasattr(discover_workloads(make_records(1), window_days=30)[0], "__dict__")
 
@@ -249,3 +280,308 @@ def test_discovery_is_order_independent(order: list[int]) -> None:
     assert Counter(len(w.record_indices) for w in found) == Counter({6: 1, 3: 1, 2: 1})
     for a, b in zip(found, baseline, strict=True):
         assert [shuffled[i] for i in a.record_indices] == [records[i] for i in b.record_indices]
+
+
+def test_traces_without_a_system_prompt_split_into_per_shape_buckets() -> None:
+    # 3,000 calls with no system prompt -- yes/no labels, then JSON, then prose --
+    # were one enum_label candidate with 2,002 distinct outputs.
+    records = [
+        make_record(
+            system=None,
+            response=(
+                "yn"[i % 2]
+                if i < 1_000
+                else json.dumps({"a": i, "b": "x"})
+                if i < 2_000
+                else f"Here is a long free text answer number {i} with many words in it."
+            ),
+            ts=T0 + timedelta(minutes=i),
+            trace_id=f"t{i}",
+        )
+        for i in range(3_000)
+    ]
+    found = {w.id: w for w in discover_workloads(records, window_days=30)}
+
+    assert {i: w.structure_class for i, w in found.items()} == {
+        f"{UNSTRUCTURED}-short": StructureClass.ENUM_LABEL,
+        f"{UNSTRUCTURED}-json": StructureClass.JSON_OBJECT,
+        f"{UNSTRUCTURED}-long": StructureClass.FREE_TEXT,
+    }
+    assert {w.calls for w in found.values()} == {1_000}
+    assert {(w.template_hash, w.confidence) for w in found.values()} == {(UNSTRUCTURED, "low")}
+    assert found[f"{UNSTRUCTURED}-short"].distinct_outputs == 2
+
+
+def test_usage_is_kept_per_model_spelling() -> None:
+    records = [
+        make_record(model=model, prompt_tokens=p, completion_tokens=c, trace_id=f"t{i}")
+        for i, (model, p, c) in enumerate(
+            [("gpt-4o-mini", 10, 1), ("gpt-4o-mini-2024-07-18", 20, 2), ("gpt-4o-mini", 30, 3)]
+        )
+    ]
+    (workload,) = discover_workloads(records, window_days=30)
+
+    assert workload.models == ("gpt-4o-mini", "gpt-4o-mini-2024-07-18")
+    assert workload.usage_by_model == (
+        ModelUsage("gpt-4o-mini", calls=2, prompt_tokens=40, completion_tokens=4),
+        ModelUsage("gpt-4o-mini-2024-07-18", calls=1, prompt_tokens=20, completion_tokens=2),
+    )
+
+
+def test_a_workload_answering_with_tool_calls_is_in_tool_call_mode() -> None:
+    call = {"function": {"name": "record", "arguments": '{"product": "p1"}'}}
+    tooled = [make_record(response="", tool_calls=(call,), trace_id=f"t{i}") for i in range(3)]
+    (workload,) = discover_workloads([*tooled, make_record(trace_id="x")], window_days=30)
+    assert workload.response_mode == "tool_call"
+    assert workload.to_json()["response_mode"] == "tool_call"
+    (plain,) = discover_workloads([*tooled[:2], *make_records(2)], window_days=30)
+    assert plain.response_mode == "text"
+
+
+def test_by_spend_orders_most_spend_first_then_calls_then_id() -> None:
+    found = discover_workloads(
+        make_records(2, system="A", cost_usd=None) + make_records(3, system="B", cost_usd=None),
+        window_days=30,
+    )
+    priced = [replace(w, cost_usd_month=float(w.calls)) for w in found]
+    assert [w.calls for w in by_spend(reversed(priced))] == [3, 2]
+    assert by_spend([]) == ()
+
+
+def test_a_secret_in_the_system_prompt_never_reaches_the_excerpt() -> None:
+    # A-11: the published excerpt read "... Bearer sk-live-AbCdEfGhIjKlMnOpQrStUvWx ...".
+    system = (
+        "You are Acme's extraction bot. Escalations go to Jane Doe (jane.doe@acme.com,"
+        " +1 415 555 0100). Auth header: Bearer sk-live-AbCdEfGhIjKlMnOpQrStUvWx."
+        " Extract the customer's contact fields as JSON."
+    )
+    (workload,) = discover_workloads([make_record(system=system)], window_days=30)
+
+    assert "<SECRET>" in workload.template_excerpt
+    assert "sk-live" not in workload.template_excerpt
+    assert "AbCdEf" not in workload.template_excerpt
+    # A key with digits in it: normalizing first left "sk-proj-a<NUM>B<NUM>...".
+    digits = template_excerpt("Use Bearer sk-proj-a1B2c3D4e5F6g7H8i9J0kLmN for the API.")
+    assert digits == "Use Bearer <SECRET> for the API."
+    # The id is the hash of the normalized prompt, whatever redaction does to the excerpt.
+    assert workload.id == template_hash(system)
+
+
+def test_a_workload_hint_overrides_the_template_hash() -> None:
+    # N11 / spec section 14: the customer's own name for a step is the most reliable key.
+    # One system prompt, two named steps: two workloads; a per-call RAG prompt under
+    # one name: one workload.
+    records = [
+        make_record(workload_hint="intent" if i % 2 else "urgency", trace_id=f"t{i}")
+        for i in range(6)
+    ] + [
+        make_record(system=f"Answer using context {i}: ...", workload_hint="rag", trace_id=f"r{i}")
+        for i in range(5)
+    ]
+    found = {w.name: w for w in discover_workloads(records, window_days=30)}
+
+    assert {name: w.calls for name, w in found.items()} == {"intent": 3, "urgency": 3, "rag": 5}
+    assert all(len(w.id) == 16 and w.id != w.template_hash for w in found.values())
+    assert found["rag"].confidence == "high"
+    assert found["intent"].template_hash == template_hash("Label the ticket.")
+    assert found["intent"].to_json()["name"] == "intent"
+    (plain,) = discover_workloads(make_records(2), window_days=30)
+    assert plain.name is None
+    assert plain.id == plain.template_hash
+
+
+def test_the_request_signature_joins_the_key() -> None:
+    # N12: one system prompt, two response schemas -- two extraction tasks merged.
+    records = [
+        make_record(signature=f"schema={'invoice' if i % 2 else 'resume'}", trace_id=f"t{i}")
+        for i in range(6)
+    ]
+    found = discover_workloads(records, window_days=30)
+
+    assert sorted(w.calls for w in found) == [3, 3]
+    assert len({w.id for w in found}) == 2
+    assert {w.template_hash for w in found} == {template_hash("Label the ticket.")}
+    no_system = discover_workloads(
+        [make_record(system=None, signature="schema=invoice")], window_days=30
+    )
+    assert no_system[0].id != UNSTRUCTURED
+    assert no_system[0].confidence == "high"
+
+
+def _router_line(
+    i: int,
+    tools: list[str],
+    *,
+    system: str = "Route the ticket to the right team.",
+    call: str = "route",
+    tool_choice: object = None,
+) -> dict[str, object]:
+    """One call answered with a ``call`` tool call (the B2-2 router, the RR-2 forced tools)."""
+    offered = [{"type": "function", "function": {"name": t, "parameters": {}}} for t in tools]
+    arguments = json.dumps({"team": ["billing", "shipping"][i % 2]})
+    system_turn = [{"role": "system", "content": system}] if system else []
+    request: dict[str, object] = {
+        "model": "gpt-4o-mini",
+        "messages": [*system_turn, {"role": "user", "content": f"ticket {i}"}],
+        "tools": offered,
+    }
+    if tool_choice is not None:
+        request["tool_choice"] = tool_choice
+    return {
+        "request": request,
+        "response": {
+            "id": f"c{i}",
+            "created": int((T0 + timedelta(minutes=i)).timestamp()),
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {"name": call, "arguments": arguments},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 400, "completion_tokens": 10},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "offered",
+    [
+        # a deploy adds a tool mid-window: it was 2 x 1,200
+        lambda i: ["route", "escalate"] + (["refund"] if i >= 1_200 else []),
+        # permission-gated or retrieved tools: 4 workloads, three under the 1,000-call floor
+        lambda i: ["route"] + (["escalate"] if i % 3 else []) + (["refund"] if i % 5 == 0 else []),
+    ],
+    ids=["tool-added-mid-window", "per-call-tool-subsets"],
+)
+def test_a_router_offered_varying_tool_sets_is_one_workload(
+    tmp_path: Path, offered: Callable[[int], list[str]]
+) -> None:
+    # B2-2: the offered tool set keyed the workload, so one 2,400-call router split
+    # into pieces too small to audit. What a call OFFERS is not what it does.
+    path = tmp_path / "router.jsonl"
+    path.write_text("".join(json.dumps(_router_line(i, offered(i))) + "\n" for i in range(2_400)))
+
+    (workload,) = discover_workloads(read_traces(path, source="openai")[0], window_days=30)
+
+    assert workload.calls == 2_400
+    assert workload.response_mode == "tool_call"
+    assert workload.id == template_hash("Route the ticket to the right team.")
+
+
+@pytest.mark.parametrize("system", ["Extract the fields.", ""], ids=["one-system", "no-system"])
+def test_two_forced_tools_are_two_workloads_and_auto_or_required_is_one(
+    tmp_path: Path, system: str
+) -> None:
+    # RR-2: a forced tool IS the output schema (OpenAI ``tool_choice.function.name``,
+    # LangChain ``with_structured_output``), and B2-2 merged two extraction tasks into
+    # one 2,400-call workload -- without a system prompt, into ``unstructured-json``.
+    def forced(i: int) -> dict[str, object]:
+        tool = ["extract_invoice", "extract_receipt"][i % 2]
+        choice = {"type": "function", "function": {"name": tool}}
+        return _router_line(i, [tool], system=system, call=tool, tool_choice=choice)
+
+    path = tmp_path / "forced.jsonl"
+    path.write_text("".join(json.dumps(forced(i)) + "\n" for i in range(2_400)))
+    found = discover_workloads(read_traces(path, source="openai")[0], window_days=30)
+    assert sorted(w.calls for w in found) == [1_200, 1_200]
+    assert {w.confidence for w in found} == {"high"}
+
+    free = [
+        _router_line(i, ["route", "escalate"], tool_choice=["auto", "required"][i % 2])
+        for i in range(2_400)
+    ]
+    path.write_text("".join(json.dumps(line) + "\n" for line in free))
+    (router,) = discover_workloads(read_traces(path, source="openai")[0], window_days=30)
+    assert router.calls == 2_400
+
+
+def test_calls_carrying_media_are_counted() -> None:
+    records = [*make_records(3), make_record(has_media=True, trace_id="m")]
+    (workload,) = discover_workloads(records, window_days=30)
+    assert workload.media_calls == 1
+
+
+def test_a_sample_rate_scales_volume_and_spend_back_up() -> None:
+    # N18: an export that holds 10% of the traffic understated calls and spend tenfold.
+    records = make_records(4, cost_usd=0.01)
+    (full,) = discover_workloads(records, window_days=30)
+    (sampled,) = discover_workloads(records, window_days=30, sample_rate=0.1)
+
+    assert sampled.calls == full.calls == 4  # what the export holds, for the sample floors
+    assert sampled.calls_per_day == pytest.approx(full.calls_per_day * 10)
+    assert sampled.cost_usd_month == pytest.approx((full.cost_usd_month or 0) * 10)
+    with pytest.raises(ValueError, match="sample_rate"):
+        discover_workloads(records, window_days=30, sample_rate=0)
+
+
+def test_discovery_reads_a_stream_once() -> None:
+    # R3-16: the scan no longer holds every record: discovery takes an iterator.
+    records = make_records(5)
+    stream = iter(records)
+    (workload,) = discover_workloads(stream, window_days=30)
+    assert workload.calls == 5
+    assert list(stream) == []
+    assert (workload.first_ts, workload.last_ts) == (records[0].ts, records[-1].ts)
+
+
+def test_a_named_workload_keeps_the_text_of_a_bounded_number_of_templates() -> None:
+    # A per-call prompt under one name (RAG) must not hold every system prompt.
+    one_offs = [
+        make_record(
+            system=f"Context {chr(65 + i // 26)}{chr(65 + i % 26)}: answer from it.",
+            workload_hint="rag",
+            ts=T0 + timedelta(minutes=i),
+            trace_id=f"o{i}",
+        )
+        for i in range(70)
+    ]
+    repeated = [
+        make_record(
+            system="The common prompt.",
+            workload_hint="rag",
+            ts=T0 + timedelta(hours=5, minutes=i),
+            trace_id=f"c{i}",
+        )
+        for i in range(3)
+    ]
+    (workload,) = discover_workloads(one_offs + repeated, window_days=30)
+
+    # The modal template came after the kept ones: the excerpt is the earliest kept.
+    assert workload.template_hash == template_hash("The common prompt.")
+    assert workload.template_excerpt == "Context AA: answer from it."
+    assert workload.stability == 3 / 73
+
+
+def test_discovery_holds_no_system_prompt_per_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    # m6: every distinct template kept its whole raw system prompt until the end, so an
+    # export of per-call (RAG) prompts was held in memory again, as in batch 1.
+    monkeypatch.setattr(discover, "normalize_template", normalize_template.__wrapped__)
+    prompt_chars, templates = 20_000, 30
+    held: list[int] = []
+
+    def stream() -> Iterator[TraceRecord]:
+        for i in range(templates):
+            system = f"Context {chr(65 + i // 26)}{chr(65 + i % 26)}: " + "passage " * 2_500
+            yield make_record(system=system, ts=T0 + timedelta(minutes=i), trace_id=f"r{i}")
+        held.append(tracemalloc.get_traced_memory()[0])  # every group is still alive here
+
+    tracemalloc.start()
+    try:
+        found = discover_workloads(stream(), window_days=30)
+    finally:
+        tracemalloc.stop()
+
+    assert len(found) == templates
+    assert found[0].template_excerpt.startswith("Context A")
+    # 690 KB held before (more than the 600 KB of prompts); about 160 KB of bookkeeping now.
+    assert held[0] < prompt_chars * templates / 2

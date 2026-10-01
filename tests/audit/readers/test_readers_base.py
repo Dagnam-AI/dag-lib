@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import gzip
 import json
 from pathlib import Path
@@ -10,7 +10,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from dagnam.audit import MALFORMED_FATAL_SHARE, MalformedExportError, read_traces
+from dagnam.audit import MALFORMED_FATAL_SHARE, MalformedExportError, TraceRecord, read_traces
 from dagnam.audit.readers import Source, base
 
 # A well-formed generic row; ``messages`` is deliberately a plain string.
@@ -41,8 +41,10 @@ def test_iter_rows_reads_jsonl_gzip_parquet_and_csv(tmp_path: Path) -> None:
         handle.write(jsonl.read_text())
     pl.DataFrame([ROW, ROW]).write_parquet(tmp_path / "a.parquet")
     pl.DataFrame([ROW, ROW]).write_csv(tmp_path / "a.csv")
+    with gzip.open(tmp_path / "a.csv.gz", "wb") as handle:
+        handle.write((tmp_path / "a.csv").read_bytes())
 
-    for name in ("a.jsonl", "a.jsonl.gz", "a.parquet", "a.csv"):
+    for name in ("a.jsonl", "a.jsonl.gz", "a.parquet", "a.csv", "a.csv.gz"):
         assert list(base.iter_rows(tmp_path / name)) == [ROW, ROW], name
 
 
@@ -148,6 +150,8 @@ def test_control_characters_are_stripped_from_every_string(tmp_path: Path) -> No
         ("2026-08-01T11:00:00+02:00", datetime(2026, 8, 1, 9, tzinfo=UTC)),
         (1_785_000_000, datetime.fromtimestamp(1_785_000_000, tz=UTC)),
         (datetime(2026, 8, 1, 9), datetime(2026, 8, 1, 9, tzinfo=UTC)),
+        # m3: a basic-format ISO date is all digits, and was read as a 1970 epoch.
+        ("20260801", datetime(2026, 8, 1, tzinfo=UTC)),
     ],
 )
 def test_parse_ts_normalises_to_utc(value: object, expected: datetime) -> None:
@@ -171,32 +175,9 @@ def test_numeric_coercion() -> None:
             base.as_float(bad)
 
 
-def test_text_flattens_containers_and_content_parts() -> None:
+def test_text_stringifies_containers() -> None:
     assert base.text({"a": [1, "b"]}) == '{"a": [1, "b"]}'
     assert base.text(None) == ""
-    assert base.content_text([{"type": "text", "text": "a"}, {"type": "image_url"}, "b"]) == "ab"
-    assert base.content_text("plain") == "plain"
-
-
-def test_split_prompt_separates_system_from_turns() -> None:
-    system, turns = base.split_prompt(
-        [
-            {"role": "system", "content": "one"},
-            {"role": "developer", "content": "two"},
-            {"role": "user", "content": "q"},
-            {"role": "assistant", "content": "prior answer"},
-            {"role": "tool", "content": "42"},
-        ]
-    )
-    assert system == "one\ntwo"
-    assert [(m.role, m.content) for m in turns] == [("user", "q"), ("tool", "42")]
-    assert base.split_prompt("bare prompt") == (None, (base.Message("user", "bare prompt"),))
-    assert base.split_prompt({"messages": [{"role": "user", "content": "x"}]})[1][0].content == "x"
-    assert base.split_prompt({"input": "x"}) == (None, (base.Message("user", '{"input": "x"}'),))
-    with pytest.raises(base.MalformedRowError):
-        base.split_prompt([{"role": "user"}, "loose string"])
-    with pytest.raises(base.MalformedRowError):
-        base.split_prompt([])
 
 
 def test_get_walks_dotted_aliases_in_order() -> None:
@@ -208,8 +189,151 @@ def test_get_walks_dotted_aliases_in_order() -> None:
         base.require(row, "usage.output")
 
 
-def test_tool_calls_accepts_only_a_list_of_objects() -> None:
-    assert base.tool_calls(None) == ()
-    assert base.tool_calls([{"id": 1}]) == ({"id": 1},)
-    with pytest.raises(base.MalformedRowError):
-        base.tool_calls([{"id": 1}, "x"])
+def test_parse_ts_rejects_implausible_timestamps() -> None:
+    # ``created: 0`` among one day of calls stretched the window to 20,697 days.
+    tomorrow_and_more = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    for value in (0, "1970-01-01T00:00:00Z", "2019-12-31T23:59:59Z", tomorrow_and_more):
+        with pytest.raises(base.MalformedRowError, match="implausible"):
+            base.parse_ts(value)
+    assert base.parse_ts("2020-01-01T00:00:00Z") == base.EARLIEST_TS
+
+
+def test_a_row_shape_the_reader_did_not_expect_is_counted_malformed(tmp_path: Path) -> None:
+    def to_record(row: base.Row) -> TraceRecord:
+        return row["missing"]  # a KeyError, not a MalformedRowError
+
+    reader = base.Reader((), to_record)
+    records, stats = base.read_records(_write(tmp_path / "a.jsonl", [ROW]), "x", reader)
+    with pytest.raises(MalformedExportError):
+        list(records)
+    assert (stats.rows_malformed, stats.first_malformed) == (1, (0,))
+
+
+def test_gemini_thinking_tokens_are_completion_tokens() -> None:
+    usage = {"promptTokenCount": 1_000, "candidatesTokenCount": 200, "thoughtsTokenCount": 800}
+    assert base.completion_tokens({"usageMetadata": usage}, "usageMetadata") == 1_000
+    snake = {"candidates_token_count": 2, "thoughts_token_count": 3}
+    assert base.completion_tokens({"u": snake}, "u") == 5
+    assert base.completion_tokens({"u": {"candidates_token_count": 2}}, "u") == 2
+    # LangChain's ``output_tokens`` already sums every output type, reasoning included.
+    langchain = {
+        "usage_metadata": {"output_tokens": 1_000, "output_token_details": {"reasoning": 800}},
+        "outputs": {"usage_metadata": {"thoughts_token_count": 800}},
+    }
+    assert base.completion_tokens(langchain, "usage_metadata", "outputs.usage_metadata") == 1_000
+
+
+def test_cached_prompt_tokens_in_every_vendor_spelling() -> None:
+    openai = {"usage": {"prompt_tokens": 10_000, "prompt_tokens_details": {"cached_tokens": 9_900}}}
+    assert base.cached_prompt_tokens(openai, "usage") == 9_900
+    anthropic = {"usage": {"input_tokens": 100, "cache_read_input_tokens": 800}}
+    assert base.cached_prompt_tokens(anthropic, "usage") == 800
+    langchain = {"usage_metadata": {"input_tokens": 900, "input_token_details": {"cache_read": 7}}}
+    assert base.cached_prompt_tokens(langchain, "usage_metadata") == 7
+    gemini = {"usageMetadata": {"promptTokenCount": 10, "cachedContentTokenCount": 4}}
+    assert base.cached_prompt_tokens(gemini, "usageMetadata") == 4
+    assert base.cached_prompt_tokens({"cached_content_token_count": 3}, "") == 3
+    assert base.cached_prompt_tokens({}, "usage", "") == 0
+
+
+def test_anthropic_cache_counts_are_added_only_to_the_block_that_excludes_them() -> None:
+    # LangChain's ``usage_metadata.input_tokens`` already includes the cache; the
+    # raw Anthropic usage beside it does not. Summing across blocks doubled it.
+    row = {
+        "usage_metadata": {"input_tokens": 10_000, "output_tokens": 5},
+        "outputs": {"usage": {"input_tokens": 100, "cache_read_input_tokens": 9_900}},
+    }
+    assert base.prompt_tokens(row, "usage_metadata", "outputs.usage") == 10_000
+    assert base.prompt_tokens(row, "outputs.usage") == 10_000
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1_790_000_000,  # seconds
+        "1790000000",  # seconds in a CSV cell
+        1_790_000_000.25,
+        "1790000000.25",
+        1_790_000_000_000,  # milliseconds (Helicone, PostHog)
+        "1790000000000",
+        1_790_000_000_000_000,  # microseconds
+        1_790_000_000_000_000_000,  # nanoseconds (OTel)
+        "1790000000000000000",
+    ],
+)
+def test_parse_ts_reads_epoch_seconds_ms_us_and_ns_as_numbers_or_strings(value: object) -> None:
+    # An epoch-timestamped CSV used to abort the scan: every cell is a string.
+    assert base.parse_ts(value).replace(microsecond=0) == datetime.fromtimestamp(
+        1_790_000_000, tz=UTC
+    )
+
+
+def test_an_epoch_csv_export_reads(tmp_path: Path) -> None:
+    for name, stamp in (("flat_s.csv", "1790000000"), ("flat_ms.csv", "1790000000000")):
+        path = tmp_path / name
+        path.write_text(
+            "trace_id,ts,messages,response,model\n"
+            f'r1,{stamp},"[{{""role"":""user"",""content"":""hi""}}]",a,gpt-4o\n'
+        )
+        records, stats = read_traces(path, source="csv")
+        (record,) = list(records)
+        assert stats.rows_malformed == 0
+        assert record.ts == datetime.fromtimestamp(1_790_000_000, tz=UTC)
+
+
+def test_a_json_array_export_reads_like_jsonl(tmp_path: Path) -> None:
+    # The UI "Export JSON" is one array; `.json` used to be rejected outright.
+    array = tmp_path / "ui_export.json"
+    array.write_text(json.dumps([ROW, {**ROW, "trace_id": "u"}, "not an object"]))
+    assert list(base.iter_rows(array)) == [ROW, {**ROW, "trace_id": "u"}, None]
+    wrapped = tmp_path / "api_page.json"
+    wrapped.write_text(json.dumps({"data": [ROW], "meta": {"page": 1}}))
+    assert list(base.iter_rows(wrapped)) == [ROW]
+    lines = tmp_path / "really_jsonl.json"
+    lines.write_text(json.dumps(ROW) + "\n\n" + json.dumps(ROW) + "\n")
+    assert list(base.iter_rows(lines)) == [ROW, ROW]
+    other = tmp_path / "scalar.json"
+    other.write_text("42")
+    assert list(base.iter_rows(other)) == [None]
+    with gzip.open(tmp_path / "ui_export.json.gz", "wt") as handle:
+        handle.write(json.dumps([ROW]))
+    assert list(base.iter_rows(tmp_path / "ui_export.json.gz")) == [ROW]
+    array.write_text(json.dumps([ROW, {**ROW, "trace_id": "u"}]))
+    records, _ = read_traces(array, source="jsonl")
+    assert [r.trace_id for r in records] == ["t", "u"]
+
+
+def test_jsonl_under_a_json_name_splits_on_newlines_only(tmp_path: Path) -> None:
+    # m5: U+2028, U+2029 and U+0085 may sit unescaped inside a JSON string, and
+    # str.splitlines() cut such a row in two, both halves malformed.
+    row = {**ROW, "response": "a\u2028b\u2029c\x85d"}
+    lines = tmp_path / "really_jsonl.json"
+    lines.write_text(
+        json.dumps(row, ensure_ascii=False) + "\r\n" + json.dumps(ROW) + "\n", encoding="utf-8"
+    )
+    assert list(base.iter_rows(lines)) == [row, ROW]
+
+
+def test_gzipped_jsonl_streams_without_inflating_to_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A 5 GB gzip of a 50 GB export needed 50 GB of temp space before one row was read.
+    def no_temp_dir(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("inflated to disk")
+
+    monkeypatch.setattr(base.tempfile, "TemporaryDirectory", no_temp_dir)
+    with gzip.open(tmp_path / "a.jsonl.gz", "wt") as handle:
+        handle.write(json.dumps(ROW) + "\n\nnot json\n" + json.dumps(ROW) + "\n")
+    assert list(base.iter_rows(tmp_path / "a.jsonl.gz")) == [ROW, None, ROW]
+
+
+def test_a_text_outcome_is_ignored_not_malformed(tmp_path: Path) -> None:
+    # R1-N11: ``outcome`` is read and never used, so "good" must never fail a row.
+    rows: list[object] = [
+        {**ROW, "trace_id": str(i), "outcome": "good" if i % 2 else "0.5"} for i in range(4)
+    ]
+    records, stats = read_traces(_write(tmp_path / "a.jsonl", rows), source="jsonl")
+    assert [r.outcome for r in records] == [0.5, None, 0.5, None]
+    assert stats.rows_malformed == 0
+    assert base.optional_outcome(True) is None
+    assert base.optional_outcome(float("nan")) is None
