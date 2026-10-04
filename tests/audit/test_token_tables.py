@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import hashlib
+import importlib
 from importlib import resources
 from pathlib import Path
 import random
@@ -14,8 +15,8 @@ import zlib
 
 import pytest
 
-from dagnam.audit import token_tables
-from dagnam.audit.token_estimate import estimate
+from dagnam.audit import token_rules, token_tables
+from dagnam.audit.token_estimate import clear_caches, estimate
 from dagnam.audit.token_tables import (
     STUDENT_CHARS_BYTES,
     STUDENT_CHARS_FILE,
@@ -64,11 +65,9 @@ class FakePackage:
 @pytest.fixture
 def fresh_tables() -> Iterator[None]:
     """Forget the loaded tables, before and after."""
-    for function in (student_words, student_chars, student_fragile):
-        function.cache_clear()
+    clear_caches()
     yield
-    for function in (student_words, student_chars, student_fragile):
-        function.cache_clear()
+    clear_caches()
 
 
 def serve(monkeypatch: pytest.MonkeyPatch, package: Any) -> None:
@@ -396,3 +395,70 @@ def test_a_failed_load_is_retried_and_does_not_poison_later_estimates(
     serve(monkeypatch, FakePackage(BOTH))
     assert len(student_words()) == 49_926
     assert token_tables.MAX_SHARED_PREFIX == 94
+
+
+# --- the caches ---------------------------------------------------------------------------------
+
+TOKEN_MODULES = ("token_classes", "token_rules", "token_tables", "token_estimate")
+WARMING_TEXT = "The parcel arrived late. \u0b05\u0b05\u0b05\u0904 \u4e00\u5207\u90fd\u662f ==> !=("
+
+
+def _caches() -> dict[str, Any]:
+    """Every cache the ``token_*`` modules keep: functools caches and private mutable memos."""
+    found: dict[str, Any] = {}
+    for name in TOKEN_MODULES:
+        module = importlib.import_module(f"dagnam.audit.{name}")
+        for attribute, value in vars(module).items():
+            # a private, lower-case mutable container is a memo; the upper-case ones are constants
+            memo = attribute.startswith("_") and not attribute.upper() == attribute
+            if hasattr(value, "cache_clear") or (
+                memo and not attribute.startswith("__") and isinstance(value, dict | list | set)
+            ):
+                found[f"{name}.{attribute}"] = value
+    return found
+
+
+def _size(cache: Any) -> int:
+    return cache.cache_info().currsize if hasattr(cache, "cache_clear") else len(cache)
+
+
+def test_clear_caches_forgets_every_cache_the_estimate_keeps(fresh_tables: None) -> None:
+    # A cache added to a token_* module and left out of clear_caches() is found here, warm,
+    # and fails: a test that reloads the tables would otherwise keep a stale copy of it.
+    caches = _caches()
+    assert {
+        "token_tables.student_words",
+        "token_tables.student_chars",
+        "token_tables.student_fragile",
+        "token_rules._odd_letters",
+    } <= set(caches)
+    estimate(WARMING_TEXT)
+    assert {name: _size(cache) for name, cache in caches.items()} == dict.fromkeys(caches, 1)
+    clear_caches()
+    assert {name: _size(cache) for name, cache in caches.items()} == dict.fromkeys(caches, 0)
+
+
+def test_the_letter_pattern_is_looked_up_by_identity_and_rebuilt_once_per_reload(
+    monkeypatch: pytest.MonkeyPatch, fresh_tables: None
+) -> None:
+    # The table is a set of ~95,000 members. A memo keyed by its value compares two such sets on
+    # every lookup after a reload, whose set equals the old one but is a new object: a gate that
+    # took 8 minutes instead of 5 seconds.
+    builds: list[frozenset[str]] = []
+    build = token_rules._build_non_token_letters  # pyright: ignore[reportPrivateUsage]
+
+    def counting(chars: frozenset[str]) -> Any:
+        builds.append(chars)
+        return build(chars)
+
+    monkeypatch.setattr(token_rules, "_build_non_token_letters", counting)
+    for _ in range(3):
+        estimate(WARMING_TEXT)
+    assert len(builds) == 1
+    for table in (student_words, student_chars, student_fragile):
+        table.cache_clear()  # only the tables: the memo has to notice the new object itself
+    for _ in range(3):
+        estimate(WARMING_TEXT)
+    assert len(builds) == 2
+    assert builds[0] == builds[1]
+    assert builds[0] is not builds[1]

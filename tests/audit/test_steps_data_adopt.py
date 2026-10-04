@@ -156,3 +156,42 @@ class TestAdoptionNeverTrustsTheFilter:
             "owner_id"
         )  # no owner on the row either: None is not a match
         assert ctx.step(upload(AuditState(audit_id="audit-1"), ctx)).dataset_id == "ds-1"
+
+
+class TestUnpublishedAdoptionChecksTheRows:
+    """A ``--local-only`` run finds its lost upload by the directory's key, then proves it is the file.
+
+    The key names the candidate, and survives a rescan that rewrites the rows: adopting on the key
+    alone would train the student on the rows of the run that was lost.
+    """
+
+    def _lost(self, make_ctx: Callable[..., StepContext], platform: FakePlatform) -> StepContext:
+        platform.lost_uploads = 1
+        with pytest.raises(APIError):
+            upload(AuditState(project_nonce="nonce-a"), make_ctx())
+        return make_ctx(floor=0.5)
+
+    def test_the_lost_upload_of_the_same_file_is_adopted(
+        self, make_ctx: Callable[..., StepContext], platform: FakePlatform
+    ) -> None:
+        ctx = self._lost(make_ctx, platform)
+
+        assert ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx)).dataset_id == "ds-1"
+        assert len(platform.uploads) == 1
+
+    def test_rows_rewritten_since_are_uploaded_afresh_and_said_so(
+        self,
+        make_ctx: Callable[..., StepContext],
+        platform: FakePlatform,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        ctx = self._lost(make_ctx, platform)
+        platform.dataset_sizes["ds-1"] += 1  # the lost upload holds other rows than the file now
+
+        with caplog.at_level("WARNING", logger="dagnam.audit"):
+            step = ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx))
+
+        assert step.dataset_id == "ds-2"
+        assert len(platform.uploads) == 2
+        assert "ds-1" in caplog.text
+        assert "holds other rows" in caplog.text

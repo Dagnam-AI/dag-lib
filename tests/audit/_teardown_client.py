@@ -89,7 +89,7 @@ class WorldClient:
                     "kind": entry["kind"],
                     "id": rid,
                     "result": "claimed" if ok else "refused",
-                    "code": "claimed" if ok else "not_claimable",
+                    "code": "claimed" if ok else "in_use_elsewhere" if linked else "not_claimable",
                 }
             )
         return {"results": rows}
@@ -197,6 +197,20 @@ class WorldClient:
         if not self._owned("project", project_id):
             raise ProjectNotFoundError(project_id)
         return {"id": project_id}
+
+    def list_projects(self, **filter_params: str | int) -> JsonObject | str | None:
+        """Every project of the owner's, on one page."""
+        self.calls.append("list_projects")
+        items: JsonArray = [{"id": r.id} for r in self.world.alive("project")]
+        return {"items": items, "pages": 1}
+
+    def get_project_datasets(self, project_id: str) -> JsonObject:
+        """The datasets linked into one project, grouped by role."""
+        self.calls.append(f"get_project_datasets:{project_id}")
+        linked: JsonArray = [
+            {"id": r.id} for r in self.world.alive("dataset") if project_id in r.links
+        ]
+        return {"training": linked}
 
     def delete_project(self, project_id: str) -> None:
         self.calls.append(f"delete_project:{project_id}")

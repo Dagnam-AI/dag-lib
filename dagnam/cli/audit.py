@@ -286,7 +286,8 @@ def register_audit(subparsers: SubParsersAction) -> None:
         action="store_true",
         help=(
             "The platform answers 404 for this audit and you know it is deleted: remove this"
-            " directory's local rows and keys instead of keeping them."
+            " directory's local rows and deployment keys instead of keeping them. Irreversible:"
+            " check `dagnam whoami` first."
         ),
     )
     delete.add_argument("--json", action="store_true", help="Print the receipt as JSON.")

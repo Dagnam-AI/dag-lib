@@ -10,14 +10,22 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from contextlib import suppress
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import Any
 
-from dagnam_contracts.audit import DELETED_SCHEMA
+from dagnam_contracts.audit import CANCELLED_SCHEMA, DELETED_SCHEMA
 
 from dagnam.audit.cleanup_kinds import KINDS
-from dagnam.audit.receipt_rows import ALREADY_ABSENT, DELETED, blocked
+from dagnam.audit.receipt_rows import (
+    ALREADY_ABSENT,
+    DELETED,
+    NOT_ANSWERED,
+    STOPPED,
+    blocked,
+    decide,
+)
 from dagnam.audit.secrets import SECRETS_FILE, SecretStore
 from dagnam.audit.state import DELETED_STATE, AuditState, StepState, save_state
 from dagnam.audit.steps_train import RUN_SETTLED
@@ -95,6 +103,37 @@ def receipt_rows(receipt: Mapping[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def unanswered(audit_id: str | None, verb: str, why: str) -> dict[str, Any]:
+    """The receipt of a ``cancel`` or ``delete`` the platform did not answer: nothing was touched.
+
+    One ``audit`` row, ``blocked [not_answered]``; no remote call was made and no local file is
+    removed, so running the command again is exactly as safe as the first time.
+    """
+    reason = f"the platform did not answer the {verb} ({why}); nothing was touched: run it again"
+    return {
+        "schema": CANCELLED_SCHEMA if verb == "cancel" else SCHEMA,
+        "deleted_at": now_iso(),
+        "entries": [blocked("audit", audit_id, reason, NOT_ANSWERED)],
+    }
+
+
+def deleted_elsewhere(verb: str) -> dict[str, Any]:
+    """The receipt of a delete the caller says is already done (``--already-deleted``).
+
+    Nothing remote is touched, and the receipt has no rows, because the caller knows of none.
+    """
+    return {
+        "schema": CANCELLED_SCHEMA if verb == "cancel" else SCHEMA,
+        "deleted_at": now_iso(),
+        "audit_status": "deleted",
+        "entries": [],
+    }
+
+
 def live(step: StepState) -> list[tuple[str, str]]:
     """``(kind, id)`` of what this candidate still has going: its run, its endpoint.
 
@@ -124,6 +163,22 @@ def mark_cancelled(state: AuditState, stopped: Collection[str], gone: Collection
     for step in state.all_steps():
         _cancel_step(step, stopped, gone)
     state.halted = {"reason": RUN_CANCELLED}
+
+
+def settle_cancel(state: AuditState, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Record a published cancel's receipt in the state, and return it untouched.
+
+    Only a row that says it stopped something marks the local run or endpoint: ``stopped``
+    (paused or cancelled) and ``deleted`` / ``already_absent`` (gone). ``already_stopped``,
+    ``kept`` and ``blocked`` mark nothing, so a run that finished stays resumable.
+    """
+    rows = receipt_rows(receipt)
+    mark_cancelled(
+        state,
+        {str(r.get("id")) for r in rows if r.get("status") == STOPPED and decide(r).marks},
+        {str(r.get("id")) for r in rows if r.get("status") in GONE},
+    )
+    return receipt
 
 
 def _cancel_step(step: StepState, stopped: Collection[str], gone: Collection[str]) -> None:
@@ -218,10 +273,14 @@ __all__ = [
     "LOCAL_KEYS",
     "LOCAL_WORKLOADS",
     "SCHEMA",
+    "deleted_elsewhere",
     "forget_locally",
     "live",
     "mark_cancelled",
+    "now_iso",
     "receipt_rows",
     "recorded_ids",
+    "settle_cancel",
+    "unanswered",
     "write_receipt",
 ]

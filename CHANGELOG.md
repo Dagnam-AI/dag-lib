@@ -10,7 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 The changes below are `__version__` 0.16.0, not yet released: the release folds
 them into a dated `## [0.16.0] - YYYY-MM-DD` heading (see `RELEASE.md`).
 
-Needs the platform release that runs `dagnam-contracts` 0.4.0 and has
+Needs the platform release that runs `dagnam-contracts` 0.4.1 and has
 `POST /api/v1/audits/{id}/resume`, the run read's `model_version_id` and
 `credits_consumed`, the `resume` publish field, a workload publish body that
 accepts `response_mode` and agreement blocks that carry `min_class_recall`, and
@@ -39,8 +39,10 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   timeout), refuses, or has no such audit (404) is never "finished from here".
   A failure writes an `audit blocked [not_answered]` row, removes nothing local,
   and exits 1 -- run it again. A 409 "another teardown is running"
-  (`teardown_in_progress`, top level or under `detail`) is waited out (its
-  `Retry-After`, two minutes at most) and asked again. A 404 decides nothing: it
+  (`teardown_in_progress`, top level or under `detail`) and a 503 "the lock is
+  unavailable" (`teardown_unavailable`) are waited out (the platform's
+  `Retry-After`, any length up to two minutes in all; five seconds when it sends
+  none or a value that is no number of seconds) and asked again. A 404 decides nothing: it
   says only that this key cannot see the audit (another account's key, another
   host, a deleted audit). The command says which host and masked key it asked,
   keeps every local row, the deployment keys and `state.json`, and exits 1; only
@@ -98,8 +100,14 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   (`POST /audits/{id}/claims`, at most 200 per request; a version follows its
   run). A claim the platform refuses is not "kept": this directory made the
   resource, so `audit delete` removes it itself once the platform has deleted the
-  audit and `audit cancel` stops it (the run says so). A claim request that fails
-  as a whole halts the run (`publish_failed`) and is asked again. A body the
+  audit and `audit cancel` stops it (the run says so). The exception is the
+  refusal code `in_use_elsewhere` (a dataset another of the owner's runs uses, or
+  the run that made it): that is recorded as kept, shown, and never touched from
+  here. What the platform's own receipt has a row for is never walked from here,
+  and a refused id this client cannot remove is named once without holding the
+  directory out of the deleted state. A claim request that fails as a whole halts
+  the run (`publish_failed`), tells the platform the run stopped, says that the
+  earlier run's resources still exist, and is asked again. A body the
   platform did not refuse (a timeout, a 502, the in-progress 409) is re-sent as
   written; one it refused (400, 404, 422) is dropped. A dataset an earlier
   candidate, retired ones included, already recorded is never adopted by another;
@@ -115,8 +123,38 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   are uploaded afresh.
 - **An audit an older dagnam published is offered a claim before it is deleted.**
   The platform keeps what it cannot prove the audit created; `audit delete` asks
-  once, claims what the directory recorded, and then deletes. Declined, or
-  refused, it says plainly which resources the platform kept and why.
+  once, claims what the directory recorded, and then deletes. Declined, refused,
+  or a claim that cannot be made at all (no such route, no answer), it says so
+  and the delete goes on, naming which resources the platform kept and why.
+- **An unpublished audit never deletes what someone else uses, and finishes.**
+  A dataset linked into a project this directory did not create is `kept
+  [in_use_elsewhere]` (the owner's projects are read to check; unreadable, the
+  dataset is `blocked`, never guessed at) and recorded in `state.json` so no later
+  walk or cancel touches it. A purge the platform refuses with `409
+  weights_served` (`status: kept`) is `kept`, not `blocked`, and the delete
+  finishes around it. A walk in which every id answers not-found changes nothing
+  local unless an earlier walk of this directory already saw one deleted
+  (`confirmed_gone`); when it does fire, the receipt and the error name
+  `audit delete --already-deleted`, whose help now says it is irreversible, and
+  whose note no longer says "nothing was changed" while it removes the files.
+  The error line no longer counts an unanswered audit as an artifact still there.
+  An unpublished run that finds its lost upload by the directory's key adopts it
+  only when the listing's size and sample count say it is this run's file;
+  otherwise it uploads afresh and logs which dataset it left behind.
+- **Smaller teardown fixes.** `audit delete` of an audit an older dagnam
+  published goes on to the delete when the claim fails (it used to stop, and a
+  platform without the claim route could not be deleted from at all) and does not
+  offer a claim for a directory already deleted. A second `audit cancel` of a
+  finished 0.15 audit exits 0 (the endpoint's "Invalid status transition from
+  paused to paused" is `already_stopped`). A `Retry-After` of `nan` no longer
+  crashes the wait.
+- **Rows are redacted last.** Each training row is redacted before the character
+  budget cuts it (so a cut can never expose part of an identifier) and again on
+  the cut row, exactly as it will be uploaded, with the contract's `redact_rows`
+  (`dagnam-contracts` 0.4.1): the uploaded row scans clean, a second pass changes
+  nothing, and the cap still holds. Text a cut leaves next to an identifier (digits
+  run together, say) used to ship; it is now redacted and counted. Redaction scans
+  each row whole, system prompt included, so deriving a large export is slower.
 - **A registry version is removed through its own route, never through its
   entry.** For an unpublished audit the version's weights are purged with
   `DELETE /api/v1/model-versions/{id}` (`DagnamClient.purge_model_version`, which
@@ -320,7 +358,7 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
 - **Secrets are always redacted** (`PII_SECRET`, from `dagnam-contracts` 0.4.0):
   provider keys, JWTs, bearer tokens, private-key blocks and credential
   assignments, quoted keys included, from the rows, the template excerpt and
-  tool-call arguments. Redaction runs before truncation, and a redacted JSON
+  tool-call arguments. Redaction runs before truncation and again after it, and a redacted JSON
   target stays valid JSON; the scan report counts, and warns about, training
   targets that redaction rewrote.
 - **An unreliable candidate never wins.** Every candidate in `audit-report.json`
@@ -360,10 +398,11 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   publication, `--force` retires stale run state and replay answers, preserves
   remote resource handles for cleanup, and carries spent credits into the fresh
   run. Re-scanning an unchanged export preserves the current run state.
-- **Requires `dagnam-contracts` 0.4.0.** Its `winner_of` skips unreliable
+- **Requires `dagnam-contracts` 0.4.1.** Its `redact_rows` is the redaction
+  every row goes through; its `winner_of` skips unreliable
   candidates and is order-independent, and the JSON agreement interval is
   computed over scored rows, so it is wider than before.
-- **`dagnam-contracts` is capped below its next minor (`>=0.4.0,<0.5`).** The
+- **`dagnam-contracts` is capped below its next minor (`>=0.4.1,<0.5`).** The
   contract's PII class list and score shape are a wire protocol with the
   platform, so a new contract minor now reaches users only through an SDK
   release built against it. An open floor let a newly published contract into

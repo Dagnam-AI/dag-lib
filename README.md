@@ -511,14 +511,15 @@ ask the platform once, print its receipt, record what it decided, write `cancell
 the deployment keys. They never finish the job with calls of their own: if the platform does not
 answer, refuses, or times out, the receipt has one `audit blocked [not_answered]` row, nothing
 remote or local is touched, and the exit status is 1 -- run it again. If another cancel or delete
-of the same audit is still walking it (`409 teardown_in_progress`), the command waits for it
-(the platform's `Retry-After`, two minutes at most) and asks again. A 404 decides nothing: it says
+of the same audit is still walking it (`409 teardown_in_progress`), or the platform cannot take its
+lock just now (`503 teardown_unavailable`), the command waits (the platform's `Retry-After`, whatever
+its length up to two minutes in all; five seconds when it sends none) and asks again. A 404 decides nothing: it says
 only that THIS key cannot see the audit (another account's key after `dagnam login`, another
 host, or a deleted audit). The command prints the host and masked key it asked, keeps every local
 row, the deployment keys and `state.json`, and exits 1; ask again with the right key. Only the
 platform's positive answer marks an audit deleted. If you know it is deleted (the website, or an
 older platform answering a repeat delete with 404), `dagnam audit delete ./audit
---already-deleted` removes the local files. A delete the platform reports `halted` (something was
+--already-deleted` removes the local files; that cannot be undone, so check `dagnam whoami` first. A delete the platform reports `halted` (something was
 refused) removes nothing local and exits 1; the next delete asks again. A run still going keeps
 `state.json` and its lock: a cancel asks the platform, which halts the audit, and the run stops at
 its next step. A deleted audit's directory refuses `run` and `cancel`.
@@ -527,22 +528,37 @@ An audit that was never published (`--local-only`, or a run that never reached `
 no platform record, so `state.json`'s own ids -- only what this directory created -- are stopped
 and deleted from here, each re-read to confirm it is gone; a registry version is purged through its
 own route (`DELETE /api/v1/model-versions/{id}`), never by deleting its registry entry, and one the
-platform cannot purge is reported `blocked [platform_only]`. The project stays while anything in it
+platform cannot purge is reported `blocked [platform_only]`; one a live endpoint serves is refused
+by the platform and shown as `kept [weights_served]` (the delete finishes around it). A dataset a
+project this directory did not create has linked is `kept [in_use_elsewhere]`, never deleted, and
+recorded in `state.json` so no later walk or cancel touches it; if the owner's projects cannot be
+read to check, the dataset is `blocked`, not guessed at. The project stays while anything in it
 does. A walk in which EVERY id answers not-found changes nothing local either (a key from another
-account is told the same). The ids live in `state.json`: if it is lost, nothing in this directory
+account is told the same), unless an earlier walk of this directory already saw one deleted
+(`confirmed_gone` in `state.json`); the receipt and the error then name `dagnam audit delete
+--already-deleted` as the way to say they are gone. The ids live in `state.json`: if it is lost, nothing in this directory
 can find what an unpublished run created (a published audit's resources are still found by the
 platform, from the audit's page); and a create whose answer was lost, in a run nobody finished, is
 in no state file at all.
 
 **Publishing a directory first run `--local-only`.** The audit is created first, and then asked to
 claim everything the earlier run made (datasets, runs, endpoints, the project). A claim the
-platform refuses (a dataset you linked to another project, say) is not a verdict that it is not
-yours: this directory created it, so `audit delete` removes it itself once the platform has
-deleted the audit, and `audit cancel` stops it; the run says so when it happens. A claim request
-that fails as a whole halts the run (`publish_failed`) and is asked again next time. Publish a `--local-only` directory only once its run has finished: a create whose answer was lost in the unpublished run cannot be found again after the audit exists (the platform replays a create only for an identical body, and the published body names the audit). **An audit an
+platform refuses is not a verdict that it is not yours: this directory created it, so `audit delete`
+removes it itself once the platform has deleted the audit, and `audit cancel` stops it; the run says
+so when it happens. The one exception is a refusal with the code `in_use_elsewhere` (a dataset one of
+your other runs uses, or the run that made it): that is yours, not this directory's, so it is
+recorded as kept, shown, and never stopped or deleted from here. What the platform's own receipt has
+a row for is the platform's, and is never walked from here. A refused id this client cannot remove
+(a failure, a refusal) is named in the receipt and the command exits 1 once; it does not keep the
+directory out of the deleted state, and a repeat delete finishes. A claim request that fails as a
+whole halts the run (`publish_failed`), tells the platform the run stopped, says that the earlier
+run's resources still exist (an endpoint may be serving: `dagnam audit cancel` stops it), and is
+asked again next time. Publish a `--local-only` directory only once its run has finished: a create whose answer was lost in the unpublished run cannot be found again after the audit exists (the platform replays a create only for an identical body, and the published body names the audit). **An audit an
 older dagnam published** never named its resources to the platform, so the platform keeps what it
 cannot prove the audit created; `audit delete` offers to claim them before it deletes (one
-confirmation), and says plainly which of this directory's resources the platform kept and why.
+confirmation), and says plainly which of this directory's resources the platform kept and why. A
+claim that cannot be made (the platform has no such route, or does not answer) is said, and the
+delete goes on without it.
 
 Each receipt row has a `status` and a stable `code`; this client reads those and never the wording
 of a reason. `deleted`, `already_absent` and `stopped` mean nothing is left; `stopped` with the
@@ -562,11 +578,16 @@ Exit status, from one function: `delete` and `cancel` exit 1 if and only if some
 audit's own is left -- a `blocked` row, a row this version cannot read, a platform that did not
 answer, a delete the platform halted, or a local file behind a link (never followed). A `kept` row
 never fails a command. The last line says whether everything is gone, everything except what was
-kept on purpose, or what is left. Commands resolve the audit directory argument once, so a
+kept on purpose, or what is left. A platform answer of the wrong shape on a route other than
+cancel and delete (an empty object where a document is expected, say) ends the command with a
+generic "unexpected error" naming the Python error rather than the route: a known limit, not a
+state change. Commands resolve the audit directory argument once, so a
 directory named through a link (a temporary or home directory) works; links inside it are refused.
 
 **The platform re-scans what you upload, and a disagreement stops the workload.** Your rows
-are redacted on your machine before they are uploaded, and the platform scans the uploaded
+are redacted on your machine before they are uploaded (before the character budget cuts a row,
+so no cut exposes part of an identifier, and again on the cut row exactly as it is uploaded, so it
+scans clean and a second pass changes nothing), and the platform scans the uploaded
 dataset again before anything is trained on it. If the two disagree the workload stops as
 `pii_disagreement`, and the reason, printed under the workload's line and written to the
 report (each candidate's `error`), says which of three things happened: the platform runs an older privacy contract than this SDK (it scanned

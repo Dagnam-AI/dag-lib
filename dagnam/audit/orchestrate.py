@@ -26,7 +26,7 @@ from typing import Any
 import uuid
 
 from dagnam.audit.candidates import CANDIDATES
-from dagnam.audit.claims import ClaimError, claim_recorded
+from dagnam.audit.claims import ClaimError, claim_halt_detail, claim_recorded
 from dagnam.audit.preflight import PlatformTooOldError, check_platform
 from dagnam.audit.publish import DELETED, Publisher, installed_version, silent
 from dagnam.audit.secrets import SecretStore
@@ -348,9 +348,10 @@ def run_audit_held(
             try:
                 claim_recorded(client, state, notice)
             except ClaimError as exc:
-                detail = f"the claim for the earlier local-only run's resources failed: {exc}"
+                detail = claim_halt_detail(exc)
                 state.halted = {"reason": "publish_failed", "detail": detail}
                 save_state(audit_dir, state)
+                _halt(publisher, "error")
                 return state
     save_state(audit_dir, state)
 

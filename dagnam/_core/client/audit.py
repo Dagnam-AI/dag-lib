@@ -34,25 +34,31 @@ BUILD_PATH = "/health/build"
 
 TEARDOWN_BUSY = "teardown_in_progress"
 """The ``error`` a 409 carries while another walk of the same audit holds its lock."""
+TEARDOWN_UNAVAILABLE = "teardown_unavailable"
+"""The ``error`` a 503 carries when the platform cannot take the lock just now: ask again shortly."""
+WAIT_MARKERS = {409: TEARDOWN_BUSY, 503: TEARDOWN_UNAVAILABLE}
+"""Which ``error`` marks a wait-and-ask-again answer, by status."""
 
 
 def raise_for_audit(resp: requests.Response) -> None:
-    """``raise_for_generic``, except that the platform's "a teardown is running" 409 is typed.
+    """``raise_for_generic``, except that the platform's "ask again shortly" answers are typed.
 
-    The marker is read at the top level of the body (``{"error": ...}``) and under FastAPI's
-    ``detail`` wrapper, whichever a platform sends; any other 409 stays an ``APIError``.
+    That is the 409 "a teardown is running" and the 503 "the lock is unavailable". The marker is
+    read at the top level of the body (``{"error": ...}``) and under FastAPI's ``detail``
+    wrapper, whichever a platform sends; any other 409 or 503 stays an ``APIError``.
     """
-    if resp.status_code == 409:
+    marker = WAIT_MARKERS.get(resp.status_code)
+    if marker is not None:
         try:
             data = resp.json()
         except ValueError:
             data = None
         detail = data.get("detail") if isinstance(data, dict) else None
         source = detail if isinstance(detail, dict) else data
-        if isinstance(source, dict) and source.get("error") == TEARDOWN_BUSY:
+        if isinstance(source, dict) and source.get("error") == marker:
             raise TeardownInProgressError(
-                409,
-                str(source.get("message") or TEARDOWN_BUSY),
+                resp.status_code,
+                str(source.get("message") or marker),
                 retry_after_header=resp.headers.get("Retry-After"),
             )
     raise_for_generic(resp)

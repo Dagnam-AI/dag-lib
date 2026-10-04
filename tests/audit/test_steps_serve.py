@@ -8,7 +8,8 @@ from pathlib import Path
 
 from dagnam_contracts.prompts import parse_chat_prompt, render_chat_prompt
 import pytest
-from tests.audit._platform import Clock, FakePlatform
+from tests.audit._chat import Clock
+from tests.audit._platform import FakePlatform
 
 from dagnam.audit.candidates import SFT_SMALL, CandidateKind
 from dagnam.audit.secrets import SECRETS_FILE

@@ -10,6 +10,7 @@ the classifier recipe's emitted script reads.
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 from dagnam.audit.preflight import UPGRADE, installed_contract, version_gap
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from dagnam._types import JsonObject
     from dagnam.audit.state import AuditState
 
+LOG = logging.getLogger("dagnam.audit")
 DATASET_TYPE = "text"
 FILE_FORMAT = "json"
 """The upload ``format`` is the FILE format; the row format is sniffed into the version."""
@@ -104,20 +106,29 @@ def _adopt(state: AuditState, ctx: StepContext, name: str, key: str | None) -> s
     platform records on it (:func:`_adopt_tagged`); an unpublished one's carries the directory's
     key in its description, a value only this directory holds. A dataset this state already
     records (any candidate, retired ones included) is never adopted: a forced rescan's new rows
-    must not meet the old candidate's upload.
+    must not meet the old candidate's upload. Both are adopted only when the listing's own
+    size and sample count say it is the file this run would upload (:func:`_same_rows`).
     """
     if state.audit_id is not None:
         return _adopt_tagged(state, ctx, name)
     if key is None:
         return None
     known = {step.dataset_id for step in state.all_steps()}
+    path = regular_path(ctx.workload_dir / "dataset.jsonl")
     for found in ctx.client.list_datasets(search=key):
         if (
             found.get("name") == name
             and f"[{key}]" in str(found.get("description") or "")
             and str(found["id"]) not in known
         ):
-            return str(found["id"])
+            if _same_rows(found, path):
+                return str(found["id"])
+            LOG.warning(
+                "dataset %s, an earlier upload of %s, holds other rows than this run's; uploading"
+                " these afresh (the old one stays in your account: delete it in the Studio)",
+                found["id"],
+                ctx.label,
+            )
     return None
 
 

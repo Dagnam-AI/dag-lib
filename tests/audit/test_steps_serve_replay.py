@@ -10,7 +10,8 @@ import threading
 from typing import Any
 
 import pytest
-from tests.audit._platform import FakePlatform, last_user, serve_chat, teacher
+from tests.audit._chat import last_user, serve_chat, teacher
+from tests.audit._platform import FakePlatform
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.exceptions import APIError

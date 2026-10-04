@@ -23,7 +23,7 @@ from dagnam_contracts.prompts import render_chat_prompt
 from dagnam.audit.discover import Workload
 from dagnam.audit.readers.messages import effective_response
 from dagnam.audit.record import TraceRecord
-from dagnam.audit.redact import PII_POLICY, RedactStats, redact_records
+from dagnam.audit.redact import PII_POLICY, RedactStats, redact_records, redact_rows
 from dagnam.audit.split import HOLDOUT_SHARE, cap_train, split_boundary, time_split
 from dagnam.audit.structure import student_tokens
 from dagnam.audit.thresholds import ENUM_MAX_DISTINCT, MAX_TRAIN_ROWS, SFT_MAX_TOKENS
@@ -219,9 +219,9 @@ def _format_key(structure_class: str) -> str:
 class _Plan:
     """One workload's rows, decided a record at a time without keeping any of their text.
 
-    Each record is redacted and derived as it arrives (redaction first, so the
-    character budget can never cut an identifier in half); only the row's
-    digest, label, time and session are kept. :meth:`select` then dedups,
+    Each record is redacted, cut to its final shape, and redacted again as it arrives (the
+    second pass is on the row exactly as it will be uploaded); only the row's digest, label,
+    time and session are kept. :meth:`select` then dedups,
     splits and caps those, and the chosen rows are derived again from their
     records -- so a workload of any size costs memory for its kept rows only.
     """
@@ -236,10 +236,24 @@ class _Plan:
 
     def row(self, record: TraceRecord) -> tuple[dict[str, Any] | None, bool, RedactStats, bool]:
         """``(the row, or None when unusable; truncated; redaction stats; truth changed)``."""
-        (redacted,), stats = redact_records([record])
-        row, truncated = _BUILDERS[self.format_key](redacted, self.max_seq_length)
-        changed = redacted.response != _answer(record)
-        return (row if _usable(row) else None), truncated, stats, changed
+        (clean,), first = redact_records([record])  # no cut can land inside a raw identifier
+        cut, truncated = _BUILDERS[self.format_key](clean, self.max_seq_length)
+        (row,), last = redact_rows([cut])  # the row as uploaded: redacted last, never cut after
+        counts = Counter(first.counts)
+        counts.update(last.counts)
+        stats = RedactStats(
+            counts=dict(counts),
+            pass_list=first.pass_list,
+            rows_changed=int(bool(first.rows_changed or last.rows_changed)),
+        )
+        if not _usable(row):
+            return None, truncated, stats, False
+        return (
+            row,
+            truncated,
+            stats,
+            clean.response != _answer(record) or _target(row) != _target(cut),
+        )
 
     def add(self, position: int, record: TraceRecord) -> None:
         row, truncated, stats, changed = self.row(record)
@@ -329,13 +343,12 @@ def build_dataset(
     holdout_share: float = HOLDOUT_SHARE,
     max_train_rows: int = MAX_TRAIN_ROWS,
 ) -> WorkloadDataset:
-    """Redact, derive, dedup and time-split one workload's records, keeping rows and records aligned.
+    """Derive, redact, dedup and time-split one workload's records, keeping rows and records aligned.
 
-    Redaction comes first, so the character budget can never cut an identifier
-    in half and leave the part a detector no longer recognises. Dedup runs on
-    the redacted rows: two calls that differ only in an email address are one
-    example once it is masked, and keeping both would put the same row on both
-    sides of the split. A ``chat-messages`` training row the student's token
+    Each record is redacted before it is cut (a cut can never expose part of an identifier) and
+    the cut row is redacted again, last, so the rows rescan clean. Dedup runs on the redacted rows: two calls that differ only in an
+    email address are one example once it is masked, and keeping both would put the same row on
+    both sides of the split. A ``chat-messages`` training row the student's token
     budget cannot hold is dropped (the recipe would drop it after the
     credits are spent), and the rest are capped at ``max_train_rows`` (a
     proportional sample by target, so a candidate trains inside its recipe's

@@ -6,7 +6,6 @@ bytes and is discounted only on evidence from the vocabulary, each discount with
 
 from __future__ import annotations
 
-import functools
 import math
 import re
 from typing import Final
@@ -316,12 +315,31 @@ def han_cost(run: str, chars: frozenset[str], fragile: frozenset[str]) -> float:
     return total
 
 
-@functools.cache
+_odd_letters: dict[str, tuple[frozenset[str], re.Pattern[str]]] = {}
+"""The last table the letter pattern was built for, and the pattern: a one-slot memo."""
+
+
 def _non_token_letters(chars: frozenset[str]) -> re.Pattern[str]:
     """One regex for the letters of the scripts at a rate of one or more that are no token.
 
-    Built once per table (a few hundred characters).
+    Built once per table object (a few hundred characters). The memo compares the table by
+    identity, never by value: a table is a ~95,000-element set, and a value comparison made on
+    every lookup after a reload (an equal set that is a new object) is a scan of all of it.
     """
+    held = _odd_letters.get("last")
+    if held is not None and held[0] is chars:
+        return held[1]
+    pattern = _build_non_token_letters(chars)
+    _odd_letters["last"] = (chars, pattern)
+    return pattern
+
+
+def forget_letters() -> None:
+    """Drop the memo of the letter pattern (see :func:`dagnam.audit.token_estimate.clear_caches`)."""
+    _odd_letters.clear()
+
+
+def _build_non_token_letters(chars: frozenset[str]) -> re.Pattern[str]:
     letters: list[str] = []
     for kind, rate in RATES.items():
         if rate >= 1.0:

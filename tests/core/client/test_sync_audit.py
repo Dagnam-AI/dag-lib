@@ -74,6 +74,36 @@ def test_a_409_saying_a_teardown_is_running_is_typed_with_its_retry_after(
     assert "another walk" in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": "teardown_unavailable", "message": "try again"},
+        {"detail": {"error": "teardown_unavailable", "message": "try again"}},
+    ],
+    ids=["top level", "nested under detail"],
+)
+def test_a_503_saying_the_lock_is_unavailable_is_waited_like_a_running_teardown(
+    client: DagnamClient, rmock: RequestsMocker, body: JsonObject
+) -> None:
+    rmock.delete(f"{AUDITS}/a1", json=body, status_code=503, headers={"Retry-After": "11"})
+    with pytest.raises(TeardownInProgressError) as exc:
+        client.delete_audit("a1")
+    assert (exc.value.status_code, exc.value.retry_after_header) == (503, "11")
+    assert "try again" in str(exc.value)
+
+
+def test_any_other_503_stays_a_plain_api_error(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{AUDITS}/a1", json={"detail": "overloaded"}, status_code=503)
+    with pytest.raises(APIError) as exc:
+        client.delete_audit("a1")
+    assert not isinstance(exc.value, TeardownInProgressError)
+    # The 409 marker on a 503 (or the reverse) is not the other's word.
+    rmock.delete(f"{AUDITS}/a2", json={"error": "teardown_in_progress"}, status_code=503)
+    with pytest.raises(APIError) as mixed:
+        client.delete_audit("a2")
+    assert not isinstance(mixed.value, TeardownInProgressError)
+
+
 def test_any_other_409_stays_a_plain_api_error(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.delete(f"{AUDITS}/a1", json={"detail": "audit is halted"}, status_code=409)
     with pytest.raises(APIError) as exc:

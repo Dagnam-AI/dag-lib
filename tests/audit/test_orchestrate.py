@@ -9,14 +9,8 @@ import socket
 from typing import Any
 
 import pytest
-from tests.audit._platform import (
-    Clock,
-    FakePlatform,
-    json_row,
-    last_user,
-    serve_chat,
-    teacher,
-)
+from tests.audit._chat import Clock, json_row, last_user, serve_chat, teacher
+from tests.audit._platform import FakePlatform
 from tests.audit.conftest import HOLDOUT, SCAN_REPORT as SCANNED, TRAIN, stats
 from tests.typing_helpers import RequestsMocker
 

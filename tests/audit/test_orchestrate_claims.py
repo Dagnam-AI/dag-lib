@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, serve_chat, teacher
+from tests.audit._chat import Clock, serve_chat, teacher
+from tests.audit._platform import FakePlatform
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.exceptions import APIError
@@ -69,6 +70,8 @@ def test_a_claim_that_fails_as_a_whole_halts_the_publish_and_the_next_run_asks_a
     assert (halted.audit_id, halted.tagged, halted.claim_pending) == ("audit-1", True, True)
     assert halted.unclaimed_ids == []  # nothing recorded as claimed, nothing as refused
     assert "upload_dataset" not in platform.call_log  # nothing new was created beside it
+    assert ("audit-1", "error") in platform.halts  # the account does not show it running for good
+    assert "still exists" in str(halted.halted["detail"])
 
     resumed = run(wait=False, publisher=Publisher(platform, load_state(audit_dir)))
 

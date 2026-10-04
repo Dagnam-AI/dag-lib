@@ -8,12 +8,8 @@ import shutil
 from typing import Any
 
 import pytest
-from tests.audit._platform import (
-    Clock,
-    FakePlatform,
-    serve_chat,
-    teacher,
-)
+from tests.audit._chat import Clock, serve_chat, teacher
+from tests.audit._platform import FakePlatform
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.exceptions import APIError, DeploymentNotFoundError, FoundationRunNotFoundError

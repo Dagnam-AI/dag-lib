@@ -78,6 +78,7 @@ from dagnam.audit.token_rules import (
     SCRIPT_LEAD,
     SCRIPT_LEAD_DEFAULT,
     char_cost,
+    forget_letters,
     han_cost,
     script_cost,
     symbols_cost,
@@ -86,7 +87,18 @@ from dagnam.audit.token_rules import (
 )
 from dagnam.audit.token_tables import student_chars, student_fragile, student_words
 
-__all__ = ["estimate", "pieces"]
+__all__ = ["clear_caches", "estimate", "pieces"]
+
+
+def clear_caches() -> None:
+    """Forget everything the estimate keeps: the three tables and the pattern built from them.
+
+    For tests and tools that reload the tables. Every cache of the ``token_*`` modules is
+    cleared here; a new one must be added to this function (a test fails otherwise).
+    """
+    for table in (student_words, student_chars, student_fragile):
+        table.cache_clear()
+    forget_letters()
 
 
 def estimate(text: str) -> int:

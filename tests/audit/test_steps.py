@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, as_client
+from tests.audit._chat import Clock
+from tests.audit._platform import FakePlatform, as_client
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import LROFailedError, LROTimeoutError, PlatformAnswerError

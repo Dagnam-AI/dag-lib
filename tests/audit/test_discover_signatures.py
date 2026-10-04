@@ -173,7 +173,7 @@ def test_a_named_workload_keeps_the_text_of_a_bounded_number_of_templates() -> N
 
 
 def test_discovery_holds_no_system_prompt_per_template(monkeypatch: pytest.MonkeyPatch) -> None:
-    # m6: every distinct template kept its whole raw system prompt until the end, so an
+    # every distinct template kept its whole raw system prompt until the end, so an
     # export of per-call (RAG) prompts was held in memory again, as in batch 1.
     monkeypatch.setattr(discover, "normalize_template", normalize_template.__wrapped__)
     prompt_chars, templates = 20_000, 30

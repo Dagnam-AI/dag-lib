@@ -127,6 +127,24 @@ class TestPlatformWithoutCodes:
         other_kind = {**old, "kind": "deployment"}  # only a run's words are read this way
         assert decide(other_kind) == Decision(LEFT)
 
+    def test_an_endpoint_a_cancel_found_already_paused_is_what_already_stopped_says(self) -> None:
+        old = r.legacy(
+            r.row(
+                "deployment",
+                "d1",
+                "blocked",
+                None,
+                "Invalid status transition from paused to paused",
+            )
+        )
+        assert decide(old) == Decision(DONE, marks=False)
+        assert exit_status([old], None, verb="cancel") == 0  # the second cancel of a finished audit
+        assert decide({**old, "kind": "training_job"}) == Decision(LEFT)  # only an endpoint's words
+        other = r.legacy(
+            r.row("deployment", "d1", "blocked", None, "Invalid status transition from a to b")
+        )
+        assert decide(other) == Decision(LEFT)
+
     def test_a_blocked_row_with_no_reason_is_a_leftover(self) -> None:
         assert decide({"kind": "dataset", "status": "blocked"}) == Decision(LEFT)
 

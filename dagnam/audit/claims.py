@@ -9,7 +9,10 @@ sent). The platform answers one ``claimed`` or ``refused`` per entry, in order.
 A refusal is not a verdict that the resource is not ours: this directory created it. It is
 recorded as unclaimed (:attr:`~dagnam.audit.state.AuditState.unclaimed_ids`, with the version its
 run pushed) and ``audit delete`` and ``audit cancel`` handle it themselves, as they would for an
-unpublished audit. A request that fails as a whole (no answer, a 5xx, a 4xx, an answer with no list
+unpublished audit. One refused with the code ``in_use_elsewhere`` (another of the owner's runs
+uses it) is the owner's, not this directory's: it is recorded as kept
+(:attr:`~dagnam.audit.state.AuditState.kept_ids`), shown, and never stopped or deleted from here.
+A request that fails as a whole (no answer, a 5xx, a 4xx, an answer with no list
 of results) records NOTHING, raises :class:`ClaimError`, and the run halts: the claim is asked again
 the next time.
 """
@@ -21,6 +24,7 @@ from typing import Protocol
 
 from dagnam._core.exceptions import DagnamError
 from dagnam._types import JsonArray, JsonObject
+from dagnam.audit.cleanup_kinds import IN_USE_ELSEWHERE
 from dagnam.audit.cleanup_local import recorded_ids
 from dagnam.audit.state import AuditState
 
@@ -43,9 +47,19 @@ class ClaimError(DagnamError):
     """A claim request failed as a whole: nothing was recorded, and it is asked again."""
 
 
-def _results(client: ClaimClient, audit_id: str, entries: JsonArray) -> dict[str, str]:
-    """``id -> result`` for every entry, or :class:`ClaimError` if any request fails."""
-    answered: dict[str, str] = {}
+def claim_halt_detail(exc: ClaimError) -> str:
+    """The halt's text for a claim that failed: what is, and is not, still in the account."""
+    return (
+        f"the claim for the earlier local-only run's resources failed: {exc}. Nothing new was"
+        " uploaded, but what that run made (datasets, runs, endpoints) still exists and an"
+        " endpoint may be serving: run `dagnam audit run` again to hand it over, or"
+        " `dagnam audit cancel` to stop it"
+    )
+
+
+def _results(client: ClaimClient, audit_id: str, entries: JsonArray) -> dict[str, tuple[str, str]]:
+    """``id -> (result, code)`` for every entry, or :class:`ClaimError` if any request fails."""
+    answered: dict[str, tuple[str, str]] = {}
     for start in range(0, len(entries), BATCH):
         try:
             answer = client.claim_audit_resources(audit_id, entries[start : start + BATCH])
@@ -56,7 +70,7 @@ def _results(client: ClaimClient, audit_id: str, entries: JsonArray) -> dict[str
             raise ClaimError("the answer had no list of results")
         for row in results:
             if isinstance(row, dict):
-                answered[str(row.get("id"))] = str(row.get("result"))
+                answered[str(row.get("id"))] = (str(row.get("result")), str(row.get("code")))
     return answered
 
 
@@ -76,16 +90,28 @@ def claim_recorded(
         state.claim_pending = False  # a lone project is tagged by the audit's own create
         return
     answered = _results(client, state.audit_id, entries)
-    refused = {
-        str(e["id"])
-        for e in entries
-        if isinstance(e, dict) and answered.get(str(e["id"])) != CLAIMED and e["kind"] != "project"
-    }
+    refused: set[str] = set()
+    kept: set[str] = set()
+    for e in entries:
+        if not isinstance(e, dict) or e["kind"] == "project":
+            continue
+        result, code = answered.get(str(e["id"]), ("", ""))
+        if result != CLAIMED:
+            (kept if code == IN_USE_ELSEWHERE else refused).add(str(e["id"]))
     for step in state.all_steps():
-        if step.training_job_id in refused and step.model_version_id is not None:
-            refused.add(step.model_version_id)  # its weights follow its run
+        for ids in (refused, kept):
+            if step.training_job_id in ids and step.model_version_id is not None:
+                ids.add(step.model_version_id)  # its weights follow its run
     state.unclaimed_ids += sorted(refused - set(state.unclaimed_ids))
+    state.kept_ids += sorted(kept - set(state.kept_ids))
     state.claim_pending = False
+    if kept:
+        count = len(kept)
+        say(
+            f"{count} resource{'s' if count != 1 else ''} the earlier local-only run made"
+            " is in use by something else of yours; it is left alone and"
+            " `dagnam audit delete` and `dagnam audit cancel` never touch it"
+        )
     if refused:
         count = len(refused)
         say(
@@ -95,4 +121,12 @@ def claim_recorded(
         )
 
 
-__all__ = ["BATCH", "CLAIMABLE", "CLAIMED", "ClaimClient", "ClaimError", "claim_recorded"]
+__all__ = [
+    "BATCH",
+    "CLAIMABLE",
+    "CLAIMED",
+    "IN_USE_ELSEWHERE",
+    "ClaimClient",
+    "ClaimError",
+    "claim_recorded",
+]

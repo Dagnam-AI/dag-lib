@@ -11,7 +11,7 @@ from tests.audit import _receipts as r
 from tests.audit._cleanup import FakeCleanup, as_cleanup_client
 from tests.audit._recorded import HEAD, recorded_state
 
-from dagnam._core.exceptions import TeardownInProgressError
+from dagnam._core.exceptions import APIError, TeardownInProgressError
 from dagnam._types import JsonObject
 from dagnam.audit.cleanup import (
     TEARDOWN_POLL,
@@ -104,6 +104,45 @@ class TestAnotherWalkHoldsTheAudit:
         delete_audit(prepared, as_cleanup_client(platform), sleep=sleeps)
         assert sleeps.slept == [TEARDOWN_POLL]
 
+    @pytest.mark.parametrize(("header", "paused"), [("30", 30.0), ("9999", TEARDOWN_WAIT)])
+    def test_a_retry_after_above_the_poll_is_honoured_up_to_the_cap(
+        self,
+        prepared: Path,
+        platform: FakeCleanup,
+        monkeypatch: pytest.MonkeyPatch,
+        header: str,
+        paused: float,
+    ) -> None:
+        platform.server_receipt = r.designed(r.DELETED_ROW)
+        _answers(platform, monkeypatch, _busy(header))
+        sleeps = _Sleeps()
+
+        receipt = delete_audit(prepared, as_cleanup_client(platform), sleep=sleeps)
+
+        assert sleeps.slept == [paused]  # not clipped to the 5 s poll
+        assert _exit(receipt, "delete") == 0
+
+    def test_two_long_waits_that_pass_the_bound_are_not_answered(
+        self, prepared: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _answers(platform, monkeypatch, _busy("100"), _busy("100"))
+        sleeps = _Sleeps()
+
+        receipt = delete_audit(prepared, as_cleanup_client(platform), sleep=sleeps)
+
+        assert sleeps.slept == [100.0]
+        (row,) = receipt_rows(receipt)
+        assert row["code"] == "not_answered"
+
+    @pytest.mark.parametrize("header", ["nan", "inf-ish", "-3", "0", ""])
+    def test_a_retry_after_that_is_not_a_usable_pause_polls_at_the_default_pace(
+        self, prepared: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch, header: str
+    ) -> None:
+        _answers(platform, monkeypatch, _busy(header))
+        sleeps = _Sleeps()
+        delete_audit(prepared, as_cleanup_client(platform), sleep=sleeps)
+        assert sleeps.slept == [TEARDOWN_POLL]
+
     def test_a_walk_that_never_ends_is_not_answered_after_the_bound_and_nothing_is_touched(
         self, prepared: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -188,6 +227,62 @@ class TestWhatTheClaimRefused:
         assert "dep-1" not in platform.present["deployment"]
         assert "ds-1" in load_state(prepared).kept_ids
 
+    def test_a_refused_id_that_cannot_be_removed_does_not_hold_the_directory_out_of_the_deleted_state(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        """The platform no longer owns it, so no later call of the platform will ever finish it."""
+        self._refused(prepared, ["ds-1"])
+        platform.server_receipt = r.designed(r.row("dataset", "ds-1", "kept", "not_created_here"))
+        platform.dataset_error = APIError(500, "storage down")
+
+        first = delete_audit(prepared, as_cleanup_client(platform))
+
+        rows = {(x["kind"], x["id"]): x["status"] for x in receipt_rows(first)}
+        assert rows[("dataset", "ds-1")] == "blocked"
+        assert _exit(first, "delete") == 1  # said, once, with the id named
+        state = load_state(prepared)
+        assert state.halted == {"reason": "deleted"}
+        assert "ds-1" in state.kept_ids  # never walked again
+
+        platform.call_log.clear()
+        again = delete_audit(prepared, as_cleanup_client(platform))
+
+        assert _exit(again, "delete") == 0
+        assert platform.call_log == []  # a deleted audit is not asked about again
+
+    def test_a_refused_deployment_still_up_keeps_its_key_for_the_one_pass_that_names_it(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        self._refused(prepared, ["dep-1"])
+        platform.server_receipt = r.designed(
+            r.row("deployment", "dep-1", "kept", "not_created_here")
+        )
+        platform.undeletable = {"dep-1"}
+
+        delete_audit(prepared, as_cleanup_client(platform))
+
+        assert SecretStore(prepared).load("w1/head_tune") == "dk-secret"
+        assert load_state(prepared).halted is None  # the next call finishes it, keys and all
+        again = delete_audit(prepared, as_cleanup_client(platform))
+        assert _exit(again, "delete") == 0
+        assert load_state(prepared).halted == {"reason": "deleted"}
+
+    def test_an_id_a_claim_said_is_in_use_elsewhere_is_never_walked(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        state = load_state(prepared)
+        state.unclaimed_ids = ["job-1"]
+        state.kept_ids = ["ds-1"]
+        save_state(prepared, state)
+        platform.server_receipt = r.designed(
+            r.row("training_job", "job-1", "kept", "not_created_here")
+        )
+
+        delete_audit(prepared, as_cleanup_client(platform))
+
+        assert ("delete_dataset", "ds-1") not in platform.call_log
+        assert "ds-1" in platform.present["dataset"]
+
     def test_nothing_refused_is_deleted_while_the_platform_has_not_deleted_the_audit(
         self, prepared: Path, platform: FakeCleanup
     ) -> None:
@@ -219,9 +314,7 @@ class TestWhatTheClaimRefused:
         state.workloads["w1"][HEAD].run_status = "running"
         state.workloads["w1"][HEAD].deploy_status = "running"
         save_state(prepared, state)
-        platform.server_receipt = r.designed(
-            r.ALREADY_STOPPED_ROW, status="halted", schema=r.SCHEMA_CANCELLED
-        )
+        platform.server_receipt = r.designed(status="halted", schema=r.SCHEMA_CANCELLED)
 
         receipt = cancel_audit(prepared, as_cleanup_client(platform))
 
@@ -229,6 +322,24 @@ class TestWhatTheClaimRefused:
         assert ("pause_deployment", "dep-1") in platform.call_log
         assert ("pause_deployment", "dep-2") not in platform.call_log
         assert {row["id"] for row in receipt_rows(receipt)} >= {"job-1", "dep-1"}
+
+    def test_a_cancel_never_stops_what_the_platforms_own_receipt_has_a_row_for(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        """A claim whose answer was lost leaves every id unclaimed; the platform owns some of them."""
+        state = load_state(prepared)
+        state.unclaimed_ids = ["job-1", "dep-1"]
+        state.workloads["w1"][HEAD].run_status = "running"
+        state.workloads["w1"][HEAD].deploy_status = "running"
+        save_state(prepared, state)
+        platform.server_receipt = r.designed(
+            r.ALREADY_STOPPED_ROW, status="halted", schema=r.SCHEMA_CANCELLED
+        )
+
+        cancel_audit(prepared, as_cleanup_client(platform))
+
+        assert ("cancel_training_job", "job-1") not in platform.call_log  # the platform answered
+        assert ("pause_deployment", "dep-1") in platform.call_log  # nobody answered for this one
 
 
 class TestWhatThePlatformSays:

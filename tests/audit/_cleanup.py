@@ -41,6 +41,8 @@ class FakeCleanup:
         """The entries of each ``claim_audit_resources`` request."""
         self.claim_refuses: set[str] = set()
         """Ids the platform refuses to claim."""
+        self.claim_codes: dict[str, str] = {}
+        """Refused id -> the ``code`` of its refusal (else ``not_claimable``)."""
         self.claim_error: DagnamError | None = None
         self.no_purge_route = False
         """The platform predates the per-version purge route: it answers 404 for it."""
@@ -51,6 +53,14 @@ class FakeCleanup:
         """Job ids the platform refuses to delete: it deletes terminal jobs only."""
         self.held_by_job: dict[str, str] = {}
         """dataset id -> job id: the live FK, a 409 for as long as that job exists."""
+        self.other_projects: dict[str, list[str]] = {}
+        """Another project of the owner's -> the dataset ids linked into it."""
+        self.project_pages: dict[int, JsonObject | str] = {}
+        """Page number -> the listing answered for it (else every project of ``other_projects``)."""
+        self.project_datasets: dict[str, JsonObject] = {}
+        """Project id -> the grouped datasets answered for it (else from ``other_projects``)."""
+        self.project_reads_fail: Exception | None = None
+        """Raised by every read of the owner's projects (the links cannot be checked)."""
         self.dataset_error: DagnamError | None = None
         """Raised by ``delete_dataset`` whatever else is true (a server failure)."""
         self.undeletable: set[str] = set()
@@ -110,7 +120,9 @@ class FakeCleanup:
                 "kind": e["kind"],
                 "id": e["id"],
                 "result": "refused" if e["id"] in self.claim_refuses else "claimed",
-                "code": "claimed",
+                "code": self.claim_codes.get(str(e["id"]), "not_claimable")
+                if e["id"] in self.claim_refuses
+                else "claimed",
             }
             for e in entries
             if isinstance(e, dict)
@@ -200,6 +212,22 @@ class FakeCleanup:
     def get_project(self, project_id: str) -> JsonObject:
         self.call_log.append(("get_project", project_id))
         return self._need("project", project_id, ProjectNotFoundError)
+
+    def list_projects(self, **filter_params: str | int) -> JsonObject | str | None:
+        self.call_log.append(("list_projects", str(filter_params.get("page"))))
+        if self.project_reads_fail is not None:
+            raise self.project_reads_fail
+        if self.project_pages:
+            return self.project_pages[int(filter_params["page"])]
+        items: JsonArray = [{"id": pid} for pid in self.other_projects]
+        return {"items": items, "pages": 1}
+
+    def get_project_datasets(self, project_id: str) -> JsonObject:
+        self.call_log.append(("get_project_datasets", project_id))
+        if project_id in self.project_datasets:
+            return self.project_datasets[project_id]
+        linked: JsonArray = [{"id": i} for i in self.other_projects.get(project_id, [])]
+        return {"training": linked, "validation": []}
 
     def delete_project(self, project_id: str) -> None:
         self.call_log.append(("delete_project", project_id))

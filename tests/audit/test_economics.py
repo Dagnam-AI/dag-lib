@@ -319,7 +319,7 @@ def test_no_usage_and_no_cost_is_an_unknown_cost_never_free() -> None:
 
 
 def test_a_model_s_calls_without_usage_are_extrapolated_from_its_calls_with_it() -> None:
-    # m1: half of one model's calls streamed without usage priced the teacher at half
+    # half of one model's calls streamed without usage priced the teacher at half
     # ($0.3012 -> $0.1506 a month): the tokens of 1,000 calls were spread over 2,000.
     def records(with_usage: Callable[[int], bool]) -> list[TraceRecord]:
         return [

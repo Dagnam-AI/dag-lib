@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.audit._platform import BASES, Clock, FakePlatform
+from tests.audit._chat import Clock
+from tests.audit._platform import BASES, FakePlatform
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.client import DagnamClient

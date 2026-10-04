@@ -9,7 +9,8 @@ import sys
 from typing import Any
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, json_row, label_row
+from tests.audit._chat import Clock, json_row, label_row
+from tests.audit._platform import FakePlatform
 
 from dagnam.audit import TraceRecord, read_traces, write_workload
 from dagnam.audit.candidates import HEAD_TUNE, CandidateSpec

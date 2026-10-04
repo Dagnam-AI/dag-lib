@@ -42,10 +42,14 @@ NOT_REMOVED = "not_removed"
 """The ``code`` of a ``blocked`` row this client wrote itself: its reason is for people, never read."""
 NOT_ANSWERED = "not_answered"
 """The ``code`` of the ``audit`` row this client writes when the platform did not answer."""
+NOT_CREATED_HERE = "not_created_here"
+"""The ``code`` of a recorded resource the platform did not create for the audit, so it left it alone."""
 PLATFORM_ONLY = "platform_only"
 """The ``code`` of a registry version this client cannot purge: the platform has no route for it."""
 LEGACY_FINISHED_PREFIX = "Cannot cancel job with status "
 """What a platform without ``code`` said of a run a cancel found already ended (a ``blocked`` row)."""
+LEGACY_PAUSED_PREFIX = "Invalid status transition from paused to paused"
+"""What a platform without ``code`` said of an endpoint a cancel found already paused (a ``blocked`` row)."""
 LEGACY_KEPT_PREFIXES = (
     "project was not created by this audit",
     "project holds artifacts this audit did not record",
@@ -90,6 +94,8 @@ def _legacy(row: Mapping[str, Any]) -> Decision:
         return Decision(
             Verdict.DONE, marks=False
         )  # what ``already_stopped`` says, in its old words
+    if row.get("kind") == "deployment" and reason.startswith(LEGACY_PAUSED_PREFIX):
+        return Decision(Verdict.DONE, marks=False)  # already paused: what ``already_stopped`` says
     return Decision(Verdict.LEFT)
 
 
@@ -140,7 +146,9 @@ __all__ = [
     "KEPT",
     "LEGACY_FINISHED_PREFIX",
     "LEGACY_KEPT_PREFIXES",
+    "LEGACY_PAUSED_PREFIX",
     "NOT_ANSWERED",
+    "NOT_CREATED_HERE",
     "NOT_REMOVED",
     "PLATFORM_ONLY",
     "STOPPED",

@@ -21,6 +21,7 @@ from dagnam._core.exceptions import (
     DagnamError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
+    ModelError,
     ModelNotFoundError,
     ProjectNotFoundError,
     TrainingJobNotFoundError,
@@ -105,6 +106,14 @@ class CleanupClient(Protocol):
         """``GET /api/v1/projects/{id}``; raises ``ProjectNotFoundError``."""
         ...
 
+    def list_projects(self, **filter_params: str | int) -> JsonObject | str | None:
+        """``GET /api/v1/projects``: ``{"items", "pages", ...}``, ``page`` and ``limit`` filters."""
+        ...
+
+    def get_project_datasets(self, project_id: str) -> JsonObject:
+        """``GET /api/v1/projects/{id}/datasets``: the project's datasets grouped by role."""
+        ...
+
     def delete_project(self, project_id: str) -> None:
         """``DELETE /api/v1/projects/{id}``."""
         ...
@@ -119,6 +128,11 @@ def _purge_version(client: CleanupClient, version_id: str) -> JsonObject | None:
     """
     try:
         return client.purge_model_version(version_id)
+    except ModelError as exc:
+        kept = _kept_by_refusal(version_id, str(exc))
+        if kept is None:
+            raise
+        return kept
     except (ModelNotFoundError, APIError) as exc:
         if isinstance(exc, APIError) and exc.status_code != METHOD_NOT_ALLOWED:
             raise
@@ -126,6 +140,31 @@ def _purge_version(client: CleanupClient, version_id: str) -> JsonObject | None:
         raise PlatformOnlyError(
             f"this platform has no route to remove version {version_id}: remove it on the website"
         ) from None
+
+
+def _kept_by_refusal(version_id: str, body: str) -> JsonObject | None:
+    """The ``kept`` row for a purge the platform refused because a live endpoint serves the version.
+
+    The 409 body is ``{"detail": {"error": "weights_served", "status": "kept", ...}}``: the
+    platform's own decision that the version is not this audit's to remove, so it is ``kept``
+    (never ``blocked``) and an unpublished delete finishes around it. Any other 409 is a refusal.
+    """
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    detail = data.get("detail") if isinstance(data, dict) else None
+    if not isinstance(detail, dict) or detail.get("status") != "kept":
+        return None
+    reason = str(detail.get("message") or detail.get("reason") or WEIGHTS_SERVED)
+    code = str(detail.get("code") or detail.get("error") or WEIGHTS_SERVED)
+    return {
+        "kind": "model_version",
+        "id": version_id,
+        "status": "kept",
+        "code": code,
+        "reason": reason,
+    }
 
 
 def _read_version(client: CleanupClient, version_id: str) -> JsonObject:
@@ -162,6 +201,12 @@ def _delete_training_job(client: CleanupClient, job_id: str) -> None:
 type Delete = Callable[[CleanupClient, str], object]
 GONE_STATUSES = frozenset({"deleted", "already_absent"})
 """The statuses of a platform's own answer to a delete that settle the id without a re-read."""
+PROJECT_PAGES = 100
+"""The most pages of the owner's projects read when looking for where a dataset is linked."""
+IN_USE_ELSEWHERE = "in_use_elsewhere"
+"""The ``code`` of a dataset left alone because a project this directory did not create uses it."""
+WEIGHTS_SERVED = "weights_served"
+"""The ``code`` of a version a live endpoint serves: the purge refuses (409) and keeps it."""
 type Get = Callable[[CleanupClient, str], JsonObject]
 type Stop = Callable[[CleanupClient, str], dict[str, Any]]
 
@@ -227,6 +272,40 @@ def _reason(exc: Exception, refusal: int = CONFLICT_STATUS) -> str:
     return _say(exc)
 
 
+def datasets_in_other_projects(client: CleanupClient, own_project: str | None) -> set[str]:
+    """Every dataset id linked to a project of the owner's that this directory did not create.
+
+    A dataset resource carries no list of the projects it is linked to, so the owner's projects
+    are listed (a page of 100 at a time, at most :data:`PROJECT_PAGES`) and each one's datasets
+    read. A read that fails raises: whether a dataset is somebody's work is not a guess.
+    """
+    found: set[str] = set()
+    page = 1
+    while page <= PROJECT_PAGES:
+        listing = client.list_projects(page=page, limit=100)
+        if not isinstance(listing, dict):
+            raise TypeError("the project list was not an object")
+        items, pages = listing.get("items"), listing.get("pages")
+        for project in items if isinstance(items, list) else []:
+            if isinstance(project, dict) and str(project.get("id")) != own_project:
+                found |= _dataset_ids(client.get_project_datasets(str(project["id"])))
+        if not isinstance(pages, int) or page >= pages:
+            return found
+        page += 1
+    return found
+
+
+def _dataset_ids(grouped: JsonObject) -> set[str]:
+    """The ids in a project's datasets grouped by role."""
+    return {
+        str(item["id"])
+        for items in grouped.values()
+        if isinstance(items, list)
+        for item in items
+        if isinstance(item, dict)
+    }
+
+
 def delete_one(
     client: CleanupClient,
     kind: str,
@@ -261,6 +340,8 @@ def delete_one(
         status = answer.get("status") if isinstance(answer, dict) else None
         if status in GONE_STATUSES:  # the platform's own receipt row for this one id
             return {**item, "status": status}
+        if status == "kept" and isinstance(answer, dict):  # the owner uses it: not ours to remove
+            return {**item, **answer}
     try:
         get(client, item_id)
     except absent:
@@ -322,6 +403,7 @@ STOPS: dict[str, Stop] = {"training_job": _stop_job, "deployment": _stop_deploym
 __all__ = [
     "BY_KIND",
     "FINISHED_STATUS",
+    "IN_USE_ELSEWHERE",
     "KINDS",
     "STILL_THERE",
     "STOPPED",
@@ -329,5 +411,6 @@ __all__ = [
     "CleanupBlockedError",
     "CleanupClient",
     "PlatformOnlyError",
+    "datasets_in_other_projects",
     "delete_one",
 ]

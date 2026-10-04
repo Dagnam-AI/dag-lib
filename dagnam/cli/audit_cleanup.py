@@ -4,8 +4,9 @@ For a published audit the platform's own routes are the only thing that touches 
 resources: this command calls one, prints the receipt, records the decisions, removes this
 machine's files, and exits. It never finishes a job from here. When the platform does not
 answer (a 5xx, a timeout, a refusal), or does not know the audit (404), it issues no destructive
-call at all: the receipt says so (``audit blocked [not_answered]``; or nothing to do) and the
-exit status is 1 for the first, 0 for the second. An unpublished audit (no ``audit_id``) has no
+call at all: the receipt says so (``audit blocked [not_answered]``) and the exit status is 1 for
+both; only ``audit delete --already-deleted`` -- the person's word that the audit is gone -- turns
+a 404 into a cleared directory (exit 0). An unpublished audit (no ``audit_id``) has no
 platform record, so the ids this directory recorded as created are walked directly.
 
 The exit status is one function (:func:`~dagnam.audit.receipt_rows.exit_status`): 1 iff
@@ -28,8 +29,12 @@ if TYPE_CHECKING:
     from dagnam._core.client import DagnamClient
 
 
-def _wrong_account_note() -> None:
-    """Say which account a 404 was asked of, so a key from another account is seen at once."""
+def _wrong_account_note(*, clearing: bool = False) -> None:
+    """Say which account a 404 was asked of, so a key from another account is seen at once.
+
+    ``clearing`` is ``--already-deleted``: the person said it is gone, so this directory's rows
+    and keys ARE removed, and the note says that instead of saying nothing changed.
+    """
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.exceptions import DagnamError
 
@@ -37,14 +42,20 @@ def _wrong_account_note() -> None:
         key = mask_key(get_api_key())
     except DagnamError:
         key = "none stored"
-    print(
+    seen = (
         f"The platform at {get_api_url()} (key {key}) says it has no such"
         " audit for this key: the key may belong to another account, or the host be another one"
-        " (see `dagnam whoami`), or the audit may be deleted. Nothing was changed on the platform"
-        " or on this machine: the rows, the deployment keys and state.json are all kept. Once you"
-        " know it is deleted, `dagnam audit delete <dir> --already-deleted` clears this directory.",
-        file=sys.stderr,
+        " (see `dagnam whoami`), or the audit may be deleted."
     )
+    after = (
+        " As you said it is deleted, this directory's rows and deployment keys are removed now;"
+        " that cannot be undone."
+        if clearing
+        else " Nothing was changed on the platform or on this machine: the rows, the deployment"
+        " keys and state.json are all kept. Once you know it is deleted,"
+        " `dagnam audit delete <dir> --already-deleted` clears this directory (irreversibly)."
+    )
+    print(seen + after, file=sys.stderr)
 
 
 def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
@@ -73,12 +84,27 @@ def _finish(receipt: Mapping[str, Any], verb: str) -> tuple[int, int, int, int]:
     rows = receipt_rows(receipt)
     verdicts = [decide(row).verdict for row in rows]
     status = exit_status(rows, receipt.get("audit_status"), verb=verb)
+    unanswered = sum(
+        1 for row in rows if row.get("kind") == "audit" and row.get("status") == "blocked"
+    )
     return (
         status,
-        verdicts.count(Verdict.LEFT),
+        verdicts.count(Verdict.LEFT) - unanswered,  # a missing answer is not an artifact left
         verdicts.count(Verdict.KEPT),
         verdicts.count(Verdict.UNKNOWN),
     )
+
+
+def _gone_hint(receipt: Mapping[str, Any], audit_dir: Path) -> str:
+    """For a walk that found none of the recorded ids: the one way to say they are gone."""
+    from dagnam.audit.cleanup import receipt_rows
+
+    if any(r.get("kind") == "audit" and r.get("id") is None for r in receipt_rows(receipt)):
+        return (
+            f"; if you know they are all deleted, `dagnam audit delete {audit_dir}"
+            " --already-deleted` clears this directory (irreversibly)"
+        )
+    return ""
 
 
 def _unknown_note(unknown: int) -> None:
@@ -148,7 +174,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
     if status:
         error(
             f"something may still be running or serving, or the platform did not answer (see"
-            f" above); the receipt is {path}",
+            f" above); the receipt is {path}{_gone_hint(receipt, audit_dir)}",
             hint=f"dagnam audit cancel {audit_dir}",
         )
 
@@ -182,13 +208,15 @@ def _offer_claim(args: argparse.Namespace, audit_dir: Path, client: DagnamClient
     The platform tags what a client names at creation; an older client named nothing, so the
     platform keeps what it cannot prove the audit created. Claiming them (while the audit still
     exists) is what lets the delete remove them. One confirmation; declined, the delete goes on
-    and says what it kept.
+    and says what it kept; a claim that cannot be made is said and does not stop it.
     """
     from dagnam.audit.claims import CLAIMABLE, ClaimError, claim_recorded
     from dagnam.audit.cleanup import recorded_ids
-    from dagnam.audit.state import load_state, save_state
+    from dagnam.audit.state import DELETED_STATE, load_state, save_state
 
     state = load_state(audit_dir)
+    if state.halted == DELETED_STATE:
+        return  # a deleted audit has nothing to claim for
     ids = recorded_ids(state)
     named = [
         f"  {kind}: {', '.join(ids[kind])}" for kind in CLAIMABLE if kind != "project" and ids[kind]
@@ -207,7 +235,12 @@ def _offer_claim(args: argparse.Namespace, audit_dir: Path, client: DagnamClient
     try:
         claim_recorded(client, state, lambda line: print(line, file=sys.stderr))
     except ClaimError as exc:
-        fail(args, f"the claim failed ({exc}); nothing was deleted: run the delete again")
+        print(
+            f"The claim failed ({exc}); going on with the delete without it: what the platform"
+            " cannot prove the audit created it keeps, and says so below.",
+            file=sys.stderr,
+        )
+        return
     state.tagged = True
     save_state(audit_dir, state)
 
@@ -215,6 +248,7 @@ def _offer_claim(args: argparse.Namespace, audit_dir: Path, client: DagnamClient
 def _kept_untagged_note(audit_dir: Path, receipt: Mapping[str, Any]) -> None:
     """Say plainly which of this directory's own resources the platform kept as not created by the audit."""
     from dagnam.audit.cleanup import receipt_rows
+    from dagnam.audit.receipt_rows import NOT_CREATED_HERE
     from dagnam.audit.state import load_state
 
     own = {
@@ -226,7 +260,7 @@ def _kept_untagged_note(audit_dir: Path, receipt: Mapping[str, Any]) -> None:
     named = [
         f"{row.get('kind')} {row.get('id')}"
         for row in receipt_rows(receipt)
-        if row.get("code") == "not_created_here" and str(row.get("id")) in own
+        if row.get("code") == NOT_CREATED_HERE and str(row.get("id")) in own
     ]
     if named:
         print(
@@ -265,7 +299,7 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
             receipt = delete_audit(
                 audit_dir,
                 client,
-                on_missing=_wrong_account_note,
+                on_missing=lambda: _wrong_account_note(clearing=args.already_deleted),
                 assume_gone=args.already_deleted,
             )
     except (AuditBusyError, FileNotFoundError, UnsafeWorkloadsError) as exc:
@@ -281,6 +315,7 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
     # The last words, on stderr in both modes so under --json stdout is the receipt alone.
     _unknown_note(unknown)
     _kept_untagged_note(audit_dir, receipt)
+    hint = _gone_hint(receipt, audit_dir)
     if status:
         still = "artifact is" if left == 1 else "artifacts are"
         what = (
@@ -291,7 +326,7 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         more = f"; {kept} more {'was' if kept == 1 else 'were'} kept on purpose" if kept else ""
         error(
             f"{what}{more}; nothing local was removed unless the platform deleted the audit;"
-            f" the receipt is {path}",
+            f" the receipt is {path}{hint}",
             hint=f"dagnam audit delete {audit_dir} --yes",
         )
     if kept:

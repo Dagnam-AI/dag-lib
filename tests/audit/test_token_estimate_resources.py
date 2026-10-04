@@ -14,7 +14,7 @@ import unicodedata
 
 import pytest
 
-from dagnam.audit.token_estimate import estimate
+from dagnam.audit.token_estimate import clear_caches, estimate
 from dagnam.audit.token_tables import student_chars, student_fragile, student_words
 
 TWO_MB = 2 * (1 << 20)
@@ -98,9 +98,7 @@ def test_time_is_linear_in_the_length_of_the_text(name: str, unit: str) -> None:
 def test_the_first_use_of_the_tables_takes_milliseconds_and_a_few_megabytes() -> None:
     # Both tables decode into sets on first use (about 9 ms and 6 ms, 13 MB resident in a fresh
     # process). Cleared and decoded again here, with the allocations traced.
-    student_words.cache_clear()
-    student_chars.cache_clear()
-    student_fragile.cache_clear()
+    clear_caches()
     try:
         tracemalloc.start()
         started = time.perf_counter()
@@ -111,9 +109,7 @@ def test_the_first_use_of_the_tables_takes_milliseconds_and_a_few_megabytes() ->
         current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
     finally:
-        student_words.cache_clear()
-        student_chars.cache_clear()
-        student_fragile.cache_clear()
+        clear_caches()
     assert (len(words), len(chars), len(fragile)) == (49_926, 39_637, 678)
     assert seconds < 1.0
     assert current < 30 * (1 << 20)

@@ -75,7 +75,7 @@ dependencies = [
     # ever picked up by an SDK release built and tested against it. An open
     # floor let a new contract reach an already published SDK whose platform
     # still ran the old one, and every audit stopped at its PII check.
-    "dagnam-contracts>=0.4.0,<0.5",
+    "dagnam-contracts>=0.4.1,<0.5",
 ]
 
 [project.optional-dependencies]

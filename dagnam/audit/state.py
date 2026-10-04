@@ -136,6 +136,9 @@ class AuditState:
     unclaimed_ids: list[str] = field(default_factory=list)
     """Ids the platform refused to claim. This directory created them, so ``audit delete`` and
     ``audit cancel`` handle them directly, as they would for an unpublished audit."""
+    confirmed_gone: list[str] = field(default_factory=list)
+    """Ids a delete of this directory has seen deleted. They prove this key can see the account's
+    resources, so a later walk that finds nothing is a finished one, not another account's."""
     kept_ids: list[str] = field(default_factory=list)
     """Ids the platform said are not this audit's to take (a ``kept`` row, a claim it refused).
 
@@ -174,6 +177,7 @@ class AuditState:
             "tagged": self.tagged,
             "claim_pending": self.claim_pending,
             "unclaimed_ids": self.unclaimed_ids,
+            "confirmed_gone": self.confirmed_gone,
             "kept_ids": self.kept_ids,
             "price_table_version": self.price_table_version,
             "workloads": {
@@ -237,7 +241,7 @@ def _from_json(raw: object) -> AuditState:
             StepState(**step_fields, kind=None if kind is None else CandidateKind(kind))
         )
     lists: dict[str, list[str]] = {}
-    for key in ("kept_ids", "unclaimed_ids"):
+    for key in ("kept_ids", "unclaimed_ids", "confirmed_gone"):
         found = data.get(key, [])
         if not isinstance(found, list):
             raise ValueError(f"state.json: {key} must be a JSON array")
@@ -252,6 +256,7 @@ def _from_json(raw: object) -> AuditState:
         tagged=data.get("tagged") is True,
         claim_pending=data.get("claim_pending") is True,
         unclaimed_ids=lists["unclaimed_ids"],
+        confirmed_gone=lists["confirmed_gone"],
         kept_ids=lists["kept_ids"],
         price_table_version=data.get("price_table_version"),
         workloads=workloads,

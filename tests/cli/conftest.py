@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, serve_chat, teacher
+from tests.audit._chat import Clock, serve_chat, teacher
+from tests.audit._platform import FakePlatform
 from tests.cli._audit_run import SDK_CONTRACT, Build, write_prepared
 
 from dagnam.audit.orchestrate import run_audit_held

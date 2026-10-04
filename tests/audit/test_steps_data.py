@@ -281,6 +281,8 @@ def test_the_newest_of_several_uploads_is_the_one_adopted(
     platform.dataset_rows["ds-old"] = ("audit-w1-head_tune", tag)
     platform.dataset_rows["ds-new"] = ("audit-w1-head_tune", tag)
     ctx = make_ctx()
+    size = (ctx.workload_dir / "dataset.jsonl").stat().st_size
+    platform.dataset_sizes.update({"ds-old": size, "ds-new": size})  # both are this file
     assert ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx)).dataset_id == "ds-new"
     assert platform.uploads == {}  # nothing was uploaded
 

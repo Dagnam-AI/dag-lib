@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tests.audit._platform import json_row, label_row
+from tests.audit._chat import json_row, label_row
 
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject

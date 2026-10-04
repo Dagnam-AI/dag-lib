@@ -8,12 +8,18 @@ from tests.audit._recorded import recorded_state
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonArray, JsonObject
 from dagnam.audit.candidates import CandidateKind
-from dagnam.audit.claims import BATCH, CLAIMABLE, ClaimError, claim_recorded
+from dagnam.audit.claims import BATCH, CLAIMABLE, ClaimError, claim_halt_detail, claim_recorded
 from dagnam.audit.state import AuditState
 
 
 class _Client:
-    def __init__(self, refuse: set[str] | None = None, failure: APIError | None = None) -> None:
+    def __init__(
+        self,
+        refuse: set[str] | None = None,
+        failure: APIError | None = None,
+        codes: dict[str, str] | None = None,
+    ) -> None:
+        self.codes = codes or {}
         self.refuse = refuse or set()
         self.failure = failure
         self.asked: list[tuple[str, JsonArray]] = []
@@ -27,7 +33,7 @@ class _Client:
                 "kind": e["kind"],
                 "id": e["id"],
                 "result": "refused" if e["id"] in self.refuse else "claimed",
-                "code": "x",
+                "code": self.codes.get(str(e["id"]), "x"),
             }
             for e in entries
             if isinstance(e, dict)
@@ -140,3 +146,34 @@ def test_nothing_recorded_but_a_project_asks_nothing() -> None:
     assert state.claim_pending is False
     claim_recorded(client, AuditState(claim_pending=True))
     assert client.asked == []
+
+
+def test_a_refusal_saying_it_is_in_use_elsewhere_is_kept_and_shown_never_unclaimed() -> None:
+    state = _state()
+    said: list[str] = []
+
+    claim_recorded(
+        _Client(refuse={"ds-2", "job-1"}, codes={"ds-2": "in_use_elsewhere"}), state, said.append
+    )
+
+    assert state.kept_ids == ["ds-2"]  # the owner's other run uses it: never touched from here
+    assert state.unclaimed_ids == ["job-1", "mv-1"]  # an ordinary refusal stays this directory's
+    assert any("1 resource " in line and "in use by something else" in line for line in said)
+    assert any("handle them directly" in line for line in said)
+
+
+def test_a_run_refused_as_in_use_elsewhere_takes_its_version_with_it() -> None:
+    state = _state()
+
+    claim_recorded(_Client(refuse={"job-1"}, codes={"job-1": "in_use_elsewhere"}), state)
+
+    assert state.kept_ids == ["job-1", "mv-1"]
+    assert state.unclaimed_ids == []
+
+
+def test_the_halt_after_a_failed_claim_says_what_is_still_in_the_account() -> None:
+    text = claim_halt_detail(ClaimError("boom"))
+    assert "boom" in text
+    assert "still exists" in text
+    assert "dagnam audit cancel" in text
+    assert "nothing was uploaded or spent" not in text.lower()

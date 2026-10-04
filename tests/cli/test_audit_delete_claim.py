@@ -14,7 +14,7 @@ from tests.cli._audit_dirs import platform_with_everything, published_dir
 
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
-from dagnam.audit.state import load_state, save_state
+from dagnam.audit.state import DELETED_STATE, load_state, save_state
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
@@ -107,19 +107,47 @@ def test_what_the_platform_refuses_to_claim_is_deleted_here_after_the_audit_is(
     assert ("delete_dataset", "ds-2") in fake.call_log
 
 
-def test_a_claim_that_fails_as_a_whole_deletes_nothing_and_says_to_run_it_again(
+def test_a_claim_that_fails_as_a_whole_is_said_and_the_delete_goes_on(
     run_cli: CliRunner, older: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:
     fake = _platform(monkeypatch, r.designed(r.DELETED_ROW))
     fake.claim_error = APIError(500, "boom")
 
-    with pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "delete", str(older), "--yes"])
+    assert run_cli(["audit", "delete", str(older), "--yes"]) == 0
 
-    assert exc.value.code == 1
-    assert "nothing was deleted" in capsys.readouterr().err
-    assert ("delete_audit", "audit-1") not in fake.call_log
-    assert load_state(older).tagged is False
+    err = capsys.readouterr().err
+    assert "The claim failed" in err
+    assert "going on with the delete" in err
+    assert ("delete_audit", "audit-1") in fake.call_log
+    assert load_state(older).tagged is False  # asked again if the directory is ever claimed again
+
+
+def test_a_platform_without_the_claim_route_still_deletes_a_0_15_directory(
+    run_cli: CliRunner, older: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    """The claim route answers 404 (a platform that predates it): the delete reaches the audit."""
+    fake = _platform(monkeypatch, r.designed(r.DELETED_ROW))
+    fake.claim_error = APIError(404, "Not Found")
+
+    assert run_cli(["audit", "delete", str(older), "--yes"]) == 0
+
+    assert [name for name, _ in fake.call_log][:2] == ["claim_audit_resources", "delete_audit"]
+    assert load_state(older).halted == DELETED_STATE
+
+
+def test_a_deleted_directory_is_not_offered_a_claim(
+    run_cli: CliRunner, older: Path, monkeypatch: PytestMonkeyPatch
+) -> None:
+    state = load_state(older)
+    state.halted = dict(DELETED_STATE)
+    save_state(older, state)
+    fake = _platform(monkeypatch, r.designed(r.DELETED_ROW))
+    fake.claim_error = APIError(500, "boom")
+
+    assert run_cli(["audit", "delete", str(older), "--yes"]) == 0
+
+    assert fake.claims == []
+    assert [name for name, _ in fake.call_log] == []  # a deleted audit is not asked about
 
 
 def test_an_audit_this_client_published_is_never_offered_a_claim(
