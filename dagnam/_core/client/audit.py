@@ -10,15 +10,52 @@ belonging to somebody else, is the same uniform 404.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from dagnam._core._resume import confirmed_by, created_body, gone
 from dagnam._core.client.base import ALLOW_REDIRECTS, DEFAULT_TIMEOUT, BaseDagnamClient
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
     response_json_object,
 )
-from dagnam._types import JsonObject
+from dagnam._core.exceptions import TeardownInProgressError
+from dagnam._types import JsonArray, JsonObject
+
+if TYPE_CHECKING:
+    import requests
 
 AUDITS_PATH = "/api/v1/audits"
+WALK_TIMEOUT = (10.0, 300.0)
+"""(connect, read) for the account's own cancel and delete: they walk every artifact in one request."""
+BUILD_PATH = "/health/build"
+"""Which build the platform runs; unversioned and unauthenticated, on the API base."""
+
+
+TEARDOWN_BUSY = "teardown_in_progress"
+"""The ``error`` a 409 carries while another walk of the same audit holds its lock."""
+
+
+def raise_for_audit(resp: requests.Response) -> None:
+    """``raise_for_generic``, except that the platform's "a teardown is running" 409 is typed.
+
+    The marker is read at the top level of the body (``{"error": ...}``) and under FastAPI's
+    ``detail`` wrapper, whichever a platform sends; any other 409 stays an ``APIError``.
+    """
+    if resp.status_code == 409:
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        detail = data.get("detail") if isinstance(data, dict) else None
+        source = detail if isinstance(detail, dict) else data
+        if isinstance(source, dict) and source.get("error") == TEARDOWN_BUSY:
+            raise TeardownInProgressError(
+                409,
+                str(source.get("message") or TEARDOWN_BUSY),
+                retry_after_header=resp.headers.get("Retry-After"),
+            )
+    raise_for_generic(resp)
 
 
 class AuditClientMixin(BaseDagnamClient):
@@ -31,25 +68,39 @@ class AuditClientMixin(BaseDagnamClient):
         json_body: JsonObject | None = None,
         *,
         idempotent: bool = False,
+        resumable: bool = False,
+        resume_nonce: str | None = None,
+        walk: bool = False,
     ) -> JsonObject:
         resp = self._request(
             method,
             f"{self.api_url}{path}",
-            raise_for=raise_for_generic,
+            raise_for=raise_for_audit,
             json=json_body,
-            timeout=DEFAULT_TIMEOUT,
+            timeout=WALK_TIMEOUT if walk else DEFAULT_TIMEOUT,
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=idempotent,
+            resumable=resumable,
+            resume_salt=resume_nonce,
+            confirm=confirmed_by(self.get_audit, gone()) if resumable else None,
+            retry=not walk,
         )
-        return response_json_object(resp)
+        body = response_json_object(resp)
+        # A replay that dropped its body points at the audit it made: read it.
+        return created_body(resp, body, self.get_audit) if resumable else body
 
-    def create_audit(self, payload: JsonObject) -> JsonObject:
+    def create_audit(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
         """``POST /api/v1/audits``: the scan header and every workload it found.
 
         Sends an ``Idempotency-Key`` the platform deduplicates on, so a transient
         failure retries into the first answer instead of opening a second audit.
+        Resumable (``resume_creates``): the body names the audit's own project,
+        and ``resume_nonce`` -- a value the caller saved before asking -- keeps
+        one directory's audit from replaying another's.
         """
-        return self._audit_request("POST", AUDITS_PATH, payload, idempotent=True)
+        return self._audit_request(
+            "POST", AUDITS_PATH, payload, idempotent=True, resumable=True, resume_nonce=resume_nonce
+        )
 
     def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
         """``POST /api/v1/audits/{id}/candidates`` (idempotent per workload x kind)."""
@@ -75,7 +126,7 @@ class AuditClientMixin(BaseDagnamClient):
         return self._audit_request("GET", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}")
 
     def resume_audit(self, audit_id: str) -> JsonObject:
-        """``POST /api/v1/audits/{id}/resume``: un-halt the audit for a run starting again (K1b)."""
+        """``POST /api/v1/audits/{id}/resume``: un-halt the audit for a run starting again."""
         return self._audit_request("POST", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/resume")
 
     def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
@@ -85,12 +136,48 @@ class AuditClientMixin(BaseDagnamClient):
         )
 
     def cancel_audit(self, audit_id: str) -> JsonObject:
-        """``POST /api/v1/audits/{id}/cancel``: pause deployments, cancel runs, delete nothing."""
-        return self._audit_request("POST", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/cancel")
+        """``POST /api/v1/audits/{id}/cancel``: pause deployments, cancel runs, delete nothing.
+
+        The platform walks every artifact in this one request, so it gets a long
+        read timeout and is sent once: a failure is the caller's to handle, and
+        the walk is safe to ask for again.
+        """
+        return self._audit_request(
+            "POST", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/cancel", walk=True
+        )
 
     def delete_audit(self, audit_id: str) -> JsonObject:
-        """``DELETE /api/v1/audits/{id}``: delete every artifact it published, with a receipt."""
-        return self._audit_request("DELETE", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}")
+        """``DELETE /api/v1/audits/{id}``: delete every artifact it published, with a receipt.
+
+        Sent once, with a long read timeout (see :meth:`cancel_audit`); repeating it
+        after a failure is what finishes a partial walk.
+        """
+        return self._audit_request(
+            "DELETE", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}", walk=True
+        )
+
+    def claim_audit_resources(self, audit_id: str, entries: JsonArray) -> JsonObject:
+        """``POST /api/v1/audits/{id}/claims``: ask the platform to take ids this caller created.
+
+        ``entries`` are ``{"kind", "id"}`` (kinds ``dataset``, ``training_job``, ``deployment``,
+        ``project``; at most 200) of resources made before the audit existed. The answer is
+        ``{"results": [{"kind", "id", "result", "code"}]}`` in request order, ``result`` being
+        ``claimed`` or ``refused``. A platform without the route answers 404.
+        """
+        return self._audit_request(
+            "POST",
+            f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/claims",
+            {"entries": entries},
+        )
+
+    def get_platform_build(self) -> JsonObject:
+        """``GET /health/build``: the running build, with the contract version it installed.
+
+        ``contracts`` is the platform's ``dagnam-contracts`` version; a platform
+        that predates the key answers without it, and one that predates the
+        route with a 404. ``dagnam audit run`` reads it before its first upload.
+        """
+        return self._audit_request("GET", BUILD_PATH)
 
 
-__all__ = ["AUDITS_PATH", "AuditClientMixin"]
+__all__ = ["AUDITS_PATH", "BUILD_PATH", "AuditClientMixin"]

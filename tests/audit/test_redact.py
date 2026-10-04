@@ -51,7 +51,7 @@ def test_input_rows_are_not_mutated() -> None:
 
 
 def test_secrets_are_always_redacted() -> None:
-    # P3: a key in a system prompt reached every uploaded row's system turn.
+    # A key in a system prompt reached every uploaded row's system turn.
     rows, stats = redact_rows(
         [
             {

@@ -1,4 +1,4 @@
-"""``state.json``: every platform artifact the audit created, per workload and candidate (spec D9).
+"""``state.json``: every platform artifact the audit created, per workload and candidate.
 
 The file is written atomically after every step, so a crash or a Ctrl+C
 leaves the state the previous step reached and the next ``run`` resumes from
@@ -22,7 +22,7 @@ import filelock
 from dagnam._core.exceptions import DagnamError
 from dagnam._types import JsonValue
 from dagnam.audit.candidates import CandidateKind
-from dagnam.audit.workspace import write_atomic
+from dagnam.audit.workspace import check_writable, read_regular, write_atomic
 
 SCHEMA = "dagnam.audit.state/1"
 STATE_FILE = "state.json"
@@ -31,6 +31,15 @@ LOCK_FILE = "state.json.lock"
 
 class AuditBusyError(DagnamError):
     """Another ``dagnam audit`` command holds this audit directory."""
+
+
+class AuditDeletedError(DagnamError):
+    """The audit directory holds a deleted audit: there is nothing left to run or cancel."""
+
+
+DELETED_STATE: dict[str, JsonValue] = {"reason": "deleted"}
+"""``halted`` of a deleted audit. Only the platform's own answer writes it (a delete it completed);
+a 404 never does: it says only that this key cannot see the audit."""
 
 
 @dataclass(slots=True)
@@ -60,9 +69,28 @@ class StepState:
     published_candidate_id: str | None = None
     published_step: str | None = None
     """The last step the account acknowledged; a resumed run publishes what came after it."""
+    workload_id: str | None = field(default=None, compare=False)
+    kind: CandidateKind | None = field(default=None, compare=False)
+    """Which candidate this step belongs to; set when the state creates or reads it.
+
+    An active step's place in ``workloads`` already says so, and that is all
+    ``state.json`` records for one. The step carries it too so that a forced
+    rescan, which moves the bare steps into ``retired``, does not lose which
+    workload a run still billing was for. It is not part of what a step *did*,
+    so it is left out of equality; ``None`` on a step retired before the state
+    kept it.
+    """
 
 
-_STEP_KEYS = frozenset(f.name for f in fields(StepState))
+_IDENTITY = frozenset({"workload_id", "kind"})
+"""The keys that say which candidate a step is: written for a retired step only."""
+_STEP_KEYS = frozenset(f.name for f in fields(StepState)) - _IDENTITY
+"""The keys of what a step did: every key an active step is written with."""
+
+
+def _step_json(step: StepState) -> dict[str, Any]:
+    """What a step did, as it is written under its workload and candidate."""
+    return {key: value for key, value in asdict(step).items() if key in _STEP_KEYS}
 
 
 @dataclass(slots=True)
@@ -78,18 +106,56 @@ class AuditState:
 
     schema: str = SCHEMA
     project_id: str | None = None
+    project_nonce: str | None = None
+    """This audit directory's own random value, saved before anything is created under it.
+
+    The project create's idempotency key comes from it: that body is only a
+    title, the same for every audit directory of that name, so nothing in it can
+    tell a replay of this audit's project from another's. A create that died
+    after the platform made the project is asked again under this nonce and
+    replays its own; a different directory has its own and never does. The audit
+    create and each dataset upload are keyed by it the same way. ``None`` in a
+    state written before it existed; a run mints one first thing.
+    """
+    pending_audit: dict[str, JsonValue] | None = None
+    """The body of an audit create no answer has come for, saved before it was sent.
+
+    The platform replays a create only for the same key *and* the same body, so a
+    rerun that has to ask again after a lost create sends this very body (whatever
+    ``--max-credits`` or ``--floor`` it has now), and finds the audit the first ask
+    made instead of opening a second. Cleared once the audit is created.
+    """
     audit_id: str | None = None
+    tagged: bool = False
+    """Every resource of this state carries the audit's id: the audit was created by a client that
+    sends it, over resources it claimed or created itself. ``False`` for an audit an older client
+    published, whose untagged resources only a claim can make the audit's."""
+    claim_pending: bool = False
+    """The audit was created over resources an earlier unpublished run made, and the claim for
+    them has not been answered yet; a run asks again before it goes on."""
+    unclaimed_ids: list[str] = field(default_factory=list)
+    """Ids the platform refused to claim. This directory created them, so ``audit delete`` and
+    ``audit cancel`` handle them directly, as they would for an unpublished audit."""
+    kept_ids: list[str] = field(default_factory=list)
+    """Ids the platform said are not this audit's to take (a ``kept`` row, a claim it refused).
+
+    Recorded from a receipt or a claim answer; no listing offers them as the audit's own, and an
+    unpublished walk never deletes them. The platform decides about a published audit's resources
+    and this client never acts on them, so this is a record of the decision, not a guard.
+    """
     price_table_version: str | None = None
     workloads: dict[str, dict[CandidateKind, StepState]] = field(default_factory=dict)
     halted: dict[str, JsonValue] | None = None
     retired_cost_credits: float = 0.0
     """Spend and conservative reservations captured before old replay files are removed."""
     retired: list[StepState] = field(default_factory=list)
-    """Superseded local candidates, kept only for cancellation and deletion."""
+    """Superseded local candidates, kept for cancellation, deletion and ``audit status``."""
 
     def candidate(self, workload_id: str, kind: CandidateKind) -> StepState:
         """The step state for one candidate, created empty on first access."""
-        return self.workloads.setdefault(workload_id, {}).setdefault(kind, StepState())
+        return self.workloads.setdefault(workload_id, {}).setdefault(
+            kind, StepState(workload_id=workload_id, kind=kind)
+        )
 
     def all_steps(self) -> Generator[StepState]:
         """Active and retired candidates, so cleanup never loses a remote handle."""
@@ -98,20 +164,31 @@ class AuditState:
         yield from self.retired
 
     def to_json(self) -> dict[str, Any]:
-        """The on-disk shape of spec section 7."""
+        """The on-disk shape; a retired step also says which candidate it had been."""
         return {
             "schema": self.schema,
             "project_id": self.project_id,
+            "project_nonce": self.project_nonce,
+            "pending_audit": self.pending_audit,
             "audit_id": self.audit_id,
+            "tagged": self.tagged,
+            "claim_pending": self.claim_pending,
+            "unclaimed_ids": self.unclaimed_ids,
+            "kept_ids": self.kept_ids,
             "price_table_version": self.price_table_version,
             "workloads": {
                 workload_id: {
-                    "candidates": {kind.value: asdict(step) for kind, step in candidates.items()}
+                    "candidates": {
+                        kind.value: _step_json(step) for kind, step in candidates.items()
+                    }
                 }
                 for workload_id, candidates in self.workloads.items()
             },
             "halted": self.halted,
-            "retired": [asdict(step) for step in self.retired],
+            "retired": [
+                {"workload_id": step.workload_id, "kind": step.kind, **_step_json(step)}
+                for step in self.retired
+            ],
             "retired_cost_credits": self.retired_cost_credits,
         }
 
@@ -142,21 +219,40 @@ def _from_json(raw: object) -> AuditState:
                 raise ValueError(
                     f"state.json: unknown step keys {unknown} under {workload_id}/{kind}"
                 )
-            workloads[workload_id][CandidateKind(kind)] = StepState(**step_fields)
+            workloads[workload_id][CandidateKind(kind)] = StepState(
+                **step_fields, workload_id=workload_id, kind=CandidateKind(kind)
+            )
     retired = data.get("retired", [])
     if not isinstance(retired, list):
         raise ValueError("state.json: retired must be a JSON array")
     retired_steps: list[StepState] = []
     for index, raw_step in enumerate(retired):
-        step_fields = _object(raw_step, f"retired[{index}]")
-        unknown = sorted(set(step_fields) - _STEP_KEYS)
+        step_fields = dict(_object(raw_step, f"retired[{index}]"))
+        unknown = sorted(set(step_fields) - _STEP_KEYS - _IDENTITY)
         if unknown:
             raise ValueError(f"state.json: unknown step keys {unknown} under retired[{index}]")
-        retired_steps.append(StepState(**step_fields))
+        # Absent from a state written before retired steps kept their candidate.
+        kind = step_fields.pop("kind", None)
+        retired_steps.append(
+            StepState(**step_fields, kind=None if kind is None else CandidateKind(kind))
+        )
+    lists: dict[str, list[str]] = {}
+    for key in ("kept_ids", "unclaimed_ids"):
+        found = data.get(key, [])
+        if not isinstance(found, list):
+            raise ValueError(f"state.json: {key} must be a JSON array")
+        lists[key] = [str(i) for i in found]
     halted = data.get("halted")
+    pending = data.get("pending_audit")
     return AuditState(
         project_id=data.get("project_id"),
+        project_nonce=data.get("project_nonce"),
+        pending_audit=_object(pending, "pending_audit") if pending is not None else None,
         audit_id=data.get("audit_id"),
+        tagged=data.get("tagged") is True,
+        claim_pending=data.get("claim_pending") is True,
+        unclaimed_ids=lists["unclaimed_ids"],
+        kept_ids=lists["kept_ids"],
         price_table_version=data.get("price_table_version"),
         workloads=workloads,
         halted=_object(halted, "halted") if halted is not None else None,
@@ -175,7 +271,7 @@ def load_state(audit_dir: Path) -> AuditState:
     path = audit_dir / STATE_FILE
     if not path.exists():
         return AuditState()
-    return _from_json(json.loads(path.read_text(encoding="utf-8")))
+    return _from_json(json.loads(read_regular(path)))
 
 
 @contextmanager
@@ -186,9 +282,14 @@ def lock_audit(audit_dir: Path) -> Generator[None]:
         AuditBusyError: another command holds it -- a second ``audit run`` over
             the same directory, or a ``delete`` under a live run.
         FileNotFoundError: there is no such directory; a mistyped one is never created.
+        UnsafeWorkloadsError: the lock file or the directory is a link, or the lock file is
+            not a regular file (opening a pipe would block for ever). Older ``filelock``
+            releases open it with ``O_TRUNC`` and follow the link, which would empty whatever
+            it points at.
     """
     if not audit_dir.is_dir():
         raise FileNotFoundError(f"{audit_dir} is not an audit directory: run `dagnam audit scan`")
+    check_writable(audit_dir / LOCK_FILE)
     lock = filelock.FileLock(str(audit_dir / LOCK_FILE), timeout=0)
     try:
         lock.acquire()

@@ -106,6 +106,18 @@ class APIError(DagnamError):
         super().__init__(f"API error {status_code}: {message}")
 
 
+class PlatformAnswerError(DagnamError):
+    """The platform answered 200 with a document that lacks what the answer is for."""
+
+
+class TeardownInProgressError(APIError):
+    """Another cancel or delete of the same audit is still walking it (``409 teardown_in_progress``).
+
+    The platform holds a lock for the walk; the caller waits (``Retry-After`` says how long)
+    and asks again.
+    """
+
+
 class DownloadTooLargeError(APIError):
     """A download exceeded the configured ``max_download_bytes`` ceiling."""
 

@@ -111,7 +111,7 @@ def test_replay_reports_each_row_as_it_lands(requests_mock: RequestsMocker) -> N
 def test_an_interrupted_replay_raises_after_reporting_what_already_landed(
     requests_mock: RequestsMocker,
 ) -> None:
-    """B9: a Ctrl+C mid-replay must not take the answers already paid for with it."""
+    """A Ctrl+C mid-replay must not take the answers already paid for with it."""
 
     def answer(request: Any, context: Any) -> dict[str, Any]:
         if json.loads(request.text)["messages"][-1]["content"] == "q1":
@@ -361,7 +361,7 @@ class _ChatHandler(BaseHTTPRequestHandler):
 
 
 def test_the_replay_reuses_its_connections() -> None:
-    # R3-20: a new TCP+TLS connection per call; the latency the report put beside the
+    # A new TCP+TLS connection per call; the latency the report put beside the
     # vendor's was mostly the handshake. One pool: at most `concurrency` connections.
     _ChatHandler.connections = set()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ChatHandler)

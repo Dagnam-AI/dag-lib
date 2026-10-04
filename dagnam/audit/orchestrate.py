@@ -1,4 +1,4 @@
-"""``run_audit``: the resumable frontier over workloads x candidates (spec U4, D9).
+"""``run_audit``: the resumable frontier over workloads x candidates.
 
 One loop, no branching on kind: for each selected workload, for each
 candidate in :data:`~dagnam.audit.candidates.CANDIDATES`, run the step list.
@@ -6,9 +6,9 @@ The state is saved after every step -- before anything is published, so a
 Ctrl+C on a slow publish never loses a step that was paid for -- and the
 next call resumes from it; a ``KeyboardInterrupt`` is never caught. A hard
 failure inside a step is recorded as ``halted: error`` before it propagates,
-and a cancel in the account ends the run as ``halted: cancelled`` (K1).
+and a cancel in the account ends the run as ``halted: cancelled``.
 
-Verdicts and prices belong to the scan report and Task 5's economics: this
+Verdicts and prices belong to the scan report and the economics module: this
 module reads ``scan-report.json`` for each workload's structure class and
 verdict, and records agreement, latency and credits spent for the report
 to price; it never computes a cost itself.
@@ -23,18 +23,31 @@ import math
 from pathlib import Path
 import time
 from typing import Any
+import uuid
 
 from dagnam.audit.candidates import CANDIDATES
-from dagnam.audit.publish import DELETED, Publisher, installed_version
+from dagnam.audit.claims import ClaimError, claim_recorded
+from dagnam.audit.preflight import PlatformTooOldError, check_platform
+from dagnam.audit.publish import DELETED, Publisher, installed_version, silent
 from dagnam.audit.secrets import SecretStore
-from dagnam.audit.state import AuditState, StepState, load_state, lock_audit, save_state
+from dagnam.audit.state import (
+    DELETED_STATE,
+    AuditDeletedError,
+    AuditState,
+    StepState,
+    load_state,
+    lock_audit,
+    save_state,
+)
 from dagnam.audit.steps import (
     DEPLOY_TIMEOUT_SECONDS,
     RUN_TIMEOUT_SECONDS,
     PlatformClient,
     Step,
     StepContext,
+    answer_field,
     error_code,
+    workload_meta,
 )
 from dagnam.audit.steps_data import pii_scan, resolve_version, split, upload, wait_pii, wait_split
 from dagnam.audit.steps_serve import (
@@ -52,12 +65,13 @@ from dagnam.audit.steps_train import (
 )
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import FLOOR_JSON, FLOOR_LABEL
+from dagnam.audit.workspace import read_regular, workload_dir
 
 SCAN_REPORT = "scan-report.json"
 AUDITED_VERDICTS = frozenset({"candidate", "marginal"})
-"""Verdict statuses the audit runs when no workload list is given (spec section 7a)."""
+"""Verdict statuses the audit runs when no workload list is given."""
 PLAN_ROUNDING = 100
-"""The default ceiling is the plan's estimate rounded up to a multiple of this (spec P5)."""
+"""The default ceiling is the plan's estimate rounded up to a multiple of this."""
 
 STEPS: tuple[Step, ...] = (
     upload,
@@ -85,49 +99,67 @@ FLOOR_BY_STRUCTURE: dict[StructureClass, float] = {
     StructureClass.SHORT_SPAN: FLOOR_LABEL,
     StructureClass.JSON_OBJECT: FLOOR_JSON,
 }
-"""Default quality floor per structure class (spec section 8); free text is never audited."""
+"""Default quality floor per structure class; free text is never audited."""
 
-type ScanWorkload = tuple[str, StructureClass, str]
+type ScanWorkload = tuple[str, StructureClass, str, bool]
+"""``(id, structure class, verdict status, whether the scan derived its rows)``."""
 
 
 def _scan(audit_dir: Path) -> tuple[dict[str, Any], list[ScanWorkload]]:
-    """``(the scan report, [(id, structure_class, verdict status)])`` from ``scan-report.json``."""
+    """``(the scan report, its workloads)`` from ``scan-report.json``."""
     path = audit_dir / SCAN_REPORT
     if not path.exists():
         raise FileNotFoundError(f"{path} not found: run `dagnam audit scan` first")
-    report = json.loads(path.read_text(encoding="utf-8"))
+    report = json.loads(read_regular(path))
     workloads = [
         (
             str(entry["id"]),
             StructureClass(str(entry["structure_class"])),
             str((entry.get("verdict") or {}).get("status", "")),
+            entry.get("dataset") is not None,
         )
         for entry in report.get("workloads", [])
     ]
     return report, workloads
 
 
+def _has_rows(audit_dir: Path, workload_id: str) -> bool:
+    """Whether the scan left rows on disk for this id; an id that cannot name a folder has none."""
+    try:
+        return (workload_dir(audit_dir, workload_id) / "dataset.jsonl").exists()
+    except ValueError:
+        return False
+
+
 def _select(
     audit_dir: Path, scanned: Sequence[ScanWorkload], workloads: Sequence[str] | None
 ) -> list[tuple[str, StructureClass]]:
-    """The workloads to run: the ones named, else every audited verdict with derived files."""
-    by_id = {workload_id: cls for workload_id, cls, _ in scanned}
+    """The workloads to run: the ones named, else every audited verdict.
+
+    Either way only a workload this scan derived, with its rows on disk. The
+    rows alone are not enough: a directory scanned before by an older version
+    can still hold another export's rows for a workload this report has none for.
+    """
+    by_id = {workload_id: cls for workload_id, cls, _, _ in scanned}
+    ready = {
+        workload_id
+        for workload_id, _, _, derived in scanned
+        if derived and _has_rows(audit_dir, workload_id)
+    }
     if workloads is None:
         chosen = [
             workload_id
-            for workload_id, _, verdict in scanned
-            if verdict in AUDITED_VERDICTS and (audit_dir / "workloads" / workload_id).is_dir()
+            for workload_id, _, verdict, _ in scanned
+            if verdict in AUDITED_VERDICTS and workload_id in ready
         ]
     else:
         unknown = [w for w in workloads if w not in by_id]
         if unknown:
             raise ValueError(f"workloads not in {SCAN_REPORT}: {unknown}")
-        chosen = list(workloads)
-        missing = [
-            w for w in chosen if not (audit_dir / "workloads" / w / "dataset.jsonl").exists()
-        ]
+        missing = [w for w in workloads if w not in ready]
         if missing:
             raise ValueError(f"workloads without derived data (run `dagnam audit scan`): {missing}")
+        chosen = list(workloads)
     return [(workload_id, by_id[workload_id]) for workload_id in chosen]
 
 
@@ -143,7 +175,7 @@ def plan_credits(
     selected: Sequence[tuple[str, StructureClass]],
     state: AuditState | None = None,
 ) -> int:
-    """The ceiling a run without ``--max-credits`` is held to (spec P5).
+    """The ceiling a run without ``--max-credits`` is held to.
 
     What the audit already spent, plus every trained candidate of every
     selected workload still to finish at its projected cost -- its run's
@@ -154,10 +186,9 @@ def plan_credits(
     state = AuditState() if state is None else state
     total = credits_spent(state, audit_dir)
     for workload_id, structure_class in selected:
-        meta = json.loads(
-            (audit_dir / "workloads" / workload_id / "meta.json").read_text(encoding="utf-8")
+        replay = projected_replay(
+            int(workload_meta(audit_dir, workload_id)["splits"]["eval_holdout"])
         )
-        replay = projected_replay(int(meta["splits"]["eval_holdout"]))
         for spec in CANDIDATES[structure_class]:
             if spec.training_credits_max is None:
                 continue
@@ -177,12 +208,20 @@ def run_audit(
     wait: bool,
     client: PlatformClient,
     publisher: Publisher | None = None,
+    notice: Callable[[str], None] = silent,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
     run_timeout: float = RUN_TIMEOUT_SECONDS,
     deploy_timeout: float = DEPLOY_TIMEOUT_SECONDS,
 ) -> AuditState:
     """Run (or resume) the frontier under ``audit_dir`` and return the state it reached.
+
+    Before anything is uploaded the platform is asked which ``dagnam-contracts``
+    it runs (:func:`~dagnam.audit.preflight.check_platform`): a platform behind
+    this install raises :class:`~dagnam.audit.preflight.PlatformTooOldError`, and
+    a newer patch is said to ``notice``. The client is also set to resume its
+    creates (``resume_creates``), so a run that is interrupted and run again
+    finds what the first ask made instead of paying for a second.
 
     ``publisher`` mirrors the run into the account as it goes; ``None``
     (``--local-only``) keeps every number on this machine. A publish failure is
@@ -200,7 +239,7 @@ def run_audit(
     One call at a time holds ``audit_dir``: a second raises ``AuditBusyError``.
     """
     with lock_audit(audit_dir):
-        return _run_audit(
+        return run_audit_held(
             audit_dir,
             floor=floor,
             workloads=workloads,
@@ -208,6 +247,7 @@ def run_audit(
             wait=wait,
             client=client,
             publisher=publisher,
+            notice=notice,
             sleep=sleep,
             now=now,
             run_timeout=run_timeout,
@@ -215,7 +255,7 @@ def run_audit(
         )
 
 
-def _run_audit(
+def run_audit_held(
     audit_dir: Path,
     *,
     floor: float | None,
@@ -224,38 +264,62 @@ def _run_audit(
     wait: bool,
     client: PlatformClient,
     publisher: Publisher | None = None,
+    notice: Callable[[str], None] = silent,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
     run_timeout: float = RUN_TIMEOUT_SECONDS,
     deploy_timeout: float = DEPLOY_TIMEOUT_SECONDS,
 ) -> AuditState:
-    """:func:`run_audit`, with ``audit_dir`` held."""
+    """:func:`run_audit` for a caller that already holds ``audit_dir`` (:func:`~dagnam.audit.state.lock_audit`).
+
+    ``dagnam audit run`` holds it from the candidate listing on, through the
+    confirmation prompt and the run, so a scan cannot replace the rows between
+    what was listed and what is uploaded.
+    """
+    if load_state(audit_dir).halted == DELETED_STATE:
+        raise AuditDeletedError(f"{audit_dir} is a deleted audit: there is nothing to run")
+    scan, scanned = _scan(audit_dir)
+    selected = _select(audit_dir, scanned, workloads)
+    # Under --local-only too: that skips the mirror into the account, and the
+    # rows are still uploaded to, and trained on, the platform.
+    client.resume_creates = True
+    check = check_platform(client)
+    if check.refusal is not None:
+        raise PlatformTooOldError(check.refusal)
+    if check.warning is not None:
+        notice(check.warning)
     state = load_state(audit_dir)
     if publisher is not None:
         publisher.follow(state)
-        # Before anything that can wait: a cancel landing from here on sticks (K1b),
+        # Before anything that can wait: a cancel landing from here on sticks,
         # and an audit the account already deleted stops the run here.
         publisher.resume()
         if publisher.stopped is not None:
             return _stopped(audit_dir, state, publisher.stopped)
-    scan, scanned = _scan(audit_dir)
-    selected = _select(audit_dir, scanned, workloads)
     price_table_version = scan.get("price_table_version")
     state.price_table_version = (
         price_table_version if isinstance(price_table_version, str) else None
     )
     state.halted = None
     secrets = SecretStore(audit_dir)
+    if state.project_nonce is None:
+        # On disk before any create: a process that dies after the platform
+        # made the project (or the audit, or a dataset) asks again under this
+        # nonce and finds its own.
+        state.project_nonce = uuid.uuid4().hex
+        save_state(audit_dir, state)
     if state.project_id is None:
         created = client.create_project(
             {
                 "title": f"workload-audit-{audit_dir.resolve().name}",
                 "framework": "pytorch",
                 "visibility": "private",
-            }
+            },
+            resume_nonce=state.project_nonce,
         )
-        state.project_id = str(created["id"])
+        state.project_id = answer_field(created, "id", "the project create")
         save_state(audit_dir, state)
+    was_unpublished = state.audit_id is None
     if publisher is not None:
         # Without --floor each class keeps its own default, so the audit header
         # records the strictest of them; every candidate's agreement carries
@@ -268,6 +332,26 @@ def _run_audit(
             max_credits=max_credits,
             sdk_version=installed_version(),
         )
+        if publisher.create_failed is not None:
+            # Before the first upload, so nothing was uploaded or spent: what a published run
+            # creates without its audit is untagged, and the platform can never own it.
+            state.halted = {"reason": "publish_failed", "detail": publisher.create_failed}
+            save_state(audit_dir, state)
+            return state
+        if was_unpublished and state.audit_id is not None:
+            # Everything created from here on carries the audit's id; what an earlier,
+            # unpublished run of this directory made is handed over (and asked again until
+            # the platform has answered).
+            state.tagged, state.claim_pending = True, True
+            save_state(audit_dir, state)
+        if state.claim_pending and state.audit_id is not None:
+            try:
+                claim_recorded(client, state, notice)
+            except ClaimError as exc:
+                detail = f"the claim for the earlier local-only run's resources failed: {exc}"
+                state.halted = {"reason": "publish_failed", "detail": detail}
+                save_state(audit_dir, state)
+                return state
     save_state(audit_dir, state)
 
     for workload_id, structure_class in selected:
@@ -291,6 +375,7 @@ def _run_audit(
                 now=now,
                 run_timeout=run_timeout,
                 deploy_timeout=deploy_timeout,
+                platform_contracts=check.contracts,
             )
             if publisher is not None:
                 publisher.candidate(ctx, step)
@@ -326,7 +411,7 @@ def _run_audit(
                         "workload_id": workload_id,
                         "candidate": spec.kind.value,
                         "step": run_step.__name__,
-                        "detail": f"{type(exc).__name__}: {exc}",
+                        "detail": describe_failure(exc),
                     }
                     save_state(audit_dir, state)
                     _halt(publisher, "error")
@@ -353,6 +438,15 @@ def _run_audit(
     return _finish(audit_dir, state, publisher)
 
 
+def describe_failure(exc: Exception) -> str:
+    """What a step failed on, for the halt: a document of the wrong shape is said so, not named by its Python error."""
+    if isinstance(exc, KeyError):
+        return f"the platform's answer had no {exc.args[0]!r}"
+    if isinstance(exc, TypeError):
+        return f"the platform's answer had an unexpected shape ({exc})"
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _halt(publisher: Publisher | None, reason: str) -> None:
     """Tell the account the run stopped short; a ``None`` publisher keeps it local."""
     if publisher is not None:
@@ -368,9 +462,22 @@ def _finish(audit_dir: Path, state: AuditState, publisher: Publisher | None) -> 
     return state if publisher.stopped is None else _stopped(audit_dir, state, publisher.stopped)
 
 
+NOT_FOUND_HALT = "audit_not_found"
+"""``halted`` when the platform answers 404 for the audit: this key cannot see it. NOT the deleted
+state, which only the platform's own completed delete writes."""
+
+
 def _stopped(audit_dir: Path, state: AuditState, reason: str) -> AuditState:
     """Stop where the account's cancel or delete caught the run: nothing more is run or published."""
-    state.halted = {"reason": reason}
+    state.halted = (
+        {
+            "reason": NOT_FOUND_HALT,
+            "detail": "the platform has no audit with this id for this key: deleted in your "
+            "account, or the key belongs to another account",
+        }
+        if reason == DELETED
+        else {"reason": reason}
+    )
     save_state(audit_dir, state)
     return state
 
@@ -383,7 +490,9 @@ __all__ = [
     "SCAN_REPORT",
     "STEPS",
     "WORKLOAD_STOPPING",
+    "describe_failure",
     "plan_credits",
     "run_audit",
+    "run_audit_held",
     "select_workloads",
 ]

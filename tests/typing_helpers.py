@@ -32,6 +32,7 @@ class RequestsRecord(Protocol):
     url: str
     qs: dict[str, list[str]]
     text: str | None
+    timeout: float | tuple[float, float] | None
 
     def json(self) -> JsonObject: ...
 

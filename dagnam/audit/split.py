@@ -1,4 +1,4 @@
-"""Time-ordered train / eval_holdout split, snapped so no session straddles it (spec U3)."""
+"""Time-ordered train / eval_holdout split, snapped so no session straddles it."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class Stamped(Protocol):
     def session_id(self) -> str | None: ...
 
 
-# Spec U3: the last 20% of rows by time is ``eval_holdout``, the earlier 80% ``train``.
+# The last 20% of rows by time is ``eval_holdout``, the earlier 80% ``train``.
 HOLDOUT_SHARE = 0.2
 
 
@@ -31,8 +31,8 @@ def time_split(
     nominal cut leaves the latest ``holdout_share`` of rows in the holdout;
     any session that already has a row before the cut is pulled whole into
     ``train``, so a ``session_id`` never straddles the boundary. Rows without
-    a session split individually. The minimum holdout size (spec §8
-    ``MIN_HOLDOUT``) is the verdict's concern, not the split's.
+    a session split individually. The minimum holdout size
+    (``MIN_HOLDOUT``) is the verdict's concern, not the split's.
     """
     if not 0 < holdout_share < 1:
         raise ValueError(f"holdout_share must be in (0, 1); got {holdout_share}")

@@ -2,8 +2,7 @@
 
 Input: an observations export, one observation per row, in any of the shapes
 Langfuse hands out (``.gz`` accepted):
-- the public observations API (JSONL, camelCase), as
-  ``scripts/audit_fixture/export_traces.py`` writes it;
+- the public observations API (JSONL, camelCase), one observation per line;
 - the blob-storage export (``observations_v2/``: Parquet, CSV, JSON or JSONL),
   in snake_case with ``input`` / ``output`` / ``metadata`` as JSON strings;
 - the UI's CSV or JSON export (camelCase, the same JSON strings; JSON is one
@@ -24,7 +23,7 @@ and the UI export guide
 | ``latency_ms`` | ``endTime - startTime``; else ``latency`` (documented in **seconds**) * 1000; else 0 |
 | ``model`` | ``model`` / ``providedModelName`` / ``provided_model_name`` |
 | ``system`` / ``messages`` | ``input``, decoded when it is a JSON string (a chat message list; a mapping holding ``messages`` with the Anthropic ``system`` beside them, or the Responses API's ``input`` items; or a bare prompt string) |
-| ``response`` | ``output``, decoded when it is a JSON string: a string, the assistant message ``{role, content, tool_calls}`` whose ``content`` may be typed blocks, a Responses ``message`` / ``function_call`` item or Responses object, or a list of messages whose last is the reply; any other object (``{"type": "refund", ...}``) is the answer itself, as JSON text |
+| ``response`` | ``output``, decoded when it is a JSON string: a string, the assistant message ``{role, content, tool_calls}`` whose ``content`` may be typed blocks, a Chat Completions object (its first choice's message), a Responses ``message`` / ``function_call`` item or Responses object, or a list of messages whose last is the reply; reasoning in any spelling is dropped, and an output that is only reasoning is no row; any other object (``{"type": "refund", ...}``) is the answer itself, as JSON text |
 | ``prompt_tokens`` | any vendor spelling under ``usage`` / ``usageDetails`` / ``usage_details`` / ``usageMetadata`` / the row itself (see :func:`~dagnam.audit.readers.base.prompt_tokens`); Langfuse's ``input_*`` buckets are added to ``input``, which excludes them |
 | ``completion_tokens`` | the same, for the completion count |
 | ``cached_prompt_tokens`` | the cache-read count in any vendor spelling (see :func:`~dagnam.audit.readers.base.cached_prompt_tokens`) |
@@ -57,13 +56,7 @@ from dagnam.audit.readers.base import (
     require,
     text,
 )
-from dagnam.audit.readers.messages import (
-    has_media,
-    is_reply,
-    reply_of,
-    split_prompt,
-    task_signature,
-)
+from dagnam.audit.readers.messages import has_media, response_of, split_prompt, task_signature
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ("id", "type", "input", "output")
@@ -80,36 +73,26 @@ def _decoded(value: object) -> Any:
     if isinstance(value, str) and value[:1] in ("[", "{"):
         try:
             return json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):  # nested too deeply to decode: it is text
             return value
     return value
 
 
 def _output(value: object) -> Any:
-    """The reply: a message, output item or Responses object, decoded when it is a JSON string.
+    """The output, or its last message when it is a conversation (a list of ``role`` messages).
 
-    An answer that is itself a JSON object is its JSON text (B2-1).
+    Whatever it is, it then goes through the shared reply rules: a message,
+    output item, Chat Completions or Responses object is unwrapped, JSON text
+    of one included, and an answer that is itself a JSON object stays its text.
     """
     decoded = _decoded(value)
-    if isinstance(decoded, Mapping):
-        return decoded if is_reply(decoded) else text(value)
     if (
         isinstance(decoded, list)
         and decoded
         and all(isinstance(item, Mapping) and "role" in item for item in decoded)
     ):
         return decoded[-1]
-    if (
-        isinstance(decoded, list)
-        and decoded
-        and all(
-            isinstance(item, Mapping)
-            and item.get("type") in {"reasoning", "message", "function_call"}
-            for item in decoded
-        )
-    ):
-        return decoded
-    return text(value) if isinstance(decoded, list) else value
+    return value
 
 
 def _latency_ms(row: Row, start: datetime) -> float:
@@ -128,15 +111,15 @@ def to_record(row: Row) -> TraceRecord | None:
     ts = parse_ts(require(row, "startTime", "start_time"))
     prompt = require(row, "input")
     system, messages = split_prompt(prompt)
-    response, calls = reply_of(_output(row["output"]))
+    reply = response_of(_output(row["output"]))
     return TraceRecord(
         trace_id=text(require(row, "id")),
         ts=ts,
         model=text(get(row, "model", "providedModelName", "provided_model_name") or UNKNOWN_MODEL),
         system=system,
         messages=messages,
-        response=response,
-        response_tool_calls=calls,
+        response=reply.text,
+        response_tool_calls=reply.calls,
         prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
         completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
         cached_prompt_tokens=cached_prompt_tokens(row, *_USAGE_ROOTS),
@@ -156,6 +139,7 @@ def to_record(row: Row) -> TraceRecord | None:
         workload_hint=_optional_text(get(row, "metadata.workload", "promptName", "prompt_name")),
         has_media=has_media(prompt),
         signature=task_signature(prompt),
+        reasoning_only=reply.reasoning_only,
     )
 
 

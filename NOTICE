@@ -6,3 +6,18 @@ This product includes software developed by Dagnam.AI.
 Dagnam.AI, Dagnam, and related names are trademarks or service marks of
 Dagnam.AI. The Apache License 2.0 does not grant trademark rights except as
 required for describing the origin of this work.
+
+Portions of the vocabulary of Qwen/Qwen2.5-0.5B-Instruct: Copyright 2024 Alibaba Cloud,
+licensed under the Apache License, Version 2.0.
+The files dagnam/audit/student_words.z, dagnam/audit/student_chars.z and
+dagnam/audit/student_fragile.z contain parts of the vocabulary of the tokenizer of
+Qwen/Qwen2.5-0.5B-Instruct (https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct),
+developed by the Qwen team at Alibaba Cloud and licensed under the Apache License,
+Version 2.0 (see LICENSE): the tokens that are whole words, the tokens that are a
+single character (or a space and one letter), han tokens of two to four characters,
+and tokens of ASCII symbols, each as the text it decodes to, sorted and compressed
+with zlib (not a filter: the entries can be read back); and, in the last file, the
+han and symbol tokens that the tokenizer does not merge again when they repeat,
+found by running it. They hold no token ids or merge rules and are not the whole
+vocabulary; they were extracted by scripts/make_student_tables.py. They are used
+only to estimate how many tokens a text costs that model.

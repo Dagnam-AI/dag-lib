@@ -19,7 +19,7 @@ from dagnam_contracts.prompts import render_chat_prompt
 from tests.typing_helpers import RequestsMocker
 
 from dagnam._core.exceptions import APIError
-from dagnam._types import JsonArray, JsonObject
+from dagnam._types import JsonArray, JsonObject, JsonValue
 from dagnam.audit.steps import PlatformClient
 
 CHAT_URL = "https://x/v1/chat/completions"
@@ -57,6 +57,34 @@ class FakePlatform:
 
     def __init__(self) -> None:
         self.call_log: list[str] = []
+        self.resume_creates = False
+        """Set by the run, as the real client's is."""
+        self.contracts: JsonValue = "0.4.0"
+        """What ``/health/build`` reports as ``contracts``; a string, or a non-string the platform got wrong."""
+        self.build_error: BaseException | None = None
+        self.project_nonces: list[str | None] = []
+        self.audit_nonces: list[str | None] = []
+        self.dataset_rows: dict[str, tuple[str, str]] = {}
+        """Dataset id -> (name, description) it was uploaded with, for ``list_datasets`` to search."""
+        self.dataset_tags: dict[str, str | None] = {}
+        """Dataset id -> the audit id the platform tagged it with at creation (``None``: untagged)."""
+        self.owner_id = "owner-1"
+        """The account the audit and every upload belong to."""
+        self.omit_provenance = False
+        """The platform's rows carry no ``audit_id`` and the audit no ``owner_id`` (production's)."""
+        self.ignores_audit_filter = False
+        """``list_datasets(audit_id=...)`` lists everything the caller can see, as a platform that
+        does not know the parameter does."""
+        self.other_datasets: list[JsonObject] = []
+        """Rows the listing always holds beside this run's: another audit's, another account's public."""
+        self.dataset_sizes: dict[str, int] = {}
+        self.claims: list[tuple[str, list[JsonObject]]] = []
+        """``(audit_id, entries)`` per ``claim_audit_resources``."""
+        self.claim_answer: JsonObject | None = None
+        """What a claim answers; ``None`` claims every entry."""
+        self.lost_uploads = 0
+        """How many uploads commit on the platform and then fail on the client (a lost answer)."""
+        """The nonce each ``create_project`` was asked under, in order."""
         self.submits = 0
         self.submitted: list[JsonObject] = []
         self.credits_estimate_max: int | None = 100
@@ -100,7 +128,7 @@ class FakePlatform:
         """``(candidate_id, payload)`` per ``patch_audit_candidate``."""
         self.halts: list[tuple[str, str]] = []
         self.resumes: list[tuple[str, bool]] = []
-        """(route, K1 ``resume`` flag) per audit create / candidate / patch, in order."""
+        """(route, ``resume`` flag) per audit create / candidate / patch, in order."""
         self.audit_halted = False
         """The account shows the audit halted (a website cancel, or a halt a run published).
 
@@ -109,20 +137,13 @@ class FakePlatform:
         self.audit_deleted = False
         """The audit was deleted in the account: every audit route answers the uniform 404."""
         self.resume_route = True
-        """K1b: the platform has ``POST /audits/{id}/resume``; ``False`` is an older one (404)."""
-        self.cancelled: list[str] = []
-        self.deleted_audits: list[str] = []
+        """The platform has ``POST /audits/{id}/resume``; ``False`` is an older one (404)."""
         self.publish_errors: dict[str, list[BaseException]] = {}
         """Per method name: the exception the next call raises, popped in order."""
         self.forbid_publishing = False
         """``--local-only``: any audit route is a test failure, not a recorded call."""
         self.forbidden_attempts: list[str] = []
         """Audit routes reached while ``forbid_publishing``; a leak, recorded before it raises."""
-        self.receipt: JsonObject = {
-            "schema": "dagnam.audit.deleted/1",
-            "deleted_at": "2026-09-07T10:00:00+00:00",
-            "entries": [{"kind": "project", "id": "proj-1", "status": "deleted", "reason": None}],
-        }
         self._polls: Counter[str] = Counter()
         self._ids: Counter[str] = Counter()
 
@@ -148,8 +169,42 @@ class FakePlatform:
 
     # -- projects / datasets ------------------------------------------------
 
-    def create_project(self, payload: JsonObject) -> JsonObject:
+    def get_platform_build(self) -> JsonObject:
+        self._log("get_platform_build")
+        if self.build_error is not None:
+            raise self.build_error
+        return {"contracts": self.contracts}
+
+    def list_datasets(
+        self, type: str = "all", search: str | None = None, audit_id: str | None = None
+    ) -> list[JsonObject]:
+        self._log("list_datasets")
+        own: list[JsonObject] = [
+            {
+                "id": dataset_id,
+                "name": name,
+                "description": description,
+                "size_bytes": self.dataset_sizes.get(dataset_id, 0),
+                "num_samples": 0,
+                **(
+                    {}
+                    if self.omit_provenance
+                    else {"audit_id": self.dataset_tags.get(dataset_id), "owner_id": self.owner_id}
+                ),
+            }
+            for dataset_id, (name, description) in reversed(self.dataset_rows.items())
+            if (search is None or search in description)
+            and (
+                audit_id is None
+                or self.ignores_audit_filter
+                or self.dataset_tags.get(dataset_id) == audit_id
+            )
+        ]
+        return [*own, *self.other_datasets]
+
+    def create_project(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
         self._log("create_project")
+        self.project_nonces.append(resume_nonce)
         return {"id": self._next("proj"), "title": payload["title"]}
 
     def upload_dataset(
@@ -162,11 +217,18 @@ class FakePlatform:
         visibility: str = "private",
         license: str | None = None,
         progress_cb: object = None,
+        audit_id: str | None = None,
     ) -> JsonObject:
         self._log("upload_dataset")
         first = json.loads(Path(file_path).read_text(encoding="utf-8").splitlines()[0])
         dataset_id = self._next("ds")
         self.uploads[dataset_id] = "labeled-example" if "label" in first else "chat-messages"
+        self.dataset_rows[dataset_id] = (name, description or "")
+        self.dataset_tags[dataset_id] = audit_id
+        self.dataset_sizes[dataset_id] = Path(file_path).stat().st_size
+        if self.lost_uploads:
+            self.lost_uploads -= 1
+            raise APIError(0, "Request timed out")  # committed, and the answer never arrived
         return {"id": dataset_id, "name": name, "format": format, "dataset_type": dataset_type}
 
     def get_dataset(self, dataset_id: str) -> JsonObject:
@@ -246,7 +308,7 @@ class FakePlatform:
         }
 
     def get_foundation_run(self, run_id: str) -> JsonObject:
-        """The run read (K2): a completed run names the version it pushed, unless it pushed none."""
+        """The run read: a completed run names the version it pushed, unless it pushed none."""
         self._log("get_foundation_run")
         self._polls[run_id] += 1
         if self._polls[run_id] <= self.run_polls:
@@ -313,7 +375,7 @@ class FakePlatform:
             raise errors.pop(0)
 
     def _resume(self, name: str, payload: JsonObject) -> None:
-        """K1: every publish says whether it resumes; only a resuming one gets past a halt."""
+        """Every publish says whether it resumes; only a resuming one gets past a halt."""
         self._gone()
         resume = bool(payload.pop("resume"))
         self.resumes.append((name, resume))
@@ -328,10 +390,11 @@ class FakePlatform:
     def get_audit(self, audit_id: str) -> JsonObject:
         self._publish("get_audit")
         self._gone()
-        return {"id": audit_id, "status": "halted" if self.audit_halted else "running"}
+        owner: JsonObject = {} if self.omit_provenance else {"owner_id": self.owner_id}
+        return {"id": audit_id, "status": "halted" if self.audit_halted else "running", **owner}
 
     def resume_audit(self, audit_id: str) -> JsonObject:
-        """K1b: un-halt the audit; an older platform has no such route."""
+        """Un-halt the audit; an older platform has no such route."""
         self._publish("resume_audit")
         if not self.resume_route:
             raise APIError(404, "Not Found")
@@ -339,8 +402,9 @@ class FakePlatform:
         self.audit_halted = False
         return {"id": audit_id, "status": "running"}
 
-    def create_audit(self, payload: JsonObject) -> JsonObject:
+    def create_audit(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
         self._publish("create_audit")
+        self.audit_nonces.append(resume_nonce)
         self._resume("create_audit", payload)
         self.audits.append(payload)
         return {"id": self._next("audit")}
@@ -366,15 +430,13 @@ class FakePlatform:
         self.audit_halted = True
         return {"id": audit_id, "status": "halted", "halted_reason": reason}
 
-    def cancel_audit(self, audit_id: str) -> JsonObject:
-        self._publish("cancel_audit")
-        self.cancelled.append(audit_id)
-        return dict(self.receipt)
-
-    def delete_audit(self, audit_id: str) -> JsonObject:
-        self._publish("delete_audit")
-        self.deleted_audits.append(audit_id)
-        return dict(self.receipt)
+    def claim_audit_resources(self, audit_id: str, entries: JsonArray) -> JsonObject:
+        self._publish("claim_audit_resources")
+        rows = [entry for entry in entries if isinstance(entry, dict)]
+        self.claims.append((audit_id, rows))
+        if self.claim_answer is not None:
+            return dict(self.claim_answer)
+        return {"results": [{**row, "result": "claimed", "code": "claimed"} for row in rows]}
 
 
 def as_client(platform: FakePlatform) -> PlatformClient:
@@ -415,7 +477,7 @@ def teacher(messages: list[dict[str, str]]) -> str:
 
 
 def label_row(i: int) -> dict[str, Any]:
-    """A ``labeled-example`` row exactly as Task 6 derives one."""
+    """A ``labeled-example`` row exactly as the scan derives one."""
     turns = [{"role": "user", "content": f"ticket {i}"}]
     return {
         "input": render_chat_prompt(turns, system="Classify the ticket"),
@@ -424,7 +486,7 @@ def label_row(i: int) -> dict[str, Any]:
 
 
 def json_row(i: int) -> dict[str, Any]:
-    """A ``chat-messages`` row exactly as Task 6 derives one."""
+    """A ``chat-messages`` row exactly as the scan derives one."""
     turns = [{"role": "system", "content": "Extract"}, {"role": "user", "content": f"order {i}"}]
     return {"messages": [*turns, {"role": "assistant", "content": teacher(turns)}]}
 

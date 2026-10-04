@@ -354,7 +354,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 # A rectangular, already-padded token array still carries raw ids
                 # that can exceed the embedding's vocab; clamp out-of-vocab ids to 0
                 # exactly like the ragged path, else nn.Embedding raises "index out
-                # of range" (Round-2 G247).
+                # of range".
                 x_test = clamp_token_ids(np.asarray(x_test), vocab_size)
             x_t = tensor(np.asarray(x_test), dtype=torch_long)
             y_t = _native_target_tensor(y_test, tensor, torch_long, torch_float32)
@@ -368,7 +368,7 @@ class PytorchDatasetMixin(DatasetMixinBase):
                 )
             elif vocab_size is not None:
                 # Rectangular already-padded token ids also need clamping to the
-                # embedding's vocab (Round-2 G247); see the test-split note above.
+                # embedding's vocab; see the test-split note above.
                 x_train = clamp_token_ids(np.asarray(x_train), vocab_size)
             n_val = int(len(x_train) * val_ratio)
             if split == "val":

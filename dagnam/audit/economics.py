@@ -69,7 +69,7 @@ def student_cost_usd_month(w: Workload, kind: StudentKind) -> float:
 def replaceability(w: Workload) -> Verdict:
     """Apply the design's economics rules to one workload."""
     if w.media_calls > MAX_MEDIA_SHARE * w.calls:
-        # N9: the answers depend on parts the text a student is trained on does not hold.
+        # The answers depend on parts the text a student is trained on does not hold.
         reason = (
             f"multimodal input: {w.media_calls / w.calls:.0%} of calls carry image, audio"
             " or file parts a text student cannot see"
@@ -108,9 +108,9 @@ def price_workload(w: Workload, table: PriceTable) -> Workload:
 
     Calls on a model the table does not list (a row that fell back to
     ``"unknown"``), or that carried no token counts -- a whole model's or some
-    of its calls (m1) -- are extrapolated from the priced ones, the way the
+    of its calls -- are extrapolated from the priced ones, the way the
     export's own partial costs are; with no priced call at all the cost stays
-    unknown -- never $0 for a stream without usage (N10).
+    unknown -- never $0 for a stream without usage.
     """
     if w.cost_usd_month is not None:
         return w

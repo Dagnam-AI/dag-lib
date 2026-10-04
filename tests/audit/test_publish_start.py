@@ -43,6 +43,8 @@ def test_start_publishes_every_workload_and_records_the_audit_id(
         "calls_per_day": 100.0,
         "mean_prompt_tokens": 100,
         "mean_completion_tokens": 2,
+        "completion_tokens_total": 6000,
+        "calls_total": 3000,
         "spend_usd_month": 900.0,
         "export_p50_ms": 400.0,
         "verdict": "candidate",

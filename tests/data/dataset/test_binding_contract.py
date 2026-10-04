@@ -20,7 +20,7 @@ from dagnam.data.load import load_dataset
 _RolesFn = Callable[[dict[str, Any]], dict[str, str] | None]
 # PyTorch, TensorFlow, and Flax all now share the single canonical
 # column_roles_from_binding (previously triplicated verbatim in each converter
-# module — G306 finding 3), so there is only one function to exercise.
+# module), so there is only one function to exercise.
 _ALL_ROLE_FNS: list[_RolesFn] = [column_roles_from_binding]
 
 

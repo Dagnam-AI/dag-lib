@@ -9,13 +9,16 @@ from pathlib import Path
 import socket
 import sys
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import pytest
+from tests.audit._cleanup import FakeCleanup
 
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.normalize import template_hash
 from dagnam.audit.state import AuditState, StepState, lock_audit, save_state
-from dagnam.cli.audit import parse_credits, parse_map, parse_sample_rate, parse_window
+from dagnam.cli.audit import parse_credits
+from dagnam.cli.audit_scan import parse_map, parse_sample_rate, parse_window
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
@@ -374,7 +377,7 @@ def test_rescanning_into_a_run_directory_refuses_to_swap_its_data(
     assert "--force" in err
     assert (out / "workloads" / label["id"] / "dataset.jsonl").read_text() == dataset
 
-    # M6: the replay answers of the rows --force rewrites belong to the old rows.
+    # The replay answers of the rows --force rewrites belong to the old rows.
     stale = out / "workloads" / label["id"] / "replay-head_tune.jsonl"
     stale.write_text('{"deployment_id": "dep-1", "balance_before": 1}\n', encoding="utf-8")
     argv = ["audit", "scan", str(other), "--source", "jsonl", "--out", str(out), "--force"]
@@ -383,10 +386,78 @@ def test_rescanning_into_a_run_directory_refuses_to_swap_its_data(
     assert not stale.exists()
 
 
+def test_a_forced_rescan_names_what_it_retired_that_is_still_live_and_how_to_stop_it(
+    run_cli: CliRunner,
+    tmp_path: Path,
+    export: Path,
+    capsys: StrCapture,
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    """A retired candidate leaves the audit, not the platform.
+
+    Its run trained -- and billed -- to the recipe's time bound and its
+    endpoint stayed up, and nothing said so: the scan printed its table and
+    ``audit status`` no longer listed them.
+    """
+    out = tmp_path / "audit"
+    assert run_cli(["audit", "scan", str(export), "--source", "jsonl", "--out", str(out)]) == 0
+    label = json.loads((out / "scan-report.json").read_text(encoding="utf-8"))["workloads"][0]
+    going = StepState(
+        dataset_id="ds-1", run_id="run-1", training_job_id="job-1", run_status="running"
+    )
+    served = StepState(
+        run_id="run-2",
+        training_job_id="job-2",
+        run_status="completed",
+        deployment_id="dep-2",
+        deploy_status="running",
+    )
+    save_state(out, AuditState(workloads={label["id"]: {HEAD: going, SFT: served}}))
+    other = tmp_path / "other.jsonl"
+    other.write_text(
+        "".join(json.dumps({**_row(i), "response": "cd"[i % 2]}) + "\n" for i in range(CALLS)),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    argv = ["audit", "scan", str(other), "--source", "jsonl", "--out", str(out), "--force"]
+
+    assert run_cli([*argv, "--json"]) == 0
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["schema"] == "dagnam.audit.scan/1"  # stdout stays the report
+    assert captured.err.splitlines()[:4] == [
+        "warning: 2 retired run(s) or endpoint(s) are still live and still billed:",
+        "  training_job job-1",
+        "  deployment dep-2",  # job-2 already completed: nothing of it to stop
+        f"Stop them: dagnam audit cancel {out}",
+    ]
+
+    # `audit status` still says which workload and candidate each of them was.
+    metrics = mock.Mock()
+    metrics.get_deployment_metrics.return_value = {}
+    monkeypatch.setattr("dagnam.cli.audit.client_from_env", lambda: metrics)
+    assert run_cli(["audit", "status", str(out), "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["workload"], r["candidate"], r["status"], r["training_job_id"]) for r in rows] == [
+        (label["id"], "head_tune", "retired", "job-1"),
+        (label["id"], "sft_small", "retired", "job-2"),
+    ]
+
+    # The command it names is the one that stops them.
+    platform = FakeCleanup(job=["job-1", "job-2"], deployment=["dep-2"])
+    monkeypatch.setattr("dagnam.cli.audit_cleanup.client_from_env", lambda: platform)
+    assert run_cli(["audit", "cancel", str(out)]) == 0
+    assert platform.call_log == [("cancel_training_job", "job-1"), ("pause_deployment", "dep-2")]
+    capsys.readouterr()
+
+    assert run_cli(argv) == 0  # and a scan with nothing live left to name says nothing
+    assert "retired" not in capsys.readouterr().err
+
+
 def test_a_scan_does_not_rewrite_rows_under_a_live_run(
     run_cli: CliRunner, tmp_path: Path, export: Path, capsys: StrCapture
 ) -> None:
-    """M6: a workload the live run has not reached yet is not in `state.json` to protect it."""
+    """A workload the live run has not reached yet is not in `state.json` to protect it."""
     out = tmp_path / "audit"
     out.mkdir()
     with lock_audit(out), pytest.raises(SystemExit) as exc:
@@ -397,7 +468,7 @@ def test_a_scan_does_not_rewrite_rows_under_a_live_run(
 
 
 def test_a_sampled_export_is_scaled_back_to_the_traffic(run_cli: CliRunner, tmp_path: Path) -> None:
-    # N18: a Langfuse/LangSmith export sampled at 25% understated volume and spend 4x.
+    # A Langfuse/LangSmith export sampled at 25% understated volume and spend 4x.
     rows = [_oai(i, "Label the ticket.", "ab"[i % 2]) for i in range(40)]
     export = _export(tmp_path, rows)
     full = _scan(run_cli, export, tmp_path / "full")

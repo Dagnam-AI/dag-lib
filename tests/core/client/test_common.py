@@ -672,7 +672,7 @@ def test_ok_returns_false_for_unknown_response_shape() -> None:
     assert common._ok(r) is False
 
 
-# ResponseError mapping (Task 6 — decode/shape failures -> ResponseError) ------
+# ResponseError mapping (decode/shape failures -> ResponseError) ---------------
 
 
 class _RaisingResp:
@@ -867,7 +867,7 @@ def test_account_locked_status_is_distinct_from_suspended():
 
 
 def test_blocked_ip_raises_existing_auth_error_not_a_new_type():
-    # Deliberate: no dedicated exception class for a blocked IP (see Task 1).
+    # Deliberate: no dedicated exception class for a blocked IP.
     with pytest.raises(AuthError) as ei:
         common.raise_for_upload(
             _resp(

@@ -451,7 +451,7 @@ class TestDownload:
         client.list_model_version_artifacts.return_value = [{"id": "a1", "sha256": sha}]
         client.download_model_artifact_stream.side_effect = side
 
-        # Open the C1 eviction gate (a budget must be explicitly configured)
+        # Open the eviction gate (a budget must be explicitly configured)
         # so the eviction attempt below is actually reached.
         monkeypatch.setattr(
             models, "load_config", lambda: {"max_model_cache_size": 1024}, raising=False
@@ -471,7 +471,7 @@ class TestDownload:
     def test_real_eviction_never_deletes_the_just_written_entry(
         self, model_cache: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """C1 / M6: a REAL (unmocked) eviction sweep must never delete the
+        """A REAL (unmocked) eviction sweep must never delete the
         artifact ``download()`` just returned, even when that artifact alone
         exceeds the configured budget -- only a stale, older entry is fair
         game.
@@ -557,7 +557,7 @@ class TestDownload:
         assert old_dir.exists(), "invalid budget must not trigger an eviction sweep"
 
     def test_lru_marker_lands_in_the_same_dir_as_the_artifact(self, model_cache: Path) -> None:
-        """I2: a slug-shaped id (containing "/") is percent-encoded once for
+        """A slug-shaped id (containing "/") is percent-encoded once for
         its cache directory; the LRU marker must land in that SAME directory,
         not a double-encoded phantom sibling.
         """
@@ -599,7 +599,7 @@ class TestDownload:
 
 
 class TestDownloadArtifactFilename:
-    """I5: the local filename comes from the artifact's real name, not always
+    """The local filename comes from the artifact's real name, not always
     ``{artifact_id}.bin`` -- so a HuggingFace-shaped multi-file release stays
     reconstructable under its real filenames.
     """

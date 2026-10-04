@@ -20,6 +20,18 @@ PER_SESSION = 4
 SESSIONS = 3
 
 
+REPLAYED_INPUT: list[dict[str, Any]] = [
+    {"role": "user", "content": "ticket 1"},
+    {"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAAA-opaque"},
+    {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    {"type": "mcp_call", "id": "mcp_1", "name": "kb", "arguments": "{}", "output": "tool-says"},
+    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "a1"}]},
+    {"role": "user", "content": "ticket 2"},
+]
+"""A Responses ``input`` that replays an earlier turn which ran hosted tools."""
+CUSTOM_CALL = {"type": "custom_tool_call", "call_id": "c1", "name": "apply_patch", "input": "x"}
+
+
 def test_reader_yields_request_response_pairs(fixtures_dir: Path) -> None:
     records, stats = read_traces(fixtures_dir / "openai_sample.jsonl", source="openai")
     rows = list(records)
@@ -197,6 +209,34 @@ def test_responses_api_lines_are_read(tmp_path: Path) -> None:
     tooled = openai_jsonl.to_record(_responses_row(0, [reasoning, call]))
     assert tooled is not None
     assert tooled.response_tool_calls == (call,)
+    # A hosted-tool item beside them changes nothing: the summary is never the answer.
+    summarized = {"type": "reasoning", "summary": [{"type": "summary_text", "text": "secret"}]}
+    hosted = openai_jsonl.to_record(
+        _responses_row(0, [summarized, {"type": "web_search_call", "id": "ws"}, message])
+    )
+    assert hosted is not None
+    assert (hosted.response, hosted.response_tool_calls) == ("billing", ())
+
+
+def test_a_replayed_hosted_tool_item_in_the_input_is_context_to_skip_not_a_malformed_row() -> None:
+    row = _responses_row(0, [CUSTOM_CALL])
+    row["request"]["input"] = REPLAYED_INPUT
+    record = openai_jsonl.to_record(row)
+    assert record is not None
+    assert [(m.role, m.content) for m in record.messages] == [
+        ("user", "ticket 1"),
+        ("assistant", "a1"),
+        ("user", "ticket 2"),
+    ]
+    assert record.response_tool_calls == (CUSTOM_CALL,)  # and a custom tool call is a call
+
+
+def test_a_legacy_function_call_reply_is_a_tool_call() -> None:
+    legacy = {"name": "route", "arguments": '{"team": "a"}'}
+    message = {"role": "assistant", "content": None, "function_call": legacy}
+    record = openai_jsonl.to_record(_completion(choices=[{"message": message}]))
+    assert record is not None
+    assert (record.response, record.response_tool_calls) == ("", (legacy,))
 
 
 def test_inline_reasoning_is_not_part_of_the_answer() -> None:
@@ -217,7 +257,7 @@ def test_the_response_schema_is_the_request_signature_and_the_tools_are_not() ->
     row["body"] = {**row["body"], "response_format": fmt, "tools": tools}
     record = openai_jsonl.to_record(row)
     assert record is not None
-    assert record.signature == "schema=invoice"  # B2-2: the offered tools never key it
+    assert record.signature == "schema=invoice"  # the offered tools never key it
 
 
 def test_a_text_outcome_in_the_metadata_is_ignored() -> None:

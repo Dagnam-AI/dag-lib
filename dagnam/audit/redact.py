@@ -1,4 +1,4 @@
-"""Redact every PII class the shared contract detects before a row touches disk (spec §10)."""
+"""Redact every PII class the shared contract detects before a row touches disk."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from dagnam_contracts.hygiene import PII_CODES, PiiAction, apply_pii_policy, sca
 from dagnam.audit.readers.messages import effective_response
 from dagnam.audit.record import Message, TraceRecord
 
-# Spec U3: ``apply_pii_policy(rows, {every class: "redact"})`` -- the classes
+# ``apply_pii_policy(rows, {every class: "redact"})`` -- the classes
 # come from the contract, so a detector added there is redacted here.
 PII_POLICY: dict[str, PiiAction] = dict.fromkeys(PII_CODES, "redact")
 

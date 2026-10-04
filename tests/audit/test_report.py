@@ -132,9 +132,11 @@ def test_report_follows_the_contract() -> None:
         "training_cost_credits",
         "replay_cost_credits",
         "status",
+        "error",
         "candidate_id",
         "unreliable",
     }
+    assert (hosted["error"], head["error"]) == (None, None)  # nothing stopped either of them
     assert head["unreliable"] is False
     assert (head["run_id"], head["model_version_id"], head["deployment_id"]) == (
         "run-1",
@@ -324,11 +326,11 @@ def test_switch_snippet_names_base_url_model_and_key_ref() -> None:
     assert 'base_url="https://x/v1"' in render_switch_snippet("d", "k", base_url="https://x/v1")
 
 
-# ------------------------------------------------ audit hardening: P2/K5, B11, P9, P10, C-F10
+# ---------------------------------------------- what the report must never say or leave out
 
 
 def test_an_unreliable_candidate_never_wins_but_still_shows() -> None:
-    """P2: 30 of 200 replay calls failed; agreement over the 170 that answered clears the floor.
+    """30 of 200 replay calls failed; agreement over the 170 that answered clears the floor.
 
     That used to be the REPLACE winner, with a switch block pointing a customer
     at an endpoint that fails one call in seven.
@@ -347,8 +349,56 @@ def test_an_unreliable_candidate_never_wins_but_still_shows() -> None:
     assert "head_tune is unreliable: more than 10% of its replay calls failed" in md
 
 
+def test_a_workload_the_scan_derived_no_rows_for_renders_without_a_dataset_line() -> None:
+    """A scan entry's ``dataset`` is ``null`` when the scan wrote no rows for it."""
+    scan = _scan()
+    scan["workloads"][1]["dataset"] = None
+    md = render_markdown(build_audit_report(_state(), scan, price_table=TABLE))
+    w1, w2 = md.index("### w1 - "), md.index("### w2 - ")
+    assert "- dataset: 800 rows" in md[w1:w2]
+    assert "- dataset:" not in md[w2 : md.index("## Switch")]
+
+
+def test_a_stopped_candidate_carries_its_reason_into_the_report_not_only_its_code(
+    tmp_path: Path,
+) -> None:
+    """The report said ``pii_disagreement`` and stopped there.
+
+    The sentence that names the cause and the cure -- upgrade and rescan, wait
+    for the platform, delete the uploaded rows -- was only in ``state.json``,
+    so neither the markdown a person reads nor the JSON a script reads had it.
+    """
+    reason = (
+        "pii_disagreement: the platform runs a newer privacy contract than the one these rows"
+        " were redacted with: it found {'PII_SECRET': 185} in classes this install does not"
+        " redact. Upgrade dagnam (`pip install -U dagnam`), which brings the newer contract,"
+        " and run `dagnam audit scan` again. The dataset was already uploaded; `dagnam audit"
+        " delete ./audit` removes it."
+    )
+    state = _state()
+    state.workloads["w1"][HEAD] = StepState(dataset_id="ds-1", pii_agrees=False, error=reason)
+    state.workloads["w2"][SFT] = _scored(
+        (0.98, 1.0), error="unreliable: 30 of 200 replay calls failed"
+    )
+
+    js = build_audit_report(state, _scan(), price_table=TABLE)
+
+    head = js["workloads"][0]["candidates"][1]
+    assert (head["status"], head["error"]) == ("pii_disagreement", reason)
+    write_audit_report(js, tmp_path)
+    on_disk = json.loads((tmp_path / "audit-report.json").read_text(encoding="utf-8"))
+    assert on_disk["workloads"][0]["candidates"][1]["error"] == reason
+    md = (tmp_path / "audit-report.md").read_text(encoding="utf-8").splitlines()
+    assert f"- head_tune: {reason}" in md
+    assert "- sft_small: unreliable: 30 of 200 replay calls failed" in md
+    # Under its own workload's table, before the line that says nothing was measured.
+    at = md.index(f"- head_tune: {reason}")
+    assert md[at - 2].startswith("| head_tune | ")
+    assert md[at + 2] == "No candidate was measured in this audit (head_tune: pii_disagreement)."
+
+
 def test_a_workload_whose_candidate_never_ran_says_so_not_that_it_missed_the_floor() -> None:
-    """B11: a deploy that failed, or a run still training, measured nothing yet."""
+    """A deploy that failed, or a run still training, measured nothing yet."""
     state = _state()
     state.workloads["w1"][HEAD] = StepState(run_id="run-1", run_status="queued")
     state.workloads["w2"][SFT] = StepState(
@@ -363,7 +413,7 @@ def test_a_workload_whose_candidate_never_ran_says_so_not_that_it_missed_the_flo
 
 
 def test_savings_count_only_a_replace_and_never_go_negative() -> None:
-    """P9: spend less the winner's serving less maintenance -- for a REPLACE, and only there."""
+    """Spend less the winner's serving less maintenance -- for a REPLACE, and only there."""
     scan = _scan()
     js = build_audit_report(_state(), scan, price_table=TABLE)
     w1, w2, w3, _ = js["workloads"]
@@ -385,7 +435,7 @@ def test_savings_count_only_a_replace_and_never_go_negative() -> None:
 
 
 def test_each_candidate_is_held_to_its_own_class_floor() -> None:
-    """P10: a JSON candidate at 0.955 passes its 0.95 floor though the audit's header says 0.97."""
+    """A JSON candidate at 0.955 passes its 0.95 floor though the audit's header says 0.97."""
     state = _state()
     state.workloads["w2"][SFT] = _scored(
         (0.955, 0.99),
@@ -406,7 +456,7 @@ def test_each_candidate_is_held_to_its_own_class_floor() -> None:
 
 
 def test_a_gpu_student_with_no_output_tokens_has_no_price_and_cannot_win() -> None:
-    """C-F10: an export with a cost but no token usage priced the GPU student at $0."""
+    """An export with a cost but no token usage priced the GPU student at $0."""
     scan = _scan()
     scan["workloads"][1]["tokens"]["completion"] = 0
     state = _state()
@@ -417,7 +467,7 @@ def test_a_gpu_student_with_no_output_tokens_has_no_price_and_cannot_win() -> No
 
 
 def test_a_tool_call_workload_s_switch_says_what_the_endpoint_returns() -> None:
-    """P4: the replacement answers with the call's name and arguments as message.content."""
+    """The replacement answers with the call's name and arguments as message.content."""
     scan = _scan()
     scan["workloads"][0]["response_mode"] = "tool_call"
     md = render_markdown(build_audit_report(_state(), scan, price_table=TABLE))

@@ -122,6 +122,28 @@ def test_delete_model_entry_404(client: DagnamClient, rmock: RequestsMocker) -> 
         client.delete_model_entry("missing")
 
 
+def test_purge_model_version_deletes_one_version_never_its_entry(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.delete(f"{API}/api/v1/model-versions/v%2F1", status_code=204, text="")
+    assert client.purge_model_version("v/1") is None  # an answer with no row
+    assert rmock.last_request.path == "/api/v1/model-versions/v%2f1"
+
+
+def test_purge_model_version_returns_the_platforms_own_row(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    row = {"kind": "model_version", "id": "v1", "status": "deleted", "code": "deleted"}
+    rmock.delete(f"{API}/api/v1/model-versions/v1", json=row)
+    assert client.purge_model_version("v1") == row
+
+
+def test_purge_model_version_404_is_typed(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{API}/api/v1/model-versions/missing", status_code=404)
+    with pytest.raises(ModelNotFoundError):
+        client.purge_model_version("missing")
+
+
 # ------------------------------------------------------------------ versions
 
 

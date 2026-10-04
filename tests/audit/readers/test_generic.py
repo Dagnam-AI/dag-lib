@@ -18,6 +18,16 @@ RECORDS = 12
 PER_SESSION = 4
 SESSIONS = 3
 
+REPLAYED_INPUT = [
+    {"role": "user", "content": "ticket 1"},
+    {"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAAA-opaque"},
+    {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    {"type": "mcp_call", "id": "mcp_1", "name": "kb", "arguments": "{}", "output": "tool-says"},
+    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "a1"}]},
+    {"role": "user", "content": "ticket 2"},
+]
+"""A Responses ``input`` that replays an earlier turn which ran hosted tools."""
+
 COLUMN_MAP = {
     "trace_id": "call_id",
     "ts": "at",
@@ -130,6 +140,61 @@ def test_unparseable_tool_calls_are_malformed() -> None:
         to_record({**row, "response_tool_calls": '"a string"'})
     with pytest.raises(generic.MalformedRowError, match="not JSON"):
         to_record({**row, "response_tool_calls": "[not json"})
+
+
+def test_a_message_object_mapped_as_the_response_is_read_as_a_message() -> None:
+    # It was the answer as JSON text, so a message's thinking blocks were the
+    # training target; an answer that is itself a JSON object still is its text.
+    to_record = generic.bind(None).to_record
+    row = {"trace_id": "1", "ts": "2026-08-01T00:00:00Z", "messages": "hi"}
+    call = {"type": "tool_use", "id": "t1", "name": "route", "input": {"team": "a"}}
+    message = {
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": "the customer sounds angry"},
+            {"type": "text", "text": "billing"},
+            call,
+        ],
+    }
+    record = to_record({**row, "response": message})
+    assert record is not None
+    assert (record.response, record.response_tool_calls) == ("billing", (call,))
+    # The explicit column comes first, and a call both carry is one call.
+    explicit = [{"id": "t1", "name": "route", "args": {"team": "a"}}, {"id": "t0", "name": "log"}]
+    both = to_record({**row, "response": message, "response_tool_calls": explicit})
+    assert both is not None
+    assert both.response_tool_calls == tuple(explicit)
+    answer = {"label": "billing", "role": "admin"}
+    as_json = to_record({**row, "response": answer})
+    assert as_json is not None
+    assert as_json.response == json.dumps(answer)
+
+
+def test_a_replayed_hosted_tool_item_and_a_custom_tool_call_are_read() -> None:
+    custom = {"type": "custom_tool_call", "call_id": "c1", "name": "apply_patch", "input": "x"}
+    row = {
+        "trace_id": "1",
+        "ts": "2026-08-01T00:00:00Z",
+        "messages": json.dumps(REPLAYED_INPUT),
+        "response": [{"type": "reasoning", "summary": []}, custom],
+    }
+    record = generic.bind(None).to_record(row)
+    assert record is not None
+    assert [(m.role, m.content) for m in record.messages] == [
+        ("user", "ticket 1"),
+        ("assistant", "a1"),
+        ("user", "ticket 2"),
+    ]
+    assert (record.response, record.response_tool_calls) == ("", (custom,))
+
+
+def test_a_legacy_function_call_message_is_a_tool_call() -> None:
+    legacy = {"name": "route", "arguments": '{"team": "a"}'}
+    message = {"role": "assistant", "content": None, "function_call": legacy}
+    row = {"trace_id": "1", "ts": "2026-08-01T00:00:00Z", "messages": "hi", "response": message}
+    record = generic.bind(None).to_record(row)
+    assert record is not None
+    assert (record.response, record.response_tool_calls) == ("", (legacy,))
 
 
 def test_missing_required_value_is_malformed() -> None:

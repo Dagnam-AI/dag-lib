@@ -1,11 +1,11 @@
 """Training steps: pick the base, submit the recipe run, follow it, find the version it pushed.
 
 The credit budget is enforced here, before a submit: the frontier halts with
-``halted: budget`` rather than start a run it cannot pay for (spec U4, P5). What
+``halted: budget`` rather than start a run it cannot pay for. What
 it counts is a candidate's whole cost -- the most its training run can charge
 plus the metered predictions of its holdout replay, which is the larger half.
 The platform's own preflight still runs on every submit; its verdicts are
-recorded per candidate and the frontier continues (spec section 9).
+recorded per candidate and the frontier continues.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from dagnam.audit.candidates import CANDIDATES, CandidateKind
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import (
     StepContext,
+    answer_field,
     answered_rows,
     replay_file,
     required,
@@ -39,7 +40,7 @@ RUN_SETTLED = frozenset({RUN_COMPLETED, *RUN_FAILED})
 REPLAY_CREDITS_PER_ROW = 1
 """Every served prediction is metered at one credit."""
 REPLAY_MARGIN = 1.1
-"""P5: a replay is budgeted 10% over its row count."""
+"""A replay is budgeted 10% over its row count."""
 
 _TRAINING_CEILING: dict[CandidateKind, int] = {
     spec.kind: spec.training_credits_max or 0 for specs in CANDIDATES.values() for spec in specs
@@ -107,7 +108,7 @@ def credits_spent(state: AuditState, audit_dir: Path | None = None) -> float:
 
 
 def over_budget(state: AuditState, ctx: StepContext, cost: float, next_step: str) -> bool:
-    """Halt with ``budget`` when spending ``cost`` more would pass ``max_credits`` (spec P5)."""
+    """Halt with ``budget`` when spending ``cost`` more would pass ``max_credits``."""
     spent = credits_spent(state, ctx.audit_dir)
     if spent + cost <= ctx.max_credits:
         return False
@@ -160,12 +161,15 @@ def submit(state: AuditState, ctx: StepContext) -> AuditState:
         return state
     payload: JsonObject = {
         "project_id": required(state.project_id, "project_id"),
-        "base_catalog_entry_id": str(base["id"]),
+        "base_catalog_entry_id": answer_field(base, "id", "the base-model catalog"),
         "dataset_version_id": required(step.version_id, "version_id"),
         "recipe_key": required(ctx.spec.recipe_key, "recipe_key"),
         "hyperparameters": {},
         "dataset_field_bindings": {},
     }
+    if state.audit_id is not None:
+        # Written on the run by the platform at creation, so the audit's delete finds it.
+        payload["audit_id"] = state.audit_id
     try:
         run = _create_run(ctx, payload)
     except QuotaExceededError as exc:
@@ -176,8 +180,10 @@ def submit(state: AuditState, ctx: StepContext) -> AuditState:
             raise
         step.error = f"rejected_preflight: {exc.message}"
         return state
-    step.base = string_field(base, "display_name") or str(base["id"])
-    step.run_id = str(run["run_id"])
+    step.base = string_field(base, "display_name") or answer_field(
+        base, "id", "the base-model catalog"
+    )
+    step.run_id = answer_field(run, "run_id", "the training run create")
     step.training_job_id = string_field(run, "training_job_id")
     step.run_status = string_field(run, "status") or "queued"
     estimate = run.get("credits_estimate_max")
@@ -231,7 +237,7 @@ def wait_run(state: AuditState, ctx: StepContext) -> AuditState:
 def resolve_model_version(state: AuditState, ctx: StepContext) -> AuditState:
     """Record the model version the completed run pushed; done once ``model_version_id`` is set.
 
-    Only the run's own answer counts (K2): the account's newest version may be
+    Only the run's own answer counts: the account's newest version may be
     another run's -- a Studio retrain of a sibling workload -- so a run that
     does not name one is a recorded error, never a guess from the registry.
     """

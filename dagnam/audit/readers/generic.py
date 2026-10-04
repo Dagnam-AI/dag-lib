@@ -13,6 +13,10 @@ counts to 0, ``latency_ms`` to 0, the rest to ``None``). ``messages`` may be
 a chat message list, a JSON string encoding one, or a plain prompt string;
 ``response_tool_calls`` a list of objects or a JSON string encoding one; an
 explicit ``system`` column wins over system turns found in ``messages``.
+``response`` is the answer text, or a reply (a message, a Chat Completions or
+Responses object, a list of blocks or items) as an object or as JSON text: a
+reply is read the way every other source's is, reasoning dropped, and an
+answer that is JSON itself stays its text.
 """
 
 from __future__ import annotations
@@ -36,7 +40,10 @@ from dagnam.audit.readers.base import (
 from dagnam.audit.readers.messages import (
     content_text,
     has_media,
-    reply_text,
+    has_reply_parts,
+    is_text_parts,
+    merge_calls,
+    response_of,
     split_prompt,
     tool_calls,
 )
@@ -51,8 +58,8 @@ def _decoded(value: object) -> object:
     if isinstance(value, str) and value[:1] in ("[", "{"):
         try:
             return json.loads(value)
-        except ValueError as exc:
-            raise MalformedRowError(f"not JSON: {value!r}") from exc
+        except (ValueError, RecursionError) as exc:
+            raise MalformedRowError(f"not JSON: {value[:80]!r}") from exc
     return value
 
 
@@ -62,6 +69,10 @@ def _prompt(value: object) -> object:
         return _decoded(value)
     except MalformedRowError:
         return value
+
+
+def _is_text_parts(value: object) -> bool:
+    return isinstance(value, list) and not has_reply_parts(value) and is_text_parts(value)
 
 
 def bind(column_map: Mapping[str, str] | None) -> Reader:
@@ -82,14 +93,19 @@ def bind(column_map: Mapping[str, str] | None) -> Reader:
         prompt = _prompt(_required(row, "messages"))
         system, messages = split_prompt(prompt)
         explicit_system = value(row, "system")
+        raw = _required(row, "response")
+        # A column mapped to ``message.content`` holds text parts; read as the text they are.
+        reply = response_of(content_text(raw) if _is_text_parts(raw) else raw)
         return TraceRecord(
             trace_id=text(_required(row, "trace_id")),
             ts=parse_ts(_required(row, "ts")),
             model=text(value(row, "model") or UNKNOWN_MODEL),
             system=content_text(explicit_system) if explicit_system is not None else system,
             messages=messages,
-            response=reply_text(_required(row, "response")),
-            response_tool_calls=tool_calls(_decoded(value(row, "response_tool_calls"))),
+            response=reply.text,
+            response_tool_calls=merge_calls(
+                tool_calls(_decoded(value(row, "response_tool_calls"))), reply.calls
+            ),
             prompt_tokens=as_int(value(row, "prompt_tokens") or 0),
             completion_tokens=as_int(value(row, "completion_tokens") or 0),
             cached_prompt_tokens=as_int(value(row, "cached_prompt_tokens") or 0),
@@ -100,6 +116,7 @@ def bind(column_map: Mapping[str, str] | None) -> Reader:
             workload_hint=_optional_text(value(row, "workload_hint")),
             has_media=has_media(prompt),
             signature=_optional_text(value(row, "signature")),
+            reasoning_only=reply.reasoning_only,
         )
 
     def _required(row: Row, target: str) -> object:

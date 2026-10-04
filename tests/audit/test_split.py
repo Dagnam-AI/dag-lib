@@ -98,7 +98,7 @@ def test_split_is_a_partition_and_sessions_never_straddle(
 
 
 def test_cap_train_keeps_a_proportional_stratified_sample() -> None:
-    # R3-15: 23,465 train rows ran past the recipe's 1-hour ceiling; a capped sample
+    # 23,465 train rows ran past the recipe's 1-hour ceiling; a capped sample
     # keeps every class, in proportion, chosen by content so any input order agrees.
     strata = ["billing"] * 80 + ["refund"] * 18 + ["rare"] * 2
     keys = [f"{i:03d}" for i in range(100)]

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+from dagnam._core._resume import confirmed_by, created_body, gone
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -19,7 +21,7 @@ from dagnam._core.client.common import (
     response_json_object,
     response_json_value,
 )
-from dagnam._core.exceptions import ResponseError
+from dagnam._core.exceptions import ProjectNotFoundError, ResponseError
 from dagnam._types import JsonObject, JsonValue, QueryParams, QueryValue
 
 
@@ -36,6 +38,9 @@ class ProjectsClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
         idempotent: bool = False,
+        resume_salt: str | None = None,
+        confirm: Callable[[requests.Response], bool] | None = None,
+        read_back: Callable[[str], JsonObject] | None = None,
     ) -> JsonValue | str | None:
         url = f"{self.api_url}{path}"
         resp = self._request(
@@ -47,13 +52,19 @@ class ProjectsClientMixin(BaseDagnamClient):
             timeout=timeout,
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=idempotent,
+            resume_salt=resume_salt,
+            confirm=confirm,
         )
         if not resp.content:
             return None
         try:
-            return response_json_value(resp)
+            value = response_json_value(resp)
         except ResponseError:
             return resp.text
+        if read_back is not None and isinstance(value, dict):
+            # A replay that dropped its body points at the project it made: read it.
+            return created_body(resp, value, read_back)
+        return value
 
     def list_projects(self, **filter_params: QueryValue) -> JsonObject | str | None:
         value = self._project_request("GET", "/api/v1/projects", params=filter_params)
@@ -69,15 +80,27 @@ class ProjectsClientMixin(BaseDagnamClient):
             return value
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
-    def create_project(self, payload: JsonObject) -> JsonObject:
+    def create_project(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
         """``POST /api/v1/projects``, with an ``Idempotency-Key``.
 
         The platform deduplicates the create on it, so a transient failure --
         a read timeout after the project already exists -- is retried into a
         replay of the first answer rather than a second, orphaned project.
+
+        A project's body is a title, so on a client with ``resume_creates`` it
+        is not keyed by its content. ``resume_nonce`` is a value the caller
+        saved before asking and keeps for this project alone: the same nonce
+        asked again replays the project it made, another nonce never does. A replay
+        is read back, and a project deleted since is created afresh.
         """
         value = self._project_request(
-            "POST", "/api/v1/projects", json_body=payload, idempotent=True
+            "POST",
+            "/api/v1/projects",
+            json_body=payload,
+            idempotent=True,
+            resume_salt=resume_nonce,
+            confirm=confirmed_by(self.get_project, gone(ProjectNotFoundError)),
+            read_back=self.get_project,
         )
         if isinstance(value, dict):
             return value

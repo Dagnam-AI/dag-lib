@@ -1,4 +1,4 @@
-"""Mirror a local audit into the account as it runs (spec section 10, Task 11).
+"""Mirror a local audit into the account as it runs.
 
 The run stays the source of truth: everything here is a best-effort echo of
 what ``state.json`` already records, so the website can show a run in progress
@@ -19,11 +19,11 @@ Each candidate remembers the last step the account acknowledged
 (``StepState.published_step``), so a step whose patch never landed -- a
 blip on the last one, a Ctrl+C mid-send -- goes out on the next run.
 
-A run resumes its audit once, before anything else (:meth:`Publisher.resume`,
-K1b), and every publish after that says ``resume: false``: a cancel on the
-website at any later point is the 409 "audit is halted" the next publish gets,
-and a delete is the uniform 404 -- either one ends the run. A platform without
-the resume route gets the older K1 behaviour: the first publish resumes.
+A run resumes its audit once, before anything else (:meth:`Publisher.resume`),
+and every publish after that says ``resume: false``: a cancel on the website at
+any later point is the 409 "audit is halted" the next publish gets, and a
+delete is the uniform 404 -- either one ends the run. A platform without the
+resume route gets the older behaviour: the first publish resumes.
 """
 
 from __future__ import annotations
@@ -44,27 +44,26 @@ from dagnam.audit.publish_body import (
     MEASURED_FROM,
     REPLAY_STEP,
     SCORED_BY,
+    SOURCE,
     STATUS_BY_STEP,
+    audit_body,
     capped,
     patch_body,
-    pii_counts,
     status_for,
     student_cost,
     too_many_selected,
     workload_body,
 )
-from dagnam.audit.state import AuditState, StepState
-from dagnam.audit.steps import CONFLICT_STATUS, PlatformClient, StepContext
+from dagnam.audit.state import AuditState, StepState, save_state
+from dagnam.audit.steps import CONFLICT_STATUS, PlatformClient, StepContext, answer_field
 
 _LOGGER = logging.getLogger("dagnam.audit.publish")
 
-SOURCE = "cli"
-"""``AuditCreate.source``: this audit was run by the CLI, not started on the site."""
 UNKNOWN_VERSION = "0+unknown"
 """What a source checkout with no installed distribution reports as its version."""
 
 AUDIT_HALTED = "audit is halted"
-"""K1: the 409 a publish that does not resume gets from an audit the account halted."""
+"""The 409 a publish that does not resume gets from an audit the account halted."""
 CANCELLED = "cancelled"
 DELETED = "deleted"
 """Why the account ended the audit under a live run; the run halts with the same reason."""
@@ -82,11 +81,7 @@ audit still exists names an artifact the owner deleted, and will not reappear.
 """
 MAX_PENDING = 20
 """Cap on the resend queue; the oldest unsent step is dropped rather than grow it forever."""
-AUDIT_PATH = "audits"
-"""The site route one published audit is watched on."""
-
-_NAME_MAX = 120
-_VERSION_MAX = 32
+AUDIT_PATH = "audits"  # the site route one published audit is watched on
 
 
 def installed_version() -> str:
@@ -136,6 +131,8 @@ class Publisher:
         """(the candidate's state, body) patches not yet sent, oldest first."""
         self._resume = True
         """Each request asks to resume until the account applies one, or :meth:`resume` succeeds."""
+        self.create_failed: str | None = None
+        """Why ``create_audit`` failed, once it did: the run halts before it uploads anything."""
         self.stopped: str | None = None
         """``cancelled``/``deleted`` once the account ended the audit mid-run: nothing more goes."""
 
@@ -146,7 +143,7 @@ class Publisher:
         self._state = state
 
     def resume(self) -> None:
-        """Un-halt the audit once, before this run waits on anything (K1b).
+        """Un-halt the audit once, before this run waits on anything.
 
         Every publish after it says ``resume: false``, so a cancel that lands
         during the run's first long wait sticks. An audit the account deleted
@@ -183,7 +180,9 @@ class Publisher:
         except APIError as exc:
             if exc.status_code != NOT_FOUND:
                 return False
-            _LOGGER.warning("audit publish: the audit was deleted in your account; stopping")
+            _LOGGER.warning(
+                "audit publish: the platform has no audit with this id for this key; stopping"
+            )
             self.stopped = DELETED
             return True
         return False
@@ -198,11 +197,10 @@ class Publisher:
         max_credits: int,
         sdk_version: str,
     ) -> None:
-        """Publish the scan (once) and remember its workloads; sets ``state.audit_id``.
+        """Publish the scan (once), remember its workloads; sets ``state.audit_id`` or ``create_failed``.
 
-        A resumed run calls this too -- the workload numbers a scored candidate
-        needs are read here -- but returns before the POST once the state
-        already carries an ``audit_id``.
+        A resumed run calls this too (it reads the workload numbers here) but returns before the
+        POST once the state already carries an ``audit_id``.
         """
         entries = [e for e in scan.get("workloads", []) if isinstance(e, Mapping) and "id" in e]
         self._entries = {str(entry["id"]): entry for entry in entries}
@@ -212,44 +210,46 @@ class Publisher:
         refusal = too_many_selected(sum(1 for entry in entries if str(entry["id"]) in selected))
         if refusal is not None:
             _LOGGER.warning("audit publish: %s", refusal)
-            # Said out loud, not only logged: the run was asked to publish and
-            # the person is waiting for the link that is not coming.
+            # Said out loud: the person is waiting for a link that is not coming.
             self._guard("the workload-cap notice", lambda: self._announce(refusal))
             return
         published = capped(entries, selected)
+        nonce = self._state.project_nonce
 
-        def body() -> JsonObject:
-            # Built inside the guarded call: a scan report this client cannot
-            # turn into a body is a warning like any other publish failure.
-            return {
-                "project_id": self._state.project_id,
-                "source": SOURCE,
-                "floor": floor,
-                "max_credits": max_credits,
-                "price_table_version": str(scan.get("price_table_version") or "unknown")[
-                    :_VERSION_MAX
-                ],
-                "scan_generated_at": scan.get("generated_at"),
-                "sdk_version": sdk_version[:_VERSION_MAX],
-                "local_dir_name": audit_dir.resolve().name[:_NAME_MAX],
-                "workloads": [
-                    workload_body(
-                        entry,
-                        selected=str(entry["id"]) in selected,
-                        pii_counts=pii_counts(audit_dir, str(entry["id"])),
-                    )
-                    for entry in published
-                ],
-            }
+        def create() -> JsonObject:
+            pending = self._state.pending_audit
+            if pending is None:
+                pending = audit_body(
+                    audit_dir,
+                    scan,
+                    published,
+                    selected,
+                    project_id=self._state.project_id,
+                    floor=floor,
+                    max_credits=max_credits,
+                    sdk_version=sdk_version,
+                )
+                # On disk before it is sent, and sent as written every time: the platform
+                # replays a create only for the same body.
+                self._state.pending_audit = pending
+                save_state(audit_dir, self._state)
+            # Not through ``_send``: there is no audit yet for the account to have ended.
+            return client.create_audit({**pending, "resume": self._resume}, resume_nonce=nonce)
 
-        created = self._guard(
-            "create_audit",
-            lambda: self._send(lambda resume: client.create_audit({**body(), "resume": resume})),
-        )
-        if created is None:
+        try:
+            created = create()
+            audit_id = answer_field(created, "id", "the audit create")
+        except Exception as exc:
+            # The run halts: what it uploads before its audit exists is untagged. A body the
+            # platform did not refuse (a timeout, a 502) may have landed, so it is re-sent as written.
+            _LOGGER.warning("audit publish: create_audit failed (%s); the run halts", exc)
+            self.create_failed = str(exc)
+            if isinstance(exc, APIError) and exc.status_code in DROP_STATUSES - {CONFLICT_STATUS}:
+                self._state.pending_audit = None
             return
-        audit_id = str(created["id"])
+        self._resume = False
         self._state.audit_id = audit_id
+        self._state.pending_audit = None
         link = f"published: {audit_id} — watch it at {audit_url(client.api_url, audit_id)}"
         # Guarded like every other publish: a console that cannot encode the
         # line must not end a run that has already published its scan.

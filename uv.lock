@@ -580,7 +580,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dagnam-contracts", specifier = ">=0.4.0" },
+    { name = "dagnam-contracts", specifier = ">=0.4.0,<0.5" },
     { name = "filelock", specifier = ">=3.13" },
     { name = "flax", marker = "extra == 'all'", specifier = ">=0.7" },
     { name = "flax", marker = "extra == 'flax'", specifier = ">=0.7" },

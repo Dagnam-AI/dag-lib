@@ -45,7 +45,16 @@ from dagnam.audit.readers.base import (
     require,
     text,
 )
-from dagnam.audit.readers.messages import has_media, reply_of, split_prompt, task_signature
+from dagnam.audit.readers.messages import (
+    Reply,
+    final_reply,
+    has_media,
+    is_reply,
+    response_of,
+    split_prompt,
+    task_signature,
+)
+from dagnam.audit.readers.reasoning import carries_reasoning
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ("id", "run_type", "start_time", "inputs", "outputs")
@@ -112,24 +121,31 @@ def _messages(inputs: Mapping[str, Any]) -> list[Any] | str | Mapping[str, Any]:
     return messages
 
 
-def _response(outputs: Mapping[str, Any]) -> Any:
-    """The assistant reply as an OpenAI-style message object, or a bare string."""
+def _response(outputs: Mapping[str, Any]) -> Reply:
+    """The assistant reply of a run's ``outputs``: a message, an envelope that wraps one, or text."""
     choice = get(outputs, "choices")
-    if isinstance(choice, list) and choice:
-        return get(choice[0], "message")
+    if isinstance(choice, list) and choice and get(choice[0], "message") is not None:
+        return final_reply(get(choice[0], "message"))
     messages = get(outputs, "messages")
     if isinstance(messages, list) and messages:
-        return _plain_message(messages[-1])
+        return final_reply(_plain_message(messages[-1]))
     generations = get(outputs, "generations")
     if isinstance(generations, list) and generations:
         first = generations[0][0] if isinstance(generations[0], list) else generations[0]
         message = get(first, "message")
-        return _plain_message(message) if message is not None else get(first, "text")
-    if get(outputs, "content") is not None:
+        return final_reply(_plain_message(message) if message is not None else get(first, "text"))
+    if get(outputs, "content") is not None or is_reply(outputs):
         # ``wrap_anthropic`` / ``wrap_gemini`` dump the reply message straight into
-        # ``outputs``: ``content`` (a string or typed blocks) beside ``tool_calls``.
-        return outputs
-    return get(outputs, "output")
+        # ``outputs``: ``content`` (a string or typed blocks) beside ``tool_calls``. So does
+        # a client that logs a whole response object (Ollama, Gemini, Bedrock...).
+        return final_reply(outputs)
+    output = get(outputs, "output")
+    if output is None and carries_reasoning(outputs, strict=True):
+        # A response object nobody recognises, with reasoning in it: kept as a call, no answer,
+        # like every other reader (never an empty reply that the warning leaves out).
+        return Reply("", (), reasoning_only=True)
+    # ``outputs.output`` is a string, a Responses item list, or an answer that is JSON itself.
+    return response_of(output)
 
 
 def to_record(row: Row) -> TraceRecord | None:
@@ -147,7 +163,7 @@ def to_record(row: Row) -> TraceRecord | None:
     inputs, outputs = require(row, "inputs"), row["outputs"]
     prompt = _messages(inputs)
     system, messages = split_prompt(prompt)
-    response, calls = reply_of(_response(outputs))
+    reply = _response(outputs)
     end = get(row, "end_time")
     return TraceRecord(
         trace_id=text(require(row, "id")),
@@ -164,8 +180,8 @@ def to_record(row: Row) -> TraceRecord | None:
         ),
         system=system,
         messages=messages,
-        response=response,
-        response_tool_calls=calls,
+        response=reply.text,
+        response_tool_calls=reply.calls,
         prompt_tokens=prompt_tokens(row, *_USAGE_ROOTS),
         completion_tokens=completion_tokens(row, *_USAGE_ROOTS),
         cached_prompt_tokens=cached_prompt_tokens(row, *_USAGE_ROOTS),
@@ -178,6 +194,7 @@ def to_record(row: Row) -> TraceRecord | None:
         workload_hint=_optional_text(get(row, "extra.metadata.workload")),
         has_media=has_media(prompt),
         signature=task_signature(inputs) or task_signature(get(row, "extra.invocation_params")),
+        reasoning_only=reply.reasoning_only,
     )
 
 

@@ -493,7 +493,7 @@ async def test_aiter_sse_once_raises_when_no_terminal() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 9: dagnam.sse reconnect logging
+# dagnam.sse reconnect logging
 # ---------------------------------------------------------------------------
 
 
@@ -558,7 +558,7 @@ def test_iter_with_reconnect_logs_warning_when_exhausted(
 
 
 # ---------------------------------------------------------------------------
-# Task 3b: dagnam.sse reconnect logging — async mirror (aiter_with_reconnect)
+# dagnam.sse reconnect logging — async mirror (aiter_with_reconnect)
 # ---------------------------------------------------------------------------
 
 

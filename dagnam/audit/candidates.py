@@ -1,4 +1,4 @@
-"""The candidate set per output-structure class (spec U4, D6).
+"""The candidate set per output-structure class.
 
 A registry, never an ``if structure_class ==`` branch: the orchestrator asks
 :data:`CANDIDATES` what to run for a workload and the report asks it what to
@@ -24,7 +24,7 @@ RECIPE_MAX_MINUTES = 60
 CREDITS_PER_GPU_MINUTE = 2
 """The A10G rate every base the audit picks is priced on (the smallest tier that fits it)."""
 TRAINING_CREDITS_MAX = RECIPE_MAX_MINUTES * CREDITS_PER_GPU_MINUTE
-"""What one audit training run can cost at most, known before it is submitted (spec P5).
+"""What one audit training run can cost at most, known before it is submitted.
 
 The platform offers no pre-submit estimate for a foundation run -- its
 ``credits_estimate_max`` arrives in the submit's response -- so the budget

@@ -28,7 +28,7 @@ from dagnam.audit.split import HOLDOUT_SHARE, cap_train, split_boundary, time_sp
 from dagnam.audit.structure import student_tokens
 from dagnam.audit.thresholds import ENUM_MAX_DISTINCT, MAX_TRAIN_ROWS, SFT_MAX_TOKENS
 
-# Structure class (Task 4's ``StructureClass`` values) -> platform row format.
+# Structure class (``StructureClass`` values) -> platform row format.
 # A new class plugs in here, never as an ``if structure_class ==`` branch.
 FORMAT_BY_STRUCTURE: dict[str, str] = {
     "enum_label": "labeled-example",
@@ -38,10 +38,10 @@ FORMAT_BY_STRUCTURE: dict[str, str] = {
 }
 MAX_STRATA: dict[str, int] = {"chat-messages": ENUM_MAX_DISTINCT}
 """Formats whose targets may not be classes (an extraction's answers): past this many distinct
-targets the cap samples them as one stratum (m4). A label is always a class, so a
-``labeled-example`` cap keeps every one (N1)."""
+targets the cap samples them as one stratum. A label is always a class, so a
+``labeled-example`` cap keeps every one."""
 TOKEN_BUDGET: dict[str, int] = {"chat-messages": SFT_MAX_TOKENS}
-"""Formats whose recipe drops, never cuts, a training row over this many tokens (B2-3).
+"""Formats whose recipe drops, never cuts, a training row over this many tokens.
 
 A ``labeled-example`` classifier truncates its input by design, so it has none.
 """
@@ -85,7 +85,7 @@ def _prompt_turns(record: TraceRecord) -> list[dict[str, str]]:
 
 
 def _answer(record: TraceRecord) -> str:
-    """What the teacher answered: its first tool call's name and arguments when it made one (P4)."""
+    """What the teacher answered: its first tool call's name and arguments when it made one."""
     return effective_response(record.response, record.response_tool_calls)
 
 
@@ -124,7 +124,9 @@ def _target(row: Mapping[str, Any]) -> str:
 def _row_tokens(row: Mapping[str, Any]) -> int:
     """A ``chat-messages`` row's length as the student reads it, by :func:`student_tokens`.
 
-    Within 0.95-1.10x of Qwen2.5's own count, template included, on real rows.
+    The template's own tokens are counted exactly, so a row is as close to
+    Qwen2.5's count as its text is: see :func:`student_tokens` for how close
+    that is in each language.
     """
     messages: list[dict[str, str]] = row["messages"]
     default = 0 if messages[0]["role"] == "system" else _DEFAULT_SYSTEM_TOKENS
@@ -221,8 +223,7 @@ class _Plan:
     character budget can never cut an identifier in half); only the row's
     digest, label, time and session are kept. :meth:`select` then dedups,
     splits and caps those, and the chosen rows are derived again from their
-    records -- so a workload of any size costs memory for its kept rows only
-    (R3-16).
+    records -- so a workload of any size costs memory for its kept rows only.
     """
 
     format_key: str
@@ -249,7 +250,7 @@ class _Plan:
             return
         self.truncated += truncated
         digest = canonical_row_hash(row)
-        # The cap's stratum is the target, so a router's rare route keeps its share (m4).
+        # The cap's stratum is the target, so a router's rare route keeps its share.
         target = hashlib.blake2b(_target(row).encode("utf-8"), digest_size=8).hexdigest()
         budget = TOKEN_BUDGET.get(self.format_key)
         over = budget is not None and _row_tokens(row) > budget
@@ -260,8 +261,8 @@ class _Plan:
     def select(self, *, holdout_share: float, max_train_rows: int) -> _Selection:
         """Dedup (first in time order), split by time, then thin the training rows.
 
-        A training row over the student's token budget is dropped (B2-3), and
-        the rest are capped (R3-15).
+        A training row over the student's token budget is dropped, and
+        the rest are capped.
         """
         derived = sorted(self.examples, key=lambda e: e.position)
         seen: set[str] = set()
@@ -335,8 +336,8 @@ def build_dataset(
     the redacted rows: two calls that differ only in an email address are one
     example once it is masked, and keeping both would put the same row on both
     sides of the split. A ``chat-messages`` training row the student's token
-    budget cannot hold is dropped (B2-3: the recipe would drop it after the
-    credits are spent), and the rest are capped at ``max_train_rows`` (R3-15: a
+    budget cannot hold is dropped (the recipe would drop it after the
+    credits are spent), and the rest are capped at ``max_train_rows`` (a
     proportional sample by target, so a candidate trains inside its recipe's
     hard ceiling); the holdout is kept whole, as serving will see it.
     ``stats["redact"]["truths_changed"]`` counts the kept rows whose target
@@ -363,7 +364,7 @@ def derive_workloads(
     ``records()`` streams the export as :func:`~dagnam.audit.discover.discover_workloads`
     numbered it. The first pass plans every workload a record at a time; the
     second derives only the rows each keeps. Nothing else of the export is ever
-    held, so memory follows the kept rows, not the export (R3-16).
+    held, so memory follows the kept rows, not the export.
     """
     if not workloads:
         return {}

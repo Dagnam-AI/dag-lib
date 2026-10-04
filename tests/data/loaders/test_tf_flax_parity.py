@@ -1,6 +1,6 @@
 """Tests for native TF/FLAX system dataset dispatch.
 
-Covers the P1 regressions reported in the audit:
+Covers regressions found in review:
   * `_native_tensorflow_dataset` must return a distinct slice for 'val'
     instead of the full training set.
   * `_native_flax_dataset` must rebatch + reshuffle + honor `val_ratio`

@@ -1,6 +1,6 @@
 """Serving steps: deploy the pushed version, wait for it, replay the holdout, score.
 
-The deployment shape is the one G0 proved through the SDK (``vllm`` / ``text``
+The deployment shape is the one proven end to end through the SDK (``vllm`` / ``text``
 / ``modal-serverless`` with a serverless revision of the model version); the
 platform renders the app from the version's task contract, so a head-tuned
 classifier and a chat adapter take the same path. The replay sends the
@@ -14,7 +14,6 @@ classifier was not trained on.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from contextlib import suppress
 import json
 from pathlib import Path
 from typing import Any
@@ -34,6 +33,7 @@ from dagnam.audit.scoring import Agreement, modal_keys, score_json, score_labels
 from dagnam.audit.state import AuditState
 from dagnam.audit.steps import (
     StepContext,
+    answer_field,
     read_replay,
     replay_file,
     required,
@@ -42,7 +42,7 @@ from dagnam.audit.steps import (
 )
 from dagnam.audit.steps_train import over_budget, projected_replay
 from dagnam.audit.structure import StructureClass
-from dagnam.audit.workspace import write_atomic
+from dagnam.audit.workspace import open_append, read_regular, write_atomic
 
 PLATFORM = "vllm"
 DEPLOYMENT_TYPE = "text"
@@ -73,9 +73,9 @@ _SCORERS: dict[StructureClass, Callable[[Sequence[str], Sequence[str]], Agreemen
 
 def holdout(ctx: StepContext) -> list[HoldoutRow]:
     """The ``eval_holdout`` rows of ``dataset.jsonl`` as (messages, truth) pairs."""
-    lines = (ctx.workload_dir / "dataset.jsonl").read_text(encoding="utf-8").splitlines()
+    lines = read_regular(ctx.workload_dir / "dataset.jsonl").splitlines()
     rows = [json.loads(line) for line in lines]
-    membership = json.loads((ctx.workload_dir / "split.json").read_text(encoding="utf-8"))
+    membership = json.loads(read_regular(ctx.workload_dir / "split.json"))
     build = _HOLDOUT[str(ctx.meta()["stats"]["format_key"])]
     return [build(rows[int(i)]) for i in membership["member_row_indices"]["eval_holdout"]]
 
@@ -97,8 +97,11 @@ def create_deployment(state: AuditState, ctx: StepContext) -> AuditState:
         "auto_scaling_enabled": False,
         "training_job_id": job_id,
     }
+    if state.audit_id is not None:
+        # Written on the deployment by the platform at creation, so the audit's delete finds it.
+        payload["audit_id"] = state.audit_id
     created = ctx.client.create_deployment(payload)
-    step.deployment_id = str(created["id"])
+    step.deployment_id = answer_field(created, "id", "the deployment create")
     key = string_field(created, "api_key")
     if key is not None:
         ctx.secrets.store(ctx.label, key)
@@ -138,7 +141,7 @@ def _revision_status(ctx: StepContext, deployment_id: str) -> JsonObject:
 
 
 def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
-    """Wait for the revision to go active; a failure or timeout is recorded and the deployment paused.
+    """Wait for the revision to go active; a failure or timeout is recorded (an unpublished audit's endpoint is paused).
 
     A candidate that already scored waits for nothing: it was deployed,
     replayed and scored on an earlier run, and ``dagnam audit cancel`` may
@@ -166,11 +169,18 @@ def wait_active(state: AuditState, ctx: StepContext) -> AuditState:
         return state
     except LROTimeoutError:
         step.deploy_status = "timeout"
-        step.error = f"deploy_timeout: not active after {ctx.deploy_timeout:.0f}s; paused"
-        # A revision that never activated leaves the deployment unpausable; the
-        # recorded timeout stands either way.
-        with suppress(DeploymentStateError):
+        waited = f"deploy_timeout: not active after {ctx.deploy_timeout:.0f}s"
+        if state.audit_id is not None:
+            # A published audit's endpoint is paused by the audit's own cancel and nothing else.
+            step.error = f"{waited}; `dagnam audit cancel` stops it"
+            return state
+        # A revision that never activated leaves the deployment unpausable; the timeout is
+        # recorded either way, and says which it was.
+        try:
             ctx.client.pause_deployment(deployment_id)
+            step.error = f"{waited}; paused"
+        except DeploymentStateError:
+            step.error = f"{waited}; it could not be paused"
         return state
     step.deploy_status = DEPLOY_RUNNING
     return state
@@ -198,7 +208,7 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
 
     Every served prediction is metered, so the replay -- not the training --
     is most of what an audit spends. It is refused outright when its
-    projected cost (spec P5) could take the credits spent past the ceiling,
+    projected cost could take the credits spent past the ceiling,
     and its cost is measured from the account balance either side of it
     rather than assumed from a rate card.
 
@@ -232,7 +242,7 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
         before = None if path.exists() else _balance(ctx)
         head = {"deployment_id": deployment_id, "balance_before": before}
         write_atomic(path, json.dumps(head) + "\n")
-    with path.open("a", encoding="utf-8") as sink:
+    with open_append(path) as sink:
 
         def landed(position: int, answer: str | None, ms: float) -> None:
             index = todo[position]

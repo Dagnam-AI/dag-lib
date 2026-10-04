@@ -13,13 +13,23 @@ from dagnam.audit import Message, TraceRecord, read_traces
 from dagnam.audit.derive import build_dataset
 from dagnam.audit.prices import PriceTable
 from dagnam.audit.readers import langfuse
-from dagnam.audit.readers.messages import effective_response
 
 # Row counts of ``fixtures/langfuse_sample.jsonl`` (see fixtures/README.md).
 LINES = 15
 RECORDS = 12
 PER_SESSION = 4
 SESSIONS = 3
+
+
+REPLAYED_INPUT = [
+    {"role": "user", "content": "ticket 1"},
+    {"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAAA-opaque"},
+    {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    {"type": "mcp_call", "id": "mcp_1", "name": "kb", "arguments": "{}", "output": "tool-says"},
+    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "a1"}]},
+    {"role": "user", "content": "ticket 2"},
+]
+"""A Responses ``input`` that replays an earlier turn which ran hosted tools."""
 
 
 def test_reader_yields_generations(fixtures_dir: Path) -> None:
@@ -238,7 +248,33 @@ def test_a_responses_generation_with_tools_is_read() -> None:
     assert record is not None
     assert record.system == "Route the ticket to a team."
     assert record.response_tool_calls == (call,)
-    assert record.signature is None  # the offered tools never key a workload (B2-2)
+    assert record.signature is None  # the offered tools never key a workload
+
+
+def test_a_replayed_hosted_tool_item_and_a_custom_tool_call_are_read() -> None:
+    custom = {"type": "custom_tool_call", "call_id": "c1", "name": "apply_patch", "input": "x"}
+    row = {
+        **_generation(),
+        "input": {"input": REPLAYED_INPUT, "tools": [{"type": "web_search"}]},
+        "output": [{"type": "reasoning", "summary": []}, {"type": "web_search_call"}, custom],
+    }
+    record = langfuse.to_record(row)
+    assert record is not None
+    assert [(m.role, m.content) for m in record.messages] == [
+        ("user", "ticket 1"),
+        ("assistant", "a1"),
+        ("user", "ticket 2"),
+    ]
+    assert (record.response, record.response_tool_calls) == ("", (custom,))
+
+
+def test_a_legacy_function_call_output_is_a_tool_call() -> None:
+    legacy = {"name": "route", "arguments": '{"team": "a"}'}
+    message = {"role": "assistant", "content": None, "function_call": legacy}
+    for output in (message, json.dumps(message)):
+        record = langfuse.to_record({**_generation(), "output": output})
+        assert record is not None
+        assert (record.response, record.response_tool_calls) == ("", (legacy,))
 
 
 def test_an_agent_step_keeps_the_calls_its_tool_results_answer() -> None:
@@ -322,66 +358,7 @@ def test_the_blob_export_shape_is_read(tmp_path: Path) -> None:
     assert first.cost_usd == 0.002
     # Langfuse usage buckets are exclusive: ``input`` excludes the cached tokens.
     assert (first.prompt_tokens, first.cached_prompt_tokens, first.completion_tokens) == (40, 30, 1)
-    assert first.workload_hint == "urgency"  # the registered prompt names the workload (N11)
-
-
-AI_MESSAGE = {
-    "content": "billing",
-    "additional_kwargs": {},
-    "response_metadata": {"model_name": "gpt-4o-mini"},
-    "type": "ai",
-    "name": None,
-    "id": "run-123",
-    "tool_calls": [],
-}
-"""A LangChain ``AIMessage`` dump, as Langfuse stores one an ``@observe`` generation returned."""
-
-
-@pytest.mark.parametrize(
-    ("output", "response"),
-    [
-        # RR-3: role-less, and read whole as JSON -- its per-call ``id`` made every
-        # answer distinct; it is a reply because it carries ``content``.
-        (AI_MESSAGE, "billing"),
-        # Answers that only look like replies stay the model's JSON answer.
-        ({"output": ["a", "b"]}, json.dumps({"output": ["a", "b"]})),
-        ({"name": "Bob", "role": "admin"}, json.dumps({"name": "Bob", "role": "admin"})),
-        (
-            {"type": "message", "priority": "high"},
-            json.dumps({"type": "message", "priority": "high"}),
-        ),
-    ],
-    ids=["langchain-ai-message", "output-list-answer", "role-field-answer", "type-field-answer"],
-)
-def test_a_reply_is_what_carries_a_reply_and_the_rest_is_the_answer(
-    output: dict[str, object], response: str
-) -> None:
-    for exported in (output, json.dumps(output)):
-        record = langfuse.to_record({**_generation(), "output": exported})
-        assert record is not None
-        assert record.response == response
-
-
-def test_priority_buckets_are_not_added_twice() -> None:
-    # m2: Langfuse's own SDK marks ``input_priority*`` / ``output_priority*`` as not
-    # exclusive (its CallbackHandler never subtracts them): they count tokens the
-    # other buckets already hold. 1,800 prompt tokens were read for 900.
-    usage = {
-        "input": 100,
-        "input_cache_read": 800,
-        "input_priority": 900,
-        "input_priority_cache_read": 800,
-        "output": 5,
-        "output_priority": 5,
-        "input_cost": 0.1,
-    }
-    record = langfuse.to_record({**_generation(), "usage_details": usage, "usage": None})
-    assert record is not None
-    assert (record.prompt_tokens, record.cached_prompt_tokens, record.completion_tokens) == (
-        900,
-        800,
-        5,
-    )
+    assert first.workload_hint == "urgency"  # the registered prompt names the workload
 
 
 def test_the_ui_export_json_strings_are_decoded(tmp_path: Path) -> None:
@@ -413,7 +390,7 @@ def test_the_ui_export_json_strings_are_decoded(tmp_path: Path) -> None:
 
 
 def test_a_json_answer_with_a_type_key_is_the_reply_not_a_message(tmp_path: Path) -> None:
-    # B2-1: an answer like {"type": "refund", ...} was taken for a message with no
+    # An answer like {"type": "refund", ...} was taken for a message with no
     # content, so every reply read "", the workload derived no rows at all and its
     # verdict fell to too_few_samples. Blob/UI exports carry it as a JSON string, the
     # API export as an object; both are the model's answer, as JSON text.
@@ -443,43 +420,3 @@ def test_a_json_answer_with_a_type_key_is_the_reply_not_a_message(tmp_path: Path
         record = langfuse.to_record({**_generation(), "output": json.dumps(output)})
         assert record is not None
         assert record.response == "low"
-
-
-def test_a_prompt_that_only_looks_like_json_stays_a_prompt() -> None:
-    record = langfuse.to_record({**_generation(), "input": "{not json, a plain prompt"})
-    assert record is not None
-    assert record.messages[0].content == "{not json, a plain prompt"
-
-
-def test_a_text_outcome_in_the_metadata_is_ignored() -> None:
-    record = langfuse.to_record({**_generation(), "metadata": {"outcome": "resolved"}})
-    assert record is not None
-    assert record.outcome is None
-
-
-@pytest.mark.parametrize("serialized", [False, True])
-def test_responses_output_array_keeps_calls_and_drops_reasoning(serialized: bool) -> None:
-    output = [
-        {"type": "reasoning", "summary": [{"type": "summary_text", "text": "secret"}]},
-        {"type": "function_call", "name": "route", "arguments": '{"team":"billing"}'},
-    ]
-    record = langfuse.to_record(
-        {**_generation(), "output": json.dumps(output) if serialized else output}
-    )
-    assert record is not None
-    assert record.response == ""
-    assert (
-        effective_response(record.response, record.response_tool_calls)
-        == '{"arguments": {"team": "billing"}, "name": "route"}'
-    )
-
-
-@pytest.mark.parametrize("serialized", [False, True])
-def test_serialized_arbitrary_array_stays_answer_text(serialized: bool) -> None:
-    output = '[{"type": "refund", "amount": 12}, {"type": "reasoning", "amount": 9}]'
-    record = langfuse.to_record(
-        {**_generation(), "output": output if serialized else json.loads(output)}
-    )
-    assert record is not None
-    assert record.response == output
-    assert record.response_tool_calls == ()

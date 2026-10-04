@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -115,7 +116,7 @@ def test_forget_removes_the_key_from_both_backends(
 def test_a_crash_mid_rewrite_leaves_every_stored_key_readable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """B14: the rewrite goes through a same-directory temp file, never over the live one."""
+    """The rewrite goes through a same-directory temp file, never over the live one."""
     monkeypatch.setitem(sys.modules, "keyring", None)
     store = SecretStore(tmp_path)
     store.store("w1/head_tune", "sk-1")
@@ -123,7 +124,7 @@ def test_a_crash_mid_rewrite_leaves_every_stored_key_readable(
     def crash(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(json, "dump", crash)
+    monkeypatch.setattr(os, "fsync", crash)  # fails with the temp file written, before promotion
     with pytest.raises(OSError, match="disk full"):
         store.store("w1/sft_small", "sk-2")
     monkeypatch.undo()

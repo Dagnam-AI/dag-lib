@@ -185,7 +185,7 @@ def test_get_project_version_404(client: DagnamClient, rmock: RequestsMocker) ->
 def test_create_project_retries_a_blip_into_the_same_idempotency_key(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    """K3: the audit's project create is deduplicated server-side, so a 502 is safe to retry."""
+    """The audit's project create is deduplicated server-side, so a 502 is safe to retry."""
     client._sleep = lambda _s: None
     rmock.post(
         f"{API}/api/v1/projects",

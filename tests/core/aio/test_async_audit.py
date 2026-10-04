@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 AUDITS = "/api/v1/audits"
-RECEIPT = {"schema": "dagnam.audit.deleted/1", "deleted_at": "2026-09-07T10:00:00Z", "entries": []}
 
 
 async def test_create_audit(client: AsyncDagnamClient, mock: respx.MockRouter) -> None:
@@ -31,6 +30,18 @@ async def test_create_audit(client: AsyncDagnamClient, mock: respx.MockRouter) -
 async def test_create_audit_candidate(client: AsyncDagnamClient, mock: respx.MockRouter) -> None:
     mock.post(f"{AUDITS}/a1/candidates").mock(return_value=httpx.Response(201, json={"id": "c1"}))
     assert await client.create_audit_candidate("a1", {"kind": "sft_small"}) == {"id": "c1"}
+
+
+async def test_claim_audit_resources(client: AsyncDagnamClient, mock: respx.MockRouter) -> None:
+    route = mock.post(f"{AUDITS}/a1/claims").mock(
+        return_value=httpx.Response(200, json={"entries": []})
+    )
+    assert await client.claim_audit_resources("a1", [{"kind": "dataset", "id": "d1"}]) == {
+        "entries": []
+    }
+    assert json.loads(route.calls.last.request.read()) == {
+        "entries": [{"kind": "dataset", "id": "d1"}]
+    }
 
 
 async def test_patch_audit_candidate(client: AsyncDagnamClient, mock: respx.MockRouter) -> None:
@@ -50,13 +61,10 @@ async def test_halt_audit(client: AsyncDagnamClient, mock: respx.MockRouter) -> 
     assert json.loads(route.calls.last.request.read()) == {"reason": "cancelled"}
 
 
-async def test_cancel_and_delete_audit_return_the_receipt(
-    client: AsyncDagnamClient, mock: respx.MockRouter
-) -> None:
-    mock.post(f"{AUDITS}/a1/cancel").mock(return_value=httpx.Response(200, json=RECEIPT))
-    mock.delete(f"{AUDITS}/a1").mock(return_value=httpx.Response(200, json=RECEIPT))
-    assert await client.cancel_audit("a1") == RECEIPT
-    assert await client.delete_audit("a1") == RECEIPT
+async def test_the_async_client_does_not_tear_an_audit_down(client: AsyncDagnamClient) -> None:
+    """A teardown is the platform's one walk plus what the CLI does with its receipt: sync only."""
+    assert not hasattr(client, "cancel_audit")
+    assert not hasattr(client, "delete_audit")
 
 
 async def test_an_id_with_a_slash_cannot_escape_its_path(
@@ -81,15 +89,15 @@ async def test_a_key_without_the_write_scope_is_a_uniform_404(
 async def test_an_expired_key_is_an_auth_error(
     client: AsyncDagnamClient, mock: respx.MockRouter
 ) -> None:
-    mock.delete(f"{AUDITS}/a1").mock(return_value=httpx.Response(401, json={"detail": "nope"}))
+    mock.post(f"{AUDITS}/a1/halt").mock(return_value=httpx.Response(401, json={"detail": "nope"}))
     with pytest.raises(AuthError):
-        await client.delete_audit("a1")
+        await client.halt_audit("a1", "error")
 
 
 async def test_create_audit_sends_an_idempotency_key(
     client: AsyncDagnamClient, mock: respx.MockRouter
 ) -> None:
-    """K3: the async twin keys the create the same way."""
+    """The async twin keys the create the same way."""
     route = mock.post(AUDITS).mock(return_value=httpx.Response(201, json={"id": "a1"}))
     await client.create_audit({"project_id": "p1"})
     assert route.calls.last.request.headers.get("Idempotency-Key")

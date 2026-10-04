@@ -101,7 +101,7 @@ def test_native_to_flax_short_tuple_sample_raises() -> None:
 
 
 def test_native_to_flax_array_label_materializes() -> None:
-    # G109: a non-scalar (segmentation-mask) target must materialize as a 2-D array,
+    # A non-scalar (segmentation-mask) target must materialize as a 2-D array,
     # not raise. Previously int(lbl) rejected any label that wasn't a scalar index.
     class _MaskLabelDs:
         def __len__(self) -> int:

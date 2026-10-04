@@ -293,7 +293,7 @@ class TestSplitByRoles:
             split_by_roles(df, {"a": "feature", "b": "feature"})
 
     def test_target_role_accepts_label_alias(self) -> None:
-        # G307: "label" must be accepted as a target role alias in TARGET_ROLES,
+        # "label" must be accepted as a target role alias in TARGET_ROLES,
         # matching detect_label_column's own "target"/"label" acceptance above.
         # commit ac16b9c switched the flax/tf loaders from detect_label_column to
         # split_by_roles, whose TARGET_ROLES silently omitted "label" and broke

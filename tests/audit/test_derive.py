@@ -239,7 +239,7 @@ def _tool_call(arguments: Mapping[str, object]) -> dict[str, object]:
 
 
 def test_a_tool_call_is_trained_on_its_name_and_arguments() -> None:
-    # P4: 1,200 function-calling extractions with ``content: null`` were all skipped
+    # 1,200 function-calling extractions with ``content: null`` were all skipped
     # (0 holdout rows); with a preamble, the preamble became the target.
     args = {"product": "p1", "sentiment": "positive"}
     silent = replace(_rec(response=""), response_tool_calls=(_tool_call(args),))
@@ -290,7 +290,7 @@ def test_build_dataset_counts_the_targets_redaction_changed() -> None:
 
 
 def test_build_dataset_caps_the_training_rows_and_keeps_the_holdout() -> None:
-    # R3-15: every train row past the cap would be paid GPU time past a hard ceiling.
+    # Every train row past the cap would be paid GPU time past a hard ceiling.
     records = [
         _rec(response="billing" if i % 5 else "refund", ts=i, turns=(f"ticket {i}",))
         for i in range(50)
@@ -315,7 +315,7 @@ def test_build_dataset_caps_the_training_rows_and_keeps_the_holdout() -> None:
 
 
 def test_the_cap_keeps_a_router_s_rare_route() -> None:
-    # m4: tool-call and JSON rows all shared one stratum, so the cap sampled a router's
+    # Tool-call and JSON rows all shared one stratum, so the cap sampled a router's
     # routes at random: a rare route could fall to none while the holdout kept it.
     def routed(i: int) -> TraceRecord:
         call = _tool_call({"team": "legal" if i % 10 == 3 else "billing"})
@@ -337,7 +337,7 @@ INVOICE_LINES = "Invoice line 17: widget, 12 x 3.50 EUR, net 42.00 EUR\n" * 220
 
 
 def test_rows_over_the_student_s_context_leave_the_training_split_only() -> None:
-    # B2-3: qlora-sft-chat@1.2 drops, never cuts, a row over its 2,048 tokens -- at
+    # qlora-sft-chat@1.2 drops, never cuts, a row over its 2,048 tokens -- at
     # train time, after the credits are spent. A 12k-character invoice in the user turn
     # is such a row (the last turn is kept whole); the scan now leaves it out of
     # training and counts it. The holdout keeps it, as serving will see it.
@@ -367,7 +367,7 @@ def test_rows_over_the_student_s_context_leave_the_training_split_only() -> None
 
 
 def test_the_cap_still_caps_an_extraction_whose_answers_are_all_distinct() -> None:
-    # m4 / N1: a stratum per distinct answer would keep a row of each and disable the
+    # A stratum per distinct answer would keep a row of each and disable the
     # cap, so past ENUM_MAX_DISTINCT distinct chat targets they are one stratum.
     records = [
         _rec(response=json.dumps({"total": i}), ts=i, turns=(f"invoice {i}",)) for i in range(100)
@@ -380,7 +380,7 @@ def test_the_cap_still_caps_an_extraction_whose_answers_are_all_distinct() -> No
 
 
 def test_the_cap_keeps_every_label_however_many_there_are() -> None:
-    # N1: the "too many strata" fallback meant for extraction answers also caught a
+    # The "too many strata" fallback meant for extraction answers also caught a
     # label workload with over 50 labels in training, and dropped a one-row label.
     labels = [f"label{i % (ENUM_MAX_DISTINCT + 5)}" for i in range(300)]
     labels[7] = "tail"  # one early row, so it trains
@@ -395,7 +395,7 @@ def test_the_cap_keeps_every_label_however_many_there_are() -> None:
 
 
 def test_derive_workloads_builds_the_same_datasets_from_two_streamed_passes() -> None:
-    # R3-16: the scan held every record of the export; now two passes plan and then
+    # The scan held every record of the export; now two passes plan and then
     # derive the rows each workload keeps, and nothing else is held.
     records = (
         [
@@ -430,7 +430,7 @@ def test_derive_workloads_builds_the_same_datasets_from_two_streamed_passes() ->
 
 
 def test_an_agent_step_s_row_keeps_the_call_its_tool_result_answers() -> None:
-    # N5: a mid-loop step whose label depends on a tool result must show the student
+    # A mid-loop step whose label depends on a tool result must show the student
     # the call that produced it, in both row formats.
     call = '{"arguments": {"order": 3}, "name": "lookup"}'
     record = replace(

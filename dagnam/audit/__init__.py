@@ -12,7 +12,7 @@ serve, replay the holdout -- keeping a resumable :class:`AuditState`, and
 :func:`frontier` names the cheapest candidate whose agreement clears the
 floor. :func:`replaceability` judges each workload by the design's economics,
 :func:`build_scan_report` assembles the scan report and
-:func:`build_audit_report` the audit report; :func:`delete_audit` removes
+:func:`build_audit_report` the audit report; :func:`dagnam.audit.cleanup.delete_audit` removes
 everything a run created and writes the receipt. :func:`replaceability` judges each workload by the design's economics
 and :func:`build_scan_report` assembles the report. :func:`replaceability` judges each
 workload by the design's economics and :func:`build_scan_report` assembles

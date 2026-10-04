@@ -54,7 +54,7 @@ from dagnam.audit.readers.base import (
     require,
     text,
 )
-from dagnam.audit.readers.messages import has_media, reply_of, split_prompt, task_signature
+from dagnam.audit.readers.messages import final_reply, has_media, split_prompt, task_signature
 from dagnam.audit.record import TraceRecord
 
 REQUIRED_FIELDS = ()
@@ -81,7 +81,7 @@ def to_record(row: Row) -> TraceRecord | None:
     choices = get(completion, "choices")
     # A Responses API completion has no ``choices``: its reply is the ``output`` item list.
     reply = choices[0]["message"] if choices is not None else require(completion, "output")
-    response, calls = reply_of(reply)
+    answer = final_reply(reply)
     meta = (get(request, "metadata"), get(completion, "metadata"))
     metadata = {**_mapping(meta[1]), **_mapping(meta[0])}
     return TraceRecord(
@@ -92,8 +92,8 @@ def to_record(row: Row) -> TraceRecord | None:
         model=text(get(completion, "model") or get(request, "model") or UNKNOWN_MODEL),
         system=system,
         messages=messages,
-        response=response,
-        response_tool_calls=calls,
+        response=answer.text,
+        response_tool_calls=answer.calls,
         prompt_tokens=prompt_tokens(completion, "usage"),
         completion_tokens=completion_tokens(completion, "usage"),
         cached_prompt_tokens=cached_prompt_tokens(completion, "usage"),
@@ -104,6 +104,7 @@ def to_record(row: Row) -> TraceRecord | None:
         workload_hint=_optional_text(metadata.get("workload") or get(request, "prompt.id")),
         has_media=has_media(prompt),
         signature=task_signature(request),
+        reasoning_only=answer.reasoning_only,
     )
 
 

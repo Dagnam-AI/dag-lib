@@ -121,8 +121,8 @@ def clamp_token_ids(array: npt.NDArray[Any], vocab_size: int) -> npt.NDArray[Any
     Mirrors ``tokenize_text``'s reserved-zero-for-padding convention for rectangular
     (already-padded) token arrays, which otherwise pass raw ids straight through and
     crash a vocab-sized embedding with "index out of range". Shared by the PyTorch,
-    Flax, and TensorFlow native-numpy converters (Round-2 G247, G306) so all three
-    frameworks clamp identically.
+    Flax, and TensorFlow native-numpy converters so all three frameworks clamp
+    identically.
     """
     return np.where(array < vocab_size, array, 0)
 

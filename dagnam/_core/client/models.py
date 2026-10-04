@@ -125,6 +125,21 @@ class ModelsClientMixin(BaseDagnamClient):
             )
         )
 
+    def purge_model_version(self, version_id: str) -> JsonObject | None:
+        """``DELETE /api/v1/model-versions/{id}``: this one version's weights, never its entry.
+
+        Idempotent. The platform answers one receipt row (``kind``, ``id``, ``status``,
+        ``code``) and refuses (409) a version a live deployment serves. A platform without the
+        route answers 404 or 405, which :func:`dagnam.audit.cleanup_kinds` tells apart from a
+        version that is gone by reading it back. ``None`` for an answer with no row.
+        """
+        answer = self._registry_request(
+            "DELETE",
+            f"/api/v1/model-versions/{quote_path_segment(version_id)}",
+            model_id=version_id,
+        )
+        return answer if isinstance(answer, dict) else None
+
     def get_model_version_lineage(self, version_id: str) -> JsonObject:
         return self._expect_object(
             self._registry_request(

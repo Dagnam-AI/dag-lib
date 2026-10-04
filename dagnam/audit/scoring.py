@@ -1,4 +1,4 @@
-"""Client-side agreement between a candidate and the teacher on the holdout (spec D3).
+"""Client-side agreement between a candidate and the teacher on the holdout.
 
 The scorers themselves live in ``dagnam_contracts.audit.scoring``: the SDK
 scores a holdout on the customer's machine and the platform scores one on a

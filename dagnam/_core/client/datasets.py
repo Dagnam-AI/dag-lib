@@ -44,12 +44,19 @@ def pii_scan_body(policy: Mapping[str, str] | None) -> JsonObject:
 class DatasetsClientMixin(BaseDagnamClient):
     """Datasets resource methods for DagnamClient."""
 
-    def list_datasets(self, type: str = "all", search: str | None = None) -> list[JsonObject]:
-        """GET /api/v1/datasets/browse — List available datasets."""
+    def list_datasets(
+        self, type: str = "all", search: str | None = None, audit_id: str | None = None
+    ) -> list[JsonObject]:
+        """GET /api/v1/datasets/browse — List available datasets.
+
+        ``audit_id`` keeps only the datasets the platform tagged with that audit at creation.
+        """
         url = f"{self.api_url}/api/v1/datasets/browse"
         params: dict[str, str] = {"type": type}
         if search:
             params["search"] = search
+        if audit_id:
+            params["audit_id"] = audit_id
         resp = self._request(
             "GET",
             url,
@@ -262,6 +269,7 @@ class DatasetsClientMixin(BaseDagnamClient):
         visibility: str = "private",
         license: str | None = None,
         progress_cb: object = None,
+        audit_id: str | None = None,
     ) -> JsonObject:
         from dagnam._core.client.common import raise_for_upload
 
@@ -279,6 +287,10 @@ class DatasetsClientMixin(BaseDagnamClient):
             fields["description"] = description
         if license:
             fields["license"] = license
+        if audit_id:
+            # The platform writes it on the row once, at creation: that tag, not a later claim
+            # or a step that names the dataset, is what makes the audit's delete take it.
+            fields["audit_id"] = audit_id
 
         file_path = Path(file_path)
         try:

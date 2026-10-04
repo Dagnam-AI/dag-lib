@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import time
 
 from hypothesis import given, settings, strategies as st
 import pytest
 
+from dagnam.audit import normalize
 from dagnam.audit.normalize import UNSTRUCTURED, normalize_template, template_hash
 
 
@@ -56,10 +58,96 @@ def test_normalize_template_masks_variables(a: str, b: str) -> None:
         # one; a newline inside braces only becomes a placeholder once collapsed.
         ('"' + "a" * 20 + '" ' + "b" * 26 + ' "' + "c" * 14 + '"', "<QUOTED>"),
         ("Fill {product,\n order_id}", "Fill {product,order_id}"),
+        # An address is masked from the start of its local part, wherever that sits.
+        ("cc first.last+tag@mail.example.co.uk, thanks", "cc <EMAIL>, thanks"),
+        ("(a-b@x.io)", "(<EMAIL>)"),
+        ("to a@b@c.dev", "to a@<EMAIL>"),
+        ("no domain a@b here", "no domain a@b here"),
+        ("a@b.c+d@e.f", "<EMAIL><EMAIL>"),  # the next address starts where the last ended
     ],
 )
 def test_each_rule(raw: str, expected: str) -> None:
     assert normalize_template(raw) == expected
+
+
+N = 100_000
+ADVERSARIAL = {
+    # For each rule of the table: input in which the rule has many places to start and a
+    # long way to scan from each. A rule that starts over inside the run it just scanned is
+    # quadratic here (the email rule took 11 s on 80,000 letters).
+    "placeholder-open": "{{" * N,
+    "placeholder-unclosed": "{{" + "a" * N,
+    "brace-open": "{a" * N,
+    "brace-long-field-list": "{" + ",".join(["a"] * N) + "}",
+    "brace-long-keys": "{" + "a:1," * N + "}",
+    "brace-field-list-that-fails": "{" + "a, " * N + "!}",
+    "url": "http://" * N,
+    "email-letters": "a" * N,
+    "email-dotted": "a." * N,
+    "email-no-domain": "a" * N + "@",
+    "email-no-dot": "a@" + "b" * N,
+    "uuid-hex": "abcdef01-" * N,
+    "date-fraction": "2026-01-01T00:00:00." + "9" * N,
+    "date-chain": "2026-01-01 " * N,
+    "day": "Mon," * N,
+    "month-spaces": "Jan" + " " * N,
+    "ordinal-spaces": "1" + " " * N + "x",
+    "time-spaces": "1" + " " * N + "x",
+    "time-colons": "12:" * N,
+    "am-pm": "1 a." * N,
+    "number-commas": "1," * N,
+    "number-digits": "7" * N,
+    "quote-unclosed": '"' + "a" * N,
+    "quote-many": '"a' * N,
+    "whitespace": " \t\n" * N,
+}
+NESTED_QUOTES = "".join(
+    [*['"' + "x" * 9] * 4_000, '"' + "y" * 25, *['"' + "x" * 9] * 4_000, *['"'] * 8_001]
+)
+"""Short quoted spans around one long one: masking the long one makes its neighbours long, a layer a pass."""
+
+
+@pytest.mark.parametrize("text", ADVERSARIAL.values(), ids=ADVERSARIAL.keys())
+def test_every_rule_is_linear_on_input_built_to_make_it_start_over(text: str) -> None:
+    # CPU time of this process, not the clock: a busy machine makes the test wait, not fail.
+    # A linear rule takes tens of milliseconds on this and a quadratic one tens of seconds;
+    # the bound sits between them, so it fails on the shape of the cost.
+    start = time.process_time()
+    normalize_template.__wrapped__(text)
+    assert time.process_time() - start < 5.0
+
+
+def test_nested_quoted_spans_cost_a_bounded_number_of_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Each layer of nested quoted spans needs a pass of its own once the layer inside is
+    # masked, so an unbounded loop ran a pass per layer: 80,000 characters took 9.8 s. The
+    # count is what is pinned, not the clock.
+    calls: list[int] = []
+    mask_once = normalize._mask_once
+
+    def counted(text: str) -> str:
+        calls.append(len(text))
+        return mask_once(text)
+
+    monkeypatch.setattr(normalize, "_mask_once", counted)
+
+    normalize.normalize_template.__wrapped__(NESTED_QUOTES)
+
+    assert len(calls) == 1 + normalize._MAX_PASSES
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'Say "one short" 1234 "another short" now',  # two short spans a masked number joins
+        'a@"this quoted span is longer than 24 chars"@b.com "x"',
+        '{"a": 1} "quoted context over twenty-five characters" {x: 7} 2026-09-02',
+    ],
+)
+def test_a_prompt_that_settles_within_the_cap_is_masked_to_the_end(text: str) -> None:
+    once = normalize.normalize_template(text)
+    assert normalize._mask_once(once) == once  # nothing left for a further pass
 
 
 def test_prompts_that_differ_in_wording_stay_apart() -> None:

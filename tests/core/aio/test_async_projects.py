@@ -160,7 +160,7 @@ async def test_async_get_project_404_not_retried(
 async def test_async_create_project_retries_a_blip_into_the_same_idempotency_key(
     client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
 ) -> None:
-    """K3: the server deduplicates the create, so a transient failure is safe to retry."""
+    """The server deduplicates the create, so a transient failure is safe to retry."""
 
     async def _no_sleep(_d: float) -> None: ...
 

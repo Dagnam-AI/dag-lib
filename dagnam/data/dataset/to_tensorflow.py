@@ -99,7 +99,7 @@ class TensorflowDatasetMixin(DatasetMixinBase):
                 # A rectangular, already-padded token array still carries raw ids
                 # that can exceed the embedding's vocab; clamp out-of-vocab ids to 0
                 # exactly like the ragged path above, else the embedding raises
-                # "index out of range" (G306, mirrors the pytorch fix for G247).
+                # "index out of range" (mirrors the pytorch fix).
                 x_train = clamp_token_ids(np.asarray(x_train), vocab_size)
                 x_test = clamp_token_ids(np.asarray(x_test), vocab_size)
             if split == "test":

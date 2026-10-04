@@ -264,7 +264,7 @@ class TestCustomStateKey:
 
 
 # ---------------------------------------------------------------------------
-# Task 8: LRO error-retry unified onto the shared jittered-backoff policy
+# LRO error-retry unified onto the shared jittered-backoff policy
 # ---------------------------------------------------------------------------
 
 

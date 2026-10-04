@@ -147,7 +147,7 @@ class AudioFolderDataset:
         if self.return_waveform:
             # Bound architectures own feature extraction (MFCC/Mel nodes), so
             # decode with SoundFile through the shared waveform path and never
-            # require TorchCodec/FFmpeg merely to read an uploaded WAV (G197).
+            # require TorchCodec/FFmpeg merely to read an uploaded WAV.
             from dagnam.data.loaders.audio.io import load_waveform_py
 
             waveform_array = load_waveform_py(

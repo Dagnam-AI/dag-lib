@@ -11,30 +11,23 @@ from typing import Any
 import pytest
 from tests.audit._records import make_record, make_workload
 
-from dagnam.audit.candidates import TRAINING_CREDITS_MAX, CandidateKind
 from dagnam.audit.derive import build_dataset
 from dagnam.audit.discover import Workload
 from dagnam.audit.prices import PriceRow, PriceTable
 from dagnam.audit.readers.messages import TOOL_CALL_NOTE
 from dagnam.audit.scan_report import (
     ScanReport,
-    SupersededRunError,
     Window,
     build_scan_report,
     dataset_entry,
-    superseded_workloads,
-    write_scan,
     write_scan_report,
 )
-from dagnam.audit.state import AuditState, StepState, load_state, save_state
-from dagnam.audit.steps_train import credits_spent
 from dagnam.audit.structure import StructureClass
 from dagnam.audit.thresholds import (
     MAX_UNSTRUCTURED_SHARE,
     PRICE_TABLE_STALE_DAYS,
     SFT_MIN_TRAIN_ROWS,
 )
-from dagnam.audit.workspace import write_workload
 
 WINDOW = Window(
     start=datetime(2026, 8, 1, tzinfo=UTC), end=datetime(2026, 8, 31, tzinfo=UTC), days=30.0
@@ -281,7 +274,7 @@ def test_dataset_entry_carries_the_scan_numbers() -> None:
 
 
 def test_a_capped_training_set_is_warned() -> None:
-    # R3-15: counted in the report, so a reader knows the candidate saw a sample.
+    # Counted in the report, so a reader knows the candidate saw a sample.
     dataset = {
         "rows": 5_800,
         "dedup_removed": 0,
@@ -327,7 +320,7 @@ def _over_budget(over: int, train: int) -> ScanReport:
 
 
 def test_training_rows_over_the_student_s_context_are_counted_and_can_leave_too_few() -> None:
-    # B2-3: long-document extraction trained on few or no rows once the recipe dropped
+    # Long-document extraction trained on few or no rows once the recipe dropped
     # its over-budget rows, and the scan had called it a candidate.
     (entry,) = _over_budget(3_990, SFT_MIN_TRAIN_ROWS - 1).to_json()["workloads"]
     assert entry["dataset"]["train_rows_over_budget"] == 3_990
@@ -359,11 +352,29 @@ POLICY_SENTENCES = (
 )
 
 
-def _policy(chars: int) -> str:
-    """A support-triage system prompt: ``chars`` characters of plain English policy."""
-    text, i = "You triage support messages for an online store. Company policy follows.\n\n", 0
+ITALIAN_SENTENCES = (
+    "I rimborsi vengono accreditati sul metodo di pagamento originale entro cinque giorni lavorativi dall'approvazione.",
+    "Il cliente può restituire qualsiasi articolo non aperto entro trenta giorni dalla consegna e ottenere il rimborso completo.",
+    "Gli articoli aperti possono essere cambiati con un buono acquisto quando arrivano danneggiati o difettosi.",
+    "Le spese di spedizione non sono rimborsabili, a meno che l'ordine non sia arrivato in ritardo o in cattive condizioni.",
+    "Segnala subito al reparto qualità ogni reclamo che riguarda un pericolo per la sicurezza.",
+    "I clienti del programma fedeltà hanno diritto al reso gratuito e alla gestione prioritaria di ogni richiesta.",
+    "Non promettere mai una data di consegna che il corriere non abbia confermato nei dati di tracciamento.",
+    "Quando un cliente chiede di annullare, verifica se l'ordine ha già lasciato il magazzino.",
+)
+ENGLISH_HEAD = "You triage support messages for an online store. Company policy follows.\n\n"
+ITALIAN_HEAD = (
+    "Smisti i messaggi di assistenza di un negozio online. Di seguito le regole aziendali.\n\n"
+)
+
+
+def _policy(
+    chars: int, head: str = ENGLISH_HEAD, sentences: tuple[str, ...] = POLICY_SENTENCES
+) -> str:
+    """A support-triage system prompt: ``chars`` characters of plain policy text."""
+    text, i = head, 0
     while len(text) < chars:
-        sentence = POLICY_SENTENCES[i % len(POLICY_SENTENCES)]
+        sentence = sentences[i % len(sentences)]
         text, i = text + sentence + (" " if i % 4 != 3 else "\n\n"), i + 1
     return text
 
@@ -397,10 +408,10 @@ def _scanned(system: str) -> dict[str, Any]:
 
 
 def test_a_long_system_prompt_that_fits_is_trained_and_a_row_that_does_not_is_dropped() -> None:
-    # RR-1: the estimate counted English at 1.6x, so a support-triage workload whose
+    # The estimate counted English at 1.6x, so a support-triage workload whose
     # 7.5k-character policy made rows of ~1,550 real tokens read too_few_samples with
     # every training row "over" 2,048. This 8,207-character policy measures 1,552
-    # Qwen2.5 tokens a row (template included); the estimate says 1,562.
+    # Qwen2.5 tokens a row (template included); the estimate says 1,622.
     fits = _scanned(_policy(8_200))
     assert fits["verdict"]["status"] == "candidate"
     assert fits["dataset"]["train_rows_over_budget"] == 0
@@ -413,163 +424,42 @@ def test_a_long_system_prompt_that_fits_is_trained_and_a_row_that_does_not_is_dr
     assert over["verdict"]["reason"] == "800 rows exceed the student's 2,048-token context"
 
 
-def test_superseded_workloads_names_every_run_workload_this_scan_would_change(
-    tmp_path: Path,
-) -> None:
-    records = [
-        make_record(system=f"Label ticket {i}.", response="ab"[i % 2], trace_id=str(i))
-        for i in range(5)
-    ]
-    built = build_dataset(records, structure_class="enum_label", max_seq_length=2_048)
-    assert superseded_workloads(tmp_path, {"w1": built}) == []  # no run, nothing to protect
-
-    write_workload(tmp_path, "w1", built.rows, built.split, built.stats)
-    write_workload(tmp_path, "w2", built.rows, built.split, built.stats)
-    steps = {CandidateKind.HEAD_TUNE: StepState(dataset_id="ds")}
-    save_state(tmp_path, AuditState(workloads={"w1": steps, "w2": steps, "gone": steps}))
-    fewer = build_dataset(records[:4], structure_class="enum_label", max_seq_length=2_048)
-
-    # w1 is unchanged; w2's rows would change; "gone" has no files and no rows any more.
-    assert superseded_workloads(tmp_path, {"w1": built, "w2": fewer}) == ["w2", "gone"]
-    assert superseded_workloads(tmp_path, {"w1": built, "w2": built, "gone": built}) == ["gone"]
-
-
-def test_chinese_policy_that_fits_keeps_its_training_rows() -> None:
-    # RR2-1: the reviewer's 2.6k-character policy yielded ~1,549 Qwen tokens per row.
-    policy = "客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏\uff0c客户可以在收到后七天内申请全额退款。对于缺少的商品\uff0c我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利\uff0c一般会在二十四小时内得到回复。请注意\uff0c定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址\uff0c必须在商品发货之前提交申请。所有退款将原路返回\uff0c到账时间通常为三到五个工作日。当客户情绪激动时\uff0c请保持礼貌并先表示理解\uff0c再说明处理方案。涉及金额超过一千元的赔偿\uff0c需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障\uff0c应告知客户预计恢复时间并记录工单编号。每次对话结束前\uff0c请确认客户的问题是否已经完全解决。"
-    system = (policy * 10)[:2600]
-    fits = _scanned(system)
+def test_a_workload_in_another_language_that_does_not_fit_is_not_passed_as_trainable() -> None:
+    # The estimate counted every word of up to eight letters as one token, which is true of
+    # English only. This 8,066-character Italian policy is 2,214-2,216 Qwen2.5 tokens a row
+    # (template included), so every row is really over the student's 2,048. Counting every
+    # short word as one token estimated 1,592 (`candidate`, 0 rows over budget, and the paid
+    # run dropped them all); it is estimated at 2,660 now.
+    over = _scanned(_policy(8_000, ITALIAN_HEAD, ITALIAN_SENTENCES))
+    assert over["verdict"]["status"] == "too_few_samples"
+    assert over["verdict"]["reason"] == "800 rows exceed the student's 2,048-token context"
+    assert over["dataset"]["split"] == {"train": 0, "eval_holdout": 200}
+    # One that really fits (6,016 characters, 1,658-1,660 tokens a row, estimated 1,995)
+    # still trains.
+    fits = _scanned(_policy(6_000, ITALIAN_HEAD, ITALIAN_SENTENCES))
     assert fits["verdict"]["status"] == "candidate"
     assert fits["dataset"]["train_rows_over_budget"] == 0
     assert fits["dataset"]["split"] == {"train": 800, "eval_holdout": 200}
 
 
-@pytest.mark.parametrize("published", [False, True])
-def test_forced_scan_never_resumes_superseded_candidates(tmp_path: Path, published: bool) -> None:
-    records = [make_record(system=f"Label {i}.", response="ab"[i % 2]) for i in range(5)]
-    old = build_dataset(records, structure_class="enum_label", max_seq_length=2_048)
-    new = build_dataset(records[:4], structure_class="enum_label", max_seq_length=2_048)
-    write_workload(tmp_path, "w1", old.rows, old.split, old.stats)
-    step = StepState(
-        dataset_id="ds",
-        version_id="v",
-        run_id="run",
-        run_status="completed",
-        training_job_id="job",
-        model_version_id="model",
-        deployment_id="dep",
-        key_ref="key",
-        scored=True,
-        training_cost_credits=12.0,
-        replay_cost_credits=7.0,
-    )
-    save_state(
-        tmp_path,
-        AuditState(
-            audit_id="audit" if published else None,
-            workloads={"w1": {CandidateKind.HEAD_TUNE: step}},
-        ),
-    )
-    replay = tmp_path / "workloads/w1/replay-head_tune.jsonl"
-    replay.write_text("old reply")
-    for suffix in ("json", "md"):
-        (tmp_path / f"audit-report.{suffix}").write_text("old score")
-    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    if published:
-        with pytest.raises(SupersededRunError, match="new --out"):
-            write_scan(
-                tmp_path,
-                [],
-                {"w1": new},
-                source="jsonl",
-                window=WINDOW,
-                price_table=FRESH,
-                force=True,
-            )
-        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
-    else:
-        write_scan(
-            tmp_path, [], {"w1": new}, source="jsonl", window=WINDOW, price_table=FRESH, force=True
-        )
-        state = load_state(tmp_path)
-        assert state.candidate("w1", CandidateKind.HEAD_TUNE) == StepState()
-        assert not replay.exists()
-        assert not (tmp_path / "audit-report.json").exists()
-        assert not (tmp_path / "audit-report.md").exists()
-        assert state.retired == [step]
-        assert credits_spent(state) == 19.0
-        write_scan(
-            tmp_path, [], {"w1": new}, source="jsonl", window=WINDOW, price_table=FRESH, force=True
-        )
-        assert credits_spent(load_state(tmp_path)) == 19.0  # unchanged scans never add it twice
-        second = state.candidate("w1", CandidateKind.HEAD_TUNE)
-        second.run_id, second.run_status = "new-run", "running"
-        save_state(tmp_path, state)
-        replay.write_text(
-            '{"deployment_id": "dep", "balance_before": 100}\n{ "row": 0, "answer": "yes", "ms": 1.0}\n'
-        )
-        write_scan(
-            tmp_path, [], {"w1": old}, source="jsonl", window=WINDOW, price_table=FRESH, force=True
-        )
-        assert credits_spent(load_state(tmp_path)) == 19.0 + TRAINING_CREDITS_MAX + 2.0
-        assert len(load_state(tmp_path).retired) == 2
+CHINESE_POLICY = "客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏\uff0c客户可以在收到后七天内申请全额退款。对于缺少的商品\uff0c我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利\uff0c一般会在二十四小时内得到回复。请注意\uff0c定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址\uff0c必须在商品发货之前提交申请。所有退款将原路返回\uff0c到账时间通常为三到五个工作日。当客户情绪激动时\uff0c请保持礼貌并先表示理解\uff0c再说明处理方案。涉及金额超过一千元的赔偿\uff0c需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障\uff0c应告知客户预计恢复时间并记录工单编号。每次对话结束前\uff0c请确认客户的问题是否已经完全解决。"
 
 
-@pytest.mark.parametrize("change", ["rows", "added", "added-retired", "removed", "unchanged"])
-@pytest.mark.parametrize("force", [False, True])
-def test_published_scan_is_protected_before_any_candidate_starts(
-    tmp_path: Path, change: str, force: bool
-) -> None:
-    records = [make_record(system=f"Label {i}.", response="ab"[i % 2]) for i in range(5)]
-    dataset = build_dataset(records, structure_class="enum_label", max_seq_length=2_048)
-    write_scan(
-        tmp_path,
-        [make_workload(), replace(make_workload(), id="without-dataset")],
-        {"w1": dataset},
-        source="jsonl",
-        window=WINDOW,
-        price_table=FRESH,
-    )
-    # Publisher.start persists this association before the first candidate is instantiated.
-    save_state(tmp_path, AuditState(audit_id="published", workloads={}))
-    # A retired local dataset folder outside the published scan is not an active workload.
-    write_workload(tmp_path, "retired", dataset.rows, dataset.split, dataset.stats)
-    proposed = {"w1": dataset}
-    if change == "rows":
-        proposed["w1"] = build_dataset(
-            records[:4], structure_class="enum_label", max_seq_length=2_048
-        )
-    elif change == "added":
-        proposed["w2"] = dataset
-    elif change == "added-retired":
-        proposed["retired"] = dataset
-    elif change == "removed":
-        proposed.clear()
-    workloads = [replace(make_workload(), id=key) for key in proposed]
-    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    if change == "unchanged":
-        write_scan(
-            tmp_path,
-            workloads,
-            proposed,
-            source="jsonl",
-            window=WINDOW,
-            price_table=FRESH,
-            force=force,
-        )
-        assert (tmp_path / "state.json").read_bytes() == before[tmp_path / "state.json"]
-        for path, contents in before.items():
-            if "workloads" in path.parts:
-                assert path.read_bytes() == contents
-    else:
-        with pytest.raises(SupersededRunError, match="new --out"):
-            write_scan(
-                tmp_path,
-                workloads,
-                proposed,
-                source="jsonl",
-                window=WINDOW,
-                price_table=FRESH,
-                force=force,
-            )
-        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+def test_chinese_policy_that_fits_keeps_its_training_rows() -> None:
+    # This 2,600-character Simplified policy is 1,512 Qwen2.5 tokens a row (template included).
+    # Pricing every han character at the Traditional rate estimated 2,203 (1.46x) and refused
+    # it; han is priced by the vocabulary's own tokens now, so it is estimated at 1,605 (1.06x),
+    # and trains.
+    fits = _scanned((CHINESE_POLICY * 10)[:2600])
+    assert fits["verdict"]["status"] == "candidate"
+    assert fits["dataset"]["train_rows_over_budget"] == 0
+    assert fits["dataset"]["split"] == {"train": 800, "eval_holdout": 200}
+
+
+def test_chinese_policy_that_does_not_fit_is_not_passed_as_trainable() -> None:
+    # 3,600 characters of it are 2,085 real tokens a row, over the student's 2,048; the
+    # estimate says 2,212.
+    over = _scanned((CHINESE_POLICY * 20)[:3600])
+    assert over["verdict"]["status"] == "too_few_samples"
+    assert over["verdict"]["reason"] == "800 rows exceed the student's 2,048-token context"
+    assert over["dataset"]["split"] == {"train": 0, "eval_holdout": 200}

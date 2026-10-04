@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from dagnam._core._resume import confirmed_by, created_body, gone
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -19,7 +22,7 @@ from dagnam._core.client.common import (
     response_json_value,
     stream_query_params,
 )
-from dagnam._core.exceptions import ResponseError
+from dagnam._core.exceptions import DeploymentNotFoundError, ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, ensure_json_array
 
 
@@ -127,7 +130,13 @@ class DeploymentsClientMixin(BaseDagnamClient):
         )
 
     def _post_created_deployment(
-        self, path: str, body: JsonObject, *, idempotency_key: str | None = None
+        self,
+        path: str,
+        body: JsonObject,
+        *,
+        idempotency_key: str | None = None,
+        resumable: bool = False,
+        confirm: Callable[[requests.Response], bool] | None = None,
     ) -> JsonObject:
         """POST a create route; return the deployment with a usable one-time key.
 
@@ -148,15 +157,28 @@ class DeploymentsClientMixin(BaseDagnamClient):
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=True,
             idempotency_key=idempotency_key,
+            resumable=resumable,
+            confirm=confirm,
         )
-        created = response_json_object(resp)
+        # A replay that dropped its body points at the deployment it made: read it.
+        created = created_body(resp, response_json_object(resp), self.get_deployment)
         if resp.headers.get("Idempotency-Replayed") == "true" and created.get("api_key") is None:
             created.update(self.rotate_deployment_key(str(created["id"])))
         return created
 
     def create_deployment(self, payload: JsonObject) -> JsonObject:
-        """POST /api/v1/deployments"""
-        return self._post_created_deployment("/api/v1/deployments", payload)
+        """POST /api/v1/deployments
+
+        Resumable (``resume_creates``): a create asked again replays, the replay is
+        read back (a deployment deleted since is created afresh), and its missing
+        one-time key is rotated into a usable one.
+        """
+        return self._post_created_deployment(
+            "/api/v1/deployments",
+            payload,
+            resumable=True,
+            confirm=confirmed_by(self.get_deployment, gone(DeploymentNotFoundError)),
+        )
 
     def deploy_model_version(
         self,

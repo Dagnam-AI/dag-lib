@@ -11,7 +11,7 @@ import polars as pl
 import pytest
 
 from dagnam.audit import MALFORMED_FATAL_SHARE, MalformedExportError, TraceRecord, read_traces
-from dagnam.audit.readers import Source, base
+from dagnam.audit.readers import Source, base, generic
 
 # A well-formed generic row; ``messages`` is deliberately a plain string.
 ROW = {"trace_id": "t", "ts": "2026-08-01T00:00:00Z", "messages": "hi", "response": "ok"}
@@ -150,7 +150,7 @@ def test_control_characters_are_stripped_from_every_string(tmp_path: Path) -> No
         ("2026-08-01T11:00:00+02:00", datetime(2026, 8, 1, 9, tzinfo=UTC)),
         (1_785_000_000, datetime.fromtimestamp(1_785_000_000, tz=UTC)),
         (datetime(2026, 8, 1, 9), datetime(2026, 8, 1, 9, tzinfo=UTC)),
-        # m3: a basic-format ISO date is all digits, and was read as a 1970 epoch.
+        # A basic-format ISO date is all digits, and was read as a 1970 epoch.
         ("20260801", datetime(2026, 8, 1, tzinfo=UTC)),
     ],
 )
@@ -304,7 +304,7 @@ def test_a_json_array_export_reads_like_jsonl(tmp_path: Path) -> None:
 
 
 def test_jsonl_under_a_json_name_splits_on_newlines_only(tmp_path: Path) -> None:
-    # m5: U+2028, U+2029 and U+0085 may sit unescaped inside a JSON string, and
+    # U+2028, U+2029 and U+0085 may sit unescaped inside a JSON string, and
     # str.splitlines() cut such a row in two, both halves malformed.
     row = {**ROW, "response": "a\u2028b\u2029c\x85d"}
     lines = tmp_path / "really_jsonl.json"
@@ -328,7 +328,7 @@ def test_gzipped_jsonl_streams_without_inflating_to_disk(
 
 
 def test_a_text_outcome_is_ignored_not_malformed(tmp_path: Path) -> None:
-    # R1-N11: ``outcome`` is read and never used, so "good" must never fail a row.
+    # ``outcome`` is read and never used, so "good" must never fail a row.
     rows: list[object] = [
         {**ROW, "trace_id": str(i), "outcome": "good" if i % 2 else "0.5"} for i in range(4)
     ]
@@ -337,3 +337,32 @@ def test_a_text_outcome_is_ignored_not_malformed(tmp_path: Path) -> None:
     assert stats.rows_malformed == 0
     assert base.optional_outcome(True) is None
     assert base.optional_outcome(float("nan")) is None
+
+
+def test_a_line_nested_too_deeply_to_decode_is_one_malformed_row(tmp_path: Path) -> None:
+    deep = '{"trace_id": "x", "response": ' + "[" * 100_000
+    rows: list[object] = [*[ROW] * 99, deep]
+    path = _write(tmp_path / "a.jsonl", rows)
+
+    records, stats = read_traces(path, source="jsonl")
+
+    assert len(list(records)) == 99
+    assert (stats.rows_malformed, stats.first_malformed) == (1, (99,))
+
+
+def test_a_row_that_exhausts_the_stack_is_counted_malformed_not_fatal(tmp_path: Path) -> None:
+    inner = generic.bind(None)
+
+    def to_record(row: base.Row) -> TraceRecord | None:
+        if row["trace_id"] == "bad":
+            raise RecursionError
+        return inner.to_record(row)
+
+    rows: list[object] = [{**ROW, "trace_id": f"t{i}"} for i in range(99)]
+    rows.append({**ROW, "trace_id": "bad"})
+    path = _write(tmp_path / "a.jsonl", rows)
+
+    records, stats = base.read_records(path, "jsonl", base.Reader(inner.required_fields, to_record))
+
+    assert len(list(records)) == 99
+    assert (stats.rows_malformed, stats.first_malformed) == (1, (99,))
