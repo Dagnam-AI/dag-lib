@@ -168,7 +168,7 @@ class TestUnpublishedAdoptionChecksTheRows:
     def _lost(self, make_ctx: Callable[..., StepContext], platform: FakePlatform) -> StepContext:
         platform.lost_uploads = 1
         with pytest.raises(APIError):
-            upload(AuditState(project_nonce="nonce-a"), make_ctx())
+            upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
         return make_ctx(floor=0.5)
 
     def test_the_lost_upload_of_the_same_file_is_adopted(
@@ -176,7 +176,12 @@ class TestUnpublishedAdoptionChecksTheRows:
     ) -> None:
         ctx = self._lost(make_ctx, platform)
 
-        assert ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx)).dataset_id == "ds-1"
+        assert (
+            ctx.step(
+                upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx)
+            ).dataset_id
+            == "ds-1"
+        )
         assert len(platform.uploads) == 1
 
     def test_rows_rewritten_since_are_uploaded_afresh_and_said_so(
@@ -189,9 +194,47 @@ class TestUnpublishedAdoptionChecksTheRows:
         platform.dataset_sizes["ds-1"] += 1  # the lost upload holds other rows than the file now
 
         with caplog.at_level("WARNING", logger="dagnam.audit"):
-            step = ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx))
+            step = ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx))
 
         assert step.dataset_id == "ds-2"
         assert len(platform.uploads) == 2
         assert "ds-1" in caplog.text
         assert "holds other rows" in caplog.text
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "another owner",
+            "no owner on the row",
+            "no owner on the project",
+            "no owner anywhere",
+            "no project",
+        ],
+    )
+    def test_a_dataset_that_is_not_the_projects_owners_is_not_adopted(
+        self,
+        make_ctx: Callable[..., StepContext],
+        platform: FakePlatform,
+        monkeypatch: pytest.MonkeyPatch,
+        case: str,
+    ) -> None:
+        """The key sits in the description of a private upload, but anyone can copy a description."""
+        ctx = self._lost(make_ctx, platform)
+        state = AuditState(project_id="proj-1", project_nonce="nonce-a")
+        real = platform.list_datasets
+        if case == "another owner":  # the project's owner is not the row's
+            monkeypatch.setattr(platform, "get_project", lambda _id: {"owner_id": "somebody-else"})
+        elif case == "no owner on the row":
+            monkeypatch.setattr(
+                platform,
+                "list_datasets",
+                lambda **kw: [{k: v for k, v in r.items() if k != "owner_id"} for r in real(**kw)],
+            )
+        elif case == "no owner on the project":
+            monkeypatch.setattr(platform, "get_project", lambda project_id: {"id": project_id})
+        elif case == "no owner anywhere":  # None is not a match for None
+            platform.omit_provenance = True
+        else:
+            state.project_id = None
+
+        assert ctx.step(upload(state, ctx)).dataset_id == "ds-2"

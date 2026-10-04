@@ -98,13 +98,27 @@ def _adopt_tagged(state: AuditState, ctx: StepContext, name: str) -> str | None:
     return None
 
 
+def _project_owner(state: AuditState, ctx: StepContext) -> str | None:
+    """The owner of this directory's own project, or ``None`` when it cannot be read.
+
+    An unpublished upload is found by a key in its description, a value any copy of the
+    description carries; the dataset must also belong to the owner of the project this directory
+    made. A platform that names no owner, or a directory with no project, never adopts.
+    """
+    if state.project_id is None:
+        return None
+    owner = ctx.client.get_project(state.project_id).get("owner_id")
+    return owner if isinstance(owner, str) else None
+
+
 def _adopt(state: AuditState, ctx: StepContext, name: str, key: str | None) -> str | None:
     """The id of the dataset an earlier ask of this upload made, if one is there.
 
     A multipart upload cannot be replayed by the platform, so a create the process never heard
     the answer to is looked for instead of repeated. A published audit's is found by what the
     platform records on it (:func:`_adopt_tagged`); an unpublished one's carries the directory's
-    key in its description, a value only this directory holds. A dataset this state already
+    key in its description, a value only this directory holds, and belongs to the owner of this
+    directory's project. A dataset this state already
     records (any candidate, retired ones included) is never adopted: a forced rescan's new rows
     must not meet the old candidate's upload. Both are adopted only when the listing's own
     size and sample count say it is the file this run would upload (:func:`_same_rows`).
@@ -113,11 +127,15 @@ def _adopt(state: AuditState, ctx: StepContext, name: str, key: str | None) -> s
         return _adopt_tagged(state, ctx, name)
     if key is None:
         return None
+    owner = _project_owner(state, ctx)
+    if owner is None:
+        return None
     known = {step.dataset_id for step in state.all_steps()}
     path = regular_path(ctx.workload_dir / "dataset.jsonl")
     for found in ctx.client.list_datasets(search=key):
         if (
             found.get("name") == name
+            and found.get("owner_id") == owner
             and f"[{key}]" in str(found.get("description") or "")
             and str(found["id"]) not in known
         ):

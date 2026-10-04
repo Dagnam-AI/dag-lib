@@ -136,3 +136,68 @@ def test_an_error_with_no_missing_ids_says_nothing_about_the_flag(
     _fails(run_cli, "audit", "delete", str(published), "--yes")
 
     assert "--already-deleted" not in capsys.readouterr().err
+
+
+def _partially_deleted(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch
+) -> tuple[Path, FakeCleanup]:
+    """An unpublished directory one delete left an endpoint of (the platform refused it once)."""
+    root = _unpublished(tmp_path)
+    mine = platform_with_everything()
+    mine.undeletable = {"dep-1"}
+    _platform(monkeypatch, mine)
+    _fails(run_cli, "audit", "delete", str(root), "--yes")
+    assert "dep-1" in mine.present["deployment"]
+    return root, mine
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {
+        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
+    }
+
+
+def test_another_accounts_key_after_a_partial_delete_names_itself_and_changes_nothing(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    monkeypatch.setenv("DAGNAM_API_KEY", "dk-other-account-1234")
+    monkeypatch.setenv("DAGNAM_API_URL", "https://api.example.test")
+    root, mine = _partially_deleted(run_cli, tmp_path, monkeypatch)
+    before = _files(root)
+    other = FakeCleanup()  # every route answers not-found
+    other.identity = "key-b"
+    _platform(monkeypatch, other)
+    capsys.readouterr()
+
+    _fails(run_cli, "audit", "delete", str(root), "--yes")
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert "https://api.example.test" in err
+    assert "dk-oth...1234" in err
+    assert "dk-other-account-1234" not in err
+    assert "--already-deleted" in err
+    assert "Everything the audit created is deleted" not in err
+    assert load_state(root).halted is None
+    assert {k: v for k, v in _files(root).items() if k != "deleted.json"} == {
+        k: v for k, v in before.items() if k != "deleted.json"
+    }
+    assert "dep-1" in mine.present["deployment"]  # still serving, and still reachable
+
+
+def test_another_accounts_key_after_a_partial_delete_cancels_nothing_either(
+    run_cli: CliRunner, tmp_path: Path, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    root, _ = _partially_deleted(run_cli, tmp_path, monkeypatch)
+    state = load_state(root)
+    state.workloads["w1"][next(iter(state.workloads["w1"]))].deploy_status = "running"
+    save_state(root, state)
+    other = FakeCleanup()
+    other.identity = "key-b"
+    _platform(monkeypatch, other)
+    capsys.readouterr()
+
+    _fails(run_cli, "audit", "cancel", str(root))
+
+    assert "--already-deleted" in " ".join(capsys.readouterr().err.split())
+    after = load_state(root)
+    assert after.workloads["w1"][next(iter(after.workloads["w1"]))].deploy_status == "running"

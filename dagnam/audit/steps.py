@@ -178,6 +178,10 @@ class PlatformClient(Protocol):
         """``GET /api/v1/audits/{id}``: its ``status``; the uniform 404 once it is deleted."""
         ...
 
+    def get_project(self, project_id: str) -> JsonObject:
+        """``GET /api/v1/projects/{id}``: the project, with its ``owner_id``."""
+        ...
+
     def resume_audit(self, audit_id: str) -> JsonObject:
         """``POST /api/v1/audits/{id}/resume``: un-halt it for a run starting again."""
         ...

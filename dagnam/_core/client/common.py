@@ -37,6 +37,7 @@ from dagnam._core.exceptions import (
     TaskNotFoundError,
     TrainingJobNotFoundError,
     UploadError,
+    VersionKeptError,
 )
 from dagnam._types import (
     JsonArray,
@@ -500,6 +501,23 @@ def raise_for_model(resp: ResponseLike, model_id: str | None = None) -> None:
     if code in (400, 409, 422):
         raise ModelError(_text(resp))
     raise APIError(code, _text(resp))
+
+
+def raise_for_purge(resp: JsonResponseLike, model_id: str | None = None) -> None:
+    """``raise_for_model``, except a 409 whose ``detail`` says ``status: kept`` keeps its body.
+
+    The platform's refusal of a version a live endpoint serves is a decision, not a failure: the
+    parsed ``detail`` rides on :class:`VersionKeptError` instead of being flattened to its message.
+    """
+    if _status_code(resp) == 409:
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if isinstance(detail, dict) and detail.get("status") == "kept":
+            raise VersionKeptError(detail)
+    raise_for_model(resp, model_id)
 
 
 def raise_for_project(resp: ResponseLike, project_id: str | None = None) -> None:

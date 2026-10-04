@@ -29,12 +29,8 @@ if TYPE_CHECKING:
     from dagnam._core.client import DagnamClient
 
 
-def _wrong_account_note(*, clearing: bool = False) -> None:
-    """Say which account a 404 was asked of, so a key from another account is seen at once.
-
-    ``clearing`` is ``--already-deleted``: the person said it is gone, so this directory's rows
-    and keys ARE removed, and the note says that instead of saying nothing changed.
-    """
+def _asked() -> str:
+    """The host and masked key this command asked as, so another account's key is seen at once."""
     from dagnam._core.auth import get_api_key, get_api_url
     from dagnam._core.exceptions import DagnamError
 
@@ -42,8 +38,17 @@ def _wrong_account_note(*, clearing: bool = False) -> None:
         key = mask_key(get_api_key())
     except DagnamError:
         key = "none stored"
+    return f"{get_api_url()} (key {key})"
+
+
+def _wrong_account_note(*, clearing: bool = False) -> None:
+    """Say which account a 404 was asked of, so a key from another account is seen at once.
+
+    ``clearing`` is ``--already-deleted``: the person said it is gone, so this directory's rows
+    and keys ARE removed, and the note says that instead of saying nothing changed.
+    """
     seen = (
-        f"The platform at {get_api_url()} (key {key}) says it has no such"
+        f"The platform at {_asked()} says it has no such"
         " audit for this key: the key may belong to another account, or the host be another one"
         " (see `dagnam whoami`), or the audit may be deleted."
     )
@@ -101,8 +106,9 @@ def _gone_hint(receipt: Mapping[str, Any], audit_dir: Path) -> str:
 
     if any(r.get("kind") == "audit" and r.get("id") is None for r in receipt_rows(receipt)):
         return (
-            f"; if you know they are all deleted, `dagnam audit delete {audit_dir}"
-            " --already-deleted` clears this directory (irreversibly)"
+            f"; the platform at {_asked()} can see none of the recorded ids (another account or"
+            f" host? see `dagnam whoami`); if you know they are all deleted, `dagnam audit delete"
+            f" {audit_dir} --already-deleted` clears this directory (irreversibly)"
         )
     return ""
 

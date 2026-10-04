@@ -18,7 +18,7 @@ from typing import Any
 
 from dagnam_contracts.audit import CANCELLED_SCHEMA
 
-from dagnam._core.exceptions import DagnamError
+from dagnam._core.exceptions import DagnamError, DatasetNotFoundError
 from dagnam.audit.cleanup_kinds import (
     IN_USE_ELSEWHERE,
     KINDS,
@@ -50,13 +50,16 @@ from dagnam.audit.receipt_rows import (
 from dagnam.audit.state import AuditState
 
 
-def invisible(state: AuditState, rows: list[dict[str, Any]]) -> bool:
-    """Every id answered not-found, and no earlier walk of this directory saw one deleted."""
-    return (
-        bool(rows)
-        and not state.confirmed_gone
-        and all(row.get("status") == ALREADY_ABSENT for row in rows)
-    )
+def invisible(state: AuditState, rows: list[dict[str, Any]], identity: str) -> bool:
+    """Every id answered not-found, and this identity has not seen one of them deleted.
+
+    A deletion this very key (on this host) saw land proves it sees the account, so a later walk
+    that finds the rest gone is a finished one. The same record made by another key proves
+    nothing about this one, which is told "not found" for everything in an account that is not
+    its own.
+    """
+    proven = bool(state.confirmed_gone) and state.confirmed_by == identity
+    return bool(rows) and not proven and all(r.get("status") == ALREADY_ABSENT for r in rows)
 
 
 def none_visible(count: int, verb: str) -> dict[str, Any]:
@@ -85,7 +88,7 @@ def cancel_unpublished(
         for kind, item_id in live(step)
         if item_id not in state.kept_ids and (only is None or item_id in only)
     ]
-    if only is None and invisible(state, entries):
+    if only is None and invisible(state, entries, client.identity):
         return none_visible(len(entries), "cancel")
     settle_cancel(state, {"entries": entries})
     return {"schema": CANCELLED_SCHEMA, "deleted_at": now_iso(), "entries": entries}
@@ -125,7 +128,7 @@ def walk(
             if kind == "project" and any(_holds_project(r) for r in rows):
                 reason = "left in place: something in it was not removed or is still in use"
                 rows.append(_kept(kind, item_id, "project_held", reason))
-            elif kind == "dataset" and (row := _dataset_guard(links, item_id)) is not None:
+            elif kind == "dataset" and (row := _dataset_guard(client, links, item_id)) is not None:
                 rows.append(row)
             else:
                 rows.append(delete_one(client, kind, delete, get, absent, item_id))
@@ -136,27 +139,43 @@ def _holds_project(row: dict[str, Any]) -> bool:
     return decide(row).verdict is Verdict.LEFT or row.get("code") == WEIGHTS_SERVED
 
 
-def _dataset_guard(links: _Links, item_id: str) -> dict[str, Any] | None:
-    """The row that keeps a dataset another project uses, or says its links could not be read."""
+def _dataset_guard(client: CleanupClient, links: _Links, item_id: str) -> dict[str, Any] | None:
+    """The row that keeps a dataset another project uses, or says its links could not be read.
+
+    A dataset that is not there needs no link check: when the links cannot be read the dataset
+    itself is read, and one that is gone is ``already_absent`` (what another account's key, or a
+    host that answers not-found to everything, is told too), never a reason to guess.
+    """
     try:
         if not links.elsewhere(item_id):
             return None
     except (DagnamError, KeyError, TypeError) as exc:
+        try:
+            client.get_dataset_meta(item_id)
+        except DatasetNotFoundError:
+            return {"kind": "dataset", "id": item_id, "status": ALREADY_ABSENT}
+        except (DagnamError, KeyError, TypeError):
+            pass  # unreadable too: the links error below is the reason
         reason = f"could not check whether another project uses it: {exc}"
         return blocked("dataset", item_id, reason)
     reason = "linked to a project this directory did not create; left alone"
     return _kept("dataset", item_id, IN_USE_ELSEWHERE, reason)
 
 
-def remember(state: AuditState, rows: list[dict[str, Any]]) -> None:
+def remember(state: AuditState, rows: list[dict[str, Any]], identity: str) -> None:
     """Record what a walk saw: ids it confirmed deleted, and datasets it left to their other users.
 
-    Only that decision is final (never touched again). A project kept for what is still in it is
+    What was confirmed is scoped to the identity that saw it. Only the keep is final (never
+    touched again). A project kept for what is still in it is
     asked again, so it is not recorded.
     """
     gone = {str(r.get("id")) for r in rows if r.get("status") == DELETED}
     kept = {str(r.get("id")) for r in rows if r.get("code") == IN_USE_ELSEWHERE}
-    state.confirmed_gone += sorted(gone - set(state.confirmed_gone))
+    if gone:
+        if state.confirmed_by != identity:  # another key's record is no proof for this one
+            state.confirmed_gone = []
+        state.confirmed_by = identity
+        state.confirmed_gone += sorted(gone - set(state.confirmed_gone))
     state.kept_ids += sorted(kept - set(state.kept_ids))
 
 
@@ -178,11 +197,11 @@ def delete_unpublished(
     local (see the module docstring) unless ``assume_gone``.
     """
     rows = walk(client, recorded_ids(state), state.project_id)
-    if invisible(state, rows) and not assume_gone:
+    if invisible(state, rows, client.identity) and not assume_gone:
         receipt = none_visible(len(rows), "delete")
         write_receipt(audit_dir, receipt)
         return receipt
-    remember(state, rows)
+    remember(state, rows, client.identity)
     receipt: dict[str, Any] = {"schema": SCHEMA, "deleted_at": now_iso(), "entries": rows}
     write_receipt(audit_dir, receipt)
     left = [r for r in rows if decide(r).verdict is Verdict.LEFT]

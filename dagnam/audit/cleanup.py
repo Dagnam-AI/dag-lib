@@ -157,7 +157,7 @@ def settle_delete(
         and str(r.get("id")) not in state.kept_ids
         and str(r.get("id")) not in walked
     ]
-    remember(state, extra)
+    remember(state, extra, client.identity)
     if not deleted:
         save_state(audit_dir, state)
         return dict(receipt)

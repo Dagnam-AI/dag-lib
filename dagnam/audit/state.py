@@ -139,6 +139,9 @@ class AuditState:
     confirmed_gone: list[str] = field(default_factory=list)
     """Ids a delete of this directory has seen deleted. They prove this key can see the account's
     resources, so a later walk that finds nothing is a finished one, not another account's."""
+    confirmed_by: str | None = None
+    """Who confirmed them (the client's ``identity``). Another identity's memory is no proof: a
+    different key, or host, may see none of the account that made these."""
     kept_ids: list[str] = field(default_factory=list)
     """Ids the platform said are not this audit's to take (a ``kept`` row, a claim it refused).
 
@@ -178,6 +181,7 @@ class AuditState:
             "claim_pending": self.claim_pending,
             "unclaimed_ids": self.unclaimed_ids,
             "confirmed_gone": self.confirmed_gone,
+            "confirmed_by": self.confirmed_by,
             "kept_ids": self.kept_ids,
             "price_table_version": self.price_table_version,
             "workloads": {
@@ -246,6 +250,9 @@ def _from_json(raw: object) -> AuditState:
         if not isinstance(found, list):
             raise ValueError(f"state.json: {key} must be a JSON array")
         lists[key] = [str(i) for i in found]
+    confirmed_by = data.get("confirmed_by")
+    if confirmed_by is not None and not isinstance(confirmed_by, str):
+        raise ValueError("state.json: confirmed_by must be a string")
     halted = data.get("halted")
     pending = data.get("pending_audit")
     return AuditState(
@@ -257,6 +264,7 @@ def _from_json(raw: object) -> AuditState:
         claim_pending=data.get("claim_pending") is True,
         unclaimed_ids=lists["unclaimed_ids"],
         confirmed_gone=lists["confirmed_gone"],
+        confirmed_by=confirmed_by,
         kept_ids=lists["kept_ids"],
         price_table_version=data.get("price_table_version"),
         workloads=workloads,

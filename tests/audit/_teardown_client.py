@@ -33,6 +33,7 @@ class WorldClient:
 
     def __init__(self, platform: TeardownPlatform) -> None:
         self.platform = platform
+        self.identity = "key-a"
         self.world: World = platform.world
         self.audit_failure: str | None = None
         """``"500"``: the next audit route does not answer; ``"404"``: it answers 404 (a key that

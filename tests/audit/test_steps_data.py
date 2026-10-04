@@ -227,21 +227,21 @@ def test_an_upload_the_platform_committed_and_the_client_never_heard_back_is_ado
     """
     platform.lost_uploads = 1
     with pytest.raises(APIError):
-        upload(AuditState(project_nonce="nonce-a"), make_ctx())
-    assert platform.call_log == ["list_datasets", "upload_dataset"]
+        upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
+    assert platform.call_log == ["get_project", "list_datasets", "upload_dataset"]
 
     ctx = make_ctx(floor=0.5, max_credits=999)
-    step = ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx))
+    step = ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx))
 
     assert step.dataset_id == "ds-1"
     assert list(platform.uploads) == ["ds-1"]  # one dataset on the platform, and the state names it
-    assert platform.call_log[2:] == ["list_datasets"]
+    assert platform.call_log[3:] == ["get_project", "list_datasets"]
 
 
 def test_the_key_is_in_the_description_not_the_name(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    upload(AuditState(project_nonce="nonce-a"), make_ctx())
+    upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
     name, description = platform.dataset_rows["ds-1"]
     assert name == "audit-w1-head_tune"
     assert (
@@ -257,9 +257,9 @@ def test_the_key_is_in_the_description_not_the_name(
 def test_another_directorys_or_candidates_upload_is_never_adopted(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, nonce: str, workload: str
 ) -> None:
-    upload(AuditState(project_nonce="nonce-a"), make_ctx())
+    upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
     ctx = make_ctx(workload_id=workload, structure_class="enum_label")
-    state = upload(AuditState(project_nonce=nonce), ctx)
+    state = upload(AuditState(project_id="proj-1", project_nonce=nonce), ctx)
     assert ctx.step(state).dataset_id == "ds-2"
     assert len(platform.uploads) == 2
 
@@ -271,7 +271,10 @@ def test_a_dataset_that_only_mentions_the_key_is_not_adopted(
     platform.dataset_rows["ds-9"] = ("audit-w1-head_tune", "see nonce-a/w1/head_tune for details")
     platform.dataset_rows["ds-8"] = ("somebody-elses", "workload audit [nonce-a/w1/head_tune]")
     ctx = make_ctx()
-    assert ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx)).dataset_id == "ds-1"
+    assert (
+        ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx)).dataset_id
+        == "ds-1"
+    )
 
 
 def test_the_newest_of_several_uploads_is_the_one_adopted(
@@ -283,7 +286,10 @@ def test_the_newest_of_several_uploads_is_the_one_adopted(
     ctx = make_ctx()
     size = (ctx.workload_dir / "dataset.jsonl").stat().st_size
     platform.dataset_sizes.update({"ds-old": size, "ds-new": size})  # both are this file
-    assert ctx.step(upload(AuditState(project_nonce="nonce-a"), ctx)).dataset_id == "ds-new"
+    assert (
+        ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx)).dataset_id
+        == "ds-new"
+    )
     assert platform.uploads == {}  # nothing was uploaded
 
 
@@ -329,7 +335,10 @@ class TestPublished:
 
 @pytest.mark.parametrize(
     "fresh",
-    [lambda: AuditState(project_nonce="nonce-a"), lambda: AuditState(audit_id="audit-1")],
+    [
+        lambda: AuditState(project_id="proj-1", project_nonce="nonce-a"),
+        lambda: AuditState(audit_id="audit-1"),
+    ],
     ids=["unpublished", "published"],
 )
 def test_a_dataset_the_state_already_records_is_never_adopted_by_another_candidate(

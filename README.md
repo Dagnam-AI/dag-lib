@@ -532,10 +532,12 @@ platform cannot purge is reported `blocked [platform_only]`; one a live endpoint
 by the platform and shown as `kept [weights_served]` (the delete finishes around it). A dataset a
 project this directory did not create has linked is `kept [in_use_elsewhere]`, never deleted, and
 recorded in `state.json` so no later walk or cancel touches it; if the owner's projects cannot be
-read to check, the dataset is `blocked`, not guessed at. The project stays while anything in it
+read to check (an answer of the wrong shape, a failed read, more than 100 pages of projects), the
+dataset is `blocked`, not guessed at. The project stays while anything in it
 does. A walk in which EVERY id answers not-found changes nothing local either (a key from another
-account is told the same), unless an earlier walk of this directory already saw one deleted
-(`confirmed_gone` in `state.json`); the receipt and the error then name `dagnam audit delete
+account is told the same), unless an earlier walk by this same key and host already saw one deleted
+(`confirmed_gone` and `confirmed_by`, a digest of both, in `state.json`; another account's key never
+counts); the receipt and the error then name `dagnam audit delete
 --already-deleted` as the way to say they are gone. The ids live in `state.json`: if it is lost, nothing in this directory
 can find what an unpublished run created (a published audit's resources are still found by the
 platform, from the audit's page); and a create whose answer was lost, in a run nobody finished, is

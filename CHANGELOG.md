@@ -128,18 +128,23 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   and the delete goes on, naming which resources the platform kept and why.
 - **An unpublished audit never deletes what someone else uses, and finishes.**
   A dataset linked into a project this directory did not create is `kept
-  [in_use_elsewhere]` (the owner's projects are read to check; unreadable, the
-  dataset is `blocked`, never guessed at) and recorded in `state.json` so no later
+  [in_use_elsewhere]` (the owner's projects are read to check; an answer of the
+  wrong shape, a failed read, or more than 100 pages of projects, and the dataset
+  is `blocked`, never guessed at; a dataset that is gone needs no check) and recorded in `state.json` so no later
   walk or cancel touches it. A purge the platform refuses with `409
   weights_served` (`status: kept`) is `kept`, not `blocked`, and the delete
-  finishes around it. A walk in which every id answers not-found changes nothing
-  local unless an earlier walk of this directory already saw one deleted
-  (`confirmed_gone`); when it does fire, the receipt and the error name
+  finishes around it (the client now keeps the response's parsed `detail` on the
+  new `VersionKeptError`; it used to hand over only its message). A walk in which
+  every id answers not-found changes nothing local unless an earlier walk by this
+  same key and host already saw one deleted (`confirmed_gone`, scoped by
+  `confirmed_by`, a digest of host and key: another account's key is told "not
+  found" for everything and is never proof); when it does fire, the receipt and the error name
   `audit delete --already-deleted`, whose help now says it is irreversible, and
   whose note no longer says "nothing was changed" while it removes the files.
   The error line no longer counts an unanswered audit as an artifact still there.
   An unpublished run that finds its lost upload by the directory's key adopts it
-  only when the listing's size and sample count say it is this run's file;
+  only when the dataset belongs to the owner of this directory's project and the
+  listing's size and sample count say it is this run's file;
   otherwise it uploads afresh and logs which dataset it left behind.
 - **Smaller teardown fixes.** `audit delete` of an audit an older dagnam
   published goes on to the delete when the claim fails (it used to stop, and a
@@ -154,7 +159,10 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   (`dagnam-contracts` 0.4.1): the uploaded row scans clean, a second pass changes
   nothing, and the cap still holds. Text a cut leaves next to an identifier (digits
   run together, say) used to ship; it is now redacted and counted. Redaction scans
-  each row whole, system prompt included, so deriving a large export is slower.
+  each row whole, system prompt included: about two milliseconds more a record
+  than 0.15's cached system prompt when every call repeats a long one (2,000
+  records, 3 KB system prompt: 0.9 s before, 4.6 s now; the same either way when
+  each record's prompt differs).
 - **A registry version is removed through its own route, never through its
   entry.** For an unpublished audit the version's weights are purged with
   `DELETE /api/v1/model-versions/{id}` (`DagnamClient.purge_model_version`, which

@@ -11,20 +11,21 @@ fails on does not cost the receipt for every other one.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 import json
 from typing import Any, Protocol
 
 from dagnam._core.exceptions import (
     APIError,
+    ArchitectureVersionNotFoundError,
     DagnamError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
-    ModelError,
     ModelNotFoundError,
     ProjectNotFoundError,
     TrainingJobNotFoundError,
+    VersionKeptError,
 )
 from dagnam._types import JsonObject
 from dagnam.audit.receipt_rows import ALREADY_STOPPED, PLATFORM_ONLY, blocked
@@ -50,6 +51,11 @@ class PlatformOnlyError(CleanupBlockedError):
 
 class CleanupClient(Protocol):
     """The ``DagnamClient`` methods deletion drives; a fake implements these and no more."""
+
+    @property
+    def identity(self) -> str:
+        """Who the client asks as (host and key, digested): what a walk's memory is scoped to."""
+        ...
 
     def cancel_audit(self, audit_id: str) -> JsonObject:
         """``POST /api/v1/audits/{id}/cancel``: the platform's own walk, one receipt."""
@@ -128,11 +134,8 @@ def _purge_version(client: CleanupClient, version_id: str) -> JsonObject | None:
     """
     try:
         return client.purge_model_version(version_id)
-    except ModelError as exc:
-        kept = _kept_by_refusal(version_id, str(exc))
-        if kept is None:
-            raise
-        return kept
+    except VersionKeptError as exc:
+        return _kept_row(version_id, exc.row)
     except (ModelNotFoundError, APIError) as exc:
         if isinstance(exc, APIError) and exc.status_code != METHOD_NOT_ALLOWED:
             raise
@@ -142,20 +145,13 @@ def _purge_version(client: CleanupClient, version_id: str) -> JsonObject | None:
         ) from None
 
 
-def _kept_by_refusal(version_id: str, body: str) -> JsonObject | None:
+def _kept_row(version_id: str, detail: Mapping[str, object]) -> JsonObject:
     """The ``kept`` row for a purge the platform refused because a live endpoint serves the version.
 
-    The 409 body is ``{"detail": {"error": "weights_served", "status": "kept", ...}}``: the
-    platform's own decision that the version is not this audit's to remove, so it is ``kept``
-    (never ``blocked``) and an unpublished delete finishes around it. Any other 409 is a refusal.
+    ``detail`` is the platform's own decision (``status: kept``, read from the response by the
+    client): the version is not this audit's to remove, so it is ``kept`` -- never ``blocked`` --
+    and an unpublished delete finishes around it.
     """
-    try:
-        data = json.loads(body)
-    except ValueError:
-        return None
-    detail = data.get("detail") if isinstance(data, dict) else None
-    if not isinstance(detail, dict) or detail.get("status") != "kept":
-        return None
     reason = str(detail.get("message") or detail.get("reason") or WEIGHTS_SERVED)
     code = str(detail.get("code") or detail.get("error") or WEIGHTS_SERVED)
     return {
@@ -277,33 +273,42 @@ def datasets_in_other_projects(client: CleanupClient, own_project: str | None) -
 
     A dataset resource carries no list of the projects it is linked to, so the owner's projects
     are listed (a page of 100 at a time, at most :data:`PROJECT_PAGES`) and each one's datasets
-    read. A read that fails raises: whether a dataset is somebody's work is not a guess.
+    read. Whether a dataset is somebody's work is not a guess: any answer of the wrong shape (no
+    ``items`` list, no integer ``pages``, a role that is not a list, an entry with no id), a
+    read that fails, and a list longer than the bound all raise, and the caller keeps the dataset.
     """
     found: set[str] = set()
-    page = 1
-    while page <= PROJECT_PAGES:
-        listing = client.list_projects(page=page, limit=100)
+    for page in range(1, PROJECT_PAGES + 1):
+        try:
+            listing = client.list_projects(page=page, limit=100)
+        except ArchitectureVersionNotFoundError:  # the client's name for a 404 with no project id
+            raise APIError(404, "GET /api/v1/projects answered not found") from None
         if not isinstance(listing, dict):
             raise TypeError("the project list was not an object")
         items, pages = listing.get("items"), listing.get("pages")
-        for project in items if isinstance(items, list) else []:
-            if isinstance(project, dict) and str(project.get("id")) != own_project:
+        if not isinstance(items, list) or not isinstance(pages, int) or isinstance(pages, bool):
+            raise TypeError("the project list had no `items` list or integer `pages`")
+        for project in items:
+            if not isinstance(project, dict):
+                raise TypeError("a project in the list was not an object")
+            if str(project["id"]) != own_project:
                 found |= _dataset_ids(client.get_project_datasets(str(project["id"])))
-        if not isinstance(pages, int) or page >= pages:
+        if page >= pages:
             return found
-        page += 1
-    return found
+    raise TypeError(f"the owner has more than {PROJECT_PAGES} pages of projects")
 
 
 def _dataset_ids(grouped: JsonObject) -> set[str]:
-    """The ids in a project's datasets grouped by role."""
-    return {
-        str(item["id"])
-        for items in grouped.values()
-        if isinstance(items, list)
-        for item in items
-        if isinstance(item, dict)
-    }
+    """The ids in a project's datasets grouped by role; a malformed group raises."""
+    found: set[str] = set()
+    for role, items in grouped.items():
+        if not isinstance(items, list):
+            raise TypeError(f"the datasets of role {role!r} were not a list")
+        for item in items:
+            if not isinstance(item, dict):
+                raise TypeError(f"a dataset of role {role!r} was not an object")
+            found.add(str(item["id"]))
+    return found
 
 
 def delete_one(

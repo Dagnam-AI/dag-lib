@@ -8,6 +8,8 @@ paused, and a dataset a job still references answers 409.
 
 from __future__ import annotations
 
+from typing import Any
+
 from dagnam._core.exceptions import (
     APIError,
     DagnamError,
@@ -35,6 +37,8 @@ class FakeCleanup:
             kind: set(present.get(kind, []))
             for kind in ("deployment", "model", "job", "dataset", "project")
         }
+        self.identity = "key-a"
+        """Who this fake is asked as (the client's ``identity``); a test swaps it for another key's."""
         self.purge_errors: dict[str, DagnamError] = {}
         """Version id -> what its purge raises (the platform's 409 or 502)."""
         self.claims: list[JsonArray] = []
@@ -55,9 +59,9 @@ class FakeCleanup:
         """dataset id -> job id: the live FK, a 409 for as long as that job exists."""
         self.other_projects: dict[str, list[str]] = {}
         """Another project of the owner's -> the dataset ids linked into it."""
-        self.project_pages: dict[int, JsonObject | str] = {}
+        self.project_pages: dict[int, Any] = {}
         """Page number -> the listing answered for it (else every project of ``other_projects``)."""
-        self.project_datasets: dict[str, JsonObject] = {}
+        self.project_datasets: dict[str, Any] = {}
         """Project id -> the grouped datasets answered for it (else from ``other_projects``)."""
         self.project_reads_fail: Exception | None = None
         """Raised by every read of the owner's projects (the links cannot be checked)."""

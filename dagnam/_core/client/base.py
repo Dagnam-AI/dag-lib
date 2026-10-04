@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import closing
+import hashlib
 import logging
 from pathlib import Path, PurePosixPath
 import random
@@ -137,6 +138,15 @@ class BaseDagnamClient:
         self._retry_budget = RetryBudget()
         self._sleep: Callable[[float], None] = time.sleep
         self._rng: Callable[[], float] = random.random
+
+    @property
+    def identity(self) -> str:
+        """Who this client asks as: a digest of the host and the key, never either of them.
+
+        Two clients with the same identity see the same account; a local record of what one saw
+        proves nothing about what the other will see.
+        """
+        return hashlib.sha256(f"{self.api_url}\n{self.api_key}".encode()).hexdigest()[:16]
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}

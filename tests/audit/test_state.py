@@ -82,6 +82,7 @@ def test_unknown_schema_is_a_hard_error_naming_the_understood_version(tmp_path: 
         ({"schema": SCHEMA, "halted": "budget"}, "halted must be a JSON object"),
         ({"schema": SCHEMA, "kept_ids": "ds-1"}, "kept_ids must be a JSON array"),
         ({"schema": SCHEMA, "confirmed_gone": "ds-1"}, "confirmed_gone must be a JSON array"),
+        ({"schema": SCHEMA, "confirmed_by": 7}, "confirmed_by must be a string"),
     ],
 )
 def test_malformed_documents_are_rejected(tmp_path: Path, document: object, match: str) -> None:
@@ -313,9 +314,11 @@ def test_kept_ids_round_trip_and_an_older_state_has_none(tmp_path: Path) -> None
 
 
 def test_confirmed_gone_round_trips_and_an_older_state_has_none(tmp_path: Path) -> None:
-    save_state(tmp_path, AuditState(confirmed_gone=["ds-1"]))
-    assert load_state(tmp_path).confirmed_gone == ["ds-1"]
+    save_state(tmp_path, AuditState(confirmed_gone=["ds-1"], confirmed_by="abc123"))
+    loaded = load_state(tmp_path)
+    assert (loaded.confirmed_gone, loaded.confirmed_by) == (["ds-1"], "abc123")
     document = json.loads((tmp_path / STATE_FILE).read_text(encoding="utf-8"))
-    del document["confirmed_gone"]
+    del document["confirmed_gone"], document["confirmed_by"]
     (tmp_path / STATE_FILE).write_text(json.dumps(document), encoding="utf-8")
-    assert load_state(tmp_path).confirmed_gone == []
+    loaded = load_state(tmp_path)
+    assert (loaded.confirmed_gone, loaded.confirmed_by) == ([], None)

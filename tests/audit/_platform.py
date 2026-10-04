@@ -197,6 +197,11 @@ class FakePlatform:
         ]
         return [*own, *self.other_datasets]
 
+    def get_project(self, project_id: str) -> JsonObject:
+        self._log("get_project")
+        owner: JsonObject = {} if self.omit_provenance else {"owner_id": self.owner_id}
+        return {"id": project_id, **owner}
+
     def create_project(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
         self._log("create_project")
         self.project_nonces.append(resume_nonce)
