@@ -1,29 +1,49 @@
 name: Claude PR Review
 
+# What a green check here means: Claude ran on this commit and finished without
+# an error. It does not mean the review found nothing, and nothing requires it
+# to merge.
+# What it can no longer mean: that no review happened. The action exits
+# successfully WITHOUT running Claude when it skips, which it does whenever the
+# pull request changes this workflow file ("Skipping action due to workflow
+# validation"). The last step fails the job unless the action reports that
+# Claude really ran. A pull request that edits this file therefore shows a red
+# review check until the change is on the default branch: that red is accurate.
+
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
+
+# Nothing is inherited: the job states what it needs.
+permissions: {}
 
 jobs:
   review-with-tracking:
     # dag-lib is going public: only review same-repo (non-fork) PRs. Fork PRs
     # receive no secret, so the review can't authenticate anyway — skipping them
     # avoids no-op failed runs. This effectively scopes review to collaborators.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Dependabot runs get no Actions secrets, so Claude cannot authenticate
+    # there. Skipped is accurate; a red check on every bump was noise.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Claude acts through the Claude GitHub App's token (the action exchanges
+    # this job's OIDC token for it), and that token carries the App's own
+    # permissions: comments, branches, commits. The job's own token only reads.
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
       id-token: write
       actions: read # Lets the review read CI check results/logs on the PR
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
       - name: PR Review with Progress Tracking
-        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1
+        id: review
+        uses: anthropics/claude-code-action@ed670b4cf9de2a5a570d130d2f6197b9e543cd64 # v1.0.240
         with:
           # Pro/Max subscription auth (generated via `claude setup-token`)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -48,3 +68,13 @@ jobs:
 
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # The action sets `conclusion` only after Claude has run to a result
+      # (src/entrypoints/run.ts at the pinned commit). On a skip it returns
+      # early with exit 0 and the output stays empty; on an error it fails its
+      # own step, so this one is not reached.
+      - name: Fail when no review ran
+        if: steps.review.outputs.conclusion != 'success'
+        run: |
+          echo "::error::Claude did not review this commit: the action exited without running it. The usual cause is a pull request that changes .github/workflows/claude-code-review.yml, which the action refuses to run until the change is on the default branch. The previous step's log has the reason."
+          exit 1

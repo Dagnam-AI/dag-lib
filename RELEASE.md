@@ -10,6 +10,35 @@ and only then publishes to **PyPI**. Publishing uses PyPI **trusted publishing**
 (OIDC) through the `testpypi` and `pypi` GitHub environments — there are no API
 tokens to manage.
 
+## Platform first
+
+**Deploy the platform before you tag.** The SDK redacts audit rows with the
+`dagnam-contracts` version it installs, and the platform re-scans them with its
+own; the contract's PII class list and score shape are a wire protocol between
+the two. An SDK published ahead of its platform uploads the rows and then stops
+every workload at the PII check, for every user, until the platform catches up.
+
+Three things hold that order:
+
+- `pyproject.toml` caps the contract below the next minor
+  (`dagnam-contracts>=X.Y.Z,<X.(Y+1)`), so a new contract minor reaches users
+  only through an SDK release built against it. Raising the floor is a release
+  of its own: do it only once the platform runs that contract.
+- The release workflow's first job runs
+  `python scripts/check_platform.py https://api.dagnam.ai` and nothing is built
+  or published unless it passes. It reads the platform's `GET /health/build`
+  and fails unless the `contracts` version reported there is at or above the
+  floor in `pyproject.toml` (compared on major and minor). A platform too old
+  to report the key, or one that cannot be reached, fails too. The request
+  names itself, has a timeout and refuses a redirect to another host. The
+  workflow also runs the whole CI workflow on the tagged commit, and `build`
+  waits for both; every publishing job waits for `build`, and none can be
+  skipped or allowed to fail.
+- `dagnam audit run` makes the same comparison before its first upload (with
+  `--local-only` too, and from the library's `run_audit`) and stops with
+  `platform_too_old` instead of spending anything. A platform a patch ahead of
+  the installed contract only warns.
+
 ## Version bump (single source of truth)
 
 The version lives in exactly one place: `__version__` in `dagnam/__init__.py`.
@@ -27,17 +56,38 @@ there is no second copy in `pyproject.toml` to keep in sync.
    must be folded into the dated release heading being published. A populated
    `[Unreleased]` at publish time means changes (often breaking) are shipping
    undocumented under the version; fold them, and if any are breaking, confirm
-   the version bump reflects it.
-2. Run the verification suite:
+   the version bump reflects it. Between releases the work sits under
+   `[Unreleased]` on purpose (even when `__version__` is already the next
+   number); a dated heading is written only at release time, never ahead of it.
+   This command refuses a changelog with entries left under `[Unreleased]`, or
+   whose newest dated heading is not the `__version__` being published with a
+   real date, and exits non-zero until it is folded:
+
+   ```bash
+   python scripts/check_changelog.py
+   ```
+2. Confirm the platform already runs this release's contract (see
+   [Platform first](#platform-first)). The workflow repeats the check as its
+   first job; passing it here first saves a release run that stops there:
+
+   ```bash
+   python scripts/check_platform.py https://api.dagnam.ai
+   ```
+
+3. Run the verification suite:
 
    ```bash
    uv sync
    uv run poe release-check   # check (lint/format/types/imports/tests) + audit + build
    ```
 
-3. Build and inspect the distribution in a clean `dist/`:
+4. Build and inspect the distribution in a clean `dist/`. `uv build` adds to
+   whatever `dist/` already holds, so remove it first -- an artifact left by an
+   earlier build would otherwise be checked, smoke-tested or uploaded as this
+   release:
 
    ```bash
+   rm -rf dist
    uv run poe build
    python -m twine check dist/*
    ```
@@ -46,7 +96,7 @@ there is no second copy in `pyproject.toml` to keep in sync.
    (Windows) helpers clean `dist/` and run `uv build` for you (pass
    `--no-clean` / `-NoClean` to keep an existing `dist/`).
 
-4. Install the wheel in a clean environment and smoke-test import, CLI, and
+5. Install the wheel in a clean environment and smoke-test import, CLI, and
    version:
 
    ```bash
@@ -67,10 +117,12 @@ git tag dagnam/v0.7.0
 git push origin dagnam/v0.7.0
 ```
 
-Watch the run under **Actions → Release dagnam to PyPI**. TestPyPI publish and
-the install smoke-test run *before* PyPI, so a broken build is caught before it
-reaches the real index. If you configure a required reviewer on the `pypi`
-environment, the final publish step waits for manual approval.
+Watch the run under **Actions → Release dagnam to PyPI**. The platform check
+runs first: if it fails, deploy the platform, then re-run the failed job (the
+tag stays). TestPyPI publish and the install smoke-test run *before* PyPI, so a
+broken build is caught before it reaches the real index. If you configure a
+required reviewer on the `pypi` environment, the final publish step waits for
+manual approval.
 
 ### First-time setup (once per index)
 
@@ -84,12 +136,18 @@ Trusted publishing must be configured before the first automated release:
 
 ### Manual fallback
 
-If you must publish by hand (trusted publishing unavailable), build as above and
-upload with an API token:
+If you must publish by hand (trusted publishing unavailable), run the platform
+check yourself, build into a **fresh directory**, and upload from it with an API
+token. Never upload `dist/*` from a working tree: `dist/` is not cleaned between
+builds, so the glob can pick up a wheel or sdist an earlier build left behind.
 
 ```bash
-python -m twine upload --repository testpypi dist/*
-python -m twine upload dist/*
+python scripts/check_platform.py https://api.dagnam.ai
+out="$(mktemp -d)"
+uv build --out-dir "$out"
+python -m twine check "$out"/*
+python -m twine upload --repository testpypi "$out"/*
+python -m twine upload "$out"/*
 ```
 
 ## Post-release

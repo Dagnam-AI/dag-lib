@@ -13,18 +13,60 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Nothing is inherited: every job below states what it needs.
+permissions: {}
+
 jobs:
+  # The platform ships first. The SDK redacts with the dagnam-contracts it
+  # installs and the platform re-scans with its own, so an SDK released ahead of
+  # its platform stops every audit at the PII check. Nothing is built, let alone
+  # published, until the platform reports a contract at or above the floor this
+  # tag declares in pyproject.toml. See RELEASE.md, "Platform first".
+  platform:
+    name: Platform runs this release's contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      # The release's own changelog: nothing left under [Unreleased], and the
+      # newest dated heading is the version being tagged.
+      - name: Check the changelog is ready for this release
+        run: python scripts/check_changelog.py
+      - name: Check the platform's contract version
+        run: python scripts/check_platform.py https://api.dagnam.ai
+
+  # The whole CI workflow, on the tagged commit. A tag is what publishes and PyPI
+  # takes no version back, so nothing is built until lint, types, import
+  # contracts, the suite and its 100% coverage floor have passed on exactly the
+  # commit the tag points at. CI's own jobs carry their timeouts.
+  ci:
+    name: CI on the tagged commit
+    uses: ./.github/workflows/dag-lib-ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build wheel and sdist
+    needs: [platform, ci]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Build
         run: uv build
       - name: Check distribution metadata
@@ -32,10 +74,10 @@ jobs:
           uv run --with twine twine check dist/*
           uv run --with "readme-renderer[md]" python -m readme_renderer README.md > /dev/null
       - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: "dist/*"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
@@ -44,17 +86,18 @@ jobs:
     name: Publish to TestPyPI
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: testpypi
       url: https://test.pypi.org/p/dagnam
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
 
@@ -62,8 +105,12 @@ jobs:
     name: Install from TestPyPI and import
     needs: publish-testpypi
     runs-on: ubuntu-latest
+    # The install step alone waits up to 15 minutes for TestPyPI's index.
+    timeout-minutes: 25
+    # Installs from two indexes and runs what it installed: no token scopes.
+    permissions: {}
     steps:
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install from TestPyPI
@@ -91,14 +138,15 @@ jobs:
     name: Publish to PyPI
     needs: smoke-testpypi
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/p/dagnam
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
