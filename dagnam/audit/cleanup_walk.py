@@ -6,8 +6,12 @@ claim, because this directory made them before the audit existed. Each walk stop
 id, reads it back, and records a row. Three rules keep it from destroying what is not this
 directory's: an id the walk or the platform marked kept (``kept_ids``) is never touched; a dataset
 that a project this directory did not create uses is kept (``in_use_elsewhere``); and a walk in
-which EVERY id answers not-found proves nothing (it is what a key from another account is told),
-unless an earlier walk of this directory already saw one deleted, or the caller says it is gone.
+which this key is not PROVEN to see the account proves nothing: not-found is what a key from
+another account is told, and a walk that also lost an id to a 5xx cannot tell the two apart. A
+key is proven by its own earlier confirmation of a deletion (same host and key), by a deletion or
+a stop it just got a positive answer to, or by a read of a recorded id that came back with a row;
+the caller's word that it is gone (``--already-deleted``) stands in for the proof. An unproven walk
+changes nothing local and marks nothing.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from dagnam.audit.cleanup_kinds import (
     STOPS,
     WEIGHTS_SERVED,
     CleanupClient,
+    can_read,
     datasets_in_other_projects,
     delete_one,
 )
@@ -42,32 +47,64 @@ from dagnam.audit.receipt_rows import (
     ALREADY_ABSENT,
     DELETED,
     KEPT,
+    NOT_ANSWERED,
     NOT_CREATED_HERE,
+    STOPPED,
     Verdict,
     blocked,
     decide,
 )
 from dagnam.audit.state import AuditState
 
+PROJECT_HELD = "project_held"
+"""The ``code`` of the project row this client writes while something in it was not removed."""
 
-def invisible(state: AuditState, rows: list[dict[str, Any]], identity: str) -> bool:
-    """Every id answered not-found, and this identity has not seen one of them deleted.
 
-    A deletion this very key (on this host) saw land proves it sees the account, so a later walk
-    that finds the rest gone is a finished one. The same record made by another key proves
-    nothing about this one, which is told "not found" for everything in an account that is not
-    its own.
+def proven(
+    client: CleanupClient,
+    state: AuditState,
+    rows: list[dict[str, Any]],
+    ids: dict[str, list[str]],
+) -> bool:
+    """Whether this walk's answers come from a key that sees the account the ids live in.
+
+    Proof is a positive answer, never an absence: this very key (host and key) confirmed a
+    deletion before; or a row says a delete or a stop was answered with success; or a recorded id
+    that is not reported gone reads back with a row. Everything else -- every id not found,
+    some not found and the rest a 5xx or a timeout -- is what another account's key is told too.
     """
-    proven = bool(state.confirmed_gone) and state.confirmed_by == identity
-    return bool(rows) and not proven and all(r.get("status") == ALREADY_ABSENT for r in rows)
+    if state.confirmed_gone and state.confirmed_by == client.identity:
+        return True
+    if any(_answered_positively(r) for r in rows):
+        return True
+    unresolved = {(str(r.get("kind")), str(r.get("id"))) for r in rows} - {
+        (str(r.get("kind")), str(r.get("id"))) for r in rows if r.get("status") == ALREADY_ABSENT
+    }
+    return any(
+        can_read(client, kind, item_id)
+        for kind, found in ids.items()
+        for item_id in found
+        if (kind, item_id) in unresolved
+    )
+
+
+def _answered_positively(row: dict[str, Any]) -> bool:
+    """A row only an account that holds the id can have: a delete or stop that succeeded, or a keep.
+
+    A keep is the platform's decision about a resource it knows (a version a live endpoint
+    serves) or one read in another of the owner's projects. ``project_held`` is this client's own.
+    """
+    status = row.get("status")
+    return status in (DELETED, STOPPED) or (status == KEPT and row.get("code") != PROJECT_HELD)
 
 
 def none_visible(count: int, verb: str) -> dict[str, Any]:
-    """The receipt of a walk that proved nothing: how to say, by hand, that it is all gone."""
+    """The receipt of a walk that could not show its key sees the account: nothing was touched."""
     why = (
-        f"none of the {count} ids this directory recorded is visible to this key: another account"
-        " or host? If you know they are gone, `dagnam audit delete <dir> --already-deleted`"
-        " clears this directory"
+        f"this key could not be shown to see any of the {count} ids this directory recorded"
+        " (they are all not found, or the rest could not be read): another account or host?"
+        " If you know they are gone, `dagnam audit delete <dir> --already-deleted` clears this"
+        " directory"
     )
     return unanswered(None, verb, why)
 
@@ -82,13 +119,17 @@ def cancel_unpublished(
     answers ``already_stopped`` and stays resumable. An id marked kept is not stopped, and when
     every id answers not-found nothing is marked (see the module docstring).
     """
-    entries = [
-        STOPS[kind](client, item_id)
+    targets = [
+        (kind, item_id)
         for step in state.all_steps()
         for kind, item_id in live(step)
         if item_id not in state.kept_ids and (only is None or item_id in only)
     ]
-    if only is None and invisible(state, entries, client.identity):
+    entries = [STOPS[kind](client, item_id) for kind, item_id in targets]
+    ids: dict[str, list[str]] = {kind: [] for kind in STOPS}
+    for kind, item_id in targets:
+        ids[kind].append(item_id)
+    if only is None and entries and not proven(client, state, entries, ids):
         return none_visible(len(entries), "cancel")
     settle_cancel(state, {"entries": entries})
     return {"schema": CANCELLED_SCHEMA, "deleted_at": now_iso(), "entries": entries}
@@ -127,7 +168,7 @@ def walk(
         for item_id in ids[kind]:
             if kind == "project" and any(_holds_project(r) for r in rows):
                 reason = "left in place: something in it was not removed or is still in use"
-                rows.append(_kept(kind, item_id, "project_held", reason))
+                rows.append(_kept(kind, item_id, PROJECT_HELD, reason))
             elif kind == "dataset" and (row := _dataset_guard(client, links, item_id)) is not None:
                 rows.append(row)
             else:
@@ -196,8 +237,9 @@ def delete_unpublished(
     deleted only when nothing is left. When EVERY id answers not-found the walk changes nothing
     local (see the module docstring) unless ``assume_gone``.
     """
-    rows = walk(client, recorded_ids(state), state.project_id)
-    if invisible(state, rows, client.identity) and not assume_gone:
+    ids = recorded_ids(state)
+    rows = walk(client, ids, state.project_id)
+    if rows and not assume_gone and not proven(client, state, rows, ids):
         receipt = none_visible(len(rows), "delete")
         write_receipt(audit_dir, receipt)
         return receipt
@@ -206,7 +248,8 @@ def delete_unpublished(
     write_receipt(audit_dir, receipt)
     left = [r for r in rows if decide(r).verdict is Verdict.LEFT]
     up = any(r.get("kind") == "deployment" for r in left)
-    local = forget_locally(audit_dir, state, keep_keys=up, settled=not left)
+    unanswered_id = any(r.get("code") == NOT_ANSWERED for r in rows)
+    local = forget_locally(audit_dir, state, keep_keys=up or unanswered_id, settled=not left)
     receipt = {**receipt, "audit_status": "halted" if left or local else "deleted"}
     if local:
         receipt["entries"] = [*rows, *local]
@@ -248,8 +291,8 @@ def unclaimed_to_delete(state: AuditState, rows: list[dict[str, Any]]) -> dict[s
 __all__ = [
     "cancel_unpublished",
     "delete_unpublished",
-    "invisible",
     "none_visible",
+    "proven",
     "remember",
     "unclaimed",
     "unclaimed_to_delete",

@@ -107,7 +107,16 @@ def _project_owner(state: AuditState, ctx: StepContext) -> str | None:
     """
     if state.project_id is None:
         return None
-    owner = ctx.client.get_project(state.project_id).get("owner_id")
+    try:
+        owner = ctx.client.get_project(state.project_id).get("owner_id")
+    except TypeError:  # a 200 that is not a project: the real client names it by its Python type
+        LOG.warning(
+            "the platform's answer for project %s was not a project; its earlier upload of %s,"
+            " if any, is not reused (these rows are uploaded afresh)",
+            state.project_id,
+            ctx.label,
+        )
+        return None
     return owner if isinstance(owner, str) else None
 
 

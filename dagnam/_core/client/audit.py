@@ -43,9 +43,9 @@ WAIT_MARKERS = {409: TEARDOWN_BUSY, 503: TEARDOWN_UNAVAILABLE}
 def raise_for_audit(resp: requests.Response) -> None:
     """``raise_for_generic``, except that the platform's "ask again shortly" answers are typed.
 
-    That is the 409 "a teardown is running" and the 503 "the lock is unavailable". The marker is
-    read at the top level of the body (``{"error": ...}``) and under FastAPI's ``detail``
-    wrapper, whichever a platform sends; any other 409 or 503 stays an ``APIError``.
+    That is the 409 "a teardown is running" and the 503 "the lock is unavailable". The backend's
+    body is ``{"detail": "<words>", "error": "<marker>"}``; the marker is also read under a
+    ``detail`` object, whichever a platform sends; any other 409 or 503 stays an ``APIError``.
     """
     marker = WAIT_MARKERS.get(resp.status_code)
     if marker is not None:
@@ -56,9 +56,10 @@ def raise_for_audit(resp: requests.Response) -> None:
         detail = data.get("detail") if isinstance(data, dict) else None
         source = detail if isinstance(detail, dict) else data
         if isinstance(source, dict) and source.get("error") == marker:
+            words = source.get("message") or (detail if isinstance(detail, str) else None)
             raise TeardownInProgressError(
                 resp.status_code,
-                str(source.get("message") or marker),
+                str(words or marker),
                 retry_after_header=resp.headers.get("Retry-After"),
             )
     raise_for_generic(resp)

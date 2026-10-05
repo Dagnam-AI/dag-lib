@@ -238,3 +238,24 @@ class TestUnpublishedAdoptionChecksTheRows:
             state.project_id = None
 
         assert ctx.step(upload(state, ctx)).dataset_id == "ds-2"
+
+    def test_a_project_read_that_is_not_a_project_is_named_and_fails_closed(
+        self,
+        make_ctx: Callable[..., StepContext],
+        platform: FakePlatform,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A non-JSON 200 used to end the run in the generic backstop; now it uploads afresh."""
+        ctx = self._lost(make_ctx, platform)
+
+        def not_a_project(_project_id: str) -> JsonObject:
+            raise TypeError("Expected JSON object, got str")
+
+        monkeypatch.setattr(platform, "get_project", not_a_project)
+
+        with caplog.at_level("WARNING", logger="dagnam.audit"):
+            step = ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx))
+
+        assert step.dataset_id == "ds-2"
+        assert "was not a project" in caplog.text

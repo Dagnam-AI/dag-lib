@@ -401,7 +401,7 @@ class TestAnUnpublishedAuditTheKeyCannotSee:
 
         (row,) = receipt_rows(receipt)
         assert (row["status"], row["code"]) == ("blocked", "not_answered")
-        assert "none of the 9 ids" in row["reason"]
+        assert "any of the 9 ids" in row["reason"]
         assert load_state(audit_dir).halted is None
         assert SecretStore(audit_dir).load("w1/head_tune") == "dk-secret"
 

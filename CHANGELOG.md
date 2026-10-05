@@ -134,17 +134,27 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   walk or cancel touches it. A purge the platform refuses with `409
   weights_served` (`status: kept`) is `kept`, not `blocked`, and the delete
   finishes around it (the client now keeps the response's parsed `detail` on the
-  new `VersionKeptError`; it used to hand over only its message). A walk in which
-  every id answers not-found changes nothing local unless an earlier walk by this
-  same key and host already saw one deleted (`confirmed_gone`, scoped by
-  `confirmed_by`, a digest of host and key: another account's key is told "not
-  found" for everything and is never proof); when it does fire, the receipt and the error name
+  new `VersionKeptError`; it used to hand over only its message). A walk
+  changes nothing local, and marks nothing, unless its key is shown to see the
+  account: a deletion this same key and host confirmed earlier (`confirmed_gone`,
+  scoped by `confirmed_by`, a digest of host and key), a delete or stop that just
+  succeeded, a keep, or a read of a recorded id that came back with a row.
+  Another account's key is told "not found" for everything, so not-found is never
+  proof, and neither is a walk where the rest failed (a 5xx on one id used to be
+  taken as an answer and released the deployment keys). An id whose delete and
+  re-read both failed, or whose delete said "not found" while it still reads back
+  or cannot be read, is `blocked [not_answered]` and keeps the keys and rows;
+  a delete's single "not found" is now read again before it is believed. A
+  damaged `state.json` is a named error (`StateFileError`, still a `ValueError`)
+  instead of "unexpected error". The teardown 409/503 error carries the backend's
+  `detail` words. When it fires, the receipt and the error name
   `audit delete --already-deleted`, whose help now says it is irreversible, and
   whose note no longer says "nothing was changed" while it removes the files.
   The error line no longer counts an unanswered audit as an artifact still there.
   An unpublished run that finds its lost upload by the directory's key adopts it
   only when the dataset belongs to the owner of this directory's project and the
-  listing's size and sample count say it is this run's file;
+  listing's size and sample count say it is this run's file (a project read that
+  is not a project uploads afresh and says so, instead of ending the run);
   otherwise it uploads afresh and logs which dataset it left behind.
 - **Smaller teardown fixes.** `audit delete` of an audit an older dagnam
   published goes on to the delete when the claim fails (it used to stop, and a

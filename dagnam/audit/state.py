@@ -33,6 +33,14 @@ class AuditBusyError(DagnamError):
     """Another ``dagnam audit`` command holds this audit directory."""
 
 
+class StateFileError(DagnamError, ValueError):
+    """``state.json`` cannot be used (not JSON, not this schema, a field of the wrong type).
+
+    A command that meets it stops before it touches anything, with the file named, so a damaged
+    record is never read as "nothing recorded".
+    """
+
+
 class AuditDeletedError(DagnamError):
     """The audit directory holds a deleted audit: there is nothing left to run or cancel."""
 
@@ -203,7 +211,7 @@ class AuditState:
 
 def _object(value: object, what: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ValueError(f"state.json: {what} must be a JSON object")
+        raise StateFileError(f"state.json: {what} must be a JSON object")
     return value
 
 
@@ -211,7 +219,7 @@ def _from_json(raw: object) -> AuditState:
     data = _object(raw, "the document")
     schema = data.get("schema")
     if schema != SCHEMA:
-        raise ValueError(
+        raise StateFileError(
             f"state.json: unknown schema {schema!r}; this version of dagnam understands {SCHEMA!r}"
         )
     workloads: dict[str, dict[CandidateKind, StepState]] = {}
@@ -224,7 +232,7 @@ def _from_json(raw: object) -> AuditState:
             step_fields = _object(step, f"workloads[{workload_id}].candidates[{kind}]")
             unknown = sorted(set(step_fields) - _STEP_KEYS)
             if unknown:
-                raise ValueError(
+                raise StateFileError(
                     f"state.json: unknown step keys {unknown} under {workload_id}/{kind}"
                 )
             workloads[workload_id][CandidateKind(kind)] = StepState(
@@ -232,13 +240,13 @@ def _from_json(raw: object) -> AuditState:
             )
     retired = data.get("retired", [])
     if not isinstance(retired, list):
-        raise ValueError("state.json: retired must be a JSON array")
+        raise StateFileError("state.json: retired must be a JSON array")
     retired_steps: list[StepState] = []
     for index, raw_step in enumerate(retired):
         step_fields = dict(_object(raw_step, f"retired[{index}]"))
         unknown = sorted(set(step_fields) - _STEP_KEYS - _IDENTITY)
         if unknown:
-            raise ValueError(f"state.json: unknown step keys {unknown} under retired[{index}]")
+            raise StateFileError(f"state.json: unknown step keys {unknown} under retired[{index}]")
         # Absent from a state written before retired steps kept their candidate.
         kind = step_fields.pop("kind", None)
         retired_steps.append(
@@ -248,11 +256,11 @@ def _from_json(raw: object) -> AuditState:
     for key in ("kept_ids", "unclaimed_ids", "confirmed_gone"):
         found = data.get(key, [])
         if not isinstance(found, list):
-            raise ValueError(f"state.json: {key} must be a JSON array")
+            raise StateFileError(f"state.json: {key} must be a JSON array")
         lists[key] = [str(i) for i in found]
     confirmed_by = data.get("confirmed_by")
     if confirmed_by is not None and not isinstance(confirmed_by, str):
-        raise ValueError("state.json: confirmed_by must be a string")
+        raise StateFileError("state.json: confirmed_by must be a string")
     halted = data.get("halted")
     pending = data.get("pending_audit")
     return AuditState(
@@ -278,13 +286,22 @@ def load_state(audit_dir: Path) -> AuditState:
     """Read ``audit_dir/state.json``; a missing file is a fresh audit.
 
     Raises:
-        ValueError: the file is not this version's schema (the message names
-            ``dagnam.audit.state/1``) or a step carries a key no step writes.
+        StateFileError: (a ``ValueError``) the file is not JSON, not this version's schema (the
+            message names ``dagnam.audit.state/1``), or a step carries a key no step writes.
     """
     path = audit_dir / STATE_FILE
     if not path.exists():
         return AuditState()
-    return _from_json(json.loads(read_regular(path)))
+    try:
+        raw = json.loads(read_regular(path))
+    except json.JSONDecodeError as exc:
+        raise StateFileError(f"state.json: not valid JSON ({exc})") from None
+    try:
+        return _from_json(raw)
+    except StateFileError:
+        raise
+    except (ValueError, TypeError, KeyError) as exc:  # e.g. a candidate no version of dagnam knows
+        raise StateFileError(f"state.json: {type(exc).__name__}: {exc}") from None
 
 
 @contextmanager
@@ -328,6 +345,7 @@ __all__ = [
     "STATE_FILE",
     "AuditBusyError",
     "AuditState",
+    "StateFileError",
     "StepState",
     "load_state",
     "lock_audit",

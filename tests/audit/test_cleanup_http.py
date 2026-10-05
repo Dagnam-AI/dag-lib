@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import ModelError, VersionKeptError
+from dagnam._core.exceptions import ModelError, TeardownInProgressError, VersionKeptError
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.claims import ClaimError, claim_recorded
 from dagnam.audit.cleanup import ask_platform, delete_unpublished, receipt_rows
@@ -108,21 +108,25 @@ def test_any_other_409_stays_a_refusal_and_the_version_blocked(
     assert not isinstance(exc.value, VersionKeptError)
 
 
+BACKEND_WALKS = {
+    409: {
+        "detail": "A delete or cancel of this audit is already running; try again.",
+        "error": "teardown_in_progress",
+    },
+    503: {"detail": "Try again in a moment.", "error": "teardown_unavailable"},
+}
+"""The 409 and 503 the teardown lock answers, exactly (``TeardownRefusedError.response``), with
+``Retry-After: 5``."""
+
+
 @pytest.mark.parametrize("code", [409, 503])
-@pytest.mark.parametrize("nested", [False, True], ids=["top level", "under detail"])
-def test_a_walk_in_progress_is_waited_out_whatever_the_status_and_shape(
-    requests_mock: RequestsMocker, code: int, nested: bool
+def test_the_backends_own_walk_in_progress_answers_are_waited_out(
+    requests_mock: RequestsMocker, code: int
 ) -> None:
-    marker = "teardown_in_progress" if code == 409 else "teardown_unavailable"
-    body: dict[str, Any] = {"error": marker, "message": "wait"}
     requests_mock.delete(
         f"{AUDITS}/a1",
         [
-            {
-                "json": {"detail": body} if nested else body,
-                "status_code": code,
-                "headers": {"Retry-After": "7"},
-            },
+            {"json": BACKEND_WALKS[code], "status_code": code, "headers": {"Retry-After": "5"}},
             {"json": {"schema": "x", "entries": []}},
         ],
     )
@@ -131,6 +135,42 @@ def test_a_walk_in_progress_is_waited_out_whatever_the_status_and_shape(
     answer = ask_platform(_client().delete_audit, "a1", sleep=slept.append)
 
     assert answer.receipt == {"schema": "x", "entries": []}
+    assert slept == [5.0]
+
+
+@pytest.mark.parametrize("code", [409, 503])
+def test_the_backends_walk_answer_carries_its_words_on_the_typed_error(
+    requests_mock: RequestsMocker, code: int
+) -> None:
+    requests_mock.delete(
+        f"{AUDITS}/a1",
+        json=BACKEND_WALKS[code],
+        status_code=code,
+        headers={"Retry-After": "5"},
+    )
+
+    with pytest.raises(TeardownInProgressError) as exc:
+        _client().delete_audit("a1")
+
+    assert str(BACKEND_WALKS[code]["detail"]) in str(exc.value)
+    assert (exc.value.status_code, exc.value.retry_after_header) == (code, "5")
+
+
+@pytest.mark.parametrize("code", [409, 503])
+def test_a_platform_that_nests_the_marker_under_detail_is_waited_out_too(
+    requests_mock: RequestsMocker, code: int
+) -> None:
+    body = {"detail": {"error": BACKEND_WALKS[code]["error"], "message": "wait"}}
+    requests_mock.delete(
+        f"{AUDITS}/a1",
+        [
+            {"json": body, "status_code": code, "headers": {"Retry-After": "7"}},
+            {"json": {"schema": "x", "entries": []}},
+        ],
+    )
+    slept: list[float] = []
+
+    assert ask_platform(_client().delete_audit, "a1", sleep=slept.append).receipt is not None
     assert slept == [7.0]
 
 
@@ -200,3 +240,15 @@ def test_the_client_identity_is_a_digest_of_host_and_key_and_never_either() -> N
     assert a.identity != b.identity != DagnamClient("https://other", "dk-b").identity
     assert "dk-a" not in a.identity
     assert "api.test" not in a.identity
+
+
+@pytest.mark.parametrize(
+    "answer", [{"text": "<html>proxy</html>"}, {"json": ["not", "a", "project"]}]
+)
+def test_a_project_read_answered_with_a_non_project_raises_the_type_error_the_adoption_names(
+    requests_mock: RequestsMocker, answer: dict[str, Any]
+) -> None:
+    """The real client's own reaction to a 200 that is not a project, which the adoption catches."""
+    requests_mock.get(f"{API}/api/v1/projects/proj-1", **answer)
+    with pytest.raises(TypeError):
+        _client().get_project("proj-1")

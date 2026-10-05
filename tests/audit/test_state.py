@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from dagnam._core.exceptions import DagnamError
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.state import (
     LOCK_FILE,
@@ -15,6 +16,7 @@ from dagnam.audit.state import (
     STATE_FILE,
     AuditBusyError,
     AuditState,
+    StateFileError,
     StepState,
     load_state,
     lock_audit,
@@ -94,7 +96,36 @@ def test_malformed_documents_are_rejected(tmp_path: Path, document: object, matc
 def test_unknown_candidate_kind_is_rejected(tmp_path: Path) -> None:
     doc = {"schema": SCHEMA, "workloads": {"w": {"candidates": {"judge": {}}}}}
     (tmp_path / STATE_FILE).write_text(json.dumps(doc))
-    with pytest.raises(ValueError, match="judge"):
+    with pytest.raises(StateFileError, match=r"state\.json: ValueError: .*judge"):
+        load_state(tmp_path)
+
+
+@pytest.mark.parametrize("text", ["{not json", ""], ids=["broken", "empty"])
+def test_a_state_file_that_is_not_json_is_a_named_state_file_error(
+    tmp_path: Path, text: str
+) -> None:
+    (tmp_path / STATE_FILE).write_text(text)
+    with pytest.raises(StateFileError, match=r"state\.json: not valid JSON"):
+        load_state(tmp_path)
+
+
+def test_a_state_file_of_the_wrong_shape_is_a_state_file_error_and_a_value_error(
+    tmp_path: Path,
+) -> None:
+    doc = {"schema": SCHEMA, "workloads": {"w": {"candidates": {"head_tune": {"bogus": 1}}}}}
+    (tmp_path / STATE_FILE).write_text(json.dumps(doc))
+    with pytest.raises(StateFileError) as exc:
+        load_state(tmp_path)
+    assert isinstance(exc.value, ValueError)
+    assert isinstance(exc.value, DagnamError)
+
+
+def test_a_state_field_of_the_wrong_type_is_named_not_an_unexpected_error(
+    tmp_path: Path,
+) -> None:
+    doc = {"schema": SCHEMA, "workloads": {"w": {"candidates": {"head_tune": 5}}}}
+    (tmp_path / STATE_FILE).write_text(json.dumps(doc))
+    with pytest.raises(StateFileError, match=r"state\.json"):
         load_state(tmp_path)
 
 

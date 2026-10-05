@@ -201,3 +201,38 @@ def test_another_accounts_key_after_a_partial_delete_cancels_nothing_either(
     assert "--already-deleted" in " ".join(capsys.readouterr().err.split())
     after = load_state(root)
     assert after.workloads["w1"][next(iter(after.workloads["w1"]))].deploy_status == "running"
+
+
+@pytest.mark.parametrize("verb", ["delete", "cancel"])
+@pytest.mark.parametrize(
+    ("text", "named"),
+    [
+        ('{"schema": "dagnam.audit.state/1", "confirmed_by": 7}', "confirmed_by must be a string"),
+        ("{not json", "not valid JSON"),
+    ],
+    ids=["a confirmed_by that is not a string", "not json"],
+)
+def test_a_state_file_that_cannot_be_used_is_named_and_nothing_is_touched(
+    run_cli: CliRunner,
+    tmp_path: Path,
+    monkeypatch: PytestMonkeyPatch,
+    capsys: StrCapture,
+    verb: str,
+    text: str,
+    named: str,
+) -> None:
+    root = tmp_path / "audit"
+    root.mkdir()
+    (root / "state.json").write_text(text, encoding="utf-8")
+    fake = platform_with_everything()
+    _platform(monkeypatch, fake)
+
+    code = run_cli(["audit", verb, str(root), *(["--yes"] if verb == "delete" else [])])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "state.json" in err
+    assert named in err
+    assert "unexpected error" not in err
+    assert fake.call_log == []
+    assert (root / "state.json").read_text(encoding="utf-8") == text

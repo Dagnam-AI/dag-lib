@@ -534,11 +534,16 @@ project this directory did not create has linked is `kept [in_use_elsewhere]`, n
 recorded in `state.json` so no later walk or cancel touches it; if the owner's projects cannot be
 read to check (an answer of the wrong shape, a failed read, more than 100 pages of projects), the
 dataset is `blocked`, not guessed at. The project stays while anything in it
-does. A walk in which EVERY id answers not-found changes nothing local either (a key from another
-account is told the same), unless an earlier walk by this same key and host already saw one deleted
+does. A walk changes nothing local, and marks nothing, unless its key is shown to see the account
+(not-found is what another account's key is told for every id, and a walk where the rest failed
+cannot tell the two apart): by a deletion this same key and host confirmed earlier
 (`confirmed_gone` and `confirmed_by`, a digest of both, in `state.json`; another account's key never
-counts); the receipt and the error then name `dagnam audit delete
---already-deleted` as the way to say they are gone. The ids live in `state.json`: if it is lost, nothing in this directory
+counts), by a delete or stop that just succeeded, by a keep, or by a read of a recorded id that
+came back with a row. An id whose delete (or not-found) and re-read both failed also keeps the
+deployment keys and the local rows, whatever else the walk did. The receipt and the error name the
+host and masked key asked and `dagnam audit delete --already-deleted` as the way to say it is gone.
+A `state.json` that is not JSON, or has a field of the wrong type, is named and stops the command
+before anything is touched. The ids live in `state.json`: if it is lost, nothing in this directory
 can find what an unpublished run created (a published audit's resources are still found by the
 platform, from the audit's page); and a create whose answer was lost, in a run nobody finished, is
 in no state file at all.

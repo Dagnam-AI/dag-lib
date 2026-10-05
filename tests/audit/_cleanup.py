@@ -39,6 +39,9 @@ class FakeCleanup:
         }
         self.identity = "key-a"
         """Who this fake is asked as (the client's ``identity``); a test swaps it for another key's."""
+        self.delete_errors: dict[str, Exception] = {}
+        """Id -> what its delete raises, whether or not it is there (a 5xx; a not-found for a
+        resource that still reads back)."""
         self.purge_errors: dict[str, DagnamError] = {}
         """Version id -> what its purge raises (the platform's 409 or 502)."""
         self.claims: list[JsonArray] = []
@@ -158,6 +161,8 @@ class FakeCleanup:
 
     def delete_deployment(self, deployment_id: str) -> JsonObject | None:
         self.call_log.append(("delete_deployment", deployment_id))
+        if deployment_id in self.delete_errors:
+            raise self.delete_errors[deployment_id]
         if deployment_id in self.undeletable:
             raise DeploymentStateError("Cannot delete a deployment that is still deploying")
         self._take("deployment", deployment_id, DeploymentNotFoundError)
@@ -207,6 +212,8 @@ class FakeCleanup:
 
     def delete_dataset(self, dataset_id: str) -> None:
         self.call_log.append(("delete_dataset", dataset_id))
+        if dataset_id in self.delete_errors:
+            raise self.delete_errors[dataset_id]
         if self.dataset_error is not None:
             raise self.dataset_error
         if self.held_by_job.get(dataset_id) in self.present["job"]:
@@ -235,6 +242,8 @@ class FakeCleanup:
 
     def delete_project(self, project_id: str) -> None:
         self.call_log.append(("delete_project", project_id))
+        if project_id in self.delete_errors:
+            raise self.delete_errors[project_id]
         self._take("project", project_id, ProjectNotFoundError)
 
 

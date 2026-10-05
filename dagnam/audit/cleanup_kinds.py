@@ -28,7 +28,7 @@ from dagnam._core.exceptions import (
     VersionKeptError,
 )
 from dagnam._types import JsonObject
-from dagnam.audit.receipt_rows import ALREADY_STOPPED, PLATFORM_ONLY, blocked
+from dagnam.audit.receipt_rows import ALREADY_STOPPED, NOT_ANSWERED, PLATFORM_ONLY, blocked
 from dagnam.audit.steps import CONFLICT_STATUS
 
 FINISHED_STATUS = 400
@@ -37,6 +37,8 @@ METHOD_NOT_ALLOWED = 405
 PAUSED_STATUSES = frozenset({"paused", "stopped"})
 STOPPED = "stopped"
 """A cancel's receipt status for a run it cancelled or a deployment it paused (the server's word)."""
+NOT_FOUND_ON_DELETE = "the delete answered not found, but the id still reads back"
+"""The reason on an id whose delete said it is not there and whose re-read finds it."""
 STILL_THERE = "the platform reported the delete done, but the id still reads back"
 """The reason on an id whose delete answered success and whose re-read still finds it."""
 
@@ -336,7 +338,8 @@ def delete_one(
     try:
         answer = delete(client, item_id)
     except absent:
-        return {**item, "status": "already_absent"}
+        # One not-found is one answer: the read below is the second, and both must agree.
+        reason = NOT_FOUND_ON_DELETE
     except PlatformOnlyError as exc:
         return blocked(kind, item_id, str(exc), PLATFORM_ONLY)
     except _ANSWERS as exc:
@@ -352,8 +355,20 @@ def delete_one(
     except absent:
         return {**item, "status": "already_absent" if reason else "deleted"}
     except _ANSWERS as exc:
+        # Neither the delete nor the read answered: this id's state is not known, which is not
+        # the same as a refusal (the platform said no) and must not release local keys or rows.
         reason = reason or f"the delete could not be confirmed: {_say(exc)}"
+        return blocked(kind, item_id, reason, NOT_ANSWERED)
     return blocked(kind, item_id, reason or STILL_THERE)
+
+
+def can_read(client: CleanupClient, kind: str, item_id: str) -> bool:
+    """Whether the platform answered a read of this id with a row: the account is seen to hold it."""
+    try:
+        BY_KIND[kind][1](client, item_id)
+    except _ANSWERS:
+        return False
+    return True
 
 
 def _stop_job(client: CleanupClient, job_id: str) -> dict[str, Any]:
@@ -416,6 +431,7 @@ __all__ = [
     "CleanupBlockedError",
     "CleanupClient",
     "PlatformOnlyError",
+    "can_read",
     "datasets_in_other_projects",
     "delete_one",
 ]
