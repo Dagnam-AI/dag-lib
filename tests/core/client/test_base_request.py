@@ -133,3 +133,81 @@ def test_post_409_with_idempotency_key_retries_into_replay(requests_mock):
     keys = {req.headers.get("Idempotency-Key") for req in requests_mock.request_history}
     assert len(keys) == 1
     assert next(iter(keys))
+
+
+UNAVAILABLE = {
+    "detail": "Idempotent creates are temporarily unavailable; retry later with the same key.",
+    "error": "idempotency_unavailable",
+}
+
+
+def test_a_503_saying_idempotent_creates_are_unavailable_waits_as_long_as_it_asks(requests_mock):
+    """Nothing ran, so the same key is asked again after the platform's own pause (up to a cap)."""
+    requests_mock.post(
+        "https://api.test/api/v1/jobs",
+        [
+            {"status_code": 503, "json": UNAVAILABLE, "headers": {"Retry-After": "30"}},
+            {"status_code": 503, "json": UNAVAILABLE, "headers": {"Retry-After": "3600"}},
+            {"status_code": 201, "json": {"id": "j1"}},
+        ],
+    )
+    c = _client()
+    slept: list[float] = []
+    c._sleep = slept.append
+
+    resp = c._request("POST", "/api/v1/jobs", raise_for=raise_for_generic, json={}, idempotent=True)
+
+    assert resp.json() == {"id": "j1"}
+    assert slept == [30.0, 60.0]  # the asked 30 s, then the 3600 s ask held to the 60 s cap
+
+
+def test_the_same_503_without_the_marker_keeps_the_ordinary_backoff_cap(requests_mock):
+    requests_mock.post(
+        "https://api.test/api/v1/jobs",
+        [
+            {"status_code": 503, "json": {"detail": "busy"}, "headers": {"Retry-After": "30"}},
+            {"status_code": 201, "json": {"id": "j1"}},
+        ],
+    )
+    c = _client()
+    slept: list[float] = []
+    c._sleep = slept.append
+
+    c._request("POST", "/api/v1/jobs", raise_for=raise_for_generic, json={}, idempotent=True)
+
+    assert slept == [10.0]
+
+
+def test_the_unavailable_503_still_gives_up_after_the_three_retries(requests_mock):
+    requests_mock.post(
+        "https://api.test/api/v1/jobs",
+        status_code=503,
+        json=UNAVAILABLE,
+        headers={"Retry-After": "30"},
+    )
+    c = _client()
+    slept: list[float] = []
+    c._sleep = slept.append
+
+    with pytest.raises(APIError) as ei:
+        c._request("POST", "/api/v1/jobs", raise_for=raise_for_generic, json={}, idempotent=True)
+
+    assert ei.value.status_code == 503
+    assert slept == [30.0, 30.0, 30.0]
+    assert requests_mock.call_count == 4
+
+
+@pytest.mark.parametrize("value", ["nan", "-5", "inf"])
+def test_an_odd_retry_after_never_reaches_sleep_as_a_bad_value(requests_mock, value):
+    requests_mock.get(
+        "https://api.test/api/v1/ping",
+        [{"status_code": 503, "headers": {"Retry-After": value}}, {"status_code": 200, "json": {}}],
+    )
+    c = _client()
+    slept: list[float] = []
+    c._sleep = slept.append
+
+    c._request("GET", "/api/v1/ping", raise_for=raise_for_generic)
+
+    assert len(slept) == 1
+    assert 0 <= slept[0] <= 10.0  # a finite wait: backoff, or the capped value

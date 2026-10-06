@@ -63,6 +63,9 @@ WEIGHTS_NOT_REMOVED_ROW = row(
     "model_version", "mv-1", "blocked", "weights_not_removed", WEIGHTS_KEPT
 )
 ALREADY_STOPPED_ROW = row("training_job", "job-1", "stopped", "already_stopped")
+IN_USE_ELSEWHERE_ROW = row(
+    "dataset", "ds-1", "kept", "in_use_elsewhere", "another training run still uses it"
+)
 NOT_CREATED_HERE_ROW = row("dataset", "ds-9", "kept", "not_created_here", "recorded, not tagged")
 FAILED_ROW = row("dataset", "ds-1", "blocked", "failed", "an internal error in the step")
 HAS_SERVED_ROW = row("deployment", "dep-1", "blocked", "has_served", HAS_SERVED)

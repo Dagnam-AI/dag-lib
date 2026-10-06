@@ -17,7 +17,12 @@ import uuid
 import requests
 from tqdm import tqdm
 
-from dagnam._core._resume import idempotency_in_progress, resume_create
+from dagnam._core._resume import (
+    UNAVAILABLE_WAIT_CAP,
+    idempotency_in_progress,
+    idempotency_unavailable,
+    resume_create,
+)
 from dagnam._core._retry import RetryBudget, run_with_retry
 from dagnam._core.client.common import build_url, safe_response_text
 from dagnam._core.config import get_config_value
@@ -223,6 +228,8 @@ class BaseDagnamClient:
                     raise_for(resp)
                 except APIError as exc:
                     exc.retry_after_header = resp.headers.get("Retry-After")
+                    if idempotency_unavailable(resp):
+                        exc.retry_after_cap = UNAVAILABLE_WAIT_CAP
                     raise
                 return resp
 

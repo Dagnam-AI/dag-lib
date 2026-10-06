@@ -118,6 +118,13 @@ def test_parse_retry_after_garbage_http_date_like_string_is_none():
     assert parse_retry_after("Not, a Date at all", cap=10.0) is None
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"), [("nan", None), ("-inf", None), ("inf", 10.0), ("1e999", 10.0)]
+)
+def test_parse_retry_after_ignores_nan_and_negative_and_caps_infinite(value, expected):
+    assert parse_retry_after(value, cap=10.0) == expected
+
+
 def _api_error(status: int, retry_after: str | None = None) -> APIError:
     exc = APIError(status, "boom")
     exc.retry_after_header = retry_after

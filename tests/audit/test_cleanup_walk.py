@@ -243,9 +243,9 @@ class TestDatasetsAnotherProjectUses:
     def test_the_project_list_is_read_page_by_page(self) -> None:
         platform = FakeCleanup()
         platform.project_pages = {
-            1: {"items": [{"id": "p1"}], "pages": 3},
-            2: {"items": [{"id": "p2"}], "pages": 3},
-            3: {"items": [{"id": "p3"}], "pages": 3},
+            1: {"items": [{"id": "p1"}], "pages": 3, "total": 3},
+            2: {"items": [{"id": "p2"}], "pages": 3, "total": 3},
+            3: {"items": [{"id": "p3"}], "pages": 3, "total": 3},
         }
         platform.project_datasets = {
             "p1": {"training": [{"id": "d-p1"}], "validation": []},
@@ -261,17 +261,20 @@ class TestDatasetsAnotherProjectUses:
         ("listing", "groups"),
         [
             ("nope", None),
-            ({"items": None, "pages": 1}, None),
-            ({"pages": 1}, None),
-            ({"items": [{"id": "p1"}]}, None),
-            ({"items": [{"id": "p1"}], "pages": "1"}, None),
-            ({"items": [{"id": "p1"}], "pages": True}, None),
-            ({"rows": [{"id": "p1"}], "pages": 1}, None),
-            ({"items": ["p1"], "pages": 1}, None),
-            ({"items": [{"name": "no id"}], "pages": 1}, None),
-            ({"items": [{"id": "p1"}], "pages": 1}, {"training": {"id": "ds-1"}}),
-            ({"items": [{"id": "p1"}], "pages": 1}, {"training": ["ds-1"]}),
-            ({"items": [{"id": "p1"}], "pages": 1}, {"training": [{"name": "no id"}]}),
+            ({"items": None, "pages": 1, "total": 1}, None),
+            ({"pages": 1, "total": 1}, None),
+            ({"items": [{"id": "p1"}], "total": 1}, None),
+            ({"items": [{"id": "p1"}], "pages": "1", "total": 1}, None),
+            ({"items": [{"id": "p1"}], "pages": True, "total": 1}, None),
+            ({"items": [{"id": "p1"}], "pages": 1}, None),
+            ({"items": [{"id": "p1"}], "pages": 1, "total": "1"}, None),
+            ({"items": [{"id": "p1"}], "pages": 1, "total": False}, None),
+            ({"rows": [{"id": "p1"}], "pages": 1, "total": 1}, None),
+            ({"items": ["p1"], "pages": 1, "total": 1}, None),
+            ({"items": [{"name": "no id"}], "pages": 1, "total": 1}, None),
+            ({"items": [{"id": "p1"}], "pages": 1, "total": 1}, {"training": {"id": "ds-1"}}),
+            ({"items": [{"id": "p1"}], "pages": 1, "total": 1}, {"training": ["ds-1"]}),
+            ({"items": [{"id": "p1"}], "pages": 1, "total": 1}, {"training": [{"name": "no id"}]}),
         ],
         ids=[
             "not an object",
@@ -280,6 +283,9 @@ class TestDatasetsAnotherProjectUses:
             "no pages",
             "pages a string",
             "pages a bool",
+            "no total",
+            "total a string",
+            "total a bool",
             "list under another key",
             "entry not an object",
             "entry without id",
@@ -300,7 +306,11 @@ class TestDatasetsAnotherProjectUses:
 
     @pytest.mark.parametrize(
         "listing",
-        [{"items": None, "pages": 1}, {"items": [{"id": "p1"}]}, {"pages": 1}],
+        [
+            {"items": None, "pages": 1, "total": 1},
+            {"items": [{"id": "p1"}], "total": 1},
+            {"pages": 1, "total": 1},
+        ],
         ids=["items null", "no pages", "items missing"],
     )
     def test_a_walk_over_a_malformed_listing_keeps_every_dataset_and_says_why(
@@ -319,7 +329,9 @@ class TestDatasetsAnotherProjectUses:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         platform = FakeCleanup()
-        platform.project_pages = {n: {"items": [], "pages": 10**6} for n in range(1, 10)}
+        platform.project_pages = {
+            n: {"items": [], "pages": 10**6, "total": 1} for n in range(1, 10)
+        }
         monkeypatch.setattr("dagnam.audit.cleanup_kinds.PROJECT_PAGES", 3)
 
         with pytest.raises(TypeError, match="more than 3 pages"):

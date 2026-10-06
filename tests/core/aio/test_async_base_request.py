@@ -193,3 +193,28 @@ async def test_async_post_409_with_idempotency_key_retries_into_replay() -> None
         assert seen_keys[0]  # a real (non-empty) key was minted and reused
     finally:
         await base._client.aclose()
+
+
+async def test_async_unavailable_503_waits_as_long_as_it_asks_up_to_the_cap() -> None:
+    base = BaseAsyncDagnamClient(API, "k")
+    slept: list[float] = []
+
+    async def _sleep(d: float) -> None:
+        slept.append(d)
+
+    base._async_sleep = _sleep
+    base._rng = lambda: 1.0
+    body = {"detail": "later", "error": "idempotency_unavailable"}
+    try:
+        with respx.mock(base_url=API) as r:
+            r.post("/x").mock(
+                side_effect=[
+                    httpx.Response(503, json=body, headers={"Retry-After": "30"}),
+                    httpx.Response(503, json=body, headers={"Retry-After": "3600"}),
+                    httpx.Response(200, json={"ok": True}),
+                ]
+            )
+            await base._request("POST", "/x", raise_for=_raise_for, idempotency_key="k1")
+        assert slept == [30.0, 60.0]
+    finally:
+        await base._client.aclose()

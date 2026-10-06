@@ -104,8 +104,8 @@ def parse_retry_after(value: str | None, *, cap: float) -> float | None:
     Supports both RFC 7231 forms: delta-seconds (``"120"``) and the HTTP-date
     form (``"Wed, 21 Oct 2026 07:28:00 GMT"``, via
     ``email.utils.parsedate_to_datetime``). Returns ``None`` for an absent or
-    unparseable value, or a negative delta-seconds value, so the caller falls
-    back to computed backoff. A past HTTP-date floors at ``0.0`` (the retry is
+    unparseable value, or a negative or ``nan`` delta-seconds value, so the caller falls
+    back to computed backoff (``inf`` and huge values are capped). A past HTTP-date floors at ``0.0`` (the retry is
     already due) rather than going negative.
     """
     if value is None:
@@ -115,7 +115,7 @@ def parse_retry_after(value: str | None, *, cap: float) -> float | None:
     except ValueError:
         pass
     else:
-        if seconds < 0:
+        if not seconds >= 0:  # negative, or nan (which no comparison is true of)
             return None
         return min(seconds, cap)
 
@@ -184,7 +184,9 @@ def run_with_retry[T](
             if not budget.try_withdraw():
                 logger.debug("retry budget exhausted for %s; surfacing error", label or "request")
                 raise
-            delay = parse_retry_after(exc.retry_after_header, cap=backoff_cap)
+            delay = parse_retry_after(
+                exc.retry_after_header, cap=exc.retry_after_cap or backoff_cap
+            )
             if delay is None:
                 delay = compute_backoff(attempt, base=backoff_base, cap=backoff_cap, rng=rng)
             logger.debug(
@@ -252,7 +254,9 @@ async def run_with_retry_async[T](
             if not budget.try_withdraw():
                 logger.debug("retry budget exhausted for %s; surfacing error", label or "request")
                 raise
-            delay = parse_retry_after(exc.retry_after_header, cap=backoff_cap)
+            delay = parse_retry_after(
+                exc.retry_after_header, cap=exc.retry_after_cap or backoff_cap
+            )
             if delay is None:
                 delay = compute_backoff(attempt, base=backoff_base, cap=backoff_cap, rng=rng)
             logger.debug(

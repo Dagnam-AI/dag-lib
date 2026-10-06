@@ -17,6 +17,7 @@ import re
 from typing import Awaitable, Callable
 import uuid
 
+from dagnam._core._resume import UNAVAILABLE_WAIT_CAP, idempotency_unavailable
 from dagnam._core._retry import RetryBudget, run_with_retry_async
 from dagnam._core.client.base import resolve_max_download_bytes, scrub_secret_params
 from dagnam._core.client.common import bearer_headers
@@ -127,6 +128,8 @@ class BaseAsyncDagnamClient:
                     raise_for(resp)
                 except APIError as exc:
                     exc.retry_after_header = resp.headers.get("Retry-After")
+                    if idempotency_unavailable(resp):
+                        exc.retry_after_cap = UNAVAILABLE_WAIT_CAP
                     raise
             return resp
 

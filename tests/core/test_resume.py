@@ -18,6 +18,7 @@ from dagnam._core._resume import (
     created_body,
     gone,
     idempotency_in_progress,
+    idempotency_unavailable,
     replay_pointer,
     resume_create,
 )
@@ -260,6 +261,23 @@ def test_a_409_body_nested_too_deeply_to_read_is_not_an_in_progress_answer() -> 
             return json.loads("[" * 200_000 + "]" * 200_000)
 
     assert idempotency_in_progress(Deep(409)) is False
+
+
+@pytest.mark.parametrize(
+    ("response", "unavailable"),
+    [
+        (_Response(503, {"error": "idempotency_unavailable", "detail": "later"}), True),
+        # Only the marker counts: any other 503, another status, or a body that is not an object.
+        (_Response(503, {"detail": "overloaded"}), False),
+        (_Response(503, ["idempotency_unavailable"]), False),
+        (_Response(503, json_error=True), False),
+        (_Response(409, {"error": "idempotency_unavailable"}), False),
+    ],
+)
+def test_an_unavailable_answer_is_a_503_with_the_marker(
+    response: _Response, unavailable: bool
+) -> None:
+    assert idempotency_unavailable(response) is unavailable
 
 
 @pytest.mark.parametrize(

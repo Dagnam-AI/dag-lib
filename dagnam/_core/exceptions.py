@@ -105,6 +105,9 @@ class APIError(DagnamError):
         self.status_code = status_code
         self.message = message
         self.retry_after_header = retry_after_header
+        self.retry_after_cap: float | None = None
+        """A larger ceiling than the client's backoff cap for honouring ``retry_after_header``, when
+        the platform's answer says the wait is worth it (see ``idempotency_unavailable``)."""
         super().__init__(f"API error {status_code}: {message}")
 
 
