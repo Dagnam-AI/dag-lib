@@ -7,8 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The changes below are `__version__` 0.16.0, not yet released: the release folds
-them into a dated `## [0.16.0] - YYYY-MM-DD` heading (see `RELEASE.md`).
+## [0.16.0] - 2026-10-06
 
 Needs the platform release that runs `dagnam-contracts` 0.4.1 and has
 `POST /api/v1/audits/{id}/resume`, the run read's `model_version_id` and
