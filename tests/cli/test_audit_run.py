@@ -2,123 +2,29 @@
 
 from __future__ import annotations
 
-from functools import partial
 import io
 import json
 from pathlib import Path
-import socket
 import sys
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, json_row, label_row, serve_chat, teacher
+from tests.audit._platform import FakePlatform
+from tests.cli._audit_run import SCAN, workload
 
-from dagnam.audit.orchestrate import run_audit
 from dagnam.audit.readers.messages import TOOL_CALL_NOTE
-from dagnam.audit.state import lock_audit
-from dagnam.audit.workspace import write_workload
-from dagnam.cli.audit_run import PUBLISH_LINE, _render_run
+from dagnam.audit.state import load_state, lock_audit
+from dagnam.audit.steps_train import credits_spent
+from dagnam.cli.audit_run import _render_run
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, RequestsMocker, StrCapture
-
-PASS_LIST = ["PII_EMAIL", "PII_PHONE", "PII_PAYMENT_CARD", "PII_NATIONAL_ID"]
-SPLIT = {"train": list(range(16)), "eval_holdout": [16, 17, 18, 19]}
-
-
-def _workload(workload_id: str, cls: str, status: str) -> dict[str, Any]:
-    return {
-        "id": workload_id,
-        "template_hash": workload_id,
-        "template_excerpt": "Classify",
-        "structure_class": cls,
-        "confidence": "high",
-        "calls": 3_000,
-        "calls_per_day": 100.0,
-        "tokens": {"prompt": 300_000, "completion": 6_000},
-        "cost_usd_month": 900.0,
-        "cost_source": "export",
-        "latency_ms": {"p50": 400.0, "p95": 900.0},
-        "distinct_outputs": 2,
-        "entropy": 1.0,
-        "models": ["gpt-4o-mini"],
-        "verdict": {"status": status, "ratio": 12.0, "savings_usd_month": 800.0, "reason": "x"},
-        "dataset": None,
-    }
-
-
-SCAN: dict[str, Any] = {
-    "schema": "dagnam.audit.scan/1",
-    "generated_at": "2026-09-06T10:00:00+00:00",
-    "source": "langfuse",
-    "window": {
-        "start": "2026-08-01T00:00:00+00:00",
-        "end": "2026-08-31T00:00:00+00:00",
-        "days": 30,
-    },
-    "price_table_version": "2026-09",
-    "totals": {
-        "calls": 6_000,
-        "cost_usd_month": 1_800.0,
-        "prompt_tokens": 1,
-        "completion_tokens": 1,
-    },
-    "pii": {"pass_list": PASS_LIST, "counts": {"PII_EMAIL": 2}},
-    "workloads": [
-        _workload("w1", "enum_label", "candidate"),
-        _workload("w2", "json_object", "marginal"),
-        _workload("w3", "free_text", "not_audited"),
-    ],
-    "warnings": [],
-}
-
-
-def _stats(format_key: str, counts: dict[str, int]) -> dict[str, Any]:
-    return {
-        "format_key": format_key,
-        "redact": {"counts": counts, "pass_list": PASS_LIST, "rows_changed": sum(counts.values())},
-    }
+    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
 
 
 @pytest.fixture(autouse=True)
 def no_real_keyring(monkeypatch: PytestMonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "keyring", None)
-
-
-@pytest.fixture
-def prepared_dir(tmp_path: Path) -> Path:
-    root = tmp_path / "audit"
-    root.mkdir()
-    write_workload(
-        root,
-        "w1",
-        [label_row(i) for i in range(20)],
-        SPLIT,
-        _stats("labeled-example", {"PII_EMAIL": 2}),
-    )
-    write_workload(root, "w2", [json_row(i) for i in range(20)], SPLIT, _stats("chat-messages", {}))
-    (root / "scan-report.json").write_text(json.dumps(SCAN), encoding="utf-8")
-    return root
-
-
-@pytest.fixture
-def platform(monkeypatch: PytestMonkeyPatch, requests_mock: RequestsMocker) -> FakePlatform:
-    """The fake platform behind ``client_from_env``, with the waits on a fake clock."""
-    fake = FakePlatform()
-    clock = Clock()
-    monkeypatch.setattr("dagnam.cli.audit_run.client_from_env", lambda: fake)
-    monkeypatch.setattr(
-        "dagnam.audit.orchestrate.run_audit", partial(run_audit, sleep=clock.sleep, now=clock.now)
-    )
-    serve_chat(requests_mock, teacher)
-    return fake
-
-
-@pytest.fixture
-def tty(monkeypatch: PytestMonkeyPatch) -> None:
-    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
 
 
 def test_run_lists_exactly_what_will_be_uploaded_and_needs_yes(
@@ -144,7 +50,7 @@ def test_run_lists_exactly_what_will_be_uploaded_and_needs_yes(
     assert "redactions: none found in 0 rows" in listing
     assert "w3" not in listing
     assert "  to: a new private project 'workload-audit-audit'" in listing
-    # P5: no --max-credits, so the ceiling is the plan's own estimate rounded up to
+    # No --max-credits, so the ceiling is the plan's own estimate rounded up to
     # 100 -- per workload a 120-credit training ceiling plus 5 for a 4-row replay.
     assert (
         "credit ceiling: 300 (the plan's estimate, rounded up to 100; --max-credits sets your own)"
@@ -177,6 +83,8 @@ def test_run_confirmed_runs_the_frontier_and_writes_the_report(
     out = capsys.readouterr().out
     assert platform.call_log[0] == "create_project"
     assert platform.submits == 2
+    # The run's client is the one whose creates a re-run finds again.
+    assert getattr(platform, "resume_creates", None) is True
     report = json.loads((prepared_dir / "audit-report.json").read_text(encoding="utf-8"))
     assert report["schema"] == "dagnam.audit.report/1"
     assert report["project_id"] == "proj-1"
@@ -195,7 +103,7 @@ def test_run_confirmed_runs_the_frontier_and_writes_the_report(
     assert "  to: existing project" not in out  # the project was created by this run
 
     # A second run resumes: the listing names the existing project, and the one
-    # platform call is the resume of its audit (K1b) -- no step moved.
+    # platform call is the resume of its audit -- no step moved.
     calls = list(platform.call_log)
     assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--json"]) == 0
     printed = json.loads(capsys.readouterr().out.partition("\n{")[2].join(["{", ""]))
@@ -237,6 +145,40 @@ def test_run_halted_exits_nonzero_with_the_reason(
     assert error["hint"] == f"dagnam audit status {prepared_dir}"
 
 
+def test_a_stopped_candidate_says_why_on_the_terminal_not_only_in_the_report(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
+) -> None:
+    """A PII stop printed ``w1: NOT YET ... (head_tune: pii_disagreement)`` and exited 0.
+
+    The code named the stop and nothing named its cause or its cure: those were
+    only in ``state.json``. Every candidate's recorded reason now goes under its
+    workload's line, whatever stopped it, and is in ``audit-report.json`` for a script.
+    """
+    platform.pii_pass_list = [*platform.pii_pass_list, "PII_SECRET"]
+    platform.pii_counts = {"ds-1": {"PII_SECRET": 185}}  # w1's dataset; w2 is clean
+    platform.revision_final = "failed"  # and w2 gets as far as a deployment that fails
+
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    at = out.index(
+        "w1: NOT YET - No candidate was measured in this audit (head_tune: pii_disagreement)."
+    )
+    assert out[at + 1] == (
+        "  head_tune: pii_disagreement: the platform runs a newer privacy contract than these"
+        " rows were redacted with: it found PII_SECRET (185) in classes the scan did not look"
+        " for. `pip install -U dagnam-contracts` (or `pip install -U dagnam`), then scan again."
+        " `dagnam audit delete <audit-dir>` removes the uploaded rows and the whole audit."
+    )
+    assert out[at + 2].startswith("w2: NOT YET")
+    assert out[at + 3] == "  sft_small: deploy_failed: no gpu"
+    assert platform.submits == 1  # the stop is a stop: w1 never trained
+    report = json.loads((prepared_dir / "audit-report.json").read_text(encoding="utf-8"))
+    assert report["workloads"][0]["candidates"][1]["error"] == out[at + 1].removeprefix(
+        "  head_tune: "
+    )
+
+
 def test_run_no_wait_returns_early_and_says_how_to_resume(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
 ) -> None:
@@ -245,7 +187,7 @@ def test_run_no_wait_returns_early_and_says_how_to_resume(
     assert platform.submits == 1
     assert "get_foundation_run" not in platform.call_log
     assert f"Next: dagnam audit run {prepared_dir} --yes" in captured.err
-    # B11: a run still training is not a candidate that missed the floor.
+    # A run still training is not a candidate that missed the floor.
     assert "w1: NOT YET - No candidate was measured in this audit (head_tune: queued)." in (
         captured.out
     )
@@ -266,172 +208,24 @@ def test_run_refuses_unknown_workloads_missing_scan_and_nothing_to_run(
     with pytest.raises(SystemExit) as exc:
         run_cli(["audit", "run", str(tmp_path / "nowhere"), "--yes", "--json"])
     assert exc.value.code == 1
-    assert "run `dagnam audit scan` first" in json.loads(capsys.readouterr().out)["error"]
+    assert (
+        "is not an audit directory: run `dagnam audit scan`"
+        in (json.loads(capsys.readouterr().out)["error"])
+    )
 
-    scan = {**SCAN, "workloads": [_workload("w3", "free_text", "not_audited")]}
+    (tmp_path / "unscanned").mkdir()
+    with pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "run", str(tmp_path / "unscanned"), "--yes"])
+    assert exc.value.code == 1
+    assert "scan-report.json not found: run `dagnam audit scan` first" in capsys.readouterr().err
+
+    scan = {**SCAN, "workloads": [workload("w3", "free_text", "not_audited")]}
     (prepared_dir / "scan-report.json").write_text(json.dumps(scan), encoding="utf-8")
     with pytest.raises(SystemExit) as exc:
         run_cli(["audit", "run", str(prepared_dir), "--yes"])
     assert exc.value.code == 1
     assert "nothing to run" in capsys.readouterr().err
     assert platform.call_log == []
-
-
-# ------------------------------------------------------------------ publishing
-
-
-def test_run_publishes_the_scan_the_candidates_and_every_step(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
-) -> None:
-    from dagnam.audit.state import load_state
-
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
-    captured = capsys.readouterr()
-    out = captured.out
-    assert PUBLISH_LINE in out
-    # Discoverability: the audit page is named once, on stderr, so `--json`
-    # keeps stdout to the report alone.
-    assert "published: audit-1 — watch it at https://x/audits/audit-1" in captured.err
-    assert "watch it at" not in out
-
-    assert platform.call_log.count("create_audit") == 1
-    published = platform.audits[0]
-    assert published["source"] == "cli"
-    assert published["floor"] == 0.5
-    assert published["local_dir_name"] == "audit"
-    assert [(w["workload_id"], w["selected"]) for w in published["workloads"]] == [
-        ("w1", True),
-        ("w2", True),
-        ("w3", False),
-    ]
-    assert [w["pii_counts"] for w in published["workloads"]] == [{"PII_EMAIL": 2}, {}, {}]
-
-    state = load_state(prepared_dir)
-    assert state.audit_id == "audit-1"
-    assert [kind for _, body in platform.candidates for kind in [body["kind"]]] == [
-        "head_tune",
-        "sft_small",
-    ]
-    head = [body for cid, body in platform.patches if cid == "cand-1"]
-    assert [body["step"] for body in head] == [
-        "upload",
-        "resolve_version",
-        "split",
-        "wait_split",
-        "pii_scan",
-        "wait_pii",
-        "submit",
-        "wait_run",
-        "resolve_model_version",
-        "create_deployment",
-        "create_revision",
-        "wait_active",
-        "replay",
-        "replay_and_score",
-    ]
-    scored = head[-1]
-    assert scored["status"] == "scored"
-    assert scored["scored_by"] == "cli"
-    assert scored["latency"]["measured_from"] == "client"
-    assert scored["agreement"]["floor"] == 0.5
-    assert scored["serving_cost_usd_month"] > 0
-    assert scored["replay_cost_credits"] == 4.0
-    assert platform.halts == []
-
-    # A resumed run republishes nothing but its resume: the audit exists and no step moved.
-    calls = list(platform.call_log)
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 0
-    assert platform.call_log == [*calls, "resume_audit"]
-
-
-def test_run_local_only_opens_no_audit_route_and_says_nothing_about_the_account(
-    run_cli: CliRunner,
-    prepared_dir: Path,
-    platform: FakePlatform,
-    capsys: StrCapture,
-    monkeypatch: PytestMonkeyPatch,
-) -> None:
-    from dagnam.audit.state import load_state
-
-    def refuse(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("network")
-
-    platform.forbid_publishing = True  # any /api/v1/audits call is an AssertionError
-    monkeypatch.setattr(socket, "socket", refuse)
-
-    assert (
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--local-only", "--floor", "0.5"]) == 0
-    )
-
-    captured = capsys.readouterr()
-    out = captured.out
-    assert PUBLISH_LINE not in out
-    assert "published to your account" not in out
-    assert "watch it at" not in captured.err
-    assert platform.forbidden_attempts == []  # the tripwire itself, not just its effect
-    assert platform.audits == []
-    assert not [call for call in platform.call_log if "audit" in call]
-    assert load_state(prepared_dir).audit_id is None
-
-
-def test_run_halted_tells_the_account_why(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    with pytest.raises(SystemExit):
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
-    assert platform.halts == [("audit-1", "budget")]
-    # w1 submitted; the submit w2's budget check refused is not published as a
-    # step that happened, so exactly one `submit` reached the account.
-    assert [body["step"] for _, body in platform.patches].count("submit") == 1
-
-
-def test_a_resumed_run_that_stops_again_publishes_its_own_halt(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    """K1b: the second run un-halted the audit when it started, so its halt is a new one."""
-    for _ in range(2):
-        with pytest.raises(SystemExit):
-            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
-    assert platform.halts == [("audit-1", "budget"), ("audit-1", "budget")]
-    assert platform.call_log.count("resume_audit") == 1  # the first run created the audit
-
-
-def test_on_an_older_platform_a_run_that_stops_again_does_not_repeat_the_halt(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    """No resume route and nothing published before the halt: the account still shows the first."""
-    platform.resume_route = False
-    for _ in range(2):
-        with pytest.raises(SystemExit):
-            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
-    assert platform.halts == [("audit-1", "budget")]
-
-
-def test_a_run_that_crashes_publishes_the_halt_before_it_raises(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    platform.submit_errors = [RuntimeError("socket reset")]
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes"]) == 1
-    assert platform.halts == [("audit-1", "error")]
-
-
-def test_a_publish_outage_never_stops_the_run(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    from dagnam._core.exceptions import APIError
-
-    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
-    assert platform.candidates == []  # nothing to attach to
-    assert (prepared_dir / "audit-report.json").exists()
-
-
-def test_the_consent_line_is_exactly_what_the_account_is_told_it_may_keep() -> None:
-    assert PUBLISH_LINE == (
-        "  published to your account: progress and the report (workload ids, verdicts, spend,"
-        " masked excerpts, the audit directory's name; never rows or keys);"
-        " 'audit delete' removes them; --local-only keeps them here"
-    )
 
 
 @pytest.mark.parametrize(
@@ -461,52 +255,82 @@ def test_a_bad_floor_or_ceiling_fails_before_anything_is_uploaded(
     assert platform.call_log == []
 
 
-def test_a_run_that_publishes_late_backfills_the_steps_it_already_took(
-    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
-) -> None:
-    """The audit service was down for the first run; the second one catches the account up."""
-    from dagnam._core.exceptions import APIError
-
-    platform.publish_errors["create_audit"] = [APIError(503, "audit service down")]
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
-    assert platform.patches == []
-
-    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
-    head = [body for cid, body in platform.patches if cid == "cand-1"]
-    assert [body["step"] for body in head] == [
-        "upload",
-        "resolve_version",
-        "split",
-        "wait_split",
-        "pii_scan",
-        "wait_pii",
-        "submit",
-        "wait_run",
-        "resolve_model_version",
-        "create_deployment",
-        "create_revision",
-        "wait_active",
-        "replay",
-        "replay_and_score",
-    ]
-    assert head[-1]["status"] == "scored"
-
-
 def test_run_refuses_a_directory_another_command_holds(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
 ) -> None:
-    """B13: a second `audit run` over one directory would submit every run a second time."""
+    """A second `audit run` over one directory would submit every run a second time."""
     with lock_audit(prepared_dir), pytest.raises(SystemExit) as exc:
         run_cli(["audit", "run", str(prepared_dir), "--yes", "--json"])
     assert exc.value.code == 1
     out = capsys.readouterr().out
-    error = json.loads(out[out.index("\n{") + 1 :])
-    assert "is in use by another `dagnam audit` command" in error["error"]
+    assert "is in use by another `dagnam audit` command" in json.loads(out)["error"]
     assert platform.call_log == []
 
 
+def test_the_directory_is_held_from_the_listing_to_the_end_of_the_run(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    tty: None,
+    capsys: StrCapture,
+    tmp_path: Path,
+) -> None:
+    """Nothing else can touch the directory while the user reads the listing.
+
+    A second `audit run` would have both pass the prompt and both submit, and
+    an `audit scan` would replace the rows between what was listed and what is
+    uploaded. Both are refused for as long as the first holds it, and the first
+    still runs what it listed.
+    """
+    argv = ["audit", "run", str(prepared_dir), "--floor", "0.5"]
+    export = tmp_path / "export.jsonl"
+    row = {
+        "trace_id": "t1",
+        "ts": "2026-09-01T00:00:00Z",
+        "messages": [{"role": "user", "content": "hi"}],
+        "response": "a",
+    }
+    export.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    refused: list[int | str | None] = []
+    uploaded_meanwhile: list[str] = []
+
+    def meanwhile(_prompt: str) -> str:
+        """This run is at its prompt; another run and a scan both try the directory."""
+        for other in (
+            [*argv, "--yes"],
+            ["audit", "scan", str(export), "--source", "jsonl", "--out", str(prepared_dir)],
+        ):
+            with pytest.raises(SystemExit) as exc:
+                run_cli(other)
+            refused.append(exc.value.code)
+        uploaded_meanwhile.extend(platform.call_log)
+        return "yes"
+
+    with mock.patch("builtins.input", side_effect=meanwhile):
+        assert run_cli(argv) == 0
+
+    assert refused == [1, 1]
+    assert uploaded_meanwhile == []  # nothing reached the platform while the listing was open
+    assert capsys.readouterr().err.count("is in use by another `dagnam audit` command") == 2
+    assert platform.submits == 2  # the first run went on to submit what it had listed, once
+    assert platform.call_log.count("create_project") == 1
+    assert credits_spent(load_state(prepared_dir), prepared_dir) <= 300  # the ceiling it listed
+
+
+def test_the_directory_is_free_again_once_a_run_ends_or_is_declined(
+    run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, tty: None
+) -> None:
+    with mock.patch("builtins.input", return_value="no"), pytest.raises(SystemExit):
+        run_cli(["audit", "run", str(prepared_dir)])
+    with lock_audit(prepared_dir):  # released on the way out of a declined prompt
+        pass
+    assert run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"]) == 0
+    with lock_audit(prepared_dir):  # and after a run
+        pass
+
+
 def test_a_tool_call_winner_is_told_what_its_replacement_returns(tmp_path: Path) -> None:
-    # P4 / N3: the same sentence the scan warning and the report's switch carry.
+    # The same sentence the scan warning and the report's switch carry.
     winner = {
         "kind": "sft_small",
         "cost_usd_month": 4.0,

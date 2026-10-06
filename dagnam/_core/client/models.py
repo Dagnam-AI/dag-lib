@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from dagnam._core.client.base import (
@@ -17,6 +18,7 @@ from dagnam._core.client.base import (
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_model,
+    raise_for_purge,
     requests_query_params,
     response_json_value,
 )
@@ -37,6 +39,7 @@ class ModelsClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
         idempotent: bool = False,
+        raise_for: Callable[[requests.Response], None] | None = None,
     ) -> JsonValue | str | None:
         """Issue an authenticated request against a registry route.
 
@@ -48,7 +51,7 @@ class ModelsClientMixin(BaseDagnamClient):
         resp = self._request(
             method,
             url,
-            raise_for=lambda r: raise_for_model(r, model_id),
+            raise_for=raise_for or (lambda r: raise_for_model(r, model_id)),
             params=requests_query_params(params),
             json=json_body,
             timeout=timeout,
@@ -124,6 +127,22 @@ class ModelsClientMixin(BaseDagnamClient):
                 model_id=version_id,
             )
         )
+
+    def purge_model_version(self, version_id: str) -> JsonObject | None:
+        """``DELETE /api/v1/model-versions/{id}``: this one version's weights, never its entry.
+
+        Idempotent. The platform answers one receipt row (``kind``, ``id``, ``status``,
+        ``code``) and refuses (409) a version a live deployment serves. A platform without the
+        route answers 404 or 405, which :func:`dagnam.audit.cleanup_kinds` tells apart from a
+        version that is gone by reading it back. ``None`` for an answer with no row.
+        """
+        answer = self._registry_request(
+            "DELETE",
+            f"/api/v1/model-versions/{quote_path_segment(version_id)}",
+            model_id=version_id,
+            raise_for=lambda r: raise_for_purge(r, version_id),
+        )
+        return answer if isinstance(answer, dict) else None
 
     def get_model_version_lineage(self, version_id: str) -> JsonObject:
         return self._expect_object(

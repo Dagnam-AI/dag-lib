@@ -144,7 +144,7 @@ def test_student_kind_is_a_registry_over_the_structure_class() -> None:
 
 
 def test_every_student_kind_is_the_rate_of_the_candidate_the_run_trains() -> None:
-    # P1: the scan prices the same student the run trains and its report prices.
+    # The scan prices the same student the run trains and its report prices.
     for cls, kind in STUDENT_KIND.items():
         assert {spec.serving_rate_key for spec in CANDIDATES[cls]} - {None} == {kind}, cls
 
@@ -283,7 +283,7 @@ def test_customer_verdict_table_verbatim() -> None:
 
 
 def test_a_workload_whose_calls_carry_images_is_not_audited() -> None:
-    # N9: receipts classified from the image, with a constant text prompt: the run
+    # Receipts classified from the image, with a constant text prompt: the run
     # would train a text classifier on 1,200 identical inputs.
     w = replace(make_workload(calls_per_day=5_000, cost_month=4_000.0), media_calls=1_000)
     verdict = replaceability(w)
@@ -295,7 +295,7 @@ def test_a_workload_whose_calls_carry_images_is_not_audited() -> None:
 
 
 def test_no_usage_and_no_cost_is_an_unknown_cost_never_free() -> None:
-    # N10: a stream without include_usage has 0 tokens; the table priced the teacher
+    # A stream without include_usage has 0 tokens; the table priced the teacher
     # at $0.00 and the verdict read "not_worth_it: teacher $0.00/month".
     w = make_workload(
         calls_per_day=100, cost_month=None, n=3_000, prompt_per_call=0, completion_per_call=0
@@ -319,7 +319,7 @@ def test_no_usage_and_no_cost_is_an_unknown_cost_never_free() -> None:
 
 
 def test_a_model_s_calls_without_usage_are_extrapolated_from_its_calls_with_it() -> None:
-    # m1: half of one model's calls streamed without usage priced the teacher at half
+    # half of one model's calls streamed without usage priced the teacher at half
     # ($0.3012 -> $0.1506 a month): the tokens of 1,000 calls were spread over 2,000.
     def records(with_usage: Callable[[int], bool]) -> list[TraceRecord]:
         return [

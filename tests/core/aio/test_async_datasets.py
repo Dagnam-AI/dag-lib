@@ -38,6 +38,22 @@ async def test_async_list_datasets_with_and_without_search(
     await client.list_datasets(search="cifar")
     assert "search=cifar" in str(route.calls[0].request.url)
     await client.list_datasets()
+    await client.list_datasets(audit_id="audit-1")
+    assert "audit_id=audit-1" in str(route.calls[2].request.url)
+
+
+async def test_async_upload_dataset_names_the_audit(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    fp = tmp_path / "x.jsonl"
+    fp.write_text("{}")
+    route = mock.post("/api/v1/datasets/").mock(
+        return_value=httpx.Response(200, json={"id": "ds1"})
+    )
+    await client.upload_dataset(
+        fp, name="x", dataset_type="text", format="json", audit_id="audit-1"
+    )
+    assert b'name="audit_id"' in route.calls[0].request.read()
 
 
 async def test_async_get_dataset_meta(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:

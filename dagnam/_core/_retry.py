@@ -1,7 +1,7 @@
 """Shared transient-failure retry policy for the sync and async clients.
 
-One policy — imported by the sync ``_request``, the async ``_request`` (Plan
-03), and the LRO poller — so retry behavior never diverges. Retries are bounded
+One policy — imported by the sync ``_request``, the async ``_request``, and
+the LRO poller — so retry behavior never diverges. Retries are bounded
 by attempt count, a per-client token-bucket budget, and exponential backoff with
 equal jitter; a ``Retry-After`` header (when present) overrides the computed
 backoff.
@@ -82,6 +82,10 @@ class RetryBudget:
             return False
 
 
+MAX_BACKOFF_EXPONENT = 30
+"""``2**attempt`` is capped here: a poll that fails for a long stretch must not overflow a float."""
+
+
 def compute_backoff(
     attempt: int,
     *,
@@ -90,7 +94,7 @@ def compute_backoff(
     rng: Callable[[], float],
 ) -> float:
     """Exponential backoff with equal jitter: ``rng() * min(cap, base*2**attempt)``."""
-    window = min(cap, base * (2**attempt))
+    window = min(cap, base * (2 ** min(attempt, MAX_BACKOFF_EXPONENT)))
     return rng() * window
 
 

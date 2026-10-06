@@ -1,0 +1,82 @@
+{
+ "han": {
+  "estimate": 127,
+  "estimate_after_a_space": 129
+ },
+ "hiragana": {
+  "estimate": 41,
+  "estimate_after_a_space": 42
+ },
+ "katakana": {
+  "estimate": 43,
+  "estimate_after_a_space": 45
+ },
+ "hangul": {
+  "estimate": 103,
+  "estimate_after_a_space": 103
+ },
+ "thai": {
+  "estimate": 26,
+  "estimate_after_a_space": 27
+ },
+ "lao": {
+  "estimate": 81,
+  "estimate_after_a_space": 83
+ },
+ "myanmar": {
+  "estimate": 73,
+  "estimate_after_a_space": 74
+ },
+ "khmer": {
+  "estimate": 69,
+  "estimate_after_a_space": 71
+ },
+ "devanagari": {
+  "estimate": 57,
+  "estimate_after_a_space": 58
+ },
+ "bengali": {
+  "estimate": 65,
+  "estimate_after_a_space": 66
+ },
+ "gurmukhi": {
+  "estimate": 117,
+  "estimate_after_a_space": 118
+ },
+ "gujarati": {
+  "estimate": 107,
+  "estimate_after_a_space": 108
+ },
+ "oriya": {
+  "estimate": 123,
+  "estimate_after_a_space": 124
+ },
+ "tamil": {
+  "estimate": 61,
+  "estimate_after_a_space": 63
+ },
+ "telugu": {
+  "estimate": 109,
+  "estimate_after_a_space": 110
+ },
+ "kannada": {
+  "estimate": 93,
+  "estimate_after_a_space": 94
+ },
+ "malayalam": {
+  "estimate": 95,
+  "estimate_after_a_space": 97
+ },
+ "sinhala": {
+  "estimate": 103,
+  "estimate_after_a_space": 104
+ },
+ "ethiopic": {
+  "estimate": 83,
+  "estimate_after_a_space": 84
+ },
+ "tibetan": {
+  "estimate": 83,
+  "estimate_after_a_space": 84
+ }
+}

@@ -4,7 +4,7 @@ Deterministic and pure: no embeddings, no I/O, no randomness. The same
 records in any order give the same workloads in the same order.
 
 Discovery reads its records once, as a stream, and keeps per record only its
-time and position (R3-16): what a workload needs from its calls -- the first
+time and position: what a workload needs from its calls -- the first
 :data:`STRUCTURE_SAMPLE` responses in time order, the digests of its outputs,
 its latencies, sums -- is accumulated as the records go by, so an export larger
 than memory can be discovered.
@@ -50,7 +50,7 @@ class ModelUsage:
 
     ``calls`` counts the calls that carried token counts, the ones its tokens
     price: a stream without usage adds none, so pricing extrapolates the priced
-    calls to it instead of spreading their tokens over it (m1).
+    calls to it instead of spreading their tokens over it.
     """
 
     model: str
@@ -67,12 +67,17 @@ class Workload:
     ``record_indices`` are positions in the sequence given to
     :func:`discover_workloads`, in time order. ``response_mode`` is
     ``"tool_call"`` when most calls answered with a tool call, whose first
-    call's name and arguments are then what the audit trains and scores on (P4).
+    call's name and arguments are then what the audit trains and scores on.
     ``usage_by_model`` keeps the tokens per model spelling so a price table can
     price each one. ``name`` is the workload's own name when the export gave
     one (a ``workload_hint`` or a registered prompt's name), which then keys it.
     ``media_calls`` counts calls whose prompt carried an image, audio or file
-    part. ``first_ts`` / ``last_ts`` bound its calls.
+    part. ``first_ts`` / ``last_ts`` bound its calls. ``answerless_calls`` counts the
+    calls whose reply was nothing but the model's reasoning (``reasoning_only``):
+    they are among ``calls`` and in the cost and token counts, as the customer paid
+    for them, but give no training row and take no part in the structure class or
+    the output counts; ``answerless_spend_share`` is their share of the spend (by the
+    export's own cost when it has one, else by completion tokens, else by calls).
     """
 
     id: str
@@ -100,6 +105,8 @@ class Workload:
     media_calls: int = 0
     first_ts: datetime | None = None
     last_ts: datetime | None = None
+    answerless_calls: int = 0
+    answerless_spend_share: float = 0.0
 
     def to_json(self) -> dict[str, Any]:
         """The scan report's ``Workload`` object (its discovery-owned fields, in contract order)."""
@@ -188,6 +195,9 @@ class _Group:
     priced: int = 0
     tool_calls: int = 0
     media: int = 0
+    answerless: int = 0
+    answerless_cost: float = 0.0
+    answerless_completion: int = 0
 
     def add(self, index: int, record: TraceRecord, template: str) -> None:
         stamp = record.ts.timestamp()
@@ -196,12 +206,21 @@ class _Group:
         self.positions.append(index)
         self.first = record.ts if self.first is None else min(self.first, record.ts)
         self.last = record.ts if self.last is None else max(self.last, record.ts)
-        heapq.heappush(self.sample, (-stamp, -index, record.response, record.response_tool_calls))
-        if len(self.sample) > STRUCTURE_SAMPLE:
-            heapq.heappop(self.sample)  # the latest of the kept responses
-        answer = normalize_response(effective_response(record.response, record.response_tool_calls))
-        digest = hashlib.blake2b(answer.encode("utf-8"), digest_size=_OUTPUT_DIGEST_BYTES)
-        self.outputs[digest.digest()] += 1
+        if record.reasoning_only:
+            # A call, and a billed one; but it has no answer to classify or to count.
+            self.answerless += 1
+            self.answerless_completion += record.completion_tokens
+            self.answerless_cost += record.cost_usd or 0.0
+        else:
+            heapq.heappush(
+                self.sample, (-stamp, -index, record.response, record.response_tool_calls)
+            )
+            if len(self.sample) > STRUCTURE_SAMPLE:
+                heapq.heappop(self.sample)  # the latest of the kept responses
+            effective = effective_response(record.response, record.response_tool_calls)
+            answer = normalize_response(effective)
+            digest = hashlib.blake2b(answer.encode("utf-8"), digest_size=_OUTPUT_DIGEST_BYTES)
+            self.outputs[digest.digest()] += 1
         self.templates[template] += 1
         if moment < self.earliest.get(template, (math.inf, 0)):
             self.earliest[template] = moment
@@ -226,7 +245,7 @@ class _Group:
         """Keep the excerpt of the template's prompt whose digest is smallest, not the prompt.
 
         A raw prompt per template was the export held again for per-call
-        prompts (m6). The smallest digest is the same whatever the records'
+        prompts. The smallest digest is the same whatever the records'
         order, and a stream of distinct prompts beats it only about ``ln n``
         times, so redaction runs a handful of times per template.
         """
@@ -249,6 +268,13 @@ class _Group:
             for model, (n, p, c, k) in sorted(self.usage.items())
         )
         scale = DAYS_PER_MONTH / days / sample_rate
+        completion = sum(u.completion_tokens for u in usage)
+        if self.priced_sum:
+            share = self.answerless_cost / self.priced_sum
+        elif completion:
+            share = self.answerless_completion / completion
+        else:
+            share = self.answerless / calls
         return Workload(
             id=self.key,
             template_hash=modal,
@@ -277,6 +303,8 @@ class _Group:
             media_calls=self.media,
             first_ts=self.first,
             last_ts=self.last,
+            answerless_calls=self.answerless,
+            answerless_spend_share=share if self.answerless else 0.0,
         )
 
 
@@ -288,7 +316,7 @@ def _later(moment: _Moment) -> _Moment:
 def _key(record: TraceRecord, template: str) -> tuple[str, str | None]:
     """The workload a record belongs to, and the name that keys it when it has one.
 
-    In order (N11, N12, spec D5 and section 14): the customer's own name for the
+    In order: the customer's own name for the
     step (``workload_hint``, a registered prompt's name); else the system
     prompt's template joined with the request's schema or forced tool; else, with
     neither, the shape of its answer.
@@ -316,7 +344,7 @@ def discover_workloads(
     :data:`STRUCTURE_SAMPLE` responses in time order. Rates are per day over
     the longer of ``window_days`` and the export's own timestamp span, so a
     partial export is never mistaken for a quiet month, and divided by
-    ``sample_rate`` when the export holds only that share of the traffic (N18);
+    ``sample_rate`` when the export holds only that share of the traffic;
     ``cost_usd_month`` is the export's own cost per call, extrapolated to every
     call and scaled to :data:`DAYS_PER_MONTH`. Ties in spend break by calls,
     then by id.
@@ -324,7 +352,7 @@ def discover_workloads(
     if not 0 < sample_rate <= 1:
         raise ValueError(f"sample_rate must be in (0, 1]; got {sample_rate}")
     # ponytail: one _Group per key, a few KB plus its first responses: unnamed per-call
-    # prompts (RAG in the system prompt) still make one per call, until N13 folds them.
+    # prompts (RAG in the system prompt) still make one per call, until a later change folds them.
     groups: dict[str, _Group] = {}
     for index, record in enumerate(records):
         template = normalize_template(record.system or "")

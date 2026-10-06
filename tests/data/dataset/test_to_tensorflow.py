@@ -93,10 +93,10 @@ def test_to_tf_native_obj_array_clamps_to_vocab_size(tmp_path: Path) -> None:
 
 
 def test_to_tf_native_clamps_rectangular_token_ids_to_vocab(tmp_path: Path) -> None:
-    """G306: rectangular, already-padded token ids above the embedding vocab must be
+    """Rectangular, already-padded token ids above the embedding vocab must be
     clamped to ``< vocab_size`` exactly like the ragged/object-dtype path above
     (test_to_tf_native_obj_array_clamps_to_vocab_size) and the pytorch native-numpy
-    loader (G247). Previously only the ragged path was clamped here, so a
+    loader. Previously only the ragged path was clamped here, so a
     rectangular IMDB-style array crashed a vocab-sized Embedding with "index out of
     range".
     """
@@ -210,7 +210,7 @@ def test_to_tf_native_indexable_splits(tmp_path: Path) -> None:
 
 
 def test_to_tf_native_indexable_segmentation_mask_label(tmp_path: Path) -> None:
-    # G109 regression: a 2-D segmentation mask target must materialize as a mask
+    # Regression: a 2-D segmentation mask target must materialize as a mask
     # batch, not raise "only 0-dimensional arrays can be converted to Python scalars"
     # from int(lbl). The mask keeps its [H, W] shape and integer dtype.
     ds = make_indexable_native_ds(label_kind="mask")
@@ -549,7 +549,7 @@ def test_native_to_tensorflow_short_tuple_sample_raises() -> None:
 
 
 def test_native_to_tensorflow_array_label_materializes() -> None:
-    # G109: a non-scalar (segmentation-mask) target must materialize as a 2-D array,
+    # A non-scalar (segmentation-mask) target must materialize as a 2-D array,
     # not raise. Previously int(lbl) rejected any label that wasn't a scalar index.
     class _MaskLabelDs:
         def __len__(self) -> int:

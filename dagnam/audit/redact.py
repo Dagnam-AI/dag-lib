@@ -1,4 +1,12 @@
-"""Redact every PII class the shared contract detects before a row touches disk (spec §10)."""
+"""Redact every PII class the shared contract detects: before a row is cut, and again on the cut row.
+
+A training row is redacted twice, and the second pass is the one that counts. The first
+(:func:`redact_records`) runs on the whole record before anything is cut, so a cut to the
+character budget can never land inside an identifier and ship the tail of it. The second
+(:func:`redact_rows`) runs on the row exactly as it will be uploaded -- cut to length, case
+folded -- and is never followed by a cut: whatever the first pass left, and any text a cut joined,
+is redacted last, so the uploaded row scans clean. A row already redacted is returned unchanged.
+"""
 
 from __future__ import annotations
 
@@ -8,13 +16,13 @@ from dataclasses import dataclass, replace
 import functools
 from typing import Any
 
-from dagnam_contracts.hygiene import PII_CODES, PiiAction, apply_pii_policy, scan_rows
+from dagnam_contracts.hygiene import PII_CODES, PiiAction, redact_rows as contract_redact_rows
 
 from dagnam.audit.readers.messages import effective_response
 from dagnam.audit.record import Message, TraceRecord
 
-# Spec U3: ``apply_pii_policy(rows, {every class: "redact"})`` -- the classes
-# come from the contract, so a detector added there is redacted here.
+# Every class the contract detects is redacted -- the classes come from the contract, so a
+# detector added there is redacted here.
 PII_POLICY: dict[str, PiiAction] = dict.fromkeys(PII_CODES, "redact")
 
 
@@ -28,12 +36,14 @@ class RedactStats:
 
 
 def redact_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], RedactStats]:
-    """Return redacted copies of ``rows`` (never dropped) with the per-class counts."""
-    scan = scan_rows(rows, max_issues=0)
-    redacted, rows_changed, _removed = apply_pii_policy(rows, PII_POLICY)
-    return redacted, RedactStats(
-        counts=scan.counts_by_code, pass_list=scan.pass_list, rows_changed=rows_changed
-    )
+    """Return redacted copies of ``rows`` (never dropped) with the per-class counts.
+
+    Call it on rows already in their final shape, and never cut them afterwards. The counts hold
+    every class, zero included, and are the number of placeholders of each class written.
+    """
+    redacted, counts = contract_redact_rows(rows)
+    changed = sum(new is not old for new, old in zip(redacted, rows, strict=True))
+    return redacted, RedactStats(counts=counts, pass_list=PII_CODES, rows_changed=changed)
 
 
 def redact_records(records: Sequence[TraceRecord]) -> tuple[list[TraceRecord], RedactStats]:
@@ -42,8 +52,8 @@ def redact_records(records: Sequence[TraceRecord]) -> tuple[list[TraceRecord], R
     A record's answer is its :func:`effective_response` -- its tool calls when
     it made some -- so the redacted copy carries that as its ``response`` and no
     tool calls: what is trained on is exactly what was redacted. A cut made
-    after redaction can only split a placeholder, never leave part of an
-    identifier behind. The system prompt an agent repeats on every call is
+    after this pass can never expose part of an identifier; the row is redacted again
+    once it is cut. The system prompt an agent repeats on every call is
     redacted once and its findings counted on every record.
     """
     rows = [

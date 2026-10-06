@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import closing
+import hashlib
 import logging
 from pathlib import Path, PurePosixPath
 import random
@@ -16,6 +17,7 @@ import uuid
 import requests
 from tqdm import tqdm
 
+from dagnam._core._resume import idempotency_in_progress, resume_create
 from dagnam._core._retry import RetryBudget, run_with_retry
 from dagnam._core.client.common import build_url, safe_response_text
 from dagnam._core.config import get_config_value
@@ -121,10 +123,30 @@ class BaseDagnamClient:
     def __init__(self, api_url: str, api_key: str) -> None:
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
+        self.resume_creates = False
+        """Let a create this caller repeats find what its first ask made, across processes.
+
+        Off, every create sends a random ``Idempotency-Key``: a process that died
+        after the platform committed -- Ctrl+C on a slow submit -- asks again
+        under a new key and gets a second resource. On, the creates marked
+        ``resumable`` derive the key from the request (:mod:`dagnam._core._resume`),
+        so the same ask inside the platform's 24-hour replay window returns what
+        the first one created. Only for a caller that never means the same
+        request as two creates, as ``dagnam audit run`` never does.
+        """
         self._session = requests.Session()
         self._retry_budget = RetryBudget()
         self._sleep: Callable[[float], None] = time.sleep
         self._rng: Callable[[], float] = random.random
+
+    @property
+    def identity(self) -> str:
+        """Who this client asks as: a digest of the host and the key, never either of them.
+
+        Two clients with the same identity see the same account; a local record of what one saw
+        proves nothing about what the other will see.
+        """
+        return hashlib.sha256(f"{self.api_url}\n{self.api_key}".encode()).hexdigest()[:16]
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
@@ -143,6 +165,10 @@ class BaseDagnamClient:
         allow_redirects: bool = True,
         idempotent: bool = False,
         idempotency_key: str | None = None,
+        resumable: bool = False,
+        resume_salt: str | None = None,
+        confirm: Callable[[requests.Response], bool] | None = None,
+        retry: bool = True,
     ) -> requests.Response:
         """Issue a request with shared transport mapping, status mapping, and retry.
 
@@ -151,6 +177,15 @@ class BaseDagnamClient:
         429/5xx into ``APIError`` (retried) and a domain 404 into its typed
         exception (surfaced immediately). POSTs retry only when ``idempotent`` (a
         key is minted) or a key is supplied.
+
+        ``resumable`` marks a create whose body names ids minted for this one
+        caller, so that on a client with ``resume_creates`` and no key of the
+        caller's own the key is derived from the request, not minted. A body that
+        could be anyone's (a project is a title) is keyed through ``resume_salt``
+        instead: a value only this caller holds, saved before the create, mixed
+        into the key. ``confirm`` reads back what a replayed answer names (see
+        :func:`dagnam._core._resume.confirmed_by`); ``retry=False`` sends the
+        request once, whatever it answers.
         """
         url = (
             path_or_url
@@ -160,45 +195,66 @@ class BaseDagnamClient:
         req_headers = dict(self._headers())
         if headers:
             req_headers.update(headers)
+        method_upper = method.upper()
+        replayed, in_progress = False, False
+
+        def send(key: str | None) -> requests.Response:
+            sent = req_headers if key is None else {**req_headers, "Idempotency-Key": key}
+
+            def _attempt() -> requests.Response:
+                nonlocal replayed, in_progress
+                replayed, in_progress = False, False
+                try:
+                    resp = self._session.request(
+                        method_upper,
+                        url,
+                        json=json,
+                        params=params,
+                        data=data,
+                        headers=sent,
+                        timeout=timeout,
+                        allow_redirects=allow_redirects,
+                    )
+                except requests.RequestException as exc:
+                    raise APIError(0, f"Request failed: {scrub_secret_params(str(exc))}") from exc
+                replayed = resp.headers.get("Idempotency-Replayed") == "true"
+                in_progress = idempotency_in_progress(resp)
+                try:
+                    raise_for(resp)
+                except APIError as exc:
+                    exc.retry_after_header = resp.headers.get("Retry-After")
+                    raise
+                return resp
+
+            return run_with_retry(
+                _attempt,
+                retryable=retry and (method_upper in {"GET", "HEAD", "PUT", "DELETE"} or bool(key)),
+                budget=self._retry_budget,
+                sleep=self._sleep,
+                rng=self._rng,
+                logger=_HTTP_LOGGER,
+                label=f"{method_upper} {url}",
+                idempotency_key=key,
+            )
+
+        if (
+            (resumable or resume_salt is not None)
+            and self.resume_creates
+            and idempotency_key is None
+        ):
+            keyed = json if resume_salt is None else {"salt": resume_salt, "body": json}
+            return resume_create(
+                send,
+                lambda: (replayed, in_progress),
+                method_upper,
+                url,
+                keyed,
+                sleep=self._sleep,
+                confirm=confirm,
+            )
         if idempotent and idempotency_key is None:
             idempotency_key = str(uuid.uuid4())
-        if idempotency_key is not None:
-            req_headers["Idempotency-Key"] = idempotency_key
-
-        method_upper = method.upper()
-        retryable = method_upper in {"GET", "HEAD", "PUT", "DELETE"} or bool(idempotency_key)
-
-        def _attempt() -> requests.Response:
-            try:
-                resp = self._session.request(
-                    method_upper,
-                    url,
-                    json=json,
-                    params=params,
-                    data=data,
-                    headers=req_headers,
-                    timeout=timeout,
-                    allow_redirects=allow_redirects,
-                )
-            except requests.RequestException as exc:
-                raise APIError(0, f"Request failed: {scrub_secret_params(str(exc))}") from exc
-            try:
-                raise_for(resp)
-            except APIError as exc:
-                exc.retry_after_header = resp.headers.get("Retry-After")
-                raise
-            return resp
-
-        return run_with_retry(
-            _attempt,
-            retryable=retryable,
-            budget=self._retry_budget,
-            sleep=self._sleep,
-            rng=self._rng,
-            logger=_HTTP_LOGGER,
-            label=f"{method_upper} {url}",
-            idempotency_key=idempotency_key,
-        )
+        return send(idempotency_key)
 
     @staticmethod
     def _expect_object(value: JsonValue | str | None) -> JsonObject:

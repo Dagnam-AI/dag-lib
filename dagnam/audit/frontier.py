@@ -1,4 +1,4 @@
-"""Replay the holdout through a served candidate, and pick the frontier's winner (spec U4, D3).
+"""Replay the holdout through a served candidate, and pick the frontier's winner.
 
 ``replay_holdout`` speaks the platform's OpenAI-compatible route with the
 deployment-scoped key: ``model``, ``messages`` and nothing else, because the
@@ -155,7 +155,7 @@ def replay_holdout(
     ``on_result(index, answer, ms)`` hears each row the moment it lands, so a
     caller can keep what an interrupted replay already paid for; an interrupt
     cancels the rows not yet sent and propagates. Every call goes through one
-    keep-alive pool of ``concurrency`` connections (R3-20), so a call's time is
+    keep-alive pool of ``concurrency`` connections, so a call's time is
     the model's and the gateway's, not a fresh TCP and TLS handshake.
     """
     workers = max(1, concurrency)

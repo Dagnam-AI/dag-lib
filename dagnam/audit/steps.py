@@ -19,17 +19,23 @@ from pathlib import Path
 import time
 from typing import Any, Protocol
 
+from dagnam._core.exceptions import PlatformAnswerError
 from dagnam._core.lro import LongRunningOperation
 from dagnam._types import JsonArray, JsonMapping, JsonObject
 from dagnam.audit.candidates import CandidateKind, CandidateSpec
 from dagnam.audit.secrets import SecretStore
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.structure import StructureClass
+from dagnam.audit.workspace import (
+    check_writable,
+    read_regular,
+    workload_dir as checked_workload_dir,
+)
 
 RUN_TIMEOUT_SECONDS = 7200.0
 """How long ``wait_run`` follows one training run before giving up (resumable)."""
 DEPLOY_TIMEOUT_SECONDS = 1200.0
-"""Spec section 9: a revision not active within this is ``deploy_timeout``."""
+"""A revision not active within this is ``deploy_timeout``."""
 TASK_TIMEOUT_SECONDS = 300.0
 """Dataset tasks (sniff, split, PII scan) settle in seconds; this is the ceiling."""
 
@@ -46,9 +52,18 @@ class PlatformClient(Protocol):
     """The ``DagnamClient`` methods the audit drives; a fake implements these and no more."""
 
     api_url: str
+    resume_creates: bool
+    """Set by the run: a create it repeats finds what the first ask made (see ``dagnam._core._resume``)."""
 
-    def create_project(self, payload: JsonObject) -> JsonObject:
-        """``POST /api/v1/projects`` (idempotent; the client retries transients)."""
+    def get_platform_build(self) -> JsonObject:
+        """``GET /health/build``: the running build, with the ``dagnam-contracts`` version it installed."""
+        ...
+
+    def create_project(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
+        """``POST /api/v1/projects`` (idempotent; the client retries transients).
+
+        ``resume_nonce`` is what lets a create that was interrupted replay its own project.
+        """
         ...
 
     def get_credit_balance(self) -> int:
@@ -65,8 +80,19 @@ class PlatformClient(Protocol):
         visibility: str = "private",
         license: str | None = None,
         progress_cb: object = None,
+        audit_id: str | None = None,
     ) -> JsonObject:
-        """``POST /api/v1/datasets/`` (multipart)."""
+        """``POST /api/v1/datasets/`` (multipart); ``audit_id`` has the platform tag the row."""
+        ...
+
+    def list_datasets(
+        self, type: str = "all", search: str | None = None, audit_id: str | None = None
+    ) -> list[JsonObject]:
+        """``GET /api/v1/datasets/browse``.
+
+        ``search`` matches the name and the description; ``audit_id`` keeps the datasets the
+        platform tagged with that audit.
+        """
         ...
 
     def get_dataset(self, dataset_id: str) -> JsonObject:
@@ -127,8 +153,15 @@ class PlatformClient(Protocol):
 
     # -- publishing the audit to the account (dagnam.audit.publish) -------------
 
-    def create_audit(self, payload: JsonObject) -> JsonObject:
-        """``POST /api/v1/audits`` -> the audit record (idempotent); its ``id`` is the ``audit_id``."""
+    def create_audit(self, payload: JsonObject, *, resume_nonce: str | None = None) -> JsonObject:
+        """``POST /api/v1/audits`` -> the audit record (idempotent); its ``id`` is the ``audit_id``.
+
+        ``resume_nonce`` is what lets a create that was interrupted replay its own audit.
+        """
+        ...
+
+    def claim_audit_resources(self, audit_id: str, entries: JsonArray) -> JsonObject:
+        """``POST /api/v1/audits/{id}/claims``: ask the platform to take ids made before the audit."""
         ...
 
     def create_audit_candidate(self, audit_id: str, payload: JsonObject) -> JsonObject:
@@ -145,20 +178,16 @@ class PlatformClient(Protocol):
         """``GET /api/v1/audits/{id}``: its ``status``; the uniform 404 once it is deleted."""
         ...
 
+    def get_project(self, project_id: str) -> JsonObject:
+        """``GET /api/v1/projects/{id}``: the project, with its ``owner_id``."""
+        ...
+
     def resume_audit(self, audit_id: str) -> JsonObject:
-        """``POST /api/v1/audits/{id}/resume``: un-halt it for a run starting again (K1b)."""
+        """``POST /api/v1/audits/{id}/resume``: un-halt it for a run starting again."""
         ...
 
     def halt_audit(self, audit_id: str, reason: str) -> JsonObject:
         """``POST /api/v1/audits/{id}/halt``."""
-        ...
-
-    def cancel_audit(self, audit_id: str) -> JsonObject:
-        """``POST /api/v1/audits/{id}/cancel`` -> the receipt of what it stopped."""
-        ...
-
-    def delete_audit(self, audit_id: str) -> JsonObject:
-        """``DELETE /api/v1/audits/{id}`` -> the receipt the CLI writes as ``deleted.json``."""
         ...
 
 
@@ -179,11 +208,17 @@ class StepContext:
     run_timeout: float = RUN_TIMEOUT_SECONDS
     deploy_timeout: float = DEPLOY_TIMEOUT_SECONDS
     task_timeout: float = TASK_TIMEOUT_SECONDS
+    platform_contracts: str | None = None
+    """The ``dagnam-contracts`` version the platform reported before the run; ``None`` if it did not."""
 
     @property
     def workload_dir(self) -> Path:
-        """``audit_dir/workloads/<id>``: ``dataset.jsonl``, ``split.json``, ``meta.json``."""
-        return self.audit_dir / "workloads" / self.workload_id
+        """``audit_dir/workloads/<id>``: ``dataset.jsonl``, ``split.json``, ``meta.json``.
+
+        Through :func:`~dagnam.audit.workspace.workload_dir`: an id that is not one
+        plain name, or a folder that is a link, is refused rather than followed.
+        """
+        return checked_workload_dir(self.audit_dir, self.workload_id)
 
     @property
     def label(self) -> str:
@@ -195,8 +230,8 @@ class StepContext:
         return state.candidate(self.workload_id, self.spec.kind)
 
     def meta(self) -> dict[str, Any]:
-        """``meta.json`` as Task 6 wrote it."""
-        return json.loads((self.workload_dir / "meta.json").read_text(encoding="utf-8"))
+        """``meta.json`` as the scan wrote it."""
+        return workload_meta(self.audit_dir, self.workload_id)
 
     def holdout_rows(self) -> int:
         """How many ``eval_holdout`` rows the replay sends: what its metered cost is projected on."""
@@ -208,9 +243,24 @@ type Answer = tuple[str | None, float]
 """One replayed row: the answer (``None`` when the call failed) and its round trip in ms."""
 
 
+def workload_meta(audit_dir: Path, workload_id: str) -> dict[str, Any]:
+    """One workload's ``meta.json``, read through the checked folder (never a link, never outside)."""
+    return json.loads(read_regular(checked_workload_dir(audit_dir, workload_id) / "meta.json"))
+
+
+def regular_path(path: Path) -> Path:
+    """``path``, once a link or anything that is not a regular file there has been refused.
+
+    For a file a client opens itself (the upload reads ``dataset.jsonl`` with ``open``): a
+    planted pipe would block it for ever while the audit directory is locked.
+    """
+    check_writable(path)
+    return path
+
+
 def replay_file(audit_dir: Path, workload_id: str, kind: CandidateKind) -> Path:
     """Where a candidate's replay writes each answer as it lands: ``workloads/<id>/replay-<kind>.jsonl``."""
-    return audit_dir / "workloads" / workload_id / f"replay-{kind.value}.jsonl"
+    return checked_workload_dir(audit_dir, workload_id) / f"replay-{kind.value}.jsonl"
 
 
 def _replay_lines(path: Path) -> tuple[dict[str, Any] | None, dict[int, Answer]]:
@@ -218,7 +268,7 @@ def _replay_lines(path: Path) -> tuple[dict[str, Any] | None, dict[int, Answer]]
 
     A head that does not parse is ``None``; a later line for a row wins.
     """
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    lines = read_regular(path).splitlines() if path.exists() else []
     parsed: list[Any] = []
     for line in lines:
         try:
@@ -256,6 +306,17 @@ def required(value: str | None, what: str) -> str:
     if value is None:
         raise RuntimeError(f"step ordering bug: {what} is not set yet")
     return value
+
+
+def answer_field(payload: Mapping[str, Any], key: str, what: str) -> str:
+    """``payload[key]`` of the platform's answer to ``what``, or an error that says what was missing.
+
+    A 200 whose body lacks the field is the platform's fault, not a ``KeyError`` of this client's.
+    """
+    value = payload.get(key)
+    if value is None:
+        raise PlatformAnswerError(f"the platform's answer to {what} had no {key!r}")
+    return str(value)
 
 
 def string_field(payload: Mapping[str, Any], key: str) -> str | None:
@@ -317,12 +378,15 @@ __all__ = [
     "PlatformClient",
     "Step",
     "StepContext",
+    "answer_field",
     "answered_rows",
     "error_code",
     "read_replay",
+    "regular_path",
     "replay_file",
     "required",
     "string_field",
     "wait_for",
     "wait_task",
+    "workload_meta",
 ]

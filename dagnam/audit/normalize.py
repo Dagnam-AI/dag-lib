@@ -41,16 +41,29 @@ def _brace(match: re.Match[str]) -> str:
     return "{" + ",".join(key.strip() for key in keys) + "}" if keys else "{VAR}"
 
 
+def _email(match: re.Match[str]) -> str:
+    """A run of local-part characters: an address when ``@domain`` follows it, else itself.
+
+    Matching ``local@domain`` alone starts the local part over from every
+    character of a run that no ``@`` follows, which is quadratic: 80,000
+    letters took 11 seconds. Taking the whole run in one match is linear.
+    """
+    return "<EMAIL>" if match.group(1) else match.group(0)
+
+
 # Order matters within a pass: placeholders are masked whole before their
 # contents could match anything else; URLs before emails (a URL may contain
 # ``@``); UUIDs and dates before bare numbers; a month name only beside a
 # number, so the prose "may" survives; quoted spans after every rule that can
-# change their length; whitespace last.
+# change their length; whitespace last. The email rule consumes every run of
+# local-part characters once, address or not (see :func:`_email`). Every rule
+# is linear in the text a pass reads: none can start over inside the run it has
+# just scanned (the tests time each against its own adversarial input).
 _RULES: tuple[tuple[re.Pattern[str], str | Callable[[re.Match[str]], str]], ...] = (
     (re.compile(r"\{\{[^{}]*\}\}"), "{{VAR}}"),
     (re.compile(r"\{([^{}\n]*)\}"), _brace),
     (re.compile(r"https?://\S+"), "<URL>"),
-    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<EMAIL>"),
+    (re.compile(r"[\w.+-]+(@[\w-]+(?:\.[\w-]+)+)?"), _email),
     (
         re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I),
         "<UUID>",
@@ -81,6 +94,10 @@ _RULES: tuple[tuple[re.Pattern[str], str | Callable[[re.Match[str]], str]], ...]
 )
 
 
+_MAX_PASSES = 8
+"""Passes after the first. A random mix of every rule's trigger settles in three at most."""
+
+
 def _mask_once(text: str) -> str:
     for pattern, replacement in _RULES:
         text = pattern.sub(replacement, text)
@@ -91,16 +108,25 @@ def _mask_once(text: str) -> str:
 def normalize_template(system: str) -> str:
     """Mask UUIDs, numbers, emails, URLs, dates and times, long quoted spans and placeholders.
 
-    Runs the rules to a fixed point: one pass can leave a new match behind
-    (two short quoted spans that a masked number between them joins into one
-    long span), and the template must be idempotent to be a stable id. Every
-    change consumes a digit, quote, ``@``, brace, name of a day or month, or
-    whitespace, and no rule puts one back, so the loop ends. An agent sends the
-    same system prompt on every call, so results are cached: the regexes run
-    once per distinct prompt, not once per call.
+    Runs the rules until a pass changes nothing, at most :data:`_MAX_PASSES`
+    more times: one pass can leave a new match behind (two short quoted spans
+    that a masked number between them joins into one long span). Below the cap
+    the template is a fixed point, so normalizing it again changes nothing;
+    above it (a prompt with more than eight layers of nested quoted spans, and a
+    value in the outermost) it is not, and two calls differing in that value can
+    get two ids, a workload split and nothing more. A pass is linear in the
+    prompt (see :data:`_RULES`), and so is the whole: each layer of *nested*
+    quoted spans takes a pass of its own, so an unbounded loop took a pass per
+    layer, 80,000 characters of them ten seconds. Real prompts settle within
+    three passes; a prompt that has not by the cap keeps what is masked so far.
+    An agent sends the same system prompt on every call, so results are
+    cached: the regexes run once per distinct prompt, not once per call.
     """
     masked = _mask_once(system)
-    while (again := _mask_once(masked)) != masked:
+    for _ in range(_MAX_PASSES):
+        again = _mask_once(masked)
+        if again == masked:
+            break
         masked = again
     return masked
 

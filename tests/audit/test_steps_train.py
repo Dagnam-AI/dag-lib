@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform
+from tests.audit._chat import Clock
+from tests.audit._platform import BASES, FakePlatform
+from tests.typing_helpers import RequestsMocker
 
+from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import APIError, QuotaExceededError
+from dagnam._types import JsonObject
 from dagnam.audit.candidates import HEAD_TUNE, SFT_SMALL, TRAINING_CREDITS_MAX, CandidateKind
 from dagnam.audit.state import AuditState, StepState
 from dagnam.audit.steps import StepContext, replay_file
@@ -46,7 +51,7 @@ def test_pick_base_is_the_smallest_ungated_sized_base_of_the_family(
 
 
 def test_credits_spent_counts_a_settled_run_at_its_charge_and_a_live_one_at_its_ceiling() -> None:
-    """B8: a run still going can cost up to its recipe ceiling, whatever the server first quoted."""
+    """A run still going can cost up to its recipe ceiling, whatever the server first quoted."""
     state = AuditState()
     assert credits_spent(state) == 0.0
     head = state.candidate("w1", CandidateKind.HEAD_TUNE)
@@ -88,6 +93,71 @@ def test_submit_sends_the_frozen_payload_and_records_the_run(
     assert step.training_cost_credits == 100.0
     submit(state, ctx)
     assert platform.submits == 1
+
+
+def test_a_published_audits_run_is_created_naming_the_audit_so_the_platform_tags_it(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    state = _ready()
+    state.audit_id = "audit-1"
+    submit(state, make_ctx())
+    assert platform.submitted[0]["audit_id"] == "audit-1"
+
+
+def test_an_unpublished_runs_create_carries_no_audit_id(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    submit(_ready(), make_ctx())
+    assert "audit_id" not in platform.submitted[0]
+
+
+def test_a_submit_interrupted_after_the_platform_took_it_is_found_by_the_next_run(
+    make_ctx: Callable[..., StepContext], requests_mock: RequestsMocker
+) -> None:
+    """Ctrl+C between the platform committing the run and ``state.json`` recording it.
+
+    The real client against the platform's own replay rule: the next ``audit
+    run`` sees no ``run_id`` and submits again. Under a random key that was a
+    second paid run and an orphaned first; the audit's client keys the create
+    by its content, so the second ask is answered with the first run.
+    """
+    started: list[str | None] = []
+    cache: dict[str | None, JsonObject] = {}
+
+    def submit_route(request: Any, context: Any) -> JsonObject:
+        key = request.headers.get("Idempotency-Key")
+        if key in cache:
+            context.headers["Idempotency-Replayed"] = "true"
+            return cache[key]
+        started.append(key)
+        cache[key] = {"run_id": f"run-{len(started)}", "training_job_id": "job-1"}
+        raise KeyboardInterrupt  # committed, cached, and the answer never arrives
+
+    requests_mock.get("https://api.test/api/v1/foundation-catalog", json=BASES)
+    requests_mock.post(
+        "https://api.test/api/v1/training/foundation-runs", status_code=201, json=submit_route
+    )
+    # A replayed answer is read back before it is trusted; the run is still there.
+    requests_mock.get(
+        "https://api.test/api/v1/training/foundation-runs/run-1", json={"run_id": "run-1"}
+    )
+
+    def audit_client() -> DagnamClient:
+        """What each ``dagnam audit run`` process builds."""
+        client = DagnamClient("https://api.test", "k")
+        client.resume_creates = True
+        return client
+
+    state = _ready()
+    with pytest.raises(KeyboardInterrupt):
+        submit(state, make_ctx(client=audit_client()))
+    assert state.workloads["w1"][CandidateKind.HEAD_TUNE].run_id is None
+
+    ctx = make_ctx(client=audit_client())
+    step = ctx.step(submit(state, ctx))
+
+    assert (step.run_id, step.training_job_id) == ("run-1", "job-1")
+    assert len(started) == 1  # one run on the platform, and the state names it
 
 
 def test_submit_without_an_estimate_or_display_name(
@@ -146,7 +216,7 @@ def test_the_budget_projection_counts_the_previous_replay(
 def test_the_first_submit_is_held_to_the_ceiling(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    """B8: `--max-credits 10` never submits a run whose own ceiling is 120 credits."""
+    """`--max-credits 10` never submits a run whose own ceiling is 120 credits."""
     state = submit(_ready(), make_ctx(max_credits=10))
     assert state.halted == {
         "reason": "budget",
@@ -160,7 +230,7 @@ def test_the_first_submit_is_held_to_the_ceiling(
 def test_the_next_submit_is_projected_at_its_own_ceiling_not_the_largest_so_far(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    """B8: a cheap first candidate no longer vouches for a dearer second one.
+    """A cheap first candidate no longer vouches for a dearer second one.
 
     9 spent, then 120 for this run's ceiling and 5 for its 4-row replay: 134.
     """
@@ -273,7 +343,7 @@ def test_wait_run_records_a_failed_run(
 def test_a_failed_run_is_charged_what_the_server_reports_not_its_estimate(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    """B12: the estimate is a ceiling, not a charge -- a run that died early cost what it used."""
+    """The estimate is a ceiling, not a charge -- a run that died early cost what it used."""
     platform.run_final_status = "failed"
     platform.run_extra = {"credits_consumed": 3}
     ctx = make_ctx()
@@ -298,7 +368,7 @@ def test_resolve_model_version_takes_the_version_the_run_reports(
 def test_a_run_that_reports_no_version_is_an_error_never_a_registry_guess(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, reported: dict[str, None]
 ) -> None:
-    """B7: the account's newest version can be another run's -- a Studio retrain, say.
+    """The account's newest version can be another run's -- a Studio retrain, say.
 
     So a completed run that does not name the version it pushed is recorded as
     such, and nothing reads the registry to guess.
@@ -316,7 +386,7 @@ def test_a_run_that_reports_no_version_is_an_error_never_a_registry_guess(
 
 
 def test_a_replay_whose_cost_was_never_read_counts_at_its_projection(tmp_path: Path) -> None:
-    """M2: a failed balance read left `replay_cost_credits` unset, which the budget read as 0."""
+    """A failed balance read left `replay_cost_credits` unset, which the budget read as 0."""
     state = AuditState()
     scored = state.candidate("w1", CandidateKind.HEAD_TUNE)
     scored.scored = True
@@ -340,7 +410,7 @@ def test_a_replay_whose_cost_was_never_read_counts_at_its_projection(tmp_path: P
 
 
 def test_a_replay_file_a_crash_cut_short_never_breaks_the_budget(tmp_path: Path) -> None:
-    """R4: a head line cut mid-write made every budget check -- and the listing -- raise."""
+    """A head line cut mid-write made every budget check -- and the listing -- raise."""
     state = AuditState()
     cut = state.candidate("w2", CandidateKind.SFT_SMALL)
     cut.deployment_id = "dep-2"

@@ -401,8 +401,33 @@ dagnam agent uninstall --all
 
 Rescanning the same export preserves a run's progress. A changed export requires a new
 `--out`, or `--force` for a local-only run: the old candidates are retired for cleanup,
-and subsequent training and scoring start fresh. Once an audit has been published,
-changed rows always require a new `--out`, even with `--force`.
+and subsequent training and scoring start fresh. Retiring a candidate does not stop it: a
+run of its that is still training keeps training, and billing, and its endpoint stays up.
+The scan names every retired run and endpoint that is still live, `dagnam audit status`
+lists them as `retired` under their workload, and `dagnam audit cancel ./audit` stops them. Once an audit has
+been published, changed rows always require a new `--out`, even with `--force`.
+A rescan removes only the `workloads/<id>/` folders that the directory's previous scan wrote
+and the new one no longer derives; anything else under `workloads/` is left alone and named in
+the scan's warnings. `--out` may be a symbolic link to a directory (it is resolved once), but a
+link inside the audit directory, or a pipe or directory where the scan expects a file, is refused
+with the path named.
+
+**What the scan does with a model's reasoning.** It is kept out of the training prompts and
+answers for the reply shapes the scan reads: a chat message, Chat Completions, Responses, Anthropic
+blocks, Gemini, Bedrock Converse, Ollama, Cohere, LangChain and AI SDK parts, and the same as JSON
+text; a message's own reasoning fields (`reasoning_content`, `reasoning_details`,
+`reasoningDetails`, `reasoning_summary`, ...); `<think>`, `<thinking>`, `<thought>` and
+`<reasoning>` tags before the answer; and a reply that has reasoning, `</think>` alone on its line,
+then the answer, or nothing (DeepSeek-R1, Qwen3, QwQ without a reasoning parser). A call that is
+only reasoning, such a reply without its answer included, is kept in the workload's calls and spend and gives no training row, and the scan says
+how many. **Not covered:** a response object of an SDK or tool the scan does not know, logged
+whole by hand, is kept as written unless its reasoning sits under a name that is only ever
+reasoning. `reasoning`, `thinking`, `thoughts`, `rationale` and `scratchpad` are also the names
+of a structured answer's own fields, so they are not guessed at; raw channel-delimited text of the
+open-weight OpenAI models, content parts typed `analysis`, a complete reasoning tag in the
+middle of an answer, and a `</think>` that is not alone on its line (the reasoning's last sentence
+ends on it, the answer starts on it) or is upper case are kept too. If your logs hold such objects, map the answer's own field
+with `--map response=<column>`.
 
 **`audit scan` prices the providers your agent actually calls.** The bundled price table
 (`dagnam/audit/prices/2026-09.json`, copied from each vendor's own pricing page on the table's
@@ -434,14 +459,27 @@ prompt's template plus the name of the request's response schema or forced tool 
 tools it offers, which an agent changes from call to call), else, without a system prompt, by
 the shape of its answers. A tool-calling workload is audited on its calls, as
 `{"name", "arguments"}` JSON (a list when the teacher made several), and the scan says what its
-replacement returns; reasoning (`<think>`, thinking blocks, Gemini thoughts) is never taken
-for the answer; a workload whose calls carry images, audio or files is not audited. When the
+replacement returns; a workload whose calls carry images, audio or files is not audited. When the
 export holds a sample of your traffic, `--sample-rate 0.1` scales volume and spend back up.
 Each candidate trains on at most 5,000 rows (a sample by label or route), so it finishes
 inside its recipe's one-hour limit; the scan report says when a workload was sampled. An SFT
 candidate's student reads 2,048 tokens, so training rows the scan estimates are longer are
 left out and counted, and a workload left with fewer than 32 is `too_few_samples`. The
-estimate is within about 10% of the student's own tokenizer on English, JSON and code.
+estimate needs no tokenizer and guesses no language: it normalises to NFC as the student's
+tokenizer does, starts every character at its UTF-8 bytes, and discounts it only where the
+student's own vocabulary shows a merge. On natural text of the kinds measured it is at least 0.95
+of the student's count (0.954 at the lowest of 2,498 held-out rows), 1.04 at the
+median and 1.22 at the 95th percentile: about 1.2 for German, Spanish, French and Portuguese,
+1.12 for code, 1.06 for Chinese. A few scripts with no natural text to measure on (Syriac,
+Cherokee, Gothic and the like) are priced at their bytes. On random or crafted text there is no such floor: it can
+count about half the real tokens (0.486 at the lowest on random Cyrillic words, 0.504 on random
+Thai, 0.547 to 0.62 on a repeated number sign or random Tibetan, 0.75 on licence keys, 0.88 to 0.90
+on base32 over plausible text), and 0.36 on crafted alternating han units, so a row estimated to
+fit the 2,048-token cap can exceed it by up to about 2.8 times on crafted text. Pairs of han units
+that break each other and cycles of 9 or more fragile han units are not seen by its 8-unit window,
+a known limit. It is
+never above the UTF-8 byte count of the NFC form of the text. A text of a few
+tokens rounds up.
 
 **Watch it on the website.** `dagnam audit run` mirrors the audit into your account as it
 goes -- the scan's workloads (ids, verdicts, spend, masked template excerpts and the redaction
@@ -450,24 +488,123 @@ what the replay cost -- so the audit page shows a run in flight and keeps the re
 finishes. When the audit is created the run prints where to watch it
 (`published: <audit-id> — watch it at https://dagnam.ai/audits/<audit-id>`), and
 `dagnam audit status ./audit` repeats the link. The derived rows, the raw traces and the
-deployment keys stay on your machine; the run itself never depends on the upload, and a publish
-that fails is retried with the next step, at the end of the run, or on the next `dagnam audit
-run`, rather than stopping the audit. A run that stopped short is published as halted, and each
+deployment keys stay on your machine. Once the audit exists, a publish that fails is retried with
+the next step, at the end of the run, or on the next `dagnam audit run`, rather than stopping
+the run; but the audit itself must exist first (below). A run that stopped short is published as halted, and each
 `dagnam audit run` resumes its audit when it starts, before it waits on anything. Cancel or
 Delete on the audit page stops a live run at its next step: the platform stops the jobs and
 endpoints it knows about at once, the run's next publish meets the halt (or the missing
 audit), and the run halts as `cancelled` (or `deleted`) and starts nothing more.
-`dagnam audit run ./audit --local-only` publishes nothing;
-`dagnam audit cancel ./audit` stops the jobs and pauses the endpoints, writing `cancelled.json`
-(under a live published run it cancels in the account and asks you to run it again once the
-run has stopped); and `dagnam audit delete ./audit` deletes everything the run created on the
-platform (a run still going is cancelled first; a project the platform keeps because it holds
-your own work is left alone), writes `deleted.json`, and then removes the local `workloads/`
-rows and the deployment keys, even when the platform blocked something — the audit's own files
-(`state.json`, `scan-report.json`, `audit-report.json`, `deleted.json`) stay where they are,
-and running it again retries whatever was blocked. Both act on every artifact
-`state.json` records, including any the account never heard about, and each receipt row is
-`stopped`/`deleted`, `already_absent`, or `blocked` with the platform's reason.
+`dagnam audit run ./audit --local-only` publishes nothing to your account (the rows are
+still uploaded to the platform and trained there). A published run creates its audit first
+and sends the audit's id with every dataset, training run and endpoint it creates, so the
+platform tags each one at creation; if the audit cannot be created the run stops, before it
+uploads anything, and says to run it again. (A `--local-only` run has no audit to tag with, so each
+dataset's description carries a `[<directory key>/<workload>/<candidate>]` marker that only this
+machine's rerun reads, to find its own upload after an interrupted one; a published run's datasets
+are found by the audit's tag instead and carry no marker.)
+
+**Cancel and delete.** For a published audit the platform's own cancel and delete are the only
+things that touch its resources. `dagnam audit cancel ./audit` and `dagnam audit delete ./audit`
+ask the platform once, print its receipt, record what it decided, write `cancelled.json` /
+`deleted.json`, and (for a delete the platform completed) remove the local `workloads/` rows and
+the deployment keys. They never finish the job with calls of their own: if the platform does not
+answer, refuses, or times out, the receipt has one `audit blocked [not_answered]` row, nothing
+remote or local is touched, and the exit status is 1 -- run it again. If another cancel or delete
+of the same audit is still walking it (`409 teardown_in_progress`), or the platform cannot take its
+lock just now (`503 teardown_unavailable`), the command waits (the platform's `Retry-After`, whatever
+its length up to two minutes in all; five seconds when it sends none) and asks again. A 404 decides nothing: it says
+only that THIS key cannot see the audit (another account's key after `dagnam login`, another
+host, or a deleted audit). The command prints the host and masked key it asked, keeps every local
+row, the deployment keys and `state.json`, and exits 1; ask again with the right key. Only the
+platform's positive answer marks an audit deleted. If you know it is deleted (the website, or an
+older platform answering a repeat delete with 404), `dagnam audit delete ./audit
+--already-deleted` removes the local files; that cannot be undone, so check `dagnam whoami` first. A delete the platform reports `halted` (something was
+refused) removes nothing local and exits 1; the next delete asks again. A run still going keeps
+`state.json` and its lock: a cancel asks the platform, which halts the audit, and the run stops at
+its next step. A deleted audit's directory refuses `run` and `cancel`.
+
+An audit that was never published (`--local-only`, or a run that never reached `create_audit`) has
+no platform record, so `state.json`'s own ids -- only what this directory created -- are stopped
+and deleted from here, each re-read to confirm it is gone; a registry version is purged through its
+own route (`DELETE /api/v1/model-versions/{id}`), never by deleting its registry entry, and one the
+platform cannot purge is reported `blocked [platform_only]`; one a live endpoint serves is refused
+by the platform and shown as `kept [weights_served]` (the delete finishes around it). A dataset a
+project this directory did not create has linked is `kept [in_use_elsewhere]`, never deleted, and
+recorded in `state.json` so no later walk or cancel touches it; if the owner's projects cannot be
+read to check (an answer of the wrong shape, a failed read, more than 100 pages of projects), the
+dataset is `blocked`, not guessed at. The project stays while anything in it
+does. A walk changes nothing local, and marks nothing, unless its key is shown to see the account
+(not-found is what another account's key is told for every id, and a walk where the rest failed
+cannot tell the two apart): by a deletion this same key and host confirmed earlier
+(`confirmed_gone` and `confirmed_by`, a digest of both, in `state.json`; another account's key never
+counts), by a delete or stop that just succeeded, by a keep the platform's own purge answered, or by a read
+of a recorded deployment or training run (a project, dataset or model version can be public, and a
+dataset can be linked into another account's project, so reading or finding those proves nothing).
+An id whose delete (or not-found) and re-read both failed also keeps the
+deployment keys and the local rows, whatever else the walk did. The receipt and the error name the
+host and masked key asked and `dagnam audit delete --already-deleted` as the way to say it is gone.
+A `state.json` that is not JSON, or has a field of the wrong type, is named and stops the command
+before anything is touched. The ids live in `state.json`: if it is lost, nothing in this directory
+can find what an unpublished run created (a published audit's resources are still found by the
+platform, from the audit's page); and a create whose answer was lost, in a run nobody finished, is
+in no state file at all.
+
+**Publishing a directory first run `--local-only`.** The audit is created first, and then asked to
+claim everything the earlier run made (datasets, runs, endpoints, the project). A claim the
+platform refuses is not a verdict that it is not yours: this directory created it, so `audit delete`
+removes it itself once the platform has deleted the audit, and `audit cancel` stops it; the run says
+so when it happens. The one exception is a refusal with the code `in_use_elsewhere` (a dataset one of
+your other runs uses, or the run that made it): that is yours, not this directory's, so it is
+recorded as kept, shown, and never stopped or deleted from here. What the platform's own receipt has
+a row for is the platform's, and is never walked from here. A refused id this client cannot remove
+(a failure, a refusal) is named in the receipt and the command exits 1 once; it does not keep the
+directory out of the deleted state, and a repeat delete finishes. A claim request that fails as a
+whole halts the run (`publish_failed`), tells the platform the run stopped, says that the earlier
+run's resources still exist (an endpoint may be serving: `dagnam audit cancel` stops it), and is
+asked again next time. Publish a `--local-only` directory only once its run has finished: a create whose answer was lost in the unpublished run cannot be found again after the audit exists (the platform replays a create only for an identical body, and the published body names the audit). **An audit an
+older dagnam published** never named its resources to the platform, so the platform keeps what it
+cannot prove the audit created; `audit delete` offers to claim them before it deletes (one
+confirmation), and says plainly which of this directory's resources the platform kept and why. A
+claim that cannot be made (the platform has no such route, or does not answer) is said, and the
+delete goes on without it.
+
+Each receipt row has a `status` and a stable `code`; this client reads those and never the wording
+of a reason. `deleted`, `already_absent` and `stopped` mean nothing is left; `stopped` with the
+code `already_stopped` means the run had already finished (or the endpoint was paused) and marks
+nothing, so a finished run stays resumable. `kept` is a decision to leave something that is not
+the audit's to take -- a project that holds your other work, weights another deployment still
+serves, a run, endpoint or dataset that now belongs to another project, something a step named
+but the audit did not create -- and the audit is deleted around it: it is shown, recorded in
+`state.json` (`kept_ids`), never touched from here, and never fails a command. `blocked` is one
+of the audit's own resources refused or failed, and is what is left: it is never retried from
+here. A platform older than the `code` column is read from the status and the four reasons it
+used; a row with a status this version does not know is shown as sent, left alone, and counts as
+not finished. Rows this client writes carry `not_answered`, `not_removed` (a local file behind a
+link, or an unpublished id that would not go) or `platform_only`.
+
+Exit status, from one function: `delete` and `cancel` exit 1 if and only if something of the
+audit's own is left -- a `blocked` row, a row this version cannot read, a platform that did not
+answer, a delete the platform halted, or a local file behind a link (never followed). A `kept` row
+never fails a command. The last line says whether everything is gone, everything except what was
+kept on purpose, or what is left. A platform answer of the wrong shape on a route other than
+cancel and delete (an empty object where a document is expected, say) ends the command with a
+generic "unexpected error" naming the Python error rather than the route: a known limit, not a
+state change. Commands resolve the audit directory argument once, so a
+directory named through a link (a temporary or home directory) works; links inside it are refused.
+
+**The platform re-scans what you upload, and a disagreement stops the workload.** Your rows
+are redacted on your machine before they are uploaded (before the character budget cuts a row,
+so no cut exposes part of an identifier, and again on the cut row exactly as it is uploaded, so it
+scans clean and a second pass changes nothing), and the platform scans the uploaded
+dataset again before anything is trained on it. If the two disagree the workload stops as
+`pii_disagreement`, and the reason, printed under the workload's line and written to the
+report (each candidate's `error`), says which of three things happened: the platform runs an older privacy contract than this SDK (it scanned
+fewer classes), it runs a newer one (it found matches in classes the scan did not look
+for: upgrade `dagnam-contracts` and scan again), or the two detectors really disagree. When
+the platform's contract differs from this install's at any level, the reason names both versions
+and which to move. The rows are already uploaded when the check runs; `dagnam audit delete
+./audit` removes them, and, since there is no narrower form, the whole audit with them.
 
 **`--max-credits` is a hard ceiling.** `dagnam audit run` never starts a training run or a
 holdout replay that could take the credits spent past it: a run is budgeted at the most its
@@ -538,6 +675,11 @@ The client is resilient to transient platform failures out of the box:
   server `Retry-After` is honored but capped.
 - **Idempotency keys.** A retriable `POST` mints a `uuid4` `Idempotency-Key`
   once and reuses it across retries, so a retried create is never applied twice.
+  That covers one call. `dagnam audit run` goes further (`DagnamClient.resume_creates`):
+  its run, deployment and audit creates derive the key from the request, so a
+  run you interrupt and start again finds what the first attempt created
+  instead of paying for it twice, for as long as the platform keeps the answer
+  (24 hours).
 - **Cross-process cache safety.** Cache writes and LRU eviction are serialized
   with a file lock, so multiple processes sharing a cache root don't corrupt it.
 - **Credential-safe logging.** Namespaced loggers
@@ -591,6 +733,21 @@ Set by the platform inside training jobs — not intended for manual use:
 
 The SDK talks to the hosted Dagnam API (`https://api.dagnam.ai`), which always
 runs its current version. Use the latest SDK release with it.
+
+**The platform is upgraded first, then the SDK is released.** The workload audit
+redacts your rows with the `dagnam-contracts` version this SDK installs, and the
+platform re-scans them with its own, so the platform must run at least the contract
+minor the SDK installs. Each SDK release therefore pins that minor (`dagnam-contracts>=X.Y,<X.(Y+1)`)
+and is published only after the hosted platform reports a contract at or above
+it; the release pipeline checks this before it builds anything. `dagnam audit
+run` checks it too, before its first upload (with `--local-only` as well, which
+still uploads and trains on the platform): against a platform that is behind
+(a private deployment not upgraded yet, say), or one that does not report its
+contract, it stops with `platform_too_old`, names both versions, and uploads and
+spends nothing by this run. Upgrade the platform. A platform a patch ahead of the
+installed contract warns first and names `pip install -U dagnam-contracts`: a
+patch changes what is found inside the same classes. The check is made by
+`dagnam.audit.orchestrate.run_audit` itself, so library callers get it too.
 
 | SDK version | Status |
 | --- | --- |

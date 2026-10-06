@@ -1,5 +1,5 @@
 """The SDK reproduces the backend's per-component param-diagnostics golden
-byte-for-byte — the structured-message parity oracle (spec §6). The catalog is
+byte-for-byte — the structured-message parity oracle. The catalog is
 shipped in the generated schema; the SDK renders from it, it never hand-writes
 messages."""
 

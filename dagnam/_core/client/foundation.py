@@ -16,10 +16,14 @@ response model is declared here, and none should be.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from dagnam._core._resume import confirmed_by, created_body, gone
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
     BaseDagnamClient,
+    requests,
 )
 from dagnam._core.client.common import (
     quote_path_segment,
@@ -75,6 +79,9 @@ class FoundationClientMixin(BaseDagnamClient):
         params: QueryParams | None = None,
         json_body: JsonValue = None,
         idempotent: bool = False,
+        resumable: bool = False,
+        confirm: Callable[[requests.Response], bool] | None = None,
+        read_back: Callable[[str], JsonObject] | None = None,
     ) -> JsonValue:
         """Issue an authenticated foundation request and decode its JSON body.
 
@@ -92,8 +99,14 @@ class FoundationClientMixin(BaseDagnamClient):
             timeout=DEFAULT_TIMEOUT,
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=idempotent,
+            resumable=resumable,
+            confirm=confirm,
         )
-        return response_json_value(resp)
+        value = response_json_value(resp)
+        if read_back is not None and isinstance(value, dict):
+            # A replay that dropped its body points at the run it made: read it.
+            return created_body(resp, value, read_back, "run_id")
+        return value
 
     def list_foundation_catalog(self, *, page: int = 1, limit: int = 20) -> JsonArray:
         """One bounded page of the curated base models. ``GET /foundation-catalog``.
@@ -118,10 +131,23 @@ class FoundationClientMixin(BaseDagnamClient):
 
         Sends an ``Idempotency-Key``: this call reserves GPU credits, so a
         transient failure must retry into a server-side replay rather than
-        start a second run.
+        start a second run. Resumable (``resume_creates``), so a process that
+        died after the submit landed finds that run instead of paying for a
+        second: the body names the project and the dataset version. A replay is
+        read back, and a run deleted since is submitted afresh.
         """
         return self._expect_object(
-            self._foundation_request("POST", _RUNS_PATH, json_body=payload, idempotent=True)
+            self._foundation_request(
+                "POST",
+                _RUNS_PATH,
+                json_body=payload,
+                idempotent=True,
+                resumable=True,
+                read_back=self.get_foundation_run,
+                confirm=confirmed_by(
+                    self.get_foundation_run, gone(FoundationRunNotFoundError), "run_id"
+                ),
+            )
         )
 
     def get_foundation_run(self, run_id: str) -> JsonObject:

@@ -1,9 +1,10 @@
-"""Data steps: each skips itself once done, uploads exactly Task 6's files, and checks the server's scan."""
+"""Data steps: each skips itself once done, uploads exactly the scan's files, and checks the server's scan."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import timedelta
+import os
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from tests.audit._platform import FakePlatform
 from tests.audit._records import T0, make_record
 from tests.audit.conftest import HOLDOUT, TRAIN
 
+from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
 from dagnam.audit import build_dataset, write_workload
 from dagnam.audit.state import AuditState
@@ -24,6 +26,8 @@ from dagnam.audit.steps_data import (
     wait_pii,
     wait_split,
 )
+from dagnam.audit.steps_serve import holdout
+from dagnam.audit.workspace import NotRegularFileError, UnsafeWorkloadsError
 
 
 def _through_split(state: AuditState, ctx: StepContext) -> AuditState:
@@ -38,7 +42,7 @@ def test_a_tool_argument_secret_is_redacted_before_it_is_uploaded(
     audit_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """N4 (C2b): P4 trains on tool arguments, so a `login` call's password was in the rows.
+    """A tool-calling workload trains on tool arguments, so a `login` call's password was in the rows.
 
     The assignment pattern needed an unquoted `key:`/`key=`, and inside JSON the
     key and the value were redacted as separate strings -- `{"password": ...}`
@@ -211,46 +215,187 @@ def test_pii_scan_targets_the_split_version_and_agrees_when_clean(
     assert len(platform.call_log) == calls
 
 
-def test_pii_residual_finding_is_a_disagreement(
+def test_an_upload_the_platform_committed_and_the_client_never_heard_back_is_adopted(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    platform.pii_counts = {"ds-1": {"PII_EMAIL": 2, "PII_PHONE": 0}}
-    ctx = make_ctx()
-    state = _through_split(AuditState(), ctx)
-    step = ctx.step(wait_pii(pii_scan(state, ctx), ctx))
-    assert step.pii_agrees is False
-    assert step.error == (
-        "pii_disagreement: server found {'PII_EMAIL': 2} after client redaction; "
-        "classes the server did not scan: []"
+    """Ctrl+C or a timeout after the multipart POST landed, then the same command again.
+
+    The platform cannot replay a multipart create, so a rerun used to upload the customer's rows
+    a second time and leave the first dataset under no record in ``state.json`` -- where ``audit
+    delete`` never looks. The rerun changes its flags and still finds it: the key is the
+    directory's nonce and the candidate, nothing a flag moves.
+    """
+    platform.lost_uploads = 1
+    with pytest.raises(APIError):
+        upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
+    assert platform.call_log == ["get_project", "list_datasets", "upload_dataset"]
+
+    ctx = make_ctx(floor=0.5, max_credits=999)
+    step = ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx))
+
+    assert step.dataset_id == "ds-1"
+    assert list(platform.uploads) == ["ds-1"]  # one dataset on the platform, and the state names it
+    assert platform.call_log[3:] == ["get_project", "list_datasets"]
+
+
+def test_the_key_is_in_the_description_not_the_name(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
+    name, description = platform.dataset_rows["ds-1"]
+    assert name == "audit-w1-head_tune"
+    assert (
+        description == "workload audit w1/head_tune: derived, redacted rows [nonce-a/w1/head_tune]"
     )
 
 
-def test_pii_class_the_server_did_not_scan_is_a_disagreement(
+@pytest.mark.parametrize(
+    ("nonce", "workload"),
+    [("nonce-b", "w1"), ("nonce-a", "w2")],
+    ids=["another directory", "another candidate"],
+)
+def test_another_directorys_or_candidates_upload_is_never_adopted(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, nonce: str, workload: str
+) -> None:
+    upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), make_ctx())
+    ctx = make_ctx(workload_id=workload, structure_class="enum_label")
+    state = upload(AuditState(project_id="proj-1", project_nonce=nonce), ctx)
+    assert ctx.step(state).dataset_id == "ds-2"
+    assert len(platform.uploads) == 2
+
+
+def test_a_dataset_that_only_mentions_the_key_is_not_adopted(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    platform.pii_pass_list = ["PII_EMAIL"]
+    """The search is a substring match on the name and description; the bracketed key is the proof."""
+    platform.dataset_rows["ds-9"] = ("audit-w1-head_tune", "see nonce-a/w1/head_tune for details")
+    platform.dataset_rows["ds-8"] = ("somebody-elses", "workload audit [nonce-a/w1/head_tune]")
     ctx = make_ctx()
-    state = _through_split(AuditState(), ctx)
-    step = ctx.step(wait_pii(pii_scan(state, ctx), ctx))
-    assert step.pii_agrees is False
-    assert step.error is not None
-    assert step.error.endswith("['PII_NATIONAL_ID', 'PII_PAYMENT_CARD', 'PII_PHONE']")
+    assert (
+        ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx)).dataset_id
+        == "ds-1"
+    )
 
 
-def test_pii_result_without_counts_or_pass_list_cannot_agree(
+def test_the_newest_of_several_uploads_is_the_one_adopted(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    tag = "workload audit w1/head_tune: derived, redacted rows [nonce-a/w1/head_tune]"
+    platform.dataset_rows["ds-old"] = ("audit-w1-head_tune", tag)
+    platform.dataset_rows["ds-new"] = ("audit-w1-head_tune", tag)
+    ctx = make_ctx()
+    size = (ctx.workload_dir / "dataset.jsonl").stat().st_size
+    platform.dataset_sizes.update({"ds-old": size, "ds-new": size})  # both are this file
+    assert (
+        ctx.step(upload(AuditState(project_id="proj-1", project_nonce="nonce-a"), ctx)).dataset_id
+        == "ds-new"
+    )
+    assert platform.uploads == {}  # nothing was uploaded
+
+
+class TestPublished:
+    """A published audit's upload is tagged by the platform at creation; the audit id is the key."""
+
+    def test_the_upload_names_the_audit_and_carries_no_key_in_its_description(
+        self, make_ctx: Callable[..., StepContext], platform: FakePlatform
+    ) -> None:
+        state = AuditState(project_nonce="nonce-a", audit_id="audit-1")
+
+        step = make_ctx().step(upload(state, make_ctx()))
+
+        assert step.dataset_id == "ds-1"
+        assert platform.dataset_tags == {"ds-1": "audit-1"}
+        assert (
+            platform.dataset_rows["ds-1"][1]
+            == "workload audit w1/head_tune: derived, redacted rows"
+        )
+
+    def test_a_lost_upload_is_adopted_by_the_audits_tag_and_the_name(
+        self, make_ctx: Callable[..., StepContext], platform: FakePlatform
+    ) -> None:
+        platform.lost_uploads = 1
+        with pytest.raises(APIError):
+            upload(AuditState(audit_id="audit-1"), make_ctx())
+
+        ctx = make_ctx(floor=0.5)
+        step = ctx.step(upload(AuditState(audit_id="audit-1"), ctx))
+
+        assert step.dataset_id == "ds-1"
+        assert platform.call_log[3:] == ["get_audit", "list_datasets"]
+        assert len(platform.uploads) == 1
+
+    def test_another_audits_dataset_of_the_same_name_is_never_adopted(
+        self, make_ctx: Callable[..., StepContext], platform: FakePlatform
+    ) -> None:
+        platform.dataset_rows["ds-9"] = ("audit-w1-head_tune", "")
+        platform.dataset_tags["ds-9"] = "audit-2"
+        ctx = make_ctx()
+        assert ctx.step(upload(AuditState(audit_id="audit-1"), ctx)).dataset_id == "ds-1"
+
+
+@pytest.mark.parametrize(
+    "fresh",
+    [
+        lambda: AuditState(project_id="proj-1", project_nonce="nonce-a"),
+        lambda: AuditState(audit_id="audit-1"),
+    ],
+    ids=["unpublished", "published"],
+)
+def test_a_dataset_the_state_already_records_is_never_adopted_by_another_candidate(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, fresh: Callable[[], AuditState]
+) -> None:
+    """A forced rescan retires the old candidate (its id stays in ``state.retired``): its dataset
+    holds the old rows, so the new candidate of the same name must upload its own."""
+    first = make_ctx()
+    state = fresh()
+    first.step(upload(state, first))
+    old = first.step(state)
+    state.retired.append(old)
+    state.workloads.clear()
+
+    ctx = make_ctx()
+    again = ctx.step(upload(state, ctx))
+
+    assert (old.dataset_id, again.dataset_id) == ("ds-1", "ds-2")
+    assert len(platform.uploads) == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a named pipe needs POSIX")
+def test_an_upload_file_that_is_not_a_regular_file_is_refused_before_it_is_opened(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    def must_not_be_reached(*_args: object, **_kwargs: object) -> JsonObject:
+        raise AssertionError("the upload was reached: a pipe would have blocked it for ever")
+
+    monkeypatch.setattr(platform, "upload_dataset", must_not_be_reached)
     ctx = make_ctx()
-    state = pii_scan(_through_split(AuditState(), ctx), ctx)
-    monkeypatch.setattr(
-        platform,
-        "get_dataset_task_status",
-        lambda task_id: {
-            "status": "SUCCESS",
-            "result": {"counts_by_code": None, "pass_list": None},
-        },
-    )
-    step = ctx.step(wait_pii(state, ctx))
-    assert step.pii_agrees is False
-    assert step.error is not None
-    assert "server found {} after" in step.error
+    target = ctx.workload_dir / "dataset.jsonl"
+    target.unlink()
+    os.mkfifo(target)  # a pipe would block the upload for ever, under the audit's lock
+
+    with pytest.raises(NotRegularFileError):
+        upload(AuditState(project_nonce="n"), ctx)
+
+    assert "upload_dataset" not in platform.call_log
+
+
+@pytest.mark.skipif(os.name == "nt", reason="creating a symlink needs a privilege on Windows")
+@pytest.mark.parametrize("name", ["split.json", "meta.json", "dataset.jsonl"])
+def test_a_file_a_step_reads_back_from_the_audit_directory_is_never_read_through_a_link(
+    make_ctx: Callable[..., StepContext], tmp_path: Path, name: str
+) -> None:
+    """Whatever a link points at (another user's file, a secret) must not be read into a step."""
+    ctx = make_ctx()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("{}", encoding="utf-8")
+    target = ctx.workload_dir / name
+    target.unlink()
+    target.symlink_to(outside)
+
+    readers: dict[str, Callable[[], object]] = {
+        "split.json": lambda: split(AuditState(), ctx),
+        "meta.json": ctx.meta,
+        "dataset.jsonl": lambda: holdout(ctx),
+    }
+    with pytest.raises(UnsafeWorkloadsError):
+        readers[name]()

@@ -239,7 +239,7 @@ def test_flax_loader_test_split(tmp_path: Path) -> None:
 
 
 def test_flax_loader_column_roles_accepts_label_role(tmp_path: Path) -> None:
-    """G307: column_roles={"col": "label"} must resolve the target column for the
+    """column_roles={"col": "label"} must resolve the target column for the
     flax loader. commit ac16b9c switched this loader from detect_label_column
     (which already accepted "label") to split_by_roles, whose TARGET_ROLES silently
     omitted "label" and broke this alias.
@@ -344,7 +344,7 @@ def test_tf_loader_test_split(tmp_path: Path) -> None:
 
 
 def test_tf_loader_column_roles_accepts_label_role(tmp_path: Path) -> None:
-    """G307: same "label" role alias must work for the tf loader (see the flax
+    """The same "label" role alias must work for the tf loader (see the flax
     loader's ``test_flax_loader_column_roles_accepts_label_role`` above)."""
     ds = _csv_ds(tmp_path)
     tf_ds = create_tensorflow_dataset(

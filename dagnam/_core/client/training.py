@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+from dagnam._core._resume import created_body
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
@@ -43,6 +45,7 @@ class TrainingClientMixin(BaseDagnamClient):
         json_body: JsonValue = None,
         timeout: int = DEFAULT_TIMEOUT,
         idempotent: bool = False,
+        read_back: Callable[[str], JsonObject] | None = None,
     ) -> JsonValue | str | None:
         """Issue an authenticated training-job request and decode the body.
 
@@ -71,15 +74,23 @@ class TrainingClientMixin(BaseDagnamClient):
         if not resp.content:
             return None
         try:
-            return response_json_value(resp)
+            value = response_json_value(resp)
         except ResponseError:
             return resp.text
+        if read_back is not None and isinstance(value, dict):
+            # A replay that dropped its body points at the job it made: read it.
+            return created_body(resp, value, read_back)
+        return value
 
     def create_training_job(self, payload: JsonObject) -> JsonObject:
         """Create a platform training job. ``POST /api/v1/training/jobs``."""
         return self._expect_object(
             self._training_request(
-                "POST", "/api/v1/training/jobs", json_body=payload, idempotent=True
+                "POST",
+                "/api/v1/training/jobs",
+                json_body=payload,
+                idempotent=True,
+                read_back=self.get_training_job,
             )
         )
 

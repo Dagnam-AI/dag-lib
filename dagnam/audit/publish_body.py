@@ -2,7 +2,7 @@
 
 :mod:`dagnam.audit.publish` owns the conversation with the server; this module
 owns the arithmetic underneath it -- the per-call means the server stores
-instead of the scan's totals, the redaction counts Task 6 left on disk, the
+instead of the scan's totals, the redaction counts the scan left on disk, the
 status each step leaves a candidate in, and the two rules about
 ``AuditCreate.workloads``' own length cap. Every function here is pure and
 total: it is called inside the publisher's guard, and a number the scan does
@@ -25,6 +25,7 @@ from dagnam.audit.state import StepState
 from dagnam.audit.steps import error_code
 from dagnam.audit.steps_serve import DEPLOY_RUNNING
 from dagnam.audit.steps_train import RUN_COMPLETED
+from dagnam.audit.workspace import UnsafeWorkloadsError, read_regular, workload_dir
 
 _LOGGER = logging.getLogger("dagnam.audit.publish")
 """The publisher's logger: what this module warns about is a publish decision."""
@@ -39,6 +40,9 @@ see :func:`too_many_selected`.
 EXCERPT_MAX = 200
 REASON_MAX = 300
 ID_MAX = 64
+SOURCE = "cli"
+"""``AuditCreate.source``: this audit was run by the CLI, not started on the site."""
+_VERSION_MAX = 32
 
 
 STATUS_BY_STEP: Mapping[str, str] = {
@@ -154,6 +158,12 @@ def sub(entry: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def totals(entry: Mapping[str, Any]) -> tuple[int, int]:
+    """``(completion tokens, calls)`` of one scanned workload: the sums its price is computed from."""
+    tokens = int(number(sub(entry, "tokens").get("completion")) or 0)
+    return tokens, int(number(entry.get("calls")) or 1) or 1
+
+
 def student_cost(kind: StudentKind, entry: Mapping[str, Any]) -> float | None:
     """What serving ``kind`` costs a month at one scanned workload's volume, or ``None``.
 
@@ -161,24 +171,59 @@ def student_cost(kind: StudentKind, entry: Mapping[str, Any]) -> float | None:
     carried no completion tokens: ``$0`` would win every frontier and inflate
     every saving, so the cost is unknown instead.
     """
-    tokens = int(number(sub(entry, "tokens").get("completion")) or 0)
+    tokens, calls = totals(entry)
     if tokens <= 0 and "usd_per_m_output_tokens" in SERVING_RATES[kind]:
         return None
     return serving_cost_usd_month(
         kind,
         calls_per_day=number(entry.get("calls_per_day")) or 0.0,
         completion_tokens=tokens,
-        calls=int(number(entry.get("calls")) or 1) or 1,
+        calls=calls,
     )
 
 
 def pii_counts(audit_dir: Path, workload_id: str) -> dict[str, int]:
-    """The redaction counts Task 6 wrote for this workload; empty when it derived none."""
-    meta = audit_dir / "workloads" / workload_id / "meta.json"
+    """The redaction counts the scan wrote for this workload; empty when it derived none."""
+    try:
+        meta = workload_dir(audit_dir, workload_id) / "meta.json"
+    except (ValueError, UnsafeWorkloadsError):  # not a folder this audit may read: no counts
+        return {}
     if not meta.is_file():
         return {}
-    counts = sub(sub(json.loads(meta.read_text(encoding="utf-8")), "stats"), "redact").get("counts")
+    counts = sub(sub(json.loads(read_regular(meta)), "stats"), "redact").get("counts")
     return {str(code): int(n) for code, n in counts.items()} if isinstance(counts, Mapping) else {}
+
+
+def audit_body(
+    audit_dir: Path,
+    scan: Mapping[str, Any],
+    published: list[Mapping[str, Any]],
+    selected: Collection[str],
+    *,
+    project_id: str | None,
+    floor: float,
+    max_credits: int,
+    sdk_version: str,
+) -> JsonObject:
+    """The ``AuditCreate`` body (without ``resume``) for a run that publishes ``published``."""
+    return {
+        "project_id": project_id,
+        "source": SOURCE,
+        "floor": floor,
+        "max_credits": max_credits,
+        "price_table_version": str(scan.get("price_table_version") or "unknown")[:_VERSION_MAX],
+        "scan_generated_at": scan.get("generated_at"),
+        "sdk_version": sdk_version[:_VERSION_MAX],
+        "local_dir_name": audit_dir.resolve().name[:_NAME_MAX],
+        "workloads": [
+            workload_body(
+                entry,
+                selected=str(entry["id"]) in selected,
+                pii_counts=pii_counts(audit_dir, str(entry["id"])),
+            )
+            for entry in published
+        ],
+    }
 
 
 def capped(entries: list[Mapping[str, Any]], selected: Collection[str]) -> list[Mapping[str, Any]]:
@@ -230,7 +275,7 @@ def workload_body(
     """One ``scan-report.json`` workload as the publish body's ``WorkloadPublish``."""
     verdict = sub(entry, "verdict")
     tokens = sub(entry, "tokens")
-    return {
+    body: JsonObject = {
         "workload_id": str(entry["id"])[:ID_MAX],
         "structure_class": str(entry["structure_class"]),
         "template_excerpt": str(entry.get("template_excerpt") or "")[:EXCERPT_MAX],
@@ -247,6 +292,12 @@ def workload_body(
         # A scan from before the field, or a value the page does not know, is text.
         "response_mode": "tool_call" if entry.get("response_mode") == "tool_call" else "text",
     }
+    if number(tokens.get("completion")) is not None and number(entry.get("calls")):
+        # The exact sums the local price is computed from (:func:`totals`); a platform that
+        # reads them prices through the contract function as this client does, and an older one
+        # ignores them and keeps the rounded means above.
+        body["completion_tokens_total"], body["calls_total"] = totals(entry)
+    return body
 
 
 __all__ = [
@@ -270,5 +321,6 @@ __all__ = [
     "student_cost",
     "sub",
     "too_many_selected",
+    "totals",
     "workload_body",
 ]

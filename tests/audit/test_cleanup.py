@@ -1,75 +1,53 @@
-"""delete_audit: every recorded id deleted and confirmed gone, with a receipt; idempotent."""
+"""delete_audit on this machine's own walk: every recorded id deleted and confirmed gone; idempotent."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
+import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.audit._cleanup import FakeCleanup, as_cleanup_client
+from tests.audit._recorded import recorded_state
 
 from dagnam._core.exceptions import APIError
-from dagnam._types import JsonObject, JsonValue
-from dagnam.audit.candidates import CandidateKind
-from dagnam.audit.cleanup import (
-    CANCELLED_ERROR,
-    DELETED_FILE,
-    cancel_recorded,
-    delete_audit,
-    recorded_ids,
-)
+from dagnam.audit.cleanup import DELETED_FILE, delete_audit, receipt_rows, recorded_ids
+from dagnam.audit.cleanup_kinds import STILL_THERE
 from dagnam.audit.secrets import SecretStore
-from dagnam.audit.state import AuditState, StepState, load_state, save_state
-
-HEAD, SFT, HOSTED = CandidateKind.HEAD_TUNE, CandidateKind.SFT_SMALL, CandidateKind.HOSTED_FLOOR
-
-
-def _state() -> AuditState:
-    state = AuditState(project_id="proj-1")
-    state.workloads["w1"] = {
-        HOSTED: StepState(),
-        HEAD: StepState(
-            dataset_id="ds-1",
-            training_job_id="job-1",
-            model_version_id="mv-1",
-            deployment_id="dep-1",
-            key_ref="w1/head_tune",
-        ),
-    }
-    state.workloads["w2"] = {
-        SFT: StepState(
-            dataset_id="ds-2",
-            training_job_id="job-2",
-            model_version_id="mv-2",
-            deployment_id="dep-2",
-        ),
-    }
-    state.workloads["w3"] = {HEAD: StepState(dataset_id="ds-1")}  # a shared id is deleted once
-    return state
+from dagnam.audit.state import AuditState, load_state, save_state
 
 
 @pytest.fixture
 def platform() -> FakeCleanup:
     fake = FakeCleanup(
         deployment=["dep-1", "dep-2"],
-        model=["entry-1", "entry-2"],
+        model=["mv-1", "mv-2"],
         job=["job-1", "job-2"],
         dataset=["ds-1", "ds-2"],
         project=["proj-1"],
     )
-    fake.entry_of = {"mv-1": "entry-1", "mv-2": "entry-2"}
     return fake
 
 
 @pytest.fixture
 def prepared(audit_dir: Path) -> Path:
-    save_state(audit_dir, _state())
+    save_state(audit_dir, recorded_state())
     SecretStore(audit_dir).store("w1/head_tune", "dk-secret")
     return audit_dir
 
 
+def _blocked(receipt: Mapping[str, Any]) -> dict[tuple[str, str], str]:
+    return {
+        (r["kind"], r["id"]): r["reason"]
+        for r in receipt_rows(receipt)
+        if r.get("status") == "blocked"
+    }
+
+
 def test_recorded_ids_in_deletion_order_without_duplicates() -> None:
-    assert recorded_ids(_state()) == {
+    assert recorded_ids(recorded_state()) == {
         "deployment": ["dep-1", "dep-2"],
         "model_version": ["mv-1", "mv-2"],
         "training_job": ["job-1", "job-2"],
@@ -92,7 +70,7 @@ def test_delete_removes_every_recorded_id_and_writes_receipt(
 
     assert receipt["schema"] == "dagnam.audit.deleted/1"
     assert receipt["deleted_at"].endswith("+00:00")
-    assert receipt["items"] == [
+    assert receipt["entries"] == [
         {"kind": "deployment", "id": "dep-1", "status": "deleted"},
         {"kind": "deployment", "id": "dep-2", "status": "deleted"},
         {"kind": "model_version", "id": "mv-1", "status": "deleted"},
@@ -104,13 +82,14 @@ def test_delete_removes_every_recorded_id_and_writes_receipt(
         {"kind": "project", "id": "proj-1", "status": "deleted"},
     ]
     assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
-    # Each id: delete, then a read that must answer not-found; a version goes through its entry.
+    # Each id: delete, then a read that must answer not-found; a version through its own purge route.
     assert platform.call_log[:2] == [("delete_deployment", "dep-1"), ("get_deployment", "dep-1")]
-    assert platform.call_log[4:7] == [
-        ("get_model_version", "mv-1"),
-        ("delete_model_entry", "entry-1"),
-        ("get_model_version", "mv-1"),
+    # The purge answers its own receipt row, so it is trusted and the version is not re-read.
+    assert platform.call_log[4:6] == [
+        ("purge_model_version", "mv-1"),
+        ("purge_model_version", "mv-2"),
     ]
+    assert "delete_model_entry" not in {name for name, _ in platform.call_log}
     assert platform.call_log[-2:] == [("delete_project", "proj-1"), ("get_project", "proj-1")]
     assert all(not ids for ids in platform.present.values())
     # Local rows and the secret go last, after the platform confirmed.
@@ -119,39 +98,89 @@ def test_delete_removes_every_recorded_id_and_writes_receipt(
     assert (prepared / "state.json").exists()
 
 
-def test_delete_is_idempotent_and_records_already_absent(
+def test_delete_records_already_absent_and_a_second_delete_asks_nothing(
     prepared: Path, platform: FakeCleanup
 ) -> None:
     platform.present["deployment"].discard("dep-2")
     first = delete_audit(prepared, as_cleanup_client(platform))
-    assert [i["status"] for i in first["items"] if i["id"] == "dep-2"] == ["already_absent"]
-    assert [i["status"] for i in first["items"] if i["id"] != "dep-2"] == ["deleted"] * 8
+    assert [i["status"] for i in first["entries"] if i["id"] == "dep-2"] == ["already_absent"]
+    assert [i["status"] for i in first["entries"] if i["id"] != "dep-2"] == ["deleted"] * 8
 
-    second = delete_audit(prepared, as_cleanup_client(platform))
-    assert {i["status"] for i in second["items"]} == {"already_absent"}
-    assert [i["id"] for i in second["items"]] == [i["id"] for i in first["items"]]
+    calls = len(platform.call_log)
+    second = delete_audit(prepared, as_cleanup_client(platform))  # deleted: nothing is asked again
+    assert second["entries"] == []
+    assert len(platform.call_log) == calls
 
 
-def test_an_id_that_survives_its_delete_is_an_error_and_no_receipt(
+def test_an_id_that_survives_its_delete_is_blocked_and_the_rest_still_goes(
     prepared: Path, platform: FakeCleanup
 ) -> None:
+    """It used to raise out of the walk: no receipt, and the project after it never reached."""
     platform.sticky.add("ds-2")
-    with pytest.raises(RuntimeError, match="dataset ds-2 still exists after delete"):
-        delete_audit(prepared, as_cleanup_client(platform))
-    assert not (prepared / DELETED_FILE).exists()
-    assert (prepared / "workloads").is_dir()
+
+    receipt = delete_audit(prepared, as_cleanup_client(platform))
+
+    assert _blocked(receipt) == {("dataset", "ds-2"): STILL_THERE}
+    assert [i["status"] for i in receipt["entries"] if i["id"] != "ds-2"] == [
+        *["deleted"] * 7,
+        "kept",
+    ]  # the project stays while anything in it does
+    assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
+    assert not (prepared / "workloads").exists()
+
+
+def test_a_deployment_the_platform_will_not_delete_blocks_only_itself_and_keeps_its_key(
+    prepared: Path, platform: FakeCleanup
+) -> None:
+    """A refused deployment delete is a typed state error, not an ``APIError``.
+
+    It raised out of the delete before the training job -- first in line after
+    the deployments and still billing -- was cancelled. And the endpoint is
+    still up: the key that calls it, and the rows its replay reads, stay until
+    a rerun has removed it.
+    """
+    platform.undeletable = {"dep-1"}
+    platform.running = {"job-1", "job-2"}
+
+    receipt = delete_audit(prepared, as_cleanup_client(platform))
+
+    assert _blocked(receipt) == {
+        ("deployment", "dep-1"): "Cannot delete a deployment that is still deploying"
+    }
+    assert ("cancel_training_job", "job-1") in platform.call_log
+    assert ("cancel_training_job", "job-2") in platform.call_log
+    assert [i["status"] for i in receipt["entries"] if i["id"] != "dep-1"] == [
+        *["deleted"] * 7,
+        "kept",
+    ]  # the project stays while anything in it does
+    assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
+    assert (prepared / "workloads" / "w1" / "dataset.jsonl").exists()
     assert SecretStore(prepared).load("w1/head_tune") == "dk-secret"
+    assert load_state(prepared).halted is None  # something is left: the next delete asks again
+    assert recorded_ids(load_state(prepared))["deployment"] == ["dep-1", "dep-2"]  # for a rerun
+    assert receipt["audit_status"] == "halted"
+
+    platform.undeletable.clear()  # and the rerun finishes the job, then lets go of the key
+    again = delete_audit(prepared, as_cleanup_client(platform))
+    statuses = {(i["kind"], i["id"]): i["status"] for i in again["entries"]}
+    assert statuses.pop(("deployment", "dep-1")) == "deleted"
+    assert statuses.pop(("project", "proj-1")) == "deleted"  # nothing is left in it now
+    assert set(statuses.values()) == {"already_absent"}
+    assert not (prepared / "workloads").exists()
+    assert SecretStore(prepared).load("w1/head_tune") is None
+    assert again["audit_status"] == "deleted"
+    assert load_state(prepared).halted == {"reason": "deleted"}
 
 
 def test_the_training_run_holding_a_dataset_is_deleted_before_it(
     prepared: Path, platform: FakeCleanup
 ) -> None:
-    """Defect 24: the platform refuses a dataset while a run of it exists, so the job goes first."""
+    """The platform refuses a dataset while a run of it exists, so the job goes first."""
     platform.held_by_job = {"ds-1": "job-1", "ds-2": "job-2"}
 
     receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    assert [i["status"] for i in receipt["items"]] == ["deleted"] * 9
+    assert [i["status"] for i in receipt["entries"]] == ["deleted"] * 9
     order = [call for call in platform.call_log if call[1] in {"job-1", "ds-1"}]
     assert order == [
         ("cancel_training_job", "job-1"),
@@ -166,13 +195,13 @@ def test_the_training_run_holding_a_dataset_is_deleted_before_it(
 def test_a_run_still_going_is_cancelled_before_it_is_deleted(
     prepared: Path, platform: FakeCleanup
 ) -> None:
-    """P7: the platform deletes terminal jobs only, so a live run used to block -- and bill."""
+    """The platform deletes terminal jobs only, so a live run used to block -- and bill."""
     platform.held_by_job = {"ds-1": "job-1"}
     platform.running = {"job-1"}
 
     receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    assert [i["status"] for i in receipt["items"]] == ["deleted"] * 9
+    assert [i["status"] for i in receipt["entries"]] == ["deleted"] * 9
     assert platform.call_log.index(("cancel_training_job", "job-1")) < platform.call_log.index(
         ("bulk_delete_training_jobs", "job-1")
     )
@@ -187,7 +216,7 @@ def test_a_run_the_platform_will_neither_stop_nor_delete_blocks_it_and_its_datas
 
     receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    blocked = {(i["kind"], i["id"]): i["reason"] for i in receipt["items"] if "reason" in i}
+    blocked = _blocked(receipt)
     assert set(blocked) == {("training_job", "job-1"), ("dataset", "ds-1")}
     assert "Cannot delete job with status running" in blocked[("training_job", "job-1")]
 
@@ -197,357 +226,133 @@ def test_a_refusal_blocks_only_its_own_id_and_the_local_rows_still_go(
 ) -> None:
     """A refusal is a receipt row, not an abort.
 
-    R1: the local rows and keys go regardless -- a second delete needs only the
-    ids `state.json` keeps, and a platform that refuses for good (a project it
-    keeps) would otherwise hold the redacted rows on this machine forever.
+    The local rows and keys go regardless of what is left of a dataset, a run
+    or the project -- a second delete needs only the ids `state.json` keeps, and
+    a platform that refuses for good would otherwise hold the redacted rows on
+    this machine forever. (An endpoint still up is the one exception.)
     """
     platform.present["job"].add("job-9")  # a run the audit never recorded still holds ds-1
     platform.held_by_job = {"ds-1": "job-9"}
 
     receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    blocked = {(i["kind"], i["id"]): i["reason"] for i in receipt["items"] if "reason" in i}
+    blocked = _blocked(receipt)
     assert set(blocked) == {("dataset", "ds-1")}
     assert "referenced by a training run" in blocked[("dataset", "ds-1")]
-    assert [i["status"] for i in receipt["items"] if i["id"] != "ds-1"] == ["deleted"] * 8
+    assert [i["status"] for i in receipt["entries"] if i["id"] != "ds-1"] == [
+        *["deleted"] * 7,
+        "kept",
+    ]  # the project stays while anything in it does
     assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
     assert not (prepared / "workloads").exists()
     assert SecretStore(prepared).load("w1/head_tune") is None
     assert not (prepared / "secrets.json").exists()
-    assert load_state(prepared).halted == {"reason": "deleted"}
+    assert load_state(prepared).halted is None  # a dataset is left: the next delete retries it
     assert recorded_ids(load_state(prepared))["dataset"] == ["ds-1", "ds-2"]  # for a rerun
 
 
-def _server_deleted(*rows: tuple[str, str, str]) -> JsonObject:
-    """A published delete's receipt: every recorded id except ds-1, plus the given rows."""
-    settled = (
-        ("deployment", "dep-1", "deleted"),
-        ("deployment", "dep-2", "deleted"),
-        ("training_job", "job-1", "deleted"),
-        ("training_job", "job-2", "deleted"),
-        ("dataset", "ds-2", "deleted"),
-    )
-    entries: list[JsonValue] = [
-        {"kind": kind, "id": item_id, "status": status, "reason": None}
-        for kind, item_id, status in (*settled, *rows)
-    ]
-    return {
-        "schema": "dagnam.audit.deleted/1",
-        "deleted_at": "2026-09-27T10:00:00Z",
-        "entries": entries,
-    }
-
-
-def test_a_published_delete_also_removes_what_the_server_never_heard_of(
+def test_a_server_failure_on_one_id_is_its_row_and_the_delete_still_finishes(
     prepared: Path, platform: FakeCleanup
 ) -> None:
-    """B5: the server deletes datasets only through a published version id.
-
-    A dataset whose upload failed never had one, so the server's receipt has no
-    row for it -- and a delete that trusted that receipt dropped the local rows
-    and the keys and left the customer's uploaded rows on the platform.
-    """
-    platform.server_receipt = _server_deleted(
-        ("model_version", "mv-1", "deleted"),
-        ("model_version", "mv-2", "deleted"),
-        ("project", "proj-1", "deleted"),
-    )
-    server = platform.delete_audit("audit-1")
-
-    receipt = delete_audit(prepared, as_cleanup_client(platform), server)
-
-    rows = {(r["kind"], r["id"]): r["status"] for r in receipt["entries"]}
-    assert rows[("dataset", "ds-1")] == "deleted"
-    assert len(receipt["entries"]) == 9
-    assert receipt["schema"] == "dagnam.audit.deleted/1"
-    assert ("delete_deployment", "dep-1") not in platform.call_log  # the server settled it
-    assert platform.present["dataset"] == set()
-    assert not (prepared / "workloads").exists()
-
-
-def test_a_project_the_server_kept_is_never_deleted_here(
-    prepared: Path, platform: FakeCleanup
-) -> None:
-    """N2 (D-F14): the owner reused the audit's project, so the server kept it and its models.
-
-    The CLI used to walk the `blocked` project itself -- an unconditional soft
-    delete -- and delete every registry entry it had recorded, which is exactly
-    what the server declined to do.
-    """
-    platform.server_receipt = _server_deleted(("project", "proj-1", "blocked"))
-    server = platform.delete_audit("audit-1")
-
-    receipt = delete_audit(prepared, as_cleanup_client(platform), server)
-
-    rows = {(r["kind"], r["id"]): r for r in receipt["entries"]}
-    assert rows[("dataset", "ds-1")]["status"] == "deleted"  # still ours to remove
-    assert rows[("project", "proj-1")]["status"] == "blocked"
-    for version in ("mv-1", "mv-2"):
-        assert rows[("model_version", version)]["status"] == "blocked"
-        assert rows[("model_version", version)]["reason"] == "kept with project proj-1"
-    touched = {name for name, _ in platform.call_log}
-    assert touched.isdisjoint({"delete_project", "delete_model_entry", "get_model_version"})
-    assert platform.present["project"] == {"proj-1"}
-    assert platform.present["model"] == {"entry-1", "entry-2"}
-    # R1: the project stays on the platform for good, so nothing here waits on it.
-    assert not (prepared / "workloads").exists()
-    assert SecretStore(prepared).load("w1/head_tune") is None
-
-
-def test_weights_the_server_kept_stay_blocked_and_the_rest_is_retried_here(
-    prepared: Path, platform: FakeCleanup
-) -> None:
-    """The server soft-deletes the entry but keeps its weights while a deployment serves them.
-
-    Its version row is ``blocked``; retried here, the soft delete read 404 and
-    the receipt said ``already_absent`` over weights still in storage. A
-    ``blocked`` deployment is still the client's to retry.
-    """
-    served = "a live deployment serves these weights; delete it, then run the delete again"
-    platform.server_receipt = _server_deleted(
-        ("model_version", "mv-1", "blocked"),
-        ("model_version", "mv-2", "deleted"),
-        ("project", "proj-1", "deleted"),
-    )
-    entries = platform.server_receipt["entries"]
-    assert isinstance(entries, list)
-    for row in entries:
-        assert isinstance(row, dict)
-        if row["id"] == "mv-1":
-            row["reason"] = served
-        if row["id"] == "dep-2":
-            row.update(status="blocked", reason="not provisioned")
-    server = platform.delete_audit("audit-1")
-    platform.present["model"].discard("entry-1")  # soft-deleted by the server's walk
-
-    receipt = delete_audit(prepared, as_cleanup_client(platform), server)
-
-    rows = {(r["kind"], r["id"]): r for r in receipt["entries"]}
-    assert rows[("model_version", "mv-1")] == {
-        "kind": "model_version",
-        "id": "mv-1",
-        "status": "blocked",
-        "reason": served,
-    }
-    assert ("get_model_version", "mv-1") not in platform.call_log
-    assert rows[("deployment", "dep-2")]["status"] == "deleted"  # retried here
-
-
-def test_a_second_delete_after_the_server_deleted_the_audit_finishes_here(
-    prepared: Path, platform: FakeCleanup
-) -> None:
-    """R1: the account already deleted the audit, so its delete now answers 404.
-
-    The rerun walks every recorded id -- finding what is gone `already_absent` --
-    and only reads the project and the registry: the account decided about those.
-    """
-    platform.server_receipt = _server_deleted(("project", "proj-1", "blocked"))
-    first = delete_audit(prepared, as_cleanup_client(platform), platform.delete_audit("audit-1"))
-    platform.call_log.clear()
-
-    second = delete_audit(prepared, as_cleanup_client(platform), account_deleted=True)
-
-    rows = {(r["kind"], r["id"]): r for r in second["items"]}
-    for kept in (("project", "proj-1"), ("model_version", "mv-1"), ("model_version", "mv-2")):
-        assert (rows[kept]["status"], rows[kept]["reason"]) == ("blocked", "kept by the account")
-        del rows[kept]
-    assert {row["status"] for row in rows.values()} == {"already_absent"}
-    assert len(second["items"]) == len(first["entries"])
-
-
-def test_a_delete_after_the_website_deleted_the_audit_never_deletes_its_project(
-    prepared: Path, platform: FakeCleanup
-) -> None:
-    """RR1: deleted on the website (no local receipt), the project kept for the owner's work.
-
-    The CLI found no record of what the account kept and walked the project
-    itself: `delete_project` soft-deleted the owner's Studio work with it.
-    """
-    platform.present["deployment"].clear()  # what the account's own delete removed
-    platform.present["job"].clear()
-    platform.present["dataset"].discard("ds-2")
-
-    receipt = delete_audit(prepared, as_cleanup_client(platform), account_deleted=True)
-
-    touched = {name for name, _ in platform.call_log}
-    assert touched.isdisjoint({"delete_project", "delete_model_entry"})
-    rows = {(r["kind"], r["id"]): r["status"] for r in receipt["items"]}
-    assert rows[("project", "proj-1")] == "blocked"
-    assert rows[("model_version", "mv-1")] == "blocked"
-    assert rows[("dataset", "ds-1")] == "deleted"  # never published: still ours to remove
-    assert platform.present["project"] == {"proj-1"}
-    assert not (prepared / "workloads").exists()
-    assert SecretStore(prepared).load("w1/head_tune") is None
-
-    platform.present["project"].clear()  # and one the account did delete reads as gone
-    platform.present["model"].clear()
-    again = delete_audit(prepared, as_cleanup_client(platform), account_deleted=True)
-    assert {r["status"] for r in again["items"]} == {"already_absent"}
-
-
-def test_a_server_failure_is_not_a_refusal_and_still_raises(
-    prepared: Path, platform: FakeCleanup
-) -> None:
+    """A fault is not a refusal, and the receipt says which it was -- but neither ends the walk."""
     platform.dataset_error = APIError(500, "boom")
-    with pytest.raises(APIError, match="API error 500"):
-        delete_audit(prepared, as_cleanup_client(platform))
-    assert not (prepared / DELETED_FILE).exists()
+
+    receipt = delete_audit(prepared, as_cleanup_client(platform))
+
+    assert _blocked(receipt) == {
+        ("dataset", "ds-1"): "API error 500: boom",
+        ("dataset", "ds-2"): "API error 500: boom",
+    }
+    assert {(i["kind"], i["status"]) for i in receipt["entries"] if i["kind"] == "project"} == {
+        ("project", "kept")
+    }
+    assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
+    assert load_state(prepared).halted is None
 
 
 def test_fresh_audit_dir_deletes_nothing(audit_dir: Path, platform: FakeCleanup) -> None:
     receipt = delete_audit(audit_dir, as_cleanup_client(platform))
-    assert receipt["items"] == []
+    assert receipt["entries"] == []
     assert platform.call_log == []
     assert not (audit_dir / "workloads").exists()
 
 
 def test_a_receipt_with_no_rows_reads_as_empty() -> None:
     """A receipt from a server that lists its rows under neither key is not a crash."""
-    from dagnam.audit.cleanup import receipt_rows
-
     assert receipt_rows({"deleted_at": "2026-09-07T10:00:00+00:00"}) == []
     assert receipt_rows({"items": [{"kind": "project", "id": "p1"}, "junk"]}) == [
-        {"kind": "project", "id": "p1"}
+        {"kind": "project", "id": "p1"},
+        {},  # a row that is not an object is shown as ``?`` and read as one nobody understands
     ]
     assert receipt_rows({"entries": [{"kind": "project", "id": "p1"}]}) == [
         {"kind": "project", "id": "p1"}
     ]
 
 
-# ------------------------------------------------------------------- cancel
+class TestLocalLeftovers:
+    """Rows on this machine go through the safe remover, and a link is a leftover, never followed."""
 
+    @pytest.mark.skipif(os.name == "nt", reason="creating a symlink needs a privilege on Windows")
+    def test_a_workload_folder_that_is_a_link_is_left_and_named_in_the_receipt(
+        self, prepared: Path, platform: FakeCleanup, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("not ours", encoding="utf-8")
+        (prepared / "workloads" / "w2").rename(tmp_path / "w2-moved")
+        (prepared / "workloads" / "w2").symlink_to(outside, target_is_directory=True)
 
-def _live_state() -> AuditState:
-    state = AuditState(project_id="proj-1")
-    state.workloads["w1"] = {
-        HEAD: StepState(dataset_id="ds-1", training_job_id="job-1", run_status="queued")
-    }
-    state.workloads["w2"] = {
-        SFT: StepState(
-            training_job_id="job-2",
-            run_status="completed",
-            deployment_id="dep-2",
-            deploy_status="running",
-            scored=True,
-        )
-    }
-    return state
+        receipt = delete_audit(prepared, as_cleanup_client(platform))
 
+        local = [i for i in receipt["entries"] if i["kind"] == "local_workload"]
+        assert [(i["id"], i["status"]) for i in local] == [("w2", "blocked")]
+        assert "symbolic link" in local[0]["reason"]
+        assert (outside / "keep.txt").read_text(encoding="utf-8") == "not ours"
+        assert not (prepared / "workloads" / "w1").exists()  # the plain one still went
+        assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
 
-def test_a_run_that_ended_while_nobody_watched_does_not_stop_the_cancel(
-    platform: FakeCleanup,
-) -> None:
-    """B3: `--no-wait` left the run `queued`; the platform answers its cancel with a 400.
+    @pytest.mark.skipif(os.name == "nt", reason="creating a symlink needs a privilege on Windows")
+    def test_a_workloads_folder_that_is_a_link_leaves_one_row_and_deletes_the_platform_side(
+        self, prepared: Path, platform: FakeCleanup, tmp_path: Path
+    ) -> None:
+        moved = tmp_path / "moved"
+        (prepared / "workloads").rename(moved)
+        (prepared / "workloads").symlink_to(moved, target_is_directory=True)
 
-    That used to raise out of the command: no receipt, no marks, and every later
-    candidate's endpoint left running. Now it is a `blocked` row, and the run
-    -- which really did finish -- is left resumable.
-    """
-    platform.finished = {"job-1"}
-    state = _live_state()
+        receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    receipt = cancel_recorded(state, as_cleanup_client(platform))
+        assert [
+            (i["id"], i["status"]) for i in receipt["entries"] if i["kind"] == "local_workload"
+        ] == [("workloads", "blocked")]
+        assert (moved / "w1" / "dataset.jsonl").exists()
+        assert all(not ids for ids in platform.present.values())
 
-    assert receipt["entries"] == [
-        {
-            "kind": "training_job",
-            "id": "job-1",
-            "status": "blocked",
-            "reason": "Cannot cancel job with status completed",
-        },
-        {"kind": "deployment", "id": "dep-2", "status": "stopped"},
-    ]
-    assert receipt["schema"] == "dagnam.audit.cancelled/1"
-    head, done = state.workloads["w1"][HEAD], state.workloads["w2"][SFT]
-    assert (head.run_status, head.error) == ("queued", None)
-    assert (done.deploy_status, done.error) == ("paused", None)
-    assert state.halted == {"reason": "cancelled"}
+    @pytest.mark.skipif(os.name == "nt", reason="creating a symlink needs a privilege on Windows")
+    def test_a_key_file_that_is_a_link_is_left_and_named_in_the_receipt(
+        self, prepared: Path, platform: FakeCleanup, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "elsewhere.json"
+        target.write_text(json.dumps({"w1/head_tune": "dk-secret"}), encoding="utf-8")
+        (prepared / "secrets.json").unlink()
+        (prepared / "secrets.json").symlink_to(target)
 
+        receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-def test_a_published_cancel_stops_what_the_server_never_heard_of(platform: FakeCleanup) -> None:
-    """B4: the server stops only the ids the run published, so the rest is stopped here.
+        local = [i for i in receipt["entries"] if i["kind"] == "local_keys"]
+        assert [(i["id"], i["status"]) for i in local] == [("secrets.json", "blocked")]
+        assert json.loads(target.read_text(encoding="utf-8")) == {"w1/head_tune": "dk-secret"}
 
-    Before, every non-terminal local run was marked cancelled whatever the
-    server did: a job whose `submit` patch was lost kept training and billing
-    while `audit status` said `cancelled`.
-    """
-    state = _live_state()
-    server = {
-        "schema": "dagnam.audit.cancelled/1",
-        "deleted_at": "2026-09-27T10:00:00+00:00",
-        "entries": [{"kind": "deployment", "id": "dep-2", "status": "stopped", "reason": None}],
-    }
+    def test_a_folder_that_is_not_a_scans_and_names_that_are_not_ours_stay(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        stray = prepared / "workloads" / "notes"
+        stray.mkdir()
+        (stray / "mine.txt").write_text("keep me", encoding="utf-8")
+        (prepared / "workloads" / ".DS_Store").write_text("", encoding="utf-8")
 
-    receipt = cancel_recorded(state, as_cleanup_client(platform), server)
+        receipt = delete_audit(prepared, as_cleanup_client(platform))
 
-    assert platform.call_log == [("cancel_training_job", "job-1")]
-    assert receipt["deleted_at"] == "2026-09-27T10:00:00+00:00"
-    assert receipt["entries"][-1] == {"kind": "training_job", "id": "job-1", "status": "stopped"}
-    head = state.workloads["w1"][HEAD]
-    assert (head.run_status, head.error) == ("cancelled", CANCELLED_ERROR)
-
-
-def test_a_run_the_server_could_not_cancel_is_not_marked_cancelled(
-    platform: FakeCleanup,
-) -> None:
-    """B4: it had already completed; skipping it on the next run would waste a paid result."""
-    state = _live_state()
-    server = {
-        "entries": [
-            {"kind": "training_job", "id": "job-1", "status": "blocked", "reason": "completed"},
-            {"kind": "deployment", "id": "dep-2", "status": "stopped", "reason": None},
-        ]
-    }
-
-    cancel_recorded(state, as_cleanup_client(platform), server)
-
-    assert platform.call_log == []
-    head = state.workloads["w1"][HEAD]
-    assert (head.run_status, head.error) == ("queued", None)
-    assert state.workloads["w2"][SFT].deploy_status == "paused"
-
-
-def test_a_cancel_pauses_or_notes_every_endpoint_once(platform: FakeCleanup) -> None:
-    platform.present["job"].discard("job-1")
-    platform.unpausable = {"dep-2"}
-    state = _live_state()
-    state.workloads["w3"] = {HEAD: StepState(deployment_id="dep-2", deploy_status="deploying")}
-    state.workloads["w4"] = {HEAD: StepState(deployment_id="dep-gone", deploy_status="running")}
-
-    receipt = cancel_recorded(state, as_cleanup_client(platform))
-
-    assert [(r["id"], r["status"]) for r in receipt["entries"]] == [
-        ("job-1", "already_absent"),
-        ("dep-2", "blocked"),
-        ("dep-gone", "already_absent"),
-    ]
-    assert state.workloads["w2"][SFT].deploy_status == "running"
-
-
-def test_a_server_failure_during_a_cancel_still_raises(
-    platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def broken(job_id: str) -> None:
-        raise APIError(500, "boom")
-
-    monkeypatch.setattr(platform, "cancel_training_job", broken)  # a fault is not a refusal
-    with pytest.raises(APIError, match="boom"):
-        cancel_recorded(_live_state(), as_cleanup_client(platform))
-
-
-def test_retired_candidates_are_cancelled_and_deleted(
-    prepared: Path, platform: FakeCleanup
-) -> None:
-    state = load_state(prepared)
-    state.retired = list(state.all_steps())
-    state.workloads.clear()
-    assert recorded_ids(state) == recorded_ids(_state())
-    cancel_recorded(state, as_cleanup_client(platform))
-    assert ("cancel_training_job", "job-1") in platform.call_log
-    assert ("pause_deployment", "dep-1") in platform.call_log
-    assert state.retired[1].run_status == "cancelled"
-    save_state(prepared, state)
-    delete_audit(prepared, as_cleanup_client(platform))
-    assert all(not ids for ids in platform.present.values())
-    assert SecretStore(prepared).load("w1/head_tune") is None
-    assert load_state(prepared).retired == state.retired
+        assert [i for i in receipt["entries"] if i["kind"].startswith("local")] == []
+        assert (stray / "mine.txt").read_text(encoding="utf-8") == "keep me"
+        assert (prepared / "workloads" / ".DS_Store").exists()
+        assert sorted(p.name for p in (prepared / "workloads").iterdir()) == [".DS_Store", "notes"]

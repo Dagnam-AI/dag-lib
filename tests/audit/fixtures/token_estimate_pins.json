@@ -1,0 +1,290 @@
+[
+ {
+  "kind": "english prose",
+  "text": "The parcel arrived late and the box was damaged, and two of the items I had already paid for were missing. I need these things before the end of the month, so I would like to know whether a full refund or a quick replacement is possible.",
+  "real": 51,
+  "estimate": 52
+ },
+ {
+  "kind": "english system prompt",
+  "text": "You extract structured information from customer support emails. Read the email and return a single JSON object with exactly these keys:\n\n- \"intent\": one of \"refund\", \"exchange\", \"shipping_status\", \"damaged_item\", \"account\", \"billing\", \"product_question\", \"complaint\", \"other\"\n- \"order_id\": the order number mentioned in the email, as a string, or null if none is mentioned\n- \"sentiment\": one of \"positive\", \"neutral\", \"negative\"\n- \"urgency\": one of \"low\", \"medium\", \"high\". Use \"high\" only when the customer mentions a deadline, a legal threat or a safety issue.\n- \"products\": a list of product names mentioned, each as written by the customer\n- \"summary\": one sentence, at most 25 words, in English, describing what the customer wants\n\nReturn only the JSON object. Do not add commentary, markdown fences or explanations. If a field cannot be determined, use null for strings and an empty list for lists. Dates must be written as YYYY-MM-DD. Amounts must be numbers without currency symbols.",
+  "real": 230,
+  "estimate": 233
+ },
+ {
+  "kind": "terse english",
+  "text": "Extract fields. Return JSON only. Keys: name, email, phone, company, intent. Null if missing. No prose.",
+  "real": 26,
+  "estimate": 27
+ },
+ {
+  "kind": "label list",
+  "text": "Electronics, Mobile Phones, Phone Cases, Screen Protectors, Chargers & Cables, Power Banks, Headphones, Earbuds, Bluetooth Speakers, Smart Watches, Fitness Trackers, Laptops, Laptop Bags, Tablets, E-readers, Desktop Computers, Monitors, Keyboards, Mice, Webcams, Printers, Ink & Toner, Routers, Network Switches, External Hard Drives, SSDs, USB Flash Drives, Memory Cards, Cameras, Camera Lenses, Tri",
+  "real": 103,
+  "estimate": 121
+ },
+ {
+  "kind": "product titles",
+  "text": "Anker PowerCore 10000 Portable Charger, Ultra-Compact 10000mAh Power Bank, USB-C Input\nSony WH-1000XM5 Wireless Noise Cancelling Headphones, Black, 30-Hour Battery\nInstant Pot Duo 7-in-1 Electric Pressure Cooker, 6 Quart, Stainless Steel\nLevi's Men's 501 Original Fit Jeans, Medium Stonewash, 34W x 32L\nLodge 10.25 Inch Cast Iron Skillet, Pre-Seasoned, Made in USA\nSamsung 27-Inch Odyssey G5 Gaming Monitor, 1440p, 165Hz, Curved\nOsprey Talon 22 Men's Hiking Backpack, Eclipse Grey, S/M\nHydro Flask 32 oz Wide Mouth Water Bottle with Flex Cap, Pacific",
+  "real": 190,
+  "estimate": 203
+ },
+ {
+  "kind": "finnish",
+  "text": "Palautusehdot. Asiakkaalla on oikeus palauttaa käyttämätön tuote alkuperäispakkauksessaan 30 päivän kuluessa toimituksesta. Palautusoikeus ei koske hygieniatuotteita, joiden pakkaus on avattu, eikä asiakkaan mittojen mukaan valmistettuja tuotteita. Palautuksen kulut maksaa asiakas, ellei tuote ole virheellinen tai toimitus ole ollut väärä. Hyvitys maksetaan samalle maksutavalle, jota tilauksessa käytettiin, viimeistään neljäntoista päivän kuluessa siitä, kun palautettu tuote on vastaanotettu var",
+  "real": 187,
+  "estimate": 200
+ },
+ {
+  "kind": "english over finnish",
+  "text": "You are a customer service assistant. Use the following company policy to answer the question. Quote the relevant passage from the policy, then answer in two sentences. Policy:\n\nPalautusehdot. Asiakkaalla on oikeus palauttaa käyttämätön tuote alkuperäispakkauksessaan 30 päivän kuluessa toimituksesta. Palautusoikeus ei koske hygieniatuotteita, joiden pakkaus on avattu, eikä asiakkaan mittojen mukaan valmistettuja tuotteita. Palautuksen kulut maksaa asiakas, ellei tuote ole virheellinen tai toimitus ole ollut väärä. Hyvitys maksetaan samalle maksutavalle, jota tilauksessa käytettiin, viimeistään neljäntoista päivän kuluessa siitä, kun palautettu tuote on vastaanotettu var",
+  "real": 220,
+  "estimate": 233
+ },
+ {
+  "kind": "spanish",
+  "text": "Buenos días, le escribo sobre el pedido número 48213 que realicé la semana pasada. El paquete llegó tarde y la caja estaba dañada; además faltaban dos artículos que ya había pagado.",
+  "real": 54,
+  "estimate": 60
+ },
+ {
+  "kind": "german",
+  "text": "Guten Tag, ich schreibe Ihnen wegen der Bestellung Nummer 48213, die ich letzte Woche aufgegeben habe. Das Paket kam zu spät an und der Karton war beschädigt.",
+  "real": 49,
+  "estimate": 58
+ },
+ {
+  "kind": "turkish",
+  "text": "Merhaba, geçen hafta verdiğim 48213 numaralı siparişle ilgili yazıyorum. Paket geç geldi ve kutu hasarlıydı; ayrıca ödediğim iki ürün eksikti.",
+  "real": 56,
+  "estimate": 61
+ },
+ {
+  "kind": "hungarian",
+  "text": "Jó napot, a múlt héten leadott 48213-as számú rendelésemmel kapcsolatban írok. A csomag késve érkezett és a doboz sérült volt; ráadásul két kifizetett termék hiányzott.",
+  "real": 75,
+  "estimate": 79
+ },
+ {
+  "kind": "vietnamese",
+  "text": "Xin chào, tôi viết thư về đơn hàng số 48213 mà tôi đã đặt tuần trước. Gói hàng đến muộn và hộp bị hỏng; ngoài ra còn thiếu hai món hàng tôi đã thanh toán.",
+  "real": 49,
+  "estimate": 49
+ },
+ {
+  "kind": "welsh",
+  "text": "Helo, rwyf yn ysgrifennu am archeb rhif 48213 a wneuthum yr wythnos diwethaf. Cyrhaeddodd y parsel yn hwyr ac roedd y bocs wedi ei ddifrodi.",
+  "real": 62,
+  "estimate": 62
+ },
+ {
+  "kind": "russian",
+  "text": "Здравствуйте, я пишу по поводу заказа номер 48213, который я оформил на прошлой неделе. Посылка пришла с опозданием, а коробка была повреждена.",
+  "real": 59,
+  "estimate": 65
+ },
+ {
+  "kind": "kazakh",
+  "text": "Сәлеметсіз бе, мен өткен аптада жасаған 48213 нөмірлі тапсырыс туралы жазып отырмын. Сәлем кеш келді, қорап зақымдалған.",
+  "real": 78,
+  "estimate": 76
+ },
+ {
+  "kind": "greek",
+  "text": "Καλησπέρα, σας γράφω σχετικά με την παραγγελία αριθμός 48213 που έκανα την περασμένη εβδομάδα. Το δέμα έφτασε αργά και το κουτί ήταν κατεστραμμένο.",
+  "real": 127,
+  "estimate": 130
+ },
+ {
+  "kind": "arabic",
+  "text": "مرحباً، أكتب إليكم بخصوص الطلب رقم 48213 الذي قدمته الأسبوع الماضي. وصلت الحزمة متأخرة وكان الصندوق متضرراً.",
+  "real": 45,
+  "estimate": 48
+ },
+ {
+  "kind": "persian",
+  "text": "سلام، در مورد سفارش شماره ۴۸۲۱۳ که هفته گذشته ثبت کردم می‌نویسم. بسته دیر رسید و جعبه آسیب دیده بود.",
+  "real": 65,
+  "estimate": 68
+ },
+ {
+  "kind": "hebrew",
+  "text": "שלום, אני כותב בנוגע להזמנה מספר 48213 שביצעתי בשבוע שעבר. החבילה הגיעה באיחור והקופסה הייתה פגומה.",
+  "real": 40,
+  "estimate": 41
+ },
+ {
+  "kind": "hindi",
+  "text": "नमस्ते, मैं पिछले सप्ताह दिए गए ऑर्डर संख्या 48213 के बारे में लिख रहा हूँ। पार्सल देर से आया और डिब्बा क्षतिग्रस्त था।",
+  "real": 111,
+  "estimate": 113
+ },
+ {
+  "kind": "bengali",
+  "text": "নমস্কার, আমি গত সপ্তাহে দেওয়া ৪৮২১৩ নম্বর অর্ডার সম্পর্কে লিখছি। পার্সেলটি দেরিতে এসেছে এবং বাক্সটি ক্ষতিগ্রস্ত ছিল।",
+  "real": 124,
+  "estimate": 136
+ },
+ {
+  "kind": "thai",
+  "text": "สวัสดีค่ะ ฉันเขียนมาเกี่ยวกับคำสั่งซื้อหมายเลข 48213 ที่สั่งไปเมื่อสัปดาห์ที่แล้ว พัสดุมาถึงช้าและกล่องเสียหาย",
+  "real": 69,
+  "estimate": 66
+ },
+ {
+  "kind": "simplified chinese",
+  "text": "你好，我上周买的那个蓝牙耳机今天收到了，但是右边的耳机没有声音，左边正常。我试过重新配对，也恢复了出厂设置，还是不行。请问可以换货吗？订单号是48213。我希望能尽快处理，因为下周要出差。另外，如果换货需要先寄回的话，运费是谁承担？谢谢。",
+  "real": 79,
+  "estimate": 83
+ },
+ {
+  "kind": "traditional chinese",
+  "text": "您好，我上週訂購的藍牙耳機今天收到了，但是右邊的耳機沒有聲音，左邊正常。我試過重新配對，也恢復了原廠設定，還是不行。請問可以換貨嗎？訂單編號是48213。希望能盡快處理，因為下週要出差。另外，如果換貨需要先寄回的話，運費由誰負擔？謝謝。",
+  "real": 96,
+  "estimate": 98
+ },
+ {
+  "kind": "japanese",
+  "text": "お世話になっております。先週注文したワイヤレスイヤホンが今日届いたのですが、右側から音が出ません。左側は問題ありません。再ペアリングと初期化を試しましたが直りませんでした。交換は可能でしょうか。注文番号は48213です。来週出張があるので、なるべく早く対応していただけると助かります。また、交換の場合、返送料はどちらの負担になりますか。よろしくお願いいたします。",
+  "real": 112,
+  "estimate": 121
+ },
+ {
+  "kind": "korean",
+  "text": "안녕하세요. 지난주에 주문한 블루투스 이어폰이 오늘 도착했는데 오른쪽에서 소리가 나지 않습니다. 왼쪽은 정상입니다. 다시 페어링도 해 보고 초기화도 했는데 여전히 안 됩니다. 교환이 가능할까요? 주문번호는 48213입니다. 다음 주에 출장이 있어서 빨리 처리해 주시면 감사하겠습니다. 교환 시 반송비는 누가 부담하나요?",
+  "real": 122,
+  "estimate": 135
+ },
+ {
+  "kind": "taglish",
+  "text": "Hi po, nag-order ako last week ng running shoes, size 9, pero ang dumating ay size 8 at iba ang kulay. Na-check ko na ang order confirmation, tama naman ang nilagay ko. Pwede po bang ma-replace? Hindi ko pa sinuot, nasa box pa rin with tags. Sana po ma-process agad kasi may fun run kami sa Linggo. Kung kailangan ko i-ship back ang item, sino po ang sasagot sa shipping fee? Salamat po and sorry sa abala.",
+  "real": 123,
+  "estimate": 131
+ },
+ {
+  "kind": "json tool call",
+  "text": "[{\"id\": \"call_7f3a9c2e1b4d\", \"type\": \"function\", \"function\": {\"name\": \"create_ticket\", \"arguments\": \"{\\\"customer_email\\\": \\\"ana.rossi@example.com\\\", \\\"subject\\\": \\\"Order 48213 arrived damaged\\\", \\\"priority\\\": \\\"high\\\", \\\"tags\\\": [\\\"damaged\\\", \\\"refund\\\"]}\"}}]",
+  "real": 85,
+  "estimate": 89
+ },
+ {
+  "kind": "python",
+  "text": "#!/usr/bin/env bash\n# Rotate application logs, compress anything older than a day, prune after 30 days.\nset -euo pipefail\n\nLOG_DIR=\"${LOG_DIR:-/var/log/payments-api}\"\nKEEP_DAYS=\"${KEEP_DAYS:-30}\"\nDRY_RUN=\"${DRY_RUN:-0}\"\n\nlog() { printf '%s %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$*\" >&2; }\n\nrun() {\n  if [[ \"$DRY_RUN\" == \"1\" ]]; then\n    log \"DRY: $*\"\n  else\n    \"$@\"\n  fi\n}\n\nif [[ ! -d \"$LOG_DIR\" ]]; then\n  log \"log dir $LOG_DIR does not exist\"\n  exit 1\nfi\n\nshopt -s nullglob\nfor f in \"$LOG_DIR\"/*.log; do\n  size=$(stat -f %z \"$f\" 2>/dev/null || stat -c %s \"$f\")\n  if (( size > 104857600 )); then\n",
+  "real": 226,
+  "estimate": 250
+ },
+ {
+  "kind": "sql",
+  "text": "-- Monthly revenue and churn per plan, last 12 complete months.\nWITH months AS (\n    SELECT generate_series(\n        date_trunc('month', CURRENT_DATE) - INTERVAL '12 months',\n        date_trunc('month', CURRENT_DATE) - INTERVAL '1 month',\n        INTERVAL '1 month'\n    )::date AS month_start\n),\npaid AS (\n    SELECT\n        date_trunc('month', o.placed_at)::date AS month_start,\n        c.plan,\n        SUM(o.total_cents) / 100.0 AS revenue,\n        COUNT(DISTINCT o.customer_id) AS paying_customers\n    FROM orders AS o\n    JOIN customers AS c ON c.customer_id = o.customer_id\n    WHERE o.status IN",
+  "real": 155,
+  "estimate": 160
+ },
+ {
+  "kind": "url list",
+  "text": "https://api.example.com/v1/orders/48213?include=items&page=2\nhttps://docs.python.org/3/library/re.html#re.finditer\nhttps://en.wikipedia.org/wiki/Byte_pair_encoding",
+  "real": 47,
+  "estimate": 55
+ },
+ {
+  "kind": "uuids",
+  "text": "a3f9c2e1-7b4d-4f2a-9c1e-0d8b7a6f5e4c\n0f8fad5b-d9cb-469f-a165-70867728950e\n7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "real": 101,
+  "estimate": 104
+ },
+ {
+  "kind": "sha256",
+  "text": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  README.md",
+  "real": 61,
+  "estimate": 63
+ },
+ {
+  "kind": "base64",
+  "text": "QmFzZTY0IGVuY29kZWQgdGV4dCBpcyBoYXJkIGZvciB0b2tlbml6ZXJzIGJlY2F1c2UgdGhlIGNhc2UgY2hhbmdlcyBhdCBldmVyeSBmZXcgY2hhcmFjdGVycy4=",
+  "real": 88,
+  "estimate": 96
+ },
+ {
+  "kind": "long number",
+  "text": "The invoice total is 1,234,567.89 EUR, reference 20261003-000048213, IBAN FI21 1234 5600 0007 85.",
+  "real": 64,
+  "estimate": 65
+ },
+ {
+  "kind": "markdown table",
+  "text": "| Metric | Threshold | Panel |\n|---|---|---|\n| 5xx rate | < 0.1% | Errors |\n| p99 latency | < 800 ms | Latency |",
+  "real": 45,
+  "estimate": 47
+ },
+ {
+  "kind": "emoji",
+  "text": "omg yes!!! 🎉🎉🎉 finally got the tickets 🎫✨ see you saturday 😎🙌",
+  "real": 24,
+  "estimate": 24
+ },
+ {
+  "kind": "camelCase identifiers",
+  "text": "getUserName HTTPServer parseJSONResponse ELECTRONICS snake_case_name",
+  "real": 13,
+  "estimate": 28
+ },
+ {
+  "kind": "whitespace and newlines",
+  "text": "def f(x):\n        return x\n\n\n    # done\n",
+  "real": 12,
+  "estimate": 13
+ },
+ {
+  "kind": "single label",
+  "text": "billing",
+  "real": 1,
+  "estimate": 2
+ },
+ {
+  "kind": "empty",
+  "text": "",
+  "real": 0,
+  "estimate": 0
+ },
+ {
+  "kind": "formal simplified chinese (policy)",
+  "text": "退换货政策。一、自收到商品之日起七日内，在不影响二次销售的前提下，用户可以申请无理由退货；商品应保持原有包装、配件、标签及赠品齐全。二、下列商品不适用无理由退货：定制商品、鲜活易腐商品、在线下载或已拆封的音像制品和计算机软件、已激活的数码产品以及报纸期刊。三、商品存在质量问题的，用户可以在收到商品后十五日内申请换货，三十日内申请维修；平台承担因此产生的往返运费。四、退款将在平台确认收到退回商品后七个工作日内原路返回；使用优惠券支付的部分，优惠券将按原规则退回账户。五、如对处理结果有异议，用户可以通过客服热线或在线客服提出申诉，平台将在五个工作日内给予书面答复。",
+  "real": 171,
+  "estimate": 180
+ },
+ {
+  "kind": "formal simplified chinese (SDK test policy x10, 2600 chars)",
+  "text": "客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的问题。如果包裹在运输过程中损坏，客户可以在收到后七天内申请全额退款。对于缺少的商品，我们需要客户提供订单号和收货照片作为凭证。会员用户享有优先处理的权利，一般会在二十四小时内得到回复。请注意，定制商品和已拆封的电子产品不支持无理由退货。如果客户要求更换地址，必须在商品发货之前提交申请。所有退款将原路返回，到账时间通常为三到五个工作日。当客户情绪激动时，请保持礼貌并先表示理解，再说明处理方案。涉及金额超过一千元的赔偿，需要主管审批后才能执行。请不要向客户透露其他用户的任何个人信息或订单信息。如遇系统故障，应告知客户预计恢复时间并记录工单编号。每次对话结束前，请确认客户的问题是否已经完全解决。客户服务部门负责处理所有与订单、配送和退款相关的",
+  "real": 1484,
+  "estimate": 1575
+ },
+ {
+  "kind": "formal traditional chinese (policy)",
+  "text": "退換貨政策。一、自收到商品之日起七日內，在不影響二次銷售的前提下，用戶可以申請無理由退貨；商品應保持原有包裝、配件、標籤及贈品齊全。二、下列商品不適用無理由退貨：客製化商品、鮮活易腐商品、線上下載或已拆封的影音製品和電腦軟體、已啟用的數位產品以及報紙期刊。三、商品存在品質問題的，用戶可以在收到商品後十五日內申請換貨，三十日內申請維修；平台承擔因此產生的往返運費。四、退款將在平台確認收到退回商品後七個工作日內原路返回；使用優惠券支付的部分，優惠券將按原規則退回帳戶。五、如對處理結果有異議，用戶可以透過客服熱線或線上客服提出申訴，平台將在五個工作日內給予書面答覆。",
+  "real": 207,
+  "estimate": 214
+ },
+ {
+  "kind": "formal traditional chinese (warranty)",
+  "text": "保固條款。本產品自購買之日起享有十二個月的有限保固。在保固期內，因材料或工藝缺陷導致的功能故障，製造商將免費提供維修或更換服務。下列情形不在保固範圍之內：未按說明書要求操作、擅自拆解或改裝、使用非原廠配件、進水、摔落、雷擊等外力損壞，以及正常使用造成的外觀磨損。申請保固時，請提供有效的購買憑證和產品序號；無法提供憑證的，以產品出廠日期推算保固期。維修更換的零件歸製造商所有，更換後的零件保固期與原產品剩餘保固期一致。本條款不影響消費者依據相關法律享有的其他權利。",
+  "real": 177,
+  "estimate": 181
+ },
+ {
+  "kind": "mixed english instructions + simplified policy",
+  "text": "You are a customer support assistant for a Chinese e-commerce platform. Answer the customer's question in the language of the question, using only the policy below. Quote the clause you rely on. If the policy does not cover the question, say so and offer to escalate. Policy:\n\n第一条 服务范围。本平台为用户提供商品展示、在线下单、支付结算、物流配送及售后服务。用户在注册账户时应当提供真实、准确、完整的个人信息，并在信息发生变更时及时更新。平台有权对用户提交的信息进行核实，对于提供虚假信息的账户，平台可以暂停或终止服务。第二条 订单与支付。用户提交订单后，系统将自动生成订单编号；订单在支付成功后生效。支持的支付方式包括银行卡、第三方支付及平台余额。若因库存不足、价格标注错误或系统故障导致订单无法履行，平台将在三个工作日内通知用户并全额退款。第三条 配送。标准配送时效为三至五个工作日，偏远地区可能延长至七至十个工作日。用户应确保收货地址和联系电话准确无误；因地址错误导致的配送失败，由用户承担重新配送的费用。",
+  "real": 244,
+  "estimate": 255
+ },
+ {
+  "kind": "mixed simplified + traditional (both variants quoted)",
+  "text": "尊敬的客户：感谢您选择我们的服务。为保障您的账户安全，请您注意以下事项：请勿向任何人透露您的登录密码和短信验证码；我们的工作人员不会以任何理由索要您的密码。如您收到可疑的电话、短信或邮件，请通过官方渠道核实。建议您定期修改密码，并开启登录保护功能。若发现账户存在异常交易，请立即致电客服热线进行挂失或冻结。本通知自发布之日起生效，最终解释权归本公司所有。\n\n尊敬的客戶：感謝您選擇我們的服務。為保障您的帳戶安全，請您注意以下事項：請勿向任何人透露您的登入密碼和簡訊驗證碼；我們的工作人員不會以任何理由索取您的密碼。如您收到可疑的電話、簡訊或郵件，請透過官方管道核實。建議您定期修改密碼，並開啟登入保護功能。若發現帳戶存在異常交易，請立即致電客服熱線進行掛失或凍結。本通知自發布之日起生效，最終解釋權歸本公司所有。",
+  "real": 222,
+  "estimate": 238
+ },
+ {
+  "kind": "japanese formal (manual)",
+  "text": "本製品をご使用の前に、本書をよくお読みください。保証期間はご購入日から十二か月です。取扱説明書に従わない使用、改造、落下、水没による故障は保証の対象外となります。",
+  "real": 62,
+  "estimate": 67
+ }
+]

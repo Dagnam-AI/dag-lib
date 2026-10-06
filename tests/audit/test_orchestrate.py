@@ -9,26 +9,29 @@ import socket
 from typing import Any
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, last_user, serve_chat, teacher
-from tests.audit.conftest import SCAN_REPORT as REPORT
+from tests.audit._chat import Clock, json_row, last_user, serve_chat, teacher
+from tests.audit._platform import FakePlatform
+from tests.audit.conftest import HOLDOUT, SCAN_REPORT as SCANNED, TRAIN, stats
 from tests.typing_helpers import RequestsMocker
 
-from dagnam._core.exceptions import APIError, FoundationRunNotFoundError, QuotaExceededError
+from dagnam._core.exceptions import APIError, QuotaExceededError
 from dagnam._types import JsonObject
 from dagnam.audit import build_dataset, discover_workloads
 from dagnam.audit.candidates import CandidateKind
-from dagnam.audit.orchestrate import SCAN_REPORT, plan_credits, run_audit
+from dagnam.audit.orchestrate import (
+    SCAN_REPORT,
+    run_audit,
+    select_workloads,
+)
 from dagnam.audit.publish import Publisher
 from dagnam.audit.record import TraceRecord
 from dagnam.audit.state import (
     STATE_FILE,
-    AuditBusyError,
     AuditState,
     load_state,
-    lock_audit,
     save_state,
 )
-from dagnam.audit.structure import StructureClass
+from dagnam.audit.workspace import write_workload
 
 HEAD, SFT, HOSTED = CandidateKind.HEAD_TUNE, CandidateKind.SFT_SMALL, CandidateKind.HOSTED_FLOOR
 
@@ -91,7 +94,7 @@ def test_full_frontier_then_each_step_is_idempotent(
 
     calls_after_first = platform.call_log[:]
     second = run()
-    assert platform.call_log == calls_after_first
+    assert platform.call_log == [*calls_after_first, "get_platform_build"]  # only the preflight
     assert second == state
 
 
@@ -205,7 +208,7 @@ def test_a_crash_mid_step_is_recorded_and_the_rerun_resumes_from_the_saved_state
     assert state.workloads["w1"][HEAD].scored is True
     rerun_calls = platform.call_log[before:]
     assert rerun_calls.count("upload_dataset") == 1  # w2 only; w1's data steps were on disk
-    assert rerun_calls[0] == "list_foundation_catalog"
+    assert rerun_calls[:2] == ["get_platform_build", "list_foundation_catalog"]
 
 
 def test_no_wait_returns_after_submitting(
@@ -234,10 +237,31 @@ def test_explicit_workload_selection(
         run(workloads=["w5"])
 
 
+def test_a_workload_the_current_scan_did_not_derive_is_never_run(
+    run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
+) -> None:
+    # Rows an earlier scan of another export left behind: ``--workloads w5`` only asked
+    # whether ``dataset.jsonl`` existed, so it uploaded and trained on them under the
+    # new scan report, which says ``w5`` has no dataset.
+    split = {"train": TRAIN, "eval_holdout": HOLDOUT}
+    write_workload(audit_dir, "w5", [json_row(i) for i in range(20)], split, stats("chat-messages"))
+    with pytest.raises(ValueError, match=r"without derived data.*\['w5'\]"):
+        run(workloads=["w5"])
+    with pytest.raises(ValueError, match=r"without derived data.*\['w5'\]"):
+        select_workloads(audit_dir, ["w1", "w5"])
+    assert platform.call_log == []
+    assert [w for w, _ in select_workloads(audit_dir, None)] == ["w1", "w2"]  # w5 is a candidate
+    # Derived by the scan, but its rows were deleted since: named, it is refused too.
+    (audit_dir / "workloads" / "w2" / "dataset.jsonl").unlink()
+    with pytest.raises(ValueError, match=r"without derived data.*\['w2'\]"):
+        select_workloads(audit_dir, ["w2"])
+    assert [w for w, _ in select_workloads(audit_dir, None)] == ["w1"]
+
+
 def test_missing_scan_report_and_an_unversioned_price_table(
     run: Callable[..., AuditState], audit_dir: Path, tmp_path: Path, platform: FakePlatform
 ) -> None:
-    report = dict(REPORT)
+    report = dict(SCANNED)
     report["price_table_version"] = 3
     report["workloads"] = [{"id": "w1", "structure_class": "enum_label"}]
     (audit_dir / SCAN_REPORT).write_text(json.dumps(report))
@@ -318,7 +342,7 @@ def test_a_cancelled_candidate_is_skipped_wherever_the_cancel_caught_it(
 
     run()
 
-    assert platform.call_log == []
+    assert platform.call_log == ["get_platform_build"]  # the preflight, and nothing for them
     assert load_state(audit_dir).workloads == state.workloads
     # w2 scored before the cancel, so it kept its result and lost its endpoint.
     assert state.workloads["w2"][SFT].deploy_status == "paused"
@@ -353,7 +377,7 @@ def test_a_candidate_that_errored_earlier_still_publishes_its_failure_on_resume(
     assert load_state(audit_dir).candidate("w1", HEAD).published_candidate_id == "cand-1"
 
 
-# ----------------------------------------------- B1 / B8 / B10 / K1 (audit hardening)
+# ------------------------------------------------- locking, budget, cancel and delete
 
 
 def test_a_ctrl_c_during_a_publish_never_loses_the_step_it_publishes(
@@ -362,7 +386,7 @@ def test_a_ctrl_c_during_a_publish_never_loses_the_step_it_publishes(
     platform: FakePlatform,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """B1: the run it submitted is on disk before the slow publish starts.
+    """The run it submitted is on disk before the slow publish starts.
 
     The old order published first and saved after, so a Ctrl+C on a hung
     publish lost the run id: the rerun paid for a second run, and the first
@@ -390,219 +414,10 @@ def test_a_ctrl_c_during_a_publish_never_loses_the_step_it_publishes(
 def test_a_ctrl_c_while_the_audit_is_published_keeps_the_project(
     run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
 ) -> None:
-    """B1: the project is on disk before the audit header goes out."""
+    """The project is on disk before the audit header goes out."""
     platform.publish_errors["create_audit"] = [KeyboardInterrupt()]
     with pytest.raises(KeyboardInterrupt):
         run(workloads=["w1"], publisher=Publisher(platform, AuditState()))
     assert load_state(audit_dir).project_id == "proj-1"
     run(workloads=["w1"], publisher=Publisher(platform, AuditState()))
     assert platform.call_log.count("create_project") == 1
-
-
-def test_the_last_patch_goes_out_even_when_its_first_send_fails(
-    run: Callable[..., AuditState],
-    audit_dir: Path,
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """B10: after the last candidate's last step nothing followed to carry it out."""
-    real_patch = platform.patch_audit_candidate
-    failed: list[bool] = []
-
-    def patch(audit_id: str, candidate_id: str, payload: JsonObject) -> JsonObject:
-        if payload.get("status") == "scored" and not failed:
-            failed.append(True)
-            raise APIError(503, "blip")
-        return real_patch(audit_id, candidate_id, payload)
-
-    monkeypatch.setattr(platform, "patch_audit_candidate", patch)
-    state = run(workloads=["w1"], publisher=Publisher(platform, AuditState()))
-    assert [body["status"] for _, body in platform.patches][-1] == "scored"
-    assert state.workloads["w1"][HEAD].published_step == "replay_and_score"
-    assert load_state(audit_dir).workloads["w1"][HEAD].published_step == "replay_and_score"
-
-
-def test_a_cancel_on_the_website_stops_a_live_run(
-    run: Callable[..., AuditState],
-    audit_dir: Path,
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """K1/P6: the next publish meets the halt, and the run stops there -- nothing more is paid for."""
-    real_create = platform.create_foundation_run
-
-    def create(payload: JsonObject) -> JsonObject:
-        created = real_create(payload)
-        platform.audit_halted = platform.submits == 1  # Cancel pressed while w1 trained
-        return created
-
-    monkeypatch.setattr(platform, "create_foundation_run", create)
-    state = run(publisher=Publisher(platform, AuditState()))
-    assert state.halted == {"reason": "cancelled"}
-    assert load_state(audit_dir).halted == {"reason": "cancelled"}
-    assert platform.submits == 1
-    assert "get_foundation_run" not in platform.call_log
-    assert platform.halts == []
-
-    resumed = run(publisher=Publisher(platform, load_state(audit_dir)))
-    assert resumed.halted is None
-    assert platform.resumes[-1] == ("patch_audit_candidate", False)
-    assert resumed.workloads["w2"][SFT].scored is True
-
-
-def test_a_cancel_between_two_candidates_stops_before_the_second_opens(
-    run: Callable[..., AuditState],
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    real_open = platform.create_audit_candidate
-
-    def open_candidate(audit_id: str, payload: JsonObject) -> JsonObject:
-        platform.audit_halted = len(platform.candidates) == 1  # after w1 scored
-        return real_open(audit_id, payload)
-
-    monkeypatch.setattr(platform, "create_audit_candidate", open_candidate)
-    state = run(publisher=Publisher(platform, AuditState()))
-    assert state.halted == {"reason": "cancelled"}
-    assert state.workloads["w1"][HEAD].scored is True
-    assert platform.call_log.count("upload_dataset") == 1  # w2 never started
-
-
-def test_the_first_submit_is_held_to_the_ceiling_too(
-    run: Callable[..., AuditState], platform: FakePlatform
-) -> None:
-    """B8: `--max-credits 10` used to submit a 300-credit run; nothing is submitted now."""
-    platform.credits_estimate_max = 300
-    state = run(max_credits=10, workloads=["w1"])
-    assert platform.submits == 0
-    assert state.halted is not None
-    assert state.halted["reason"] == "budget"
-
-
-def test_the_default_ceiling_is_the_plan_rounded_up_to_a_hundred(audit_dir: Path) -> None:
-    """P5: each trained candidate at its 120-credit ceiling plus 5 for its 4-row replay."""
-    w1 = ("w1", StructureClass.ENUM_LABEL)
-    w2 = ("w2", StructureClass.JSON_OBJECT)
-    assert plan_credits(audit_dir, [w1]) == 200
-    assert plan_credits(audit_dir, [w1, w2]) == 300
-    assert plan_credits(audit_dir, []) == 0
-
-
-def test_a_second_run_over_the_same_directory_is_refused(
-    run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
-) -> None:
-    """B13: both saw no `run_id` and both submitted; last writer won `state.json`."""
-    with lock_audit(audit_dir), pytest.raises(AuditBusyError):
-        run()
-    assert platform.call_log == []
-    assert run().halted is None  # and the directory is free again once the first is done
-
-
-def test_a_cancel_during_a_resumed_run_s_first_wait_sticks(
-    run: Callable[..., AuditState],
-    audit_dir: Path,
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Review N1: `--no-wait`, then a resumed run whose first request came after `wait_run`.
-
-    That request carried the run's one `resume: true`, un-halted the audit the
-    owner had just cancelled, and the run went on to submit a second paid run.
-    """
-    run(wait=False, publisher=Publisher(platform, AuditState()))
-    real_poll = platform.get_foundation_run
-
-    def poll(run_id: str) -> JsonObject:
-        platform.audit_halted = True  # Cancel pressed while w1 trains
-        return real_poll(run_id)
-
-    monkeypatch.setattr(platform, "get_foundation_run", poll)
-    state = run(publisher=Publisher(platform, load_state(audit_dir)))
-    assert state.halted == {"reason": "cancelled"}
-    assert platform.submits == 1
-    assert "resume_audit" in platform.call_log
-    assert all(flag is False for name, flag in platform.resumes if name != "create_audit")
-
-
-def test_an_audit_deleted_during_a_live_run_stops_it(
-    run: Callable[..., AuditState],
-    audit_dir: Path,
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Backend review N3: the owner deleted the audit; every publish is a 404 from then on."""
-    real_create = platform.create_foundation_run
-
-    def create(payload: JsonObject) -> JsonObject:
-        created = real_create(payload)
-        platform.audit_deleted = True
-        return created
-
-    monkeypatch.setattr(platform, "create_foundation_run", create)
-    state = run(publisher=Publisher(platform, AuditState()))
-    assert state.halted == {"reason": "deleted"}
-    assert load_state(audit_dir).halted == {"reason": "deleted"}
-    assert platform.submits == 1
-    assert "get_foundation_run" not in platform.call_log
-
-
-def test_the_default_ceiling_counts_what_the_audit_already_spent(audit_dir: Path) -> None:
-    """M3: `--workloads w1` spent 150; `--workloads w2` was then told a 200 ceiling and halted."""
-    state = AuditState()
-    w1 = state.candidate("w1", HEAD)
-    w1.run_id, w1.run_status, w1.scored = "run-1", "completed", True
-    w1.training_cost_credits, w1.replay_cost_credits = 146.0, 4.0
-    w2 = ("w2", StructureClass.JSON_OBJECT)
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 spent + 125 still to come
-    assert plan_credits(audit_dir, [("w1", StructureClass.ENUM_LABEL), w2], state) == 300
-
-    live = state.candidate("w2", SFT)
-    live.run_id, live.run_status = "run-2", "running"  # its ceiling is in what was spent
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 + 120 live + 5 replay
-    live.error = "deploy_failed: no gpu"
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 + 120: nothing left to run
-
-
-def test_a_delete_while_the_run_waits_on_training_ends_it_as_deleted(
-    run: Callable[..., AuditState],
-    audit_dir: Path,
-    platform: FakePlatform,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """R2: the account's delete took the job with it, so the run's own poll got the 404.
-
-    That ended the run as `halted: error` and a traceback; it is the owner's
-    delete, and the run ends as `deleted` -- quietly, with nothing more spent.
-    """
-
-    def poll(run_id: str) -> JsonObject:
-        platform.audit_deleted = True
-        raise FoundationRunNotFoundError(run_id)
-
-    monkeypatch.setattr(platform, "get_foundation_run", poll)
-    state = run(publisher=Publisher(platform, AuditState()))
-    assert state.halted == {"reason": "deleted"}
-    assert load_state(audit_dir).halted == {"reason": "deleted"}
-    assert platform.submits == 1
-    assert "halt_audit" not in platform.call_log
-
-
-def test_a_step_that_fails_under_a_live_audit_is_still_an_error(
-    run: Callable[..., AuditState], platform: FakePlatform
-) -> None:
-    platform.submit_errors = [RuntimeError("socket reset")]
-    with pytest.raises(RuntimeError, match="socket reset"):
-        run(publisher=Publisher(platform, AuditState()))
-    assert platform.call_log.count("get_audit") >= 1  # asked, and the audit was there
-
-
-def test_a_run_over_an_audit_the_account_deleted_stops_before_any_step(
-    run: Callable[..., AuditState], audit_dir: Path, platform: FakePlatform
-) -> None:
-    """R3: the resume at start is where the run learns it, not its first publish."""
-    run(wait=False, publisher=Publisher(platform, AuditState()))
-    platform.audit_deleted = True
-    platform.call_log.clear()
-    state = run(publisher=Publisher(platform, load_state(audit_dir)))
-    assert state.halted == {"reason": "deleted"}
-    assert platform.call_log == ["resume_audit", "get_audit"]

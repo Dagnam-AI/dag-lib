@@ -50,3 +50,6 @@ class TraceRecord:
     """The prompt carried an image, audio, file or document part the text does not hold."""
     signature: str | None = None
     """The request's output schema or forced tool, as ``schema=<name>``; never its tool set."""
+    reasoning_only: bool = False
+    """The reply was nothing but the model's reasoning, so ``response`` is empty: the call is
+    counted and priced like any other, and gives no training row."""

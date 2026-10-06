@@ -66,7 +66,7 @@ def test_score_json_field_level() -> None:
     assert abs(a.field_f1 - 0.4) < 1e-9
     assert a.value == a.field_f1
     assert a.n == 1
-    # Contract 0.4.0 (C3): the Wilson score interval around the micro-F1 over the
+    # Contract 0.4.0: the Wilson score interval around the micro-F1 over the
     # ONE scored row -- not 2tp of 2tp+fp+fn trials, which counted each correct
     # field twice. Derived here from the closed form, p = 0.4 and n = 1.
     z, p, n = 1.959963984540054, 0.4, 1
@@ -103,6 +103,6 @@ def test_agreement_to_json_carries_only_the_populated_extras() -> None:
         "n": 2,
         "exact": 0.5,
         "macro_f1": 0.4,
-        # Q4: a label block always says its weakest class (null when none has support).
+        # A label block always says its weakest class (null when none has support).
         "min_class_recall": None,
     }

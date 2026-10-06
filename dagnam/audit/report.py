@@ -1,10 +1,12 @@
 """The audit report: ``audit-report.json`` (the contract) and ``audit-report.md`` (a view of it).
 
 :func:`build_audit_report` is the scan report plus, per audited workload, the
-candidates the run produced, the frontier's winner and the switch values
-(spec section 7). The verdict a customer reads -- REPLACE, NOT YET, KEEP
-(section 7a) -- is a view over ``verdict.status`` and ``winner`` that the
-markdown renders from the JSON, never a second computation. The derived blocks
+candidates the run produced, the frontier's winner and the switch values. The
+verdict a customer reads -- REPLACE, NOT YET, KEEP -- is a view over
+``verdict.status`` and ``winner`` that the markdown renders from the JSON,
+never a second computation. A candidate that stopped carries its whole
+recorded reason (``error``), not only the code its ``status`` is: the reason
+is what names the cause and what to do about it. The derived blocks
 themselves -- the winner, the switch, the snippet -- come from
 ``dagnam_contracts.audit.report``, so the platform renders the same report
 from the same candidates: a candidate flagged ``unreliable`` never wins, and
@@ -30,7 +32,7 @@ from dagnam_contracts.audit.report import (
 )
 
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
-from dagnam.audit.cleanup import DEPLOY_PAUSED
+from dagnam.audit.cleanup import DEPLOY_DELETED, DEPLOY_PAUSED
 from dagnam.audit.economics import customer_verdict
 from dagnam.audit.orchestrate import FLOOR_BY_STRUCTURE
 from dagnam.audit.prices import PriceTable
@@ -50,14 +52,15 @@ from dagnam.audit.thresholds import (
     RATIO_CANDIDATE,
     RATIO_NOT_WORTH_IT,
 )
+from dagnam.audit.workspace import write_atomic
 
 SCHEMA = REPORT_SCHEMA
 """The ``schema`` value of ``audit-report.json``."""
 UNTESTED = "untested"
 TOOL_CALL = "tool_call"
-"""A scan entry's ``response_mode`` when the workload answers with tool calls (spec P4)."""
+"""A scan entry's ``response_mode`` when the workload answers with tool calls."""
 UNRELIABLE = "unreliable"
-"""The error code of a replay where more than 10% of calls failed: shown, never a winner (P2)."""
+"""The error code of a replay where more than 10% of calls failed: shown, never a winner."""
 
 
 def _hosted_floor(entry: Mapping[str, Any], table: PriceTable) -> tuple[str | None, float | None]:
@@ -85,10 +88,11 @@ def candidate_status(spec: CandidateSpec, step: StepState) -> str:
     if step.scored:
         return "scored"
     if step.deploy_status is not None:
-        # `running` and `paused` are where a deployment *is*; every other value
-        # is a revision still on its way up. A paused endpoint reported as
-        # `deploying` reads as "any moment now" for one deliberately stopped.
-        settled = {DEPLOY_RUNNING, DEPLOY_PAUSED}
+        # `running`, `paused` and `deleted` are where a deployment *is*; every
+        # other value is a revision still on its way up. A paused endpoint
+        # reported as `deploying` reads as "any moment now" for one
+        # deliberately stopped.
+        settled = {DEPLOY_RUNNING, DEPLOY_PAUSED, DEPLOY_DELETED}
         return step.deploy_status if step.deploy_status in settled else "deploying"
     if step.run_status is not None:
         return step.run_status
@@ -119,11 +123,14 @@ def _candidate(
         "training_cost_credits": step.training_cost_credits,
         "replay_cost_credits": step.replay_cost_credits,
         "status": candidate_status(spec, step),
+        # The whole recorded reason behind an error status: the code says that a
+        # candidate stopped, this says why and what to do. `None` when it did not.
+        "error": step.error,
         # The account-side row this candidate was published to (`None` for a
         # `--local-only` run): `winner_of` passes it through, which is what
         # lets the audit page link a winner to the candidate the run published.
         "candidate_id": step.published_candidate_id,
-        # K5: what `winner_of` skips -- more than 10% of the replay failed.
+        # What `winner_of` skips -- more than 10% of the replay failed.
         "unreliable": error_code(step) == UNRELIABLE,
     }
 
@@ -134,7 +141,7 @@ def _winner(candidates: list[dict[str, Any]], default_floor: float) -> dict[str,
 
 
 def _savings(entry: Mapping[str, Any], winner: Mapping[str, Any] | None) -> float:
-    """What replacing the workload saves a month (P9): a REPLACE only, and never below zero.
+    """What replacing the workload saves a month: a REPLACE only, and never below zero.
 
     Spend, less the winner's serving, less maintenance. A KEEP that still has a
     winner (too few samples, say) and a workload with no winner save nothing,
@@ -200,8 +207,8 @@ def write_audit_report(report: Mapping[str, Any], out_dir: Path) -> None:
     """Write ``audit-report.json`` and ``audit-report.md`` (rendered from the JSON) into ``out_dir``."""
     out_dir.mkdir(parents=True, exist_ok=True)
     text = json.dumps(report, indent=2)
-    (out_dir / "audit-report.json").write_text(text, encoding="utf-8")
-    (out_dir / "audit-report.md").write_text(render_markdown(json.loads(text)), encoding="utf-8")
+    write_atomic(out_dir / "audit-report.json", text)
+    write_atomic(out_dir / "audit-report.md", render_markdown(json.loads(text)))
 
 
 def _usd(value: float | None) -> str:
@@ -259,6 +266,10 @@ def _candidate_section(w: Mapping[str, Any]) -> list[str]:
             f" split {d['split']}"
         )
     lines += ["", *_CANDIDATE_HEAD, *(_candidate_row(c, w["winner"]) for c in w["candidates"]), ""]
+    stopped = [f"- {c['kind']}: {c['error']}" for c in w["candidates"] if c.get("error")]
+    if stopped:
+        # The table's status column holds the code; this is the sentence behind it.
+        lines += [*stopped, ""]
     if w["winner"] is None:
         lines += [no_winner_reason(w), ""]
     return lines

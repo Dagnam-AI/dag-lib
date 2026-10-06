@@ -96,7 +96,7 @@ class TestRegisterModels:
             license="mit",
             visibility="private",
         )
-        # I6: the default (no --json flag) output must be real JSON, not a
+        # The default (no --json flag) output must be real JSON, not a
         # Python dict repr (single-quoted) -- json.loads raises on the latter.
         assert json.loads(capsys.readouterr().out) == {"id": "v1", "status": "ready"}
 
@@ -153,7 +153,7 @@ class TestRegisterModels:
         ) as mock_get:
             args.func(args)
         mock_get.assert_called_once_with("m1")
-        # I6: real JSON by default, not a Python dict repr.
+        # Real JSON by default, not a Python dict repr.
         assert json.loads(capsys.readouterr().out) == {"id": "m1", "name": "Tiny"}
 
     def test_get_json_flag_prints_json(
@@ -236,7 +236,7 @@ class TestRegisterModels:
         ) as mock_download:
             args.func(args)
         mock_download.assert_called_once_with("v1", "a1", cache_dir="/tmp/models")
-        # I6: the default output is the same JSON shape as --json, not a bare
+        # The default output is the same JSON shape as --json, not a bare
         # printed path.
         assert json.loads(capsys.readouterr().out) == {"path": "/tmp/models/a1.bin"}
 
@@ -261,7 +261,7 @@ class TestRegisterModels:
         ) as mock_lineage:
             args.func(args)
         mock_lineage.assert_called_once_with("v1")
-        # I6: real JSON by default, not a Python dict repr.
+        # Real JSON by default, not a Python dict repr.
         assert json.loads(capsys.readouterr().out) == {"parents": []}
 
     def test_lineage_json_flag_prints_json(self, capsys: StrCapture) -> None:
@@ -285,7 +285,7 @@ class TestRegisterModels:
         ) as mock_contract:
             args.func(args)
         mock_contract.assert_called_once_with("chat-completion", "1")
-        # I6: real JSON by default, not a Python dict repr.
+        # Real JSON by default, not a Python dict repr.
         assert json.loads(capsys.readouterr().out) == {"key": "chat-completion", "version": "1"}
 
     def test_task_contract_json_flag_prints_json(self, capsys: StrCapture) -> None:

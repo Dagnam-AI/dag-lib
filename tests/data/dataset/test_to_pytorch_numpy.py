@@ -156,7 +156,7 @@ def test_numpy_loader_clamps_rectangular_token_ids_to_vocab(
     high_id_numpy_native_ds: DagnamDataset, split: str
 ) -> None:
     """Rectangular, already-padded token ids above the embedding vocab are clamped to
-    ``< vocab_size`` (Round-2 G247). Raw IMDB ids reach ~88k, so a vocab-sized
+    ``< vocab_size``. Raw IMDB ids reach ~88k, so a vocab-sized
     ``nn.Embedding`` would otherwise raise "index out of range" at the pre-flight smoke.
     """
     loader = high_id_numpy_native_ds.to_pytorch_loader(

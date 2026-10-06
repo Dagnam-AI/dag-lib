@@ -9,7 +9,8 @@ import sys
 from typing import Any
 
 import pytest
-from tests.audit._platform import Clock, FakePlatform, json_row, label_row
+from tests.audit._chat import Clock, json_row, label_row
+from tests.audit._platform import FakePlatform
 
 from dagnam.audit import TraceRecord, read_traces, write_workload
 from dagnam.audit.candidates import HEAD_TUNE, CandidateSpec
@@ -23,15 +24,26 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PASS_LIST = ["PII_EMAIL", "PII_PHONE", "PII_PAYMENT_CARD", "PII_NATIONAL_ID"]
 TRAIN = list(range(16))
 HOLDOUT = [16, 17, 18, 19]
+DERIVED: dict[str, Any] = {"rows": 20, "split": {"train": len(TRAIN), "eval_holdout": len(HOLDOUT)}}
+"""A scan report's ``dataset`` entry for a workload whose rows it derived."""
 SCAN_REPORT: dict[str, Any] = {
     "schema": "dagnam.audit.scan/1",
     "price_table_version": "2026-09",
     "workloads": [
-        {"id": "w1", "structure_class": "enum_label", "verdict": {"status": "candidate"}},
-        {"id": "w2", "structure_class": "json_object", "verdict": {"status": "marginal"}},
-        {"id": "w3", "structure_class": "free_text", "verdict": {"status": "not_audited"}},
-        {"id": "w4", "structure_class": "enum_label", "verdict": {"status": "not_worth_it"}},
-        {"id": "w5", "structure_class": "enum_label", "verdict": {"status": "candidate"}},
+        {
+            "id": workload_id,
+            "structure_class": structure_class,
+            "verdict": {"status": status},
+            # A scan writes ``dataset`` for every workload: ``None`` when it derived no rows.
+            "dataset": DERIVED if workload_id in ("w1", "w2") else None,
+        }
+        for workload_id, structure_class, status in (
+            ("w1", "enum_label", "candidate"),
+            ("w2", "json_object", "marginal"),
+            ("w3", "free_text", "not_audited"),
+            ("w4", "enum_label", "not_worth_it"),
+            ("w5", "enum_label", "candidate"),
+        )
     ],
 }
 

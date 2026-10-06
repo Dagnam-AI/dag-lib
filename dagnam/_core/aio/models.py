@@ -94,6 +94,15 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
             "DELETE", f"/api/v1/models/{quote_path_segment(model_id)}", model_id=model_id
         )
 
+    async def purge_model_version(self, version_id: str) -> JsonObject | None:
+        """``DELETE /api/v1/model-versions/{id}``: this one version's weights, never its entry."""
+        answer = await self._registry_req(
+            "DELETE",
+            f"/api/v1/model-versions/{quote_path_segment(version_id)}",
+            model_id=version_id,
+        )
+        return answer if isinstance(answer, dict) else None
+
     # --------------------------------------------------------------- versions
 
     async def create_model_version(self, model_id: str, payload: JsonObject) -> JsonObject:

@@ -70,7 +70,12 @@ dependencies = [
     # with the backend and the Studio so all three reach identical verdicts.
     # Has ZERO runtime dependencies by design, so it costs this SDK no
     # transitive deps.
-    "dagnam-contracts>=0.4.0",
+    # Capped below the next minor: the contract's PII class list and score
+    # shape are a wire protocol with the platform, so a contract minor is only
+    # ever picked up by an SDK release built and tested against it. An open
+    # floor let a new contract reach an already published SDK whose platform
+    # still ran the old one, and every audit stopped at its PII check.
+    "dagnam-contracts>=0.4.1,<0.5",
 ]
 
 [project.optional-dependencies]
@@ -85,7 +90,7 @@ audit = ["keyring>=25"]
 pytorch = ["torch>=2.13.0", "torchvision>=0.19"]
 # SoundFile decodes uploaded WAV/FLAC/MP3 files without a machine-global FFmpeg
 # shared-library install. Torchaudio remains the framework transform dependency
-# for generated MFCC/Mel nodes; TorchCodec is deliberately not a loader dep (G197).
+# for generated MFCC/Mel nodes; TorchCodec is deliberately not a loader dep.
 audio = ["torch>=2.13.0", "torchaudio>=2.0", "soundfile>=0.13"]
 # TensorFlow added Python 3.12 support in 2.16 (2.12 tops out at 3.11), so the
 # floor must be >=2.16 to be installable on the supported interpreters.
@@ -124,10 +129,10 @@ dagnam = "dagnam.cli:main"
 [project.urls]
 Homepage = "https://dagnam.ai"
 Documentation = "https://dagnam.ai/docs"
-Repository = "https://github.com/dagnam-ai/dagnam"
-Changelog = "https://github.com/dagnam-ai/dagnam/blob/main/dag-lib/CHANGELOG.md"
-Issues = "https://github.com/dagnam-ai/dagnam/issues"
-Security = "https://github.com/dagnam-ai/dagnam/blob/main/dag-lib/SECURITY.md"
+Repository = "https://github.com/Dagnam-AI/dag-lib"
+Changelog = "https://github.com/Dagnam-AI/dag-lib/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Dagnam-AI/dag-lib/issues"
+Security = "https://github.com/Dagnam-AI/dag-lib/blob/main/SECURITY.md"
 
 [dependency-groups]
 dev = [
@@ -178,6 +183,7 @@ force-include = { "NOTICE" = "dagnam/NOTICE" }
 include = [
     "dagnam",
     "tests",
+    "/scripts",
     "README.md",
     "LICENSE",
     "NOTICE",

@@ -458,10 +458,10 @@ def download(
         os.replace(written, dest_path)  # atomic promotion; never expose a partial file
         touch_cache(version_id, base_dir=base_dir)
 
-    # Evict OUTSIDE the per-artifact lock (T11), under evict_lru_locked's own
+    # Evict OUTSIDE the per-artifact lock, under evict_lru_locked's own
     # separate global eviction lock -- best-effort, and only when a budget is
     # explicitly configured (never falls back to evict_lru's default dataset
-    # budget; see C1). Padding the budget by the fresh entry's own size means
+    # budget). Padding the budget by the fresh entry's own size means
     # the sweep can evict every older entry but never this one.
     max_bytes = _resolve_model_cache_budget()
     if max_bytes is not None:

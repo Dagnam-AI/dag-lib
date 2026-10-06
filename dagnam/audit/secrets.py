@@ -1,4 +1,4 @@
-"""Where deployment keys live: the OS keyring, else a 0600 file under the audit dir (spec section 10).
+"""Where deployment keys live: the OS keyring, else a 0600 file under the audit dir.
 
 The state file records a ``key_ref``; the key itself is never in ``state.json``,
 never in a report, never printed. ``keyring`` is the optional ``dagnam[audit]``
@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from types import ModuleType
+
+from dagnam.audit.workspace import read_regular, write_atomic
 
 SERVICE = "dagnam-audit"
 SECRETS_FILE = "secrets.json"
@@ -47,24 +48,15 @@ class SecretStore:
         path = self._path()
         if not path.exists():
             return {}
-        return {str(k): str(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+        return {str(k): str(v) for k, v in json.loads(read_regular(path)).items()}
 
     def _write_file(self, secrets: dict[str, str]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._path()
-        tmp = path.with_name(path.name + ".tmp")
         # Written beside the live file and promoted only once complete, so a
         # crash mid-write leaves every key the file already held readable.
-        # Created 0600 from the first byte; chmod covers a leftover wider temp.
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(secrets, handle, indent=2)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, path)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+        # Created 0600 from the first byte, under a name nobody could have
+        # planted a link at.
+        write_atomic(self._path(), json.dumps(secrets, indent=2), mode=0o600)
 
     def store(self, key_ref: str, value: str) -> str:
         """Store ``value`` under ``key_ref`` and return the mode used (``keyring`` or ``file``)."""

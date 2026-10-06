@@ -333,3 +333,9 @@ def test_409_conflict_retry_charges_the_shared_budget():
             idempotency_key="idem-3",
         )
     assert calls["n"] == 1  # budget exhausted before the first conflict-retry
+
+
+def test_a_poll_that_has_failed_for_thousands_of_attempts_still_backs_off_to_the_cap() -> None:
+    """``2**attempt`` overflows a float near attempt 1,024: the wait ends in an error before its deadline."""
+    assert compute_backoff(5_000, base=1.0, cap=30.0, rng=lambda: 1.0) == 30.0
+    assert compute_backoff(1_100, base=0.5, cap=10.0, rng=lambda: 0.5) == 5.0

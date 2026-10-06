@@ -1,5 +1,7 @@
 """Custom exception classes for the dagnam library."""
 
+from collections.abc import Mapping
+
 from dagnam_contracts import ParamError
 
 
@@ -106,6 +108,18 @@ class APIError(DagnamError):
         super().__init__(f"API error {status_code}: {message}")
 
 
+class PlatformAnswerError(DagnamError):
+    """The platform answered 200 with a document that lacks what the answer is for."""
+
+
+class TeardownInProgressError(APIError):
+    """Another cancel or delete of the same audit is still walking it (``409 teardown_in_progress``).
+
+    The platform holds a lock for the walk; the caller waits (``Retry-After`` says how long)
+    and asks again.
+    """
+
+
 class DownloadTooLargeError(APIError):
     """A download exceeded the configured ``max_download_bytes`` ceiling."""
 
@@ -188,6 +202,18 @@ class HubModelNotFoundError(DagnamError):
 
 class ModelError(DagnamError):
     """Generic registry model operation failure."""
+
+
+class VersionKeptError(ModelError):
+    """A version purge the platform refused and answered as a ``kept`` decision (409).
+
+    ``row`` is the receipt row the platform sent in its ``detail`` (``error``, ``message``,
+    ``kind``, ``id``, ``status``, ``code``): the weights are a live endpoint's, not ours to remove.
+    """
+
+    def __init__(self, row: Mapping[str, object]):
+        self.row = row
+        super().__init__(str(row.get("message") or row.get("error") or "the purge was refused"))
 
 
 class ModelNotFoundError(DagnamError):

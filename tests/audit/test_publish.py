@@ -270,7 +270,7 @@ def test_a_json_candidate_of_an_export_without_token_counts_has_no_price(
     state: AuditState,
     make_ctx: Callable[..., StepContext],
 ) -> None:
-    """C-F10: a cost but no usage left 0 completion tokens, and the GPU student at $0."""
+    """A cost but no usage left 0 completion tokens, and the GPU student at $0."""
     publisher = Publisher(platform, state)
     scan = {**SCAN, "workloads": [dict(w) for w in SCAN["workloads"]]}
     scan["workloads"][1]["tokens"] = {"prompt": 300_000, "completion": 0}

@@ -113,7 +113,7 @@ class Reader:
 def _parse_line(line: str) -> Row | None:
     try:
         value = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):  # nested too deeply to decode: one bad row, not the read
         return None
     return value if isinstance(value, dict) else None
 
@@ -219,7 +219,7 @@ def _records(path: Path, source: str, reader: Reader, stats: ReadStats) -> Itera
             shape_checked = True
         try:
             record = reader.to_record(row)
-        except (ValueError, LookupError, TypeError, AttributeError):
+        except (ValueError, LookupError, TypeError, AttributeError, RecursionError):
             # Any shape the reader did not expect (an empty ``choices`` list, a
             # stream chunk's ``delta``) is this row's problem, not the export's:
             # count it, and let the malformed share decide whether to stop.
@@ -313,7 +313,7 @@ def _bucket(key: str) -> bool:
     """Whether a Langfuse ``input_*`` / ``output_*`` key is a token bucket the base count excludes.
 
     Cost keys are dollars, and the ``*_priority*`` keys re-count tokens the
-    other buckets already hold: Langfuse's own SDK never subtracts them (m2).
+    other buckets already hold: Langfuse's own SDK never subtracts them.
     """
     return "cost" not in key and "priority" not in key
 
@@ -411,8 +411,8 @@ def _epoch_seconds(value: float) -> float:
 def optional_outcome(value: object) -> float | None:
     """An outcome score when the export's value is a finite number, else ``None``.
 
-    ``outcome`` is a customer convention the audit reads and does not use yet
-    (R1-N11): a text value ("resolved", "thumbs up") is never a malformed row.
+    ``outcome`` is a customer convention the audit reads and does not use yet:
+    a text value ("resolved", "thumbs up") is never a malformed row.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None

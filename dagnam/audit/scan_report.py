@@ -1,7 +1,7 @@
 """The scan report: ``scan-report.json`` (the contract) and ``scan-report.md`` (a view of it).
 
 :func:`build_scan_report` folds discovered workloads, their verdicts and the
-price table into the design's JSON shape; :func:`write_scan_report` writes the
+price table into the report's JSON shape; :func:`write_scan_report` writes the
 JSON and renders the markdown from that JSON object, never from live values.
 :func:`write_scan` writes a whole scan -- every workload's rows, then the report.
 """
@@ -32,9 +32,20 @@ from dagnam.audit.thresholds import (
     SFT_MAX_TOKENS,
     SFT_MIN_TRAIN_ROWS,
 )
-from dagnam.audit.workspace import write_workload
+from dagnam.audit.workspace import (
+    check_workload_for_write,
+    check_writable,
+    is_plain_name,
+    read_regular,
+    remove_workload,
+    workload_dir,
+    workload_names,
+    write_atomic,
+    write_workload,
+)
 
 SCHEMA = "dagnam.audit.scan/1"
+SCAN_JSON = "scan-report.json"
 _SECONDS_PER_DAY = 86_400
 
 
@@ -59,7 +70,7 @@ def scan_window(workloads: Sequence[Workload], *, window_days: int, sample_rate:
 
 @dataclass(frozen=True)
 class ScanReport:
-    """The scan report as the design's JSON contract, one field per top-level key."""
+    """The scan report as its JSON contract, one field per top-level key."""
 
     generated_at: str
     source: str
@@ -95,6 +106,7 @@ def build_scan_report(
     pii_pass_list: Sequence[str],
     pii_counts: Mapping[str, int],
     datasets: Mapping[str, Mapping[str, Any]] | None = None,
+    notes: Sequence[str] = (),
 ) -> ScanReport:
     """Price what the export did not, judge every workload, and assemble the report.
 
@@ -102,7 +114,8 @@ def build_scan_report(
     contract's ``dataset`` object); a holdout under :data:`MIN_HOLDOUT`, or
     fewer than :data:`SFT_MIN_TRAIN_ROWS` training rows once the ones over the
     student's context are left out, turns that workload's verdict into
-    ``too_few_samples``.
+    ``too_few_samples``. ``notes`` are warnings of the scan itself (a folder it
+    left alone) and follow the report's own.
     """
     now = datetime.now(UTC)
     priced = [price_workload(w, price_table) for w in workloads]
@@ -129,6 +142,13 @@ def build_scan_report(
         f"workload {w.id}: {TOOL_CALL_NOTE}" for w in priced if w.response_mode == "tool_call"
     )
     warnings.extend(
+        f"workload {w.id}: {w.answerless_calls:,} of {w.calls:,} calls"
+        f" ({w.answerless_spend_share:.0%} of its spend) ended inside the model's reasoning"
+        " with no answer: they stay in its calls and its spend, and give no training row"
+        for w in priced
+        if w.answerless_calls
+    )
+    warnings.extend(
         f"workload {workload_id}: redaction rewrote {dataset['truths_redacted']:,} of"
         f" {dataset['rows']:,} training targets; the holdout is scored against the redacted"
         " values, so agreement can overstate how well a replacement reproduces them"
@@ -149,6 +169,7 @@ def build_scan_report(
         for workload_id, dataset in (datasets or {}).items()
         if dataset.get("train_rows_over_budget")
     )
+    warnings.extend(notes)
     return ScanReport(
         generated_at=now.isoformat(),
         source=source,
@@ -196,7 +217,7 @@ def _verdict(w: Workload, dataset: Mapping[str, Any] | None) -> Verdict:
         return Verdict("too_few_samples", None, None, reason)
     over = dataset.get("train_rows_over_budget", 0)
     if over and dataset["split"]["train"] < SFT_MIN_TRAIN_ROWS:
-        # B2-3: the recipe drops these rows at train time, after the credits are spent.
+        # The recipe drops these rows at train time, after the credits are spent.
         reason = f"{over:,} rows exceed the student's {SFT_MAX_TOKENS:,}-token context"
         return Verdict("too_few_samples", None, None, reason)
     return verdict
@@ -216,9 +237,9 @@ def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset])
     protected = dict.fromkeys(state.workloads)
     added: set[str] = set()
     if state.audit_id is not None:
-        scan_path = out_dir / "scan-report.json"
+        scan_path = out_dir / SCAN_JSON
         if scan_path.exists():
-            scan = json.loads(scan_path.read_text(encoding="utf-8"))
+            scan = json.loads(read_regular(scan_path))
             published = {
                 entry["id"] for entry in scan["workloads"] if entry.get("dataset") is not None
             }
@@ -234,8 +255,8 @@ def superseded_workloads(out_dir: Path, datasets: Mapping[str, WorkloadDataset])
         folder = out_dir / "workloads" / workload_id
         dataset = datasets.get(workload_id)
         try:
-            lines = (folder / "dataset.jsonl").read_text(encoding="utf-8").splitlines()
-            split = json.loads((folder / "split.json").read_text(encoding="utf-8"))
+            lines = read_regular(folder / "dataset.jsonl").splitlines()
+            split = json.loads(read_regular(folder / "split.json"))
         except FileNotFoundError:
             lines, split = [], {}
         same = (
@@ -265,6 +286,38 @@ class SupersededRunError(DagnamError):
         )
 
 
+def _written_by_a_scan(out_dir: Path) -> tuple[set[str], list[str]]:
+    """``(the workloads the previous scan report lists with rows, notes)``: the folders it wrote.
+
+    An entry that is not an object with a string ``id`` is skipped, the rest still
+    count. A report that is missing proves nothing and names none; one that is
+    there but cannot be read names none and says so in the notes.
+    """
+    path = out_dir / SCAN_JSON
+    try:
+        scan = json.loads(read_regular(path))
+        entries = [e for e in scan["workloads"] if isinstance(e, Mapping)]
+    except FileNotFoundError:
+        return set(), []
+    except (OSError, LookupError, TypeError, ValueError, RecursionError):
+        note = (
+            f"{SCAN_JSON} of an earlier scan could not be read, so no folder it listed was removed"
+        )
+        return set(), [note]
+    return {
+        e["id"] for e in entries if isinstance(e.get("id"), str) and e.get("dataset") is not None
+    }, []
+
+
+def _left_alone(name: str, written_by_a_scan: bool) -> str:
+    if written_by_a_scan:
+        return (
+            f"workloads/{name} holds files this scan did not write, so it was left in place;"
+            " remove it by hand when it is not needed"
+        )
+    return f"workloads/{name} was not written by this audit's scan and was left alone"
+
+
 def write_scan(
     out_dir: Path,
     workloads: Sequence[Workload],
@@ -282,23 +335,72 @@ def write_scan(
     had already kept are stale and are removed. Old candidates are retired for
     cleanup; the next run starts fresh. Published runs require a new ``--out``
     even with ``force``. The caller holds ``out_dir``'s lock.
+
+    A rescan removes only a workload folder that this directory's previous
+    scan report lists and the new scan no longer derives, and then only the
+    files a scan writes. Any other entry under ``workloads/`` is left alone and
+    named in the report's warnings; a symbolic link there (or ``workloads/``
+    itself) is refused with :class:`~dagnam.audit.workspace.UnsafeWorkloadsError`
+    before anything is changed.
+
+    A scan stopped at any point leaves nothing a later command misreads. The
+    state is saved before any row or answer is removed, so no retired run is
+    lost to ``cancel`` or to the budget. The old report outlives the removals,
+    so a scan stopped inside one still finds the rest of them listed. From
+    there the directory holds no ``scan-report.json`` until the last write puts
+    the new one in place, so ``dagnam audit run`` refuses a directory whose rows
+    are half rewritten, and scanning again finishes the job.
+
+    One window stays narrow rather than closed: a scan killed while it removes
+    a folder leaves the old report over a folder that may hold ``dataset.jsonl``
+    without ``split.json``. ``audit run`` fails reading it, before any paid
+    step, and a scan again removes the rest. The report is removed after the
+    folders on purpose: removed first, a later scan would take the half-removed
+    folder for one no scan wrote and leave it.
     """
+    listed, report_note = _written_by_a_scan(out_dir)
+    dropped = sorted(
+        name
+        for name in (listed & workload_names(out_dir)) - set(datasets)
+        if is_plain_name(name)  # a hand-edited report can name anything; only plain names are ours
+    )
+    for workload_id in datasets:
+        check_workload_for_write(out_dir, workload_id)  # a link or an id that leads out: refused
+    for workload_id in dropped:
+        workload_dir(out_dir, workload_id)
+    # The report files are written last (and the old json removed first): refuse them first.
+    check_writable(out_dir / "scan-report.md")
+    check_writable(out_dir / SCAN_JSON)
     changed = superseded_workloads(out_dir, datasets)
     state = load_state(out_dir)
     if changed and (not force or state.audit_id is not None):
         raise SupersededRunError(out_dir, changed, published=state.audit_id is not None)
     if changed:
+        # Rendered from the candidates being retired; the next run writes it again.
+        for suffix in ("json", "md"):
+            (out_dir / f"audit-report.{suffix}").unlink(missing_ok=True)
         superseded = AuditState(workloads={key: state.workloads[key] for key in changed})
         state.retired_cost_credits += credits_spent(superseded, out_dir)
         for workload_id in changed:
             state.retired.extend(state.workloads.pop(workload_id).values())
         state.halted = None
+        state.pending_audit = None  # a create body of the old rows: the next run builds its own
         save_state(out_dir, state)
-        for suffix in ("json", "md"):
-            (out_dir / f"audit-report.{suffix}").unlink(missing_ok=True)
-    for workload_id in changed:
-        for stale in (out_dir / "workloads" / workload_id).glob("replay-*.jsonl"):
-            stale.unlink()
+    for workload_id in dropped:
+        remove_workload(out_dir, workload_id)  # no longer derived: not left for a run to train on
+    for workload_id in datasets:
+        if workload_id not in state.workloads:
+            # Answers no candidate owns: a retired one's, or a stopped scan's leftovers.
+            for stale in workload_dir(out_dir, workload_id).glob("replay-*.jsonl"):
+                stale.unlink()
+    notes = [
+        *report_note,
+        *(
+            _left_alone(name, name in listed)
+            for name in sorted(workload_names(out_dir) - set(datasets))
+        ),
+    ]
+    (out_dir / SCAN_JSON).unlink(missing_ok=True)
     pii_counts: Counter[str] = Counter()
     for workload_id, dataset in datasets.items():
         write_workload(out_dir, workload_id, dataset.rows, dataset.split, dataset.stats)
@@ -311,17 +413,22 @@ def write_scan(
         pii_pass_list=list(PII_POLICY),
         pii_counts=dict(pii_counts),
         datasets={workload_id: dataset_entry(d) for workload_id, d in datasets.items()},
+        notes=notes,
     )
     write_scan_report(report, out_dir)
     return report
 
 
 def write_scan_report(report: ScanReport, out_dir: Path) -> None:
-    """Write ``scan-report.json`` and ``scan-report.md`` (rendered from the JSON) into ``out_dir``."""
+    """Write ``scan-report.md`` (rendered from the JSON), then ``scan-report.json``, into ``out_dir``.
+
+    The JSON is what a run reads, so it lands last and whole: a directory
+    that holds it holds a finished scan.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     text = json.dumps(report.to_json(), indent=2)
-    (out_dir / "scan-report.json").write_text(text, encoding="utf-8")
-    (out_dir / "scan-report.md").write_text(render_markdown(json.loads(text)), encoding="utf-8")
+    write_atomic(out_dir / "scan-report.md", render_markdown(json.loads(text)))
+    write_atomic(out_dir / SCAN_JSON, text)
 
 
 def _usd(value: float | None) -> str:

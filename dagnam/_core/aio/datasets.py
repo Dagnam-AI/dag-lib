@@ -24,10 +24,14 @@ from dagnam._types import JsonObject, QueryParams, ensure_json_object
 class AsyncDatasetsMixin(BaseAsyncDagnamClient):
     """Async Datasets resource methods."""
 
-    async def list_datasets(self, type: str = "all", search: str | None = None) -> list[JsonObject]:
+    async def list_datasets(
+        self, type: str = "all", search: str | None = None, audit_id: str | None = None
+    ) -> list[JsonObject]:
         params: QueryParams = {"type": type}
         if search:
             params["search"] = search
+        if audit_id:
+            params["audit_id"] = audit_id
         resp = await self._request(
             "GET",
             "/api/v1/datasets/browse",
@@ -125,6 +129,7 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
         description: str | None = None,
         visibility: str = "private",
         license: str | None = None,
+        audit_id: str | None = None,
     ) -> JsonObject:
         # ``POST /api/v1/datasets/`` is the dataset-create endpoint; the file is
         # an optional multipart part alongside the metadata form fields. The
@@ -139,6 +144,8 @@ class AsyncDatasetsMixin(BaseAsyncDagnamClient):
             fields["description"] = description
         if license:
             fields["license"] = license
+        if audit_id:
+            fields["audit_id"] = audit_id  # the platform tags the row with it at creation
 
         fp = Path(file_path)
         with open(fp, "rb") as fh:

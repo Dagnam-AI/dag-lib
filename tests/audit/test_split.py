@@ -98,7 +98,7 @@ def test_split_is_a_partition_and_sessions_never_straddle(
 
 
 def test_cap_train_keeps_a_proportional_stratified_sample() -> None:
-    # R3-15: 23,465 train rows ran past the recipe's 1-hour ceiling; a capped sample
+    # 23,465 train rows ran past the recipe's 1-hour ceiling; a capped sample
     # keeps every class, in proportion, chosen by content so any input order agrees.
     strata = ["billing"] * 80 + ["refund"] * 18 + ["rare"] * 2
     keys = [f"{i:03d}" for i in range(100)]
@@ -115,7 +115,7 @@ def test_cap_train_keeps_a_proportional_stratified_sample() -> None:
 
 
 def test_cap_train_samples_targets_that_are_not_classes_as_one_stratum() -> None:
-    # m4: a stratum per distinct answer keeps a router's rare routes; an extraction's
+    # a stratum per distinct answer keeps a router's rare routes; an extraction's
     # answers are all distinct, and a stratum each would keep every row past the cap.
     keys = [f"{i:03d}" for i in range(100)]
     rows = list(range(100))
