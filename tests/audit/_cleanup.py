@@ -231,7 +231,7 @@ class FakeCleanup:
         if self.project_pages:
             return self.project_pages[int(filter_params["page"])]
         items: JsonArray = [{"id": pid} for pid in self.other_projects]
-        return {"items": items, "pages": 1}
+        return {"items": items, "pages": 1, "total": len(items)}
 
     def get_project_datasets(self, project_id: str) -> JsonObject:
         self.call_log.append(("get_project_datasets", project_id))

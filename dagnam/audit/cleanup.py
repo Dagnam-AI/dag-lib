@@ -80,7 +80,7 @@ class Answer:
 def _pause(exc: TeardownInProgressError) -> float:
     """How long the platform asked to wait: its ``Retry-After`` (any size up to the cap), else the poll."""
     asked = parse_retry_after(exc.retry_after_header, cap=TEARDOWN_WAIT)
-    return asked if asked is not None and asked > 0 else TEARDOWN_POLL  # False for nan too
+    return asked if asked is not None and asked > 0 else TEARDOWN_POLL
 
 
 def ask_platform(

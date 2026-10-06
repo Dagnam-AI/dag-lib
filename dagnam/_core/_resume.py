@@ -11,11 +11,11 @@ Two things keep that from swallowing an ask that is meant:
 - The key is a digest of the method, the URL and the body, so a different
   request is a different create. It is only right for a body that identifies
   its create -- one naming ids minted for this caller alone.
-- The platform caches a refusal as it does a success, so a key that never
-  changed would replay a refusal for a day after its cause was fixed (credits
-  topped up, say). A replayed refusal therefore answers an *earlier* ask, and
-  is stepped past: the next key in the sequence is either a fresh ask or the
-  create an interrupted process lost. A refusal heard first-hand is the answer.
+- The platform replays only successful answers, but an older one cached a refusal as it
+  did a success, so a key that never changed would replay a refusal for a day after its
+  cause was fixed (credits topped up, say). A replayed refusal therefore answers an
+  *earlier* ask, and is stepped past: the next key in the sequence is either a fresh ask
+  or the create an interrupted process lost. A refusal heard first-hand is the answer.
 - A replayed success can name a resource that has been deleted since (the owner
   removed the orphan an interrupted run left). It is therefore confirmed by a read
   of the resource, and one that is gone is stepped past like a replayed refusal.
@@ -44,11 +44,16 @@ IN_PROGRESS_SECONDS = 120.0
 IN_PROGRESS_POLL = 5.0
 CONFLICT = 409
 NOT_FOUND = 404
+SERVICE_UNAVAILABLE = 503
 IN_PROGRESS_MARKER = "idempotency_in_progress"
 """The ``error`` a platform that marks its "in progress" answer sends in the body."""
 IN_PROGRESS_TEXT = "A request with this Idempotency-Key is in progress"
 """The ``detail`` every platform sends for it; older ones send nothing else."""
 REPLAYED = "Idempotency-Replayed"
+UNAVAILABLE_MARKER = "idempotency_unavailable"
+"""The ``error`` of the 503 a platform sends when it cannot promise to remember a create: nothing ran."""
+UNAVAILABLE_WAIT_CAP = 60.0
+"""The longest a single wait on that 503's ``Retry-After`` is honoured (the platform may ask for much more)."""
 
 
 def content_key(method: str, url: str, body: Any, attempt: int) -> str:
@@ -60,6 +65,17 @@ def content_key(method: str, url: str, body: Any, attempt: int) -> str:
     return f"dagnam-{hashlib.sha256(request.encode('utf-8')).hexdigest()}"
 
 
+def _error_body(response: Any, status: int) -> dict[str, Any] | None:
+    """The JSON object a response of this status carries, else ``None``."""
+    if response.status_code != status:
+        return None
+    try:
+        body = response.json()
+    except (ValueError, RecursionError):  # not JSON, or nested too deeply to read
+        return None
+    return body if isinstance(body, dict) else None
+
+
 def idempotency_in_progress(response: Any) -> bool:
     """Whether a response is the platform's "the first ask of this key is still in progress".
 
@@ -67,15 +83,19 @@ def idempotency_in_progress(response: Any) -> bool:
     platforms send -- never a looser match: any other 409 is a real conflict and is not
     waited on.
     """
-    if response.status_code != CONFLICT:
-        return False
-    try:
-        body = response.json()
-    except (ValueError, RecursionError):  # not JSON, or nested too deeply to read
-        return False
-    return isinstance(body, dict) and (
+    body = _error_body(response, CONFLICT)
+    return body is not None and (
         body.get("error") == IN_PROGRESS_MARKER or body.get("detail") == IN_PROGRESS_TEXT
     )
+
+
+def idempotency_unavailable(response: Any) -> bool:
+    """Whether a response is the 503 "idempotent creates are unavailable; nothing ran, retry".
+
+    Only the body's marker counts: any other 503 keeps the client's ordinary backoff cap.
+    """
+    body = _error_body(response, SERVICE_UNAVAILABLE)
+    return body is not None and body.get("error") == UNAVAILABLE_MARKER
 
 
 def replay_pointer(response: Any, body: dict[str, Any]) -> str | None:
@@ -195,11 +215,14 @@ __all__ = [
     "IN_PROGRESS_SECONDS",
     "IN_PROGRESS_TEXT",
     "RESUME_ATTEMPTS",
+    "UNAVAILABLE_MARKER",
+    "UNAVAILABLE_WAIT_CAP",
     "confirmed_by",
     "content_key",
     "created_body",
     "gone",
     "idempotency_in_progress",
+    "idempotency_unavailable",
     "replay_pointer",
     "resume_create",
 ]

@@ -203,7 +203,7 @@ class WorldClient:
         """Every project of the owner's, on one page."""
         self.calls.append("list_projects")
         items: JsonArray = [{"id": r.id} for r in self.world.alive("project")]
-        return {"items": items, "pages": 1}
+        return {"items": items, "pages": 1, "total": len(items)}
 
     def get_project_datasets(self, project_id: str) -> JsonObject:
         """The datasets linked into one project, grouped by role."""

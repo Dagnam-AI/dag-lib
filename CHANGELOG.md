@@ -215,6 +215,15 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   its next key instead of returning it. The "in progress" 409 is recognised by
   its exact text or its `"error": "idempotency_in_progress"` marker, never a looser
   match.
+- **The unpublished delete lists the owner's projects oldest first and trusts only a steady
+  list.** A project touched while the walk ran used to shift between pages and could be
+  missed, and its dataset deleted. The list now also has to report the same `total` on every
+  page and on a last read of the first; a changed total counts as "could not check" and the
+  dataset is kept.
+- **A 503 "idempotent creates are unavailable" is waited out for as long as the platform
+  asks, up to 60 seconds a wait.** The create still gives up after three retries. A
+  `Retry-After` of `nan`, a negative number or `inf` on any retried request is ignored or
+  capped instead of ending the command with a `ValueError`.
 - **The publish carries exact token totals.** Each workload sends
   `completion_tokens_total` and `calls_total` (the sums its local price is
   computed from) beside the rounded means, so a platform that prices through the

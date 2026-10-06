@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 import json
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard
 
 from dagnam._core.client.common import short_error_text
 from dagnam._core.exceptions import (
@@ -280,32 +280,51 @@ def _reason(exc: Exception, refusal: int = CONFLICT_STATUS) -> str:
     return _say(exc)
 
 
+def _project_page(client: CleanupClient, page: int) -> tuple[list[Any], int, int]:
+    """One page of the owner's projects, oldest first: ``(items, pages, total)``; a bad shape raises."""
+    try:
+        listing = client.list_projects(page=page, limit=100, sort_by="created_at", order="asc")
+    except ArchitectureVersionNotFoundError:  # the client's name for a 404 with no project id
+        raise APIError(404, "GET /api/v1/projects answered not found") from None
+    if not isinstance(listing, dict):
+        raise TypeError("the project list was not an object")
+    items, pages, total = listing.get("items"), listing.get("pages"), listing.get("total")
+    if not isinstance(items, list) or not _is_count(pages) or not _is_count(total):
+        raise TypeError("the project list had no `items` list or integer `pages` and `total`")
+    return items, pages, total
+
+
+def _is_count(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def datasets_in_other_projects(client: CleanupClient, own_project: str | None) -> set[str]:
     """Every dataset id linked to a project of the owner's that this directory did not create.
 
     A dataset resource carries no list of the projects it is linked to, so the owner's projects
-    are listed (a page of 100 at a time, at most :data:`PROJECT_PAGES`) and each one's datasets
-    read. Whether a dataset is somebody's work is not a guess: any answer of the wrong shape (no
-    ``items`` list, no integer ``pages``, a role that is not a list, an entry with no id), a
-    read that fails, and a list longer than the bound all raise, and the caller keeps the dataset.
+    are listed (a page of 100 at a time, oldest first so that touching a project does not move it
+    between pages, at most :data:`PROJECT_PAGES`) and each one's datasets read. Whether a dataset
+    is somebody's work is not a guess: any answer of the wrong shape (no ``items`` list, no
+    integer ``pages`` or ``total``, a role that is not a list, an entry with no id), a read that
+    fails, a list longer than the bound, and a list whose ``total`` is not the same on every
+    page and again on a last read of the first one (a project was made or deleted during the
+    walk, so one may have been skipped) all raise, and the caller keeps the dataset.
     """
     found: set[str] = set()
+    first_total: int | None = None
     for page in range(1, PROJECT_PAGES + 1):
-        try:
-            listing = client.list_projects(page=page, limit=100)
-        except ArchitectureVersionNotFoundError:  # the client's name for a 404 with no project id
-            raise APIError(404, "GET /api/v1/projects answered not found") from None
-        if not isinstance(listing, dict):
-            raise TypeError("the project list was not an object")
-        items, pages = listing.get("items"), listing.get("pages")
-        if not isinstance(items, list) or not isinstance(pages, int) or isinstance(pages, bool):
-            raise TypeError("the project list had no `items` list or integer `pages`")
+        items, pages, total = _project_page(client, page)
+        first_total = total if first_total is None else first_total
+        if total != first_total:
+            raise TypeError("the owner's projects changed while they were being listed")
         for project in items:
             if not isinstance(project, dict):
                 raise TypeError("a project in the list was not an object")
             if str(project["id"]) != own_project:
                 found |= _dataset_ids(client.get_project_datasets(str(project["id"])))
         if page >= pages:
+            if _project_page(client, 1)[2] != first_total:
+                raise TypeError("the owner's projects changed while they were being listed")
             return found
     raise TypeError(f"the owner has more than {PROJECT_PAGES} pages of projects")
 

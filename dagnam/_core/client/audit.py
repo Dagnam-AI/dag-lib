@@ -4,8 +4,8 @@ The routes ``dagnam audit run`` uses to mirror a local audit into the
 account: the scan header with its workloads, a candidate per workload x kind,
 one PATCH per step, the read and the resume a run starts with, and the three
 that end a run -- halt, cancel, delete. Every
-one needs an API key with the ``write`` scope; a key without it, or an audit
-belonging to somebody else, is the same uniform 404.
+one needs an API key with the ``write`` scope; a key without it is refused with
+a 403, and an audit belonging to somebody else is a 404.
 """
 
 from __future__ import annotations
