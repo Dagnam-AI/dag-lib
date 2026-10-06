@@ -15,9 +15,11 @@ from typing import TYPE_CHECKING
 from dagnam._core._resume import confirmed_by, created_body, gone
 from dagnam._core.client.base import ALLOW_REDIRECTS, DEFAULT_TIMEOUT, BaseDagnamClient
 from dagnam._core.client.common import (
+    UNPARSEABLE_BODY,
     quote_path_segment,
     raise_for_generic,
     response_json_object,
+    short_error_text,
 )
 from dagnam._core.exceptions import TeardownInProgressError
 from dagnam._types import JsonArray, JsonObject
@@ -51,7 +53,7 @@ def raise_for_audit(resp: requests.Response) -> None:
     if marker is not None:
         try:
             data = resp.json()
-        except ValueError:
+        except UNPARSEABLE_BODY:
             data = None
         detail = data.get("detail") if isinstance(data, dict) else None
         source = detail if isinstance(detail, dict) else data
@@ -59,7 +61,7 @@ def raise_for_audit(resp: requests.Response) -> None:
             words = source.get("message") or (detail if isinstance(detail, str) else None)
             raise TeardownInProgressError(
                 resp.status_code,
-                str(words or marker),
+                short_error_text(str(words or marker)),
                 retry_after_header=resp.headers.get("Retry-After"),
             )
     raise_for_generic(resp)

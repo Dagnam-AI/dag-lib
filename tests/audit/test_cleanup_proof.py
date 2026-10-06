@@ -2,8 +2,10 @@
 
 Not-found is what another account's key is told for every id, so it is never proof. These cases are
 the ones where something else went wrong beside the not-founds: an id whose delete and read both
-failed, a stop that failed. Proof is a positive answer: a deletion this key confirmed earlier, a
-delete or stop that succeeded, a keep, or a read of a recorded id that came back with a row.
+failed, a stop that failed. Proof is a positive answer only the owner's account can get: a
+deletion this key confirmed earlier, a delete or stop that succeeded, a keep the platform's own
+purge answered, or a read of a recorded deployment or training run. A project, dataset or model
+version can be public, so a read of one proves nothing.
 """
 
 from __future__ import annotations
@@ -128,21 +130,40 @@ def test_a_delete_that_got_one_positive_answer_proves_its_key_but_not_an_unanswe
     assert _exit(receipt) == 1
 
 
-def test_a_key_is_proven_by_reading_an_id_that_a_refusal_left_in_place(
+def test_a_key_is_proven_by_reading_a_deployment_that_a_refusal_left_in_place(
     local: Path, platform: FakeCleanup
 ) -> None:
-    """Nothing deleted, everything refused: the refusals' own reasons are the receipt."""
+    """Nothing deleted, the endpoint refused: only the owner can read it, so the refusal stands."""
+    only_a_deployment = AuditState(project_id="proj-1")
+    only_a_deployment.workloads = {"w1": {HEAD: StepState(deployment_id="dep-1")}}
+    save_state(local, only_a_deployment)
+    platform.undeletable = {"dep-1"}
+
+    receipt = delete_unpublished(local, as_cleanup_client(platform), load_state(local))
+
+    row = next(r for r in receipt_rows(receipt) if r["id"] == "dep-1")
+    assert (row["status"], row["code"]) == ("blocked", "not_removed")
+    assert _exit(receipt) == 1
+    assert SecretStore(local).load("w1/head_tune") == "dk-secret"  # an endpoint is up: keys stay
+
+
+def test_a_read_of_a_dataset_that_a_refusal_left_in_place_proves_nothing(
+    local: Path, platform: FakeCleanup
+) -> None:
+    """A dataset can be public: another account's key reads it too, so the walk is not answered."""
     only_a_dataset = AuditState(project_id="proj-1")
     only_a_dataset.workloads = {"w1": {HEAD: StepState(dataset_id="ds-1")}}
     save_state(local, only_a_dataset)
     platform.delete_errors = {"ds-1": APIError(409, "Dataset is held")}
+    before = _files(local)
 
     receipt = delete_unpublished(local, as_cleanup_client(platform), load_state(local))
 
-    row = next(r for r in receipt_rows(receipt) if r["id"] == "ds-1")
-    assert (row["status"], row["code"]) == ("blocked", "not_removed")
-    assert row["reason"] == "Dataset is held"
+    (row,) = receipt_rows(receipt)
+    assert (row["status"], row["code"]) == ("blocked", "not_answered")
     assert _exit(receipt) == 1
+    assert _same_but_receipt(before, _files(local))
+    assert load_state(local).halted is None
 
 
 def test_a_cancel_by_another_key_with_a_failed_stop_marks_nothing(

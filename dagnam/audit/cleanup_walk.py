@@ -7,10 +7,13 @@ id, reads it back, and records a row. Three rules keep it from destroying what i
 directory's: an id the walk or the platform marked kept (``kept_ids``) is never touched; a dataset
 that a project this directory did not create uses is kept (``in_use_elsewhere``); and a walk in
 which this key is not PROVEN to see the account proves nothing: not-found is what a key from
-another account is told, and a walk that also lost an id to a 5xx cannot tell the two apart. A
-key is proven by its own earlier confirmation of a deletion (same host and key), by a deletion or
-a stop it just got a positive answer to, or by a read of a recorded id that came back with a row;
-the caller's word that it is gone (``--already-deleted``) stands in for the proof. An unproven walk
+another account is told, and a walk that also lost an id to a 5xx cannot tell the two apart. Only
+what the owner's account alone can produce is proof: this very key's earlier confirmation of a
+deletion (same host and key), a deletion or a stop it just got a positive answer to, a version the
+platform's own purge answered as kept, or a read of a recorded deployment or training run. A
+project, dataset or model version may be public, and a dataset may be linked into another
+account's project, so reading those, or finding a dataset in use elsewhere, proves nothing. The
+caller's word that it is gone (``--already-deleted``) stands in for the proof. An unproven walk
 changes nothing local and marks nothing.
 """
 
@@ -56,6 +59,8 @@ from dagnam.audit.receipt_rows import (
 )
 from dagnam.audit.state import AuditState
 
+OWNER_ONLY_READS = frozenset({"deployment", "training_job"})
+"""The kinds whose read answers only the owner's account (the rest can be public)."""
 PROJECT_HELD = "project_held"
 """The ``code`` of the project row this client writes while something in it was not removed."""
 
@@ -68,10 +73,13 @@ def proven(
 ) -> bool:
     """Whether this walk's answers come from a key that sees the account the ids live in.
 
-    Proof is a positive answer, never an absence: this very key (host and key) confirmed a
-    deletion before; or a row says a delete or a stop was answered with success; or a recorded id
-    that is not reported gone reads back with a row. Everything else -- every id not found,
-    some not found and the rest a 5xx or a timeout -- is what another account's key is told too.
+    Proof is a positive answer only the owner's account can get, never an absence: this very key
+    (host and key) confirmed a deletion before; or a row says a delete, a stop or the platform's
+    own purge answered with success or a keep; or a recorded deployment or training run reads
+    back with a row. A read of a project, dataset or model version is not proof (they may be
+    public), and neither is a dataset found in use elsewhere (another account may have linked
+    it). Everything else -- every id not found, some not found and the rest a 5xx or a timeout --
+    is what another account's key is told too.
     """
     if state.confirmed_gone and state.confirmed_by == client.identity:
         return True
@@ -84,18 +92,20 @@ def proven(
         can_read(client, kind, item_id)
         for kind, found in ids.items()
         for item_id in found
-        if (kind, item_id) in unresolved
+        if (kind, item_id) in unresolved and kind in OWNER_ONLY_READS
     )
 
 
 def _answered_positively(row: dict[str, Any]) -> bool:
-    """A row only an account that holds the id can have: a delete or stop that succeeded, or a keep.
+    """A row only the owner's account can have: a delete or stop that succeeded, or a purge's keep.
 
-    A keep is the platform's decision about a resource it knows (a version a live endpoint
-    serves) or one read in another of the owner's projects. ``project_held`` is this client's own.
+    A keep from the platform's own purge (a version a live endpoint serves) is the owner's alone.
+    The two keeps this client writes itself prove nothing: ``project_held`` and ``in_use_elsewhere``
+    (the latter is read from the caller's own projects, which another account may have made).
     """
     status = row.get("status")
-    return status in (DELETED, STOPPED) or (status == KEPT and row.get("code") != PROJECT_HELD)
+    own_keep = row.get("code") in (PROJECT_HELD, IN_USE_ELSEWHERE)
+    return status in (DELETED, STOPPED) or (status == KEPT and not own_keep)
 
 
 def none_visible(count: int, verb: str) -> dict[str, Any]:
@@ -117,7 +127,7 @@ def cancel_unpublished(
     Every stop is tried and every outcome is a row, so one that fails never keeps the next from
     being tried. Only what stopped or was found gone is marked; a run that had already finished
     answers ``already_stopped`` and stays resumable. An id marked kept is not stopped, and when
-    every id answers not-found nothing is marked (see the module docstring).
+    no answer proves the key sees the owner's account nothing is marked (see the module docstring).
     """
     targets = [
         (kind, item_id)
@@ -234,8 +244,9 @@ def delete_unpublished(
     goes through its own purge route (``blocked [platform_only]`` when the platform has none; a
     version the owner serves from another endpoint is kept), never through the registry entry
     around it. The local rows and keys go unless an endpoint is still up; the state is marked
-    deleted only when nothing is left. When EVERY id answers not-found the walk changes nothing
-    local (see the module docstring) unless ``assume_gone``.
+    deleted only when nothing is left. When no answer proves the key sees the owner's account
+    (every id not found, say) the walk changes nothing local (see the module docstring) unless
+    ``assume_gone``.
     """
     ids = recorded_ids(state)
     rows = walk(client, ids, state.project_id)

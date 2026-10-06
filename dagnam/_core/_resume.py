@@ -71,7 +71,7 @@ def idempotency_in_progress(response: Any) -> bool:
         return False
     try:
         body = response.json()
-    except ValueError:
+    except (ValueError, RecursionError):  # not JSON, or nested too deeply to read
         return False
     return isinstance(body, dict) and (
         body.get("error") == IN_PROGRESS_MARKER or body.get("detail") == IN_PROGRESS_TEXT

@@ -54,6 +54,12 @@ from dagnam._types import (
 
 API_BASE = "/api/v1"
 _MAX_ERROR_BODY = 2048
+UNPARSEABLE_BODY = (ValueError, TypeError, RecursionError)
+"""What decoding a response body can raise: not JSON, the wrong shape, or nested too deeply.
+
+``json`` raises ``RecursionError`` (not a ``ValueError``) for a body of thousands of nested
+brackets, which a hostile or broken server can send in a few kilobytes.
+"""
 _TEXT_CONTENT_MARKERS = ("text/", "json", "xml", "javascript", "yaml", "html")
 
 
@@ -76,7 +82,7 @@ def response_json_value(resp: JsonResponseLike) -> JsonValue:
     """Decode a response body and validate that it is JSON-compatible."""
     try:
         return ensure_json_value(resp.json())
-    except (ValueError, TypeError) as exc:
+    except UNPARSEABLE_BODY as exc:
         raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
@@ -84,7 +90,7 @@ def response_json_object(resp: JsonResponseLike) -> JsonObject:
     """Decode a response body and validate that it is a JSON object."""
     try:
         return ensure_json_object(resp.json())
-    except (ValueError, TypeError) as exc:
+    except UNPARSEABLE_BODY as exc:
         raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
@@ -92,7 +98,7 @@ def response_json_array(resp: JsonResponseLike) -> JsonArray:
     """Decode a response body and validate that it is a JSON array."""
     try:
         return ensure_json_array(resp.json())
-    except (ValueError, TypeError) as exc:
+    except UNPARSEABLE_BODY as exc:
         raise ResponseError(_response_status(resp), f"malformed response body: {exc}") from exc
 
 
@@ -145,7 +151,8 @@ def _text(resp: ResponseLike) -> str:
     return safe_response_text(resp)
 
 
-def _short_error_text(text: str) -> str:
+def short_error_text(text: str) -> str:
+    """``text`` cut to ``_MAX_ERROR_BODY`` characters, with a note of how long it was."""
     if len(text) > _MAX_ERROR_BODY:
         return text[:_MAX_ERROR_BODY] + f"... [truncated, {len(text)} chars total]"
     return text
@@ -154,7 +161,7 @@ def _short_error_text(text: str) -> str:
 def _format_fastapi_detail(text: str) -> str:
     try:
         payload = json.loads(text)
-    except (TypeError, json.JSONDecodeError):
+    except UNPARSEABLE_BODY:
         return text
     if not isinstance(payload, dict) or "detail" not in payload:
         return text
@@ -200,7 +207,7 @@ def safe_response_text(resp: ResponseLike) -> str:
             except Exception:
                 text_value = ""
             if text_value:
-                return _short_error_text(_format_fastapi_detail(text_value))
+                return short_error_text(_format_fastapi_detail(text_value))
         if content_type:
             return f"<streaming {content_type} body omitted>"
         return "<streaming response body omitted>"
@@ -222,7 +229,7 @@ def safe_response_text(resp: ResponseLike) -> str:
             body_len = 0
         return f"<{body_len} bytes; failed to decode body>"
     text_value = str(text)
-    return _short_error_text(_format_fastapi_detail(text_value))
+    return short_error_text(_format_fastapi_detail(text_value))
 
 
 def _ok(resp: ResponseLike) -> bool:
@@ -247,7 +254,7 @@ def _entitlement_message(resp: ResponseLike) -> str:
     body = _text(resp)
     try:
         data = json.loads(body)
-    except (ValueError, TypeError):
+    except UNPARSEABLE_BODY:
         return body or "Plan limit reached"
     if not isinstance(data, dict):
         return "Plan limit reached"
@@ -295,7 +302,7 @@ def _response_payload(resp: ResponseLike) -> JsonObject | None:
         return None
     try:
         data = json.loads(raw[:_MAX_ERROR_BODY])
-    except (ValueError, TypeError):
+    except UNPARSEABLE_BODY:
         return None
     return data if isinstance(data, dict) else None
 
@@ -512,7 +519,7 @@ def raise_for_purge(resp: JsonResponseLike, model_id: str | None = None) -> None
     if _status_code(resp) == 409:
         try:
             body = resp.json()
-        except ValueError:
+        except UNPARSEABLE_BODY:
             body = None
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, dict) and detail.get("status") == "kept":

@@ -91,7 +91,7 @@ def test_a_version_a_live_endpoint_serves_is_kept_and_the_unpublished_delete_fin
     ],
     ids=["other status", "string detail", "not an object", "not json", "no detail wrapper"],
 )
-def test_any_other_409_stays_a_refusal_and_the_version_blocked(
+def test_any_other_409_leaves_the_version_and_every_local_file_in_place(
     audit_dir: Path, requests_mock: RequestsMocker, answer: dict[str, Any]
 ) -> None:
     state = _state(audit_dir)
@@ -100,9 +100,12 @@ def test_any_other_409_stays_a_refusal_and_the_version_blocked(
 
     receipt = delete_unpublished(audit_dir, _client(), state)
 
-    rows = {(r["kind"], r["id"]): r for r in receipt_rows(receipt)}
-    assert rows[("model_version", "mv-1")]["status"] == "blocked"
+    # A readable version proves nothing (it may be public), so the walk answers as not-answered.
+    (row,) = receipt_rows(receipt)
+    assert (row["status"], row["code"]) == ("blocked", "not_answered")
     assert exit_status(receipt_rows(receipt), receipt.get("audit_status"), verb="delete") == 1
+    assert load_state(audit_dir).halted is None
+    assert load_state(audit_dir).workloads["w1"][CandidateKind.HEAD_TUNE].model_version_id == "mv-1"
     with pytest.raises(ModelError) as exc:
         _client().purge_model_version("mv-1")
     assert not isinstance(exc.value, VersionKeptError)

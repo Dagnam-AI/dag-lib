@@ -538,8 +538,10 @@ does. A walk changes nothing local, and marks nothing, unless its key is shown t
 (not-found is what another account's key is told for every id, and a walk where the rest failed
 cannot tell the two apart): by a deletion this same key and host confirmed earlier
 (`confirmed_gone` and `confirmed_by`, a digest of both, in `state.json`; another account's key never
-counts), by a delete or stop that just succeeded, by a keep, or by a read of a recorded id that
-came back with a row. An id whose delete (or not-found) and re-read both failed also keeps the
+counts), by a delete or stop that just succeeded, by a keep the platform's own purge answered, or by a read
+of a recorded deployment or training run (a project, dataset or model version can be public, and a
+dataset can be linked into another account's project, so reading or finding those proves nothing).
+An id whose delete (or not-found) and re-read both failed also keeps the
 deployment keys and the local rows, whatever else the walk did. The receipt and the error name the
 host and masked key asked and `dagnam audit delete --already-deleted` as the way to say it is gone.
 A `state.json` that is not JSON, or has a field of the wrong type, is named and stops the command

@@ -138,7 +138,11 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   changes nothing local, and marks nothing, unless its key is shown to see the
   account: a deletion this same key and host confirmed earlier (`confirmed_gone`,
   scoped by `confirmed_by`, a digest of host and key), a delete or stop that just
-  succeeded, a keep, or a read of a recorded id that came back with a row.
+  succeeded, a keep the platform's own purge answered, or a read of a recorded
+  deployment or training run. A project, dataset or model version can be public,
+  and a dataset can be linked into another account's project, so reading those,
+  or finding a dataset in use elsewhere, proves nothing (and a dataset found in
+  use by a walk that proves nothing is not recorded as kept).
   Another account's key is told "not found" for everything, so not-found is never
   proof, and neither is a walk where the rest failed (a 5xx on one id used to be
   taken as an answer and released the deployment keys). An id whose delete and
@@ -163,6 +167,12 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   finished 0.15 audit exits 0 (the endpoint's "Invalid status transition from
   paused to paused" is `already_stopped`). A `Retry-After` of `nan` no longer
   crashes the wait.
+  A response body nested thousands of levels deep is treated as an unreadable
+  body (a malformed response, or no marker) instead of ending the command with
+  `RecursionError`. An empty-bodied 409 on a version that still reads back says
+  "the platform gave no reason" on its row instead of claiming the delete was
+  reported done. Platform words copied into a receipt row or a teardown wait
+  error are cut at 2,048 characters with a note of the full length.
 - **Rows are redacted last.** Each training row is redacted before the character
   budget cuts it (so a cut can never expose part of an identifier) and again on
   the cut row, exactly as it will be uploaded, with the contract's `redact_rows`

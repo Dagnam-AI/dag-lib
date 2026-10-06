@@ -16,6 +16,7 @@ from contextlib import suppress
 import json
 from typing import Any, Protocol
 
+from dagnam._core.client.common import short_error_text
 from dagnam._core.exceptions import (
     APIError,
     ArchitectureVersionNotFoundError,
@@ -154,8 +155,8 @@ def _kept_row(version_id: str, detail: Mapping[str, object]) -> JsonObject:
     client): the version is not this audit's to remove, so it is ``kept`` -- never ``blocked`` --
     and an unpublished delete finishes around it.
     """
-    reason = str(detail.get("message") or detail.get("reason") or WEIGHTS_SERVED)
-    code = str(detail.get("code") or detail.get("error") or WEIGHTS_SERVED)
+    reason = _words(str(detail.get("message") or detail.get("reason") or WEIGHTS_SERVED))
+    code = short_error_text(str(detail.get("code") or detail.get("error") or WEIGHTS_SERVED))
     return {
         "kind": "model_version",
         "id": version_id,
@@ -258,15 +259,24 @@ field or a non-object body end it, whichever reader tripped on it.
 """
 
 
+NO_REASON = "the platform gave no reason"
+"""What a receipt says when the platform answered with an empty message."""
+
+
+def _words(text: str) -> str:
+    """Platform words as a receipt carries them: capped, and never empty."""
+    return short_error_text(text) or NO_REASON
+
+
 def _say(exc: Exception) -> str:
     """An error as a receipt says it: the client's own message, else what was raised."""
-    return str(exc) if isinstance(exc, DagnamError) else repr(exc)
+    return _words(str(exc) if isinstance(exc, DagnamError) else repr(exc))
 
 
 def _reason(exc: Exception, refusal: int = CONFLICT_STATUS) -> str:
     """What the receipt says an id was kept for: the platform's own words when it refused."""
     if isinstance(exc, APIError) and exc.status_code == refusal:
-        return exc.message
+        return _words(exc.message)
     return _say(exc)
 
 

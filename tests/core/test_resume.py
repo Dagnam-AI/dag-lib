@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
+from typing import override
 
 import pytest
 
@@ -249,6 +251,15 @@ def test_an_in_progress_answer_is_the_marker_or_exactly_the_platforms_text(
     response: _Response, waits: bool
 ) -> None:
     assert idempotency_in_progress(response) is waits
+
+
+def test_a_409_body_nested_too_deeply_to_read_is_not_an_in_progress_answer() -> None:
+    class Deep(_Response):
+        @override
+        def json(self) -> object:
+            return json.loads("[" * 200_000 + "]" * 200_000)
+
+    assert idempotency_in_progress(Deep(409)) is False
 
 
 @pytest.mark.parametrize(
