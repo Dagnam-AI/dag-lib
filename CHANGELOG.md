@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dagnam.set_warm(deployment_id, warm)` and `dagnam deployments warm <id> --on|--off`
+  keep one container running for a deployment, or release it. The async client has
+  `set_deployment_warm`.
+- `dagnam inference run` and `dagnam inference batch` take `--timeout` (seconds).
+
+### Changed
+
+- `inference`, `inference_batch` and the client `predict` / `predict_batch` wait up to
+  600 seconds by default (was 30), so a first call after idle survives a cold start
+  instead of being abandoned while the platform still answers it. Lower `timeout` to
+  fail fast. The async client's `predict` / `predict_batch` now default to 600 seconds
+  too, rather than the client's own timeout (an explicit `timeout=` still wins). The
+  connection phase stays at 30 seconds.
+- `deployments.create_revision` and `dagnam audit run` no longer send a
+  `capacity_policy` unless you pass one; the platform keeps the deployment's current
+  policy (including a warm pin) and applies its own default when nothing is live.
+
 ## [0.16.0] - 2026-10-06
 
 Needs the platform release that runs `dagnam-contracts` 0.4.1 and has

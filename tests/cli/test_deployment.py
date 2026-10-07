@@ -300,3 +300,35 @@ def test_removed_deployment_commands_are_unknown(
         run_cli(["deployments", command, "--help"])
     assert exc_info.value.code == 2
     assert f"unknown subcommand '{command}'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flag", "expected"), [("--on", True), ("--off", False)])
+def test_deployments_warm_sets_the_pin(
+    run_cli: CliRunner, capsys: StrCapture, flag: str, expected: bool
+) -> None:
+    fake = SimpleNamespace(set_warm=mock.Mock(return_value={"warm": expected}))
+    with mock.patch("dagnam.deployments", fake):
+        assert run_cli(["deployments", "warm", "dep-1", flag]) == 0
+    fake.set_warm.assert_called_once_with("dep-1", expected)
+    assert json.loads(capsys.readouterr().out) == {"warm": expected}
+
+
+def test_deployments_warm_needs_exactly_one_of_on_and_off(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    for extra in ([], ["--on", "--off"]):
+        with pytest.raises(SystemExit) as exc_info:
+            run_cli(["deployments", "warm", "dep-1", *extra])
+        assert exc_info.value.code == 2
+    assert "--on" in capsys.readouterr().err
+
+
+def test_deployments_warm_reports_a_deployment_that_is_not_serving(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    from dagnam._core.exceptions import DeploymentStateError
+
+    fake = SimpleNamespace(set_warm=mock.Mock(side_effect=DeploymentStateError("not serving")))
+    with mock.patch("dagnam.deployments", fake):
+        assert run_cli(["deployments", "warm", "dep-1", "--on"]) == 1
+    assert "not serving" in capsys.readouterr().err

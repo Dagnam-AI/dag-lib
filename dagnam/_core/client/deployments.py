@@ -255,6 +255,15 @@ class DeploymentsClientMixin(BaseDagnamClient):
             return value
         raise TypeError(f"Expected JSON object, got {type(value).__name__}")
 
+    def set_deployment_warm(self, deployment_id: str, warm: bool) -> JsonObject:
+        """PATCH /api/v1/deployments/{id}/capacity with ``{"warm": warm}``: pin or release a warm container."""
+        return self._deployment_object(
+            "PATCH",
+            f"/api/v1/deployments/{quote_path_segment(deployment_id)}/capacity",
+            deployment_id=deployment_id,
+            json_body={"warm": warm},
+        )
+
     def pause_deployment(self, deployment_id: str) -> JsonObject:
         return self._deployment_object(
             "POST",

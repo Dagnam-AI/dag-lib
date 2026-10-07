@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Optional
 
 from dagnam._core.client import DagnamClient
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT
 from dagnam._core.resolver import resolve_client
 from dagnam._core.sse import TERMINAL_INFERENCE_EVENTS, SSEEvent, iter_sse_once
 from dagnam._types import JsonArray, JsonObject
@@ -32,9 +33,12 @@ def inference(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_PREDICT_TIMEOUT,
 ) -> JsonObject:
     """Call a deployed model's /predict endpoint with ``inputs`` as the model input.
+
+    A first call after idle can wait out a cold start of several minutes, so
+    ``timeout`` defaults to 600 seconds; lower it to fail fast.
 
     >>> result = dagnam.inference("dep_abc123", {"text": "hello"}, api_key=deployment_key)
     """
@@ -49,7 +53,7 @@ def inference_batch(
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_PREDICT_TIMEOUT,
 ) -> JsonArray:
     """Batch-predict against a deployed model.
 

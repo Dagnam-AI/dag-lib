@@ -112,6 +112,7 @@ EXPECTED_ALL = sorted(
         "restore_checkpoint",
         "save_checksum",
         "save_metadata",
+        "set_warm",
         "stream_training",
         "studio",
         "touch_cache",

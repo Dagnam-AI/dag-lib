@@ -31,15 +31,22 @@ class TestInferenceDelegation:
         client = MagicMock(spec=DagnamClient)
         client.predict.return_value = {"label": "cat"}
         result = inference("dep_1", {"x": 1}, client=client)
-        client.predict.assert_called_once_with("dep_1", {"x": 1}, timeout=30)
+        client.predict.assert_called_once_with("dep_1", {"x": 1}, timeout=600)
         assert result == {"label": "cat"}
 
     def test_batch_uses_provided_client(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.predict_batch.return_value = [{"y": 1}, {"y": 2}]
         result = inference_batch("dep_1", [{"x": 1}, {"x": 2}], client=client)
-        client.predict_batch.assert_called_once_with("dep_1", [{"x": 1}, {"x": 2}], timeout=30)
+        client.predict_batch.assert_called_once_with("dep_1", [{"x": 1}, {"x": 2}], timeout=600)
         assert result == [{"y": 1}, {"y": 2}]
+
+    def test_timeout_can_be_lowered(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        inference("dep_1", {"x": 1}, client=client, timeout=5)
+        inference_batch("dep_1", [{"x": 1}], client=client, timeout=7)
+        client.predict.assert_called_once_with("dep_1", {"x": 1}, timeout=5)
+        client.predict_batch.assert_called_once_with("dep_1", [{"x": 1}], timeout=7)
 
     def test_health_uses_provided_client(self) -> None:
         client = MagicMock(spec=DagnamClient)

@@ -179,6 +179,12 @@ def cmd_deployments_update(args: argparse.Namespace) -> None:
     print_json(dagnam.deployments.update(args.deployment_id, name=args.name))
 
 
+def cmd_deployments_warm(args: argparse.Namespace) -> None:
+    import dagnam
+
+    print_json(dagnam.deployments.set_warm(args.deployment_id, args.on))
+
+
 def register_deployments(subparsers: SubParsersAction) -> None:
     """Register the ``deployments`` command group on the top-level subparsers."""
     deployments = subparsers.add_parser(
@@ -260,6 +266,23 @@ def register_deployments(subparsers: SubParsersAction) -> None:
                 "--limit", type=int, default=50, help="Results per page (default: 50)."
             )
         command.set_defaults(func=handler)
+
+    warm = deployment_sub.add_parser(
+        "warm",
+        help="Keep a deployment warm, or release it.",
+        description=(
+            "--on pins one GPU container continuously so the first call after idle is fast; "
+            "this costs for as long as it is on and needs a plan that includes remote GPU. "
+            "--off lets the deployment scale to zero when idle."
+        ),
+    )
+    warm.add_argument("deployment_id", help="ID of the deployment.")
+    warm_state = warm.add_mutually_exclusive_group(required=True)
+    warm_state.add_argument("--on", action="store_true", help="Keep one container warm.")
+    warm_state.add_argument(
+        "--off", dest="on", action="store_false", help="Scale to zero when idle."
+    )
+    warm.set_defaults(func=cmd_deployments_warm)
 
     dep_update = deployment_sub.add_parser(
         "update", help="Rename a deployment.", description="Rename a deployment."

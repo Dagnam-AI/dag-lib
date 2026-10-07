@@ -15,6 +15,7 @@ from dagnam._core.exceptions import (
     APIError,
     AuthError,
     DeploymentNotFoundError,
+    DeploymentStateError,
     DeploymentValidationError,
 )
 from dagnam._core.lro import LongRunningOperation
@@ -89,7 +90,7 @@ class TestReadDelegation:
 
 
 class TestCreateRevision:
-    def test_defaults_capacity_policy_and_omits_nulls(self) -> None:
+    def test_omits_capacity_policy_and_nulls_unless_given(self) -> None:
         client = MagicMock(spec=DagnamClient)
         client.create_deployment_revision.return_value = {"id": "rev2", "is_active": False}
         result = deployments.create_revision("dep-1", model_version_id="mv1", client=client)
@@ -99,7 +100,6 @@ class TestCreateRevision:
             {
                 "model_version_id": "mv1",
                 "capacity_mode": "serverless",
-                "capacity_policy": {"min_replicas": 0, "max_replicas": 1},
             },
             idempotency_key=None,
         )
@@ -363,3 +363,38 @@ def test_predict_stream_is_inference_stream_alias(monkeypatch) -> None:
 def test_removed_functions_are_gone(name: str) -> None:
     assert not hasattr(deployments, name)
     assert name not in deployments.__all__
+
+
+class TestSetWarm:
+    @pytest.mark.parametrize("warm", [True, False])
+    def test_delegates_with_the_flag(self, warm: bool) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.set_deployment_warm.return_value = {"warm": warm}
+        result = deployments.set_warm("dep-1", warm, client=client)
+        assert result == {"warm": warm}
+        client.set_deployment_warm.assert_called_once_with("dep-1", warm)
+
+    def test_is_exported_at_the_top_level(self) -> None:
+        import dagnam
+
+        assert dagnam.set_warm is deployments.set_warm
+
+    def test_patches_the_capacity_route_over_the_wire(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.patch(
+            "https://api.test/api/v1/deployments/dep-1/capacity", json={"warm": True}
+        )
+        result = deployments.set_warm("dep-1", True, api_key="k", api_url="https://api.test")
+        assert result == {"warm": True}
+        assert requests_mock.last_request.json() == {"warm": True}
+
+    def test_a_deployment_that_is_not_serving_yet_is_a_state_error(
+        self, requests_mock: RequestsMocker
+    ) -> None:
+        requests_mock.patch("https://api.test/api/v1/deployments/dep-1/capacity", status_code=409)
+        with pytest.raises(DeploymentStateError):
+            deployments.set_warm("dep-1", True, api_key="k", api_url="https://api.test")
+
+    def test_someone_elses_deployment_is_not_found(self, requests_mock: RequestsMocker) -> None:
+        requests_mock.patch("https://api.test/api/v1/deployments/dep-1/capacity", status_code=404)
+        with pytest.raises(DeploymentNotFoundError):
+            deployments.set_warm("dep-1", False, api_key="k", api_url="https://api.test")

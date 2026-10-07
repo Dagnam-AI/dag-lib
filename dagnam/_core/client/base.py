@@ -37,6 +37,8 @@ _HTTP_LOGGER = logging.getLogger("dagnam.http")
 
 _CHUNK_SIZE = 8192  # 8KB
 DEFAULT_TIMEOUT = 30  # seconds (used for both connect and per-read on non-streaming calls)
+# A first predict after idle waits out a cold start (minutes), so predict calls get a longer read timeout.
+DEFAULT_PREDICT_TIMEOUT = 600  # seconds
 
 # A hostile or compromised server (or redirect target) can stream an unbounded
 # body and exhaust the client's disk. Every on-disk download funnels through the

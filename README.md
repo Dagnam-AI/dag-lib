@@ -305,6 +305,13 @@ version. `pause` and `resume` return `LongRunningOperation` objects. Read
 operations such as `list`, `get`, `health`, `metrics`, `revisions` and `logs`
 return data from the API.
 
+A first call after idle may take up to the deployment's cold-start budget, which
+is minutes, so the default timeout for `inference` and `inference_batch` is 600
+seconds. Lower it with `timeout=` (or `--timeout` on the CLI) if you prefer to
+fail fast and retry on a 503 with `Retry-After`. `dagnam.set_warm(deployment_id,
+True)` (`dagnam deployments warm <id> --on`) keeps one container running to avoid
+the cold start; it costs for as long as it is on.
+
 ## Projects, Code Generation, and Model Hub
 
 ```python

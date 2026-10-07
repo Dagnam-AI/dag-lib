@@ -8,7 +8,7 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from dagnam._core.aio.base import SSE_READ_TIMEOUT, BaseAsyncDagnamClient
-from dagnam._core.client.base import scrub_secret_params
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, DEFAULT_TIMEOUT, scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
@@ -24,11 +24,16 @@ from dagnam._core.sse import (
 from dagnam._types import JsonArray, JsonObject
 
 
+def _predict_timeout(read: int) -> httpx.Timeout:
+    """A long read wait with the connect phase kept short (a cold start is slow to answer, not to reach)."""
+    return httpx.Timeout(read, connect=min(DEFAULT_TIMEOUT, read))
+
+
 class AsyncInferenceMixin(BaseAsyncDagnamClient):
     """Async Inference resource methods."""
 
     async def predict(
-        self, deployment_id: str, inputs: JsonObject, timeout: int | None = None
+        self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonObject:
         """Async mirror of ``InferenceClientMixin.predict``: sends ``{"input": inputs}``."""
         resp = await self._request(
@@ -36,20 +41,20 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict",
             json={"input": inputs},
             headers=self._headers(),
-            timeout=timeout,
+            timeout=_predict_timeout(timeout),
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
         return resp.json()
 
     async def predict_batch(
-        self, deployment_id: str, inputs: JsonArray, timeout: int | None = None
+        self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonArray:
         resp = await self._request(
             "POST",
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict/batch",
             json={"inputs": inputs},
             headers=self._headers(),
-            timeout=timeout,
+            timeout=_predict_timeout(timeout),
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
         return resp.json()

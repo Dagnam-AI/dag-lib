@@ -48,7 +48,6 @@ PLATFORM = "vllm"
 DEPLOYMENT_TYPE = "text"
 INSTANCE_TYPE = "modal-serverless"
 CAPACITY_MODE = "serverless"
-CAPACITY_POLICY: dict[str, int] = {"min_replicas": 0, "max_replicas": 1}
 DEPLOY_RUNNING = "running"
 """``StepState.deploy_status`` once ``wait_active`` saw the revision go live."""
 
@@ -120,7 +119,6 @@ def create_revision(state: AuditState, ctx: StepContext) -> AuditState:
         {
             "model_version_id": version_id,
             "capacity_mode": CAPACITY_MODE,
-            "capacity_policy": dict(CAPACITY_POLICY),
         },
         idempotency_key=f"audit-{ctx.label}-{version_id}",
     )
@@ -277,7 +275,6 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
 
 __all__ = [
     "CAPACITY_MODE",
-    "CAPACITY_POLICY",
     "DEPLOYMENT_TYPE",
     "DEPLOY_RUNNING",
     "INSTANCE_TYPE",

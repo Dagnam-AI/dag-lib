@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, DEFAULT_TIMEOUT
 from dagnam._core.exceptions import (
     AccountSuspendedError,
     APIError,
@@ -18,7 +19,7 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
+    from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter, RespxRoute
 
 API = "https://api.test"
 
@@ -265,3 +266,66 @@ async def test_async_predict_blocked_ip_403_raises_auth_error(
     )
     with pytest.raises(AuthError, match=r"IP not permitted\."):
         await client.predict("dep1", {"x": 1})
+
+
+# ------------------------------------------------ cold-start timeout defaults
+
+
+def _timeouts(route: RespxRoute) -> dict[str, float | None]:
+    return dict(route.calls[0].request.extensions["timeout"])
+
+
+async def test_async_predict_waits_the_cold_start_budget_by_default(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/inference/dep1/predict").mock(
+        return_value=httpx.Response(200, json={"y": 1})
+    )
+    await client.predict("dep1", {"x": 1})
+    seen = _timeouts(route)
+    assert seen["read"] == DEFAULT_PREDICT_TIMEOUT
+    assert seen["connect"] == DEFAULT_TIMEOUT
+
+
+async def test_async_predict_batch_waits_the_cold_start_budget_by_default(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/inference/dep1/predict/batch").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    await client.predict_batch("dep1", [{"x": 1}])
+    seen = _timeouts(route)
+    assert seen["read"] == DEFAULT_PREDICT_TIMEOUT
+    assert seen["connect"] == DEFAULT_TIMEOUT
+
+
+async def test_async_predict_timeout_can_be_lowered(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/inference/dep1/predict").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    await client.predict("dep1", {}, timeout=5)
+    seen = _timeouts(route)
+    assert (seen["connect"], seen["read"]) == (5, 5)
+
+
+async def test_async_predict_connect_stays_short_when_the_read_timeout_is_raised(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/inference/dep1/predict/batch").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    await client.predict_batch("dep1", [], timeout=900)
+    seen = _timeouts(route)
+    assert (seen["connect"], seen["read"]) == (DEFAULT_TIMEOUT, 900)
+
+
+async def test_async_schema_keeps_the_client_timeout(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/inference/dep1/schema").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    await client.schema("dep1")
+    assert _timeouts(route)["read"] == client.timeout

@@ -89,8 +89,8 @@ def test_inference_accepts_explicit_file_flags(
         run_cli(["inference", "run", "dep-1", "--input-file", str(input_path)])
         run_cli(["inference", "batch", "dep-1", "--inputs-file", str(inputs_path)])
 
-    infer.assert_called_once_with("dep-1", {"input": "hello"})
-    infer_batch.assert_called_once_with("dep-1", [{"input": "hello"}])
+    infer.assert_called_once_with("dep-1", {"input": "hello"}, timeout=600)
+    infer_batch.assert_called_once_with("dep-1", [{"input": "hello"}], timeout=600)
     assert "ok" in capsys.readouterr().out
 
 
@@ -103,7 +103,7 @@ def test_inference_json_file_flags_accept_utf8_bom(
     with mock.patch("dagnam.inference", return_value={"ok": True}) as infer:
         run_cli(["inference", "run", "dep-1", "--input-file", str(input_path)])
 
-    infer.assert_called_once_with("dep-1", {"input": "hello"})
+    infer.assert_called_once_with("dep-1", {"input": "hello"}, timeout=600)
     assert "ok" in capsys.readouterr().out
 
 
@@ -298,3 +298,48 @@ def test_inference_stream_reads_input_file(
 def test_inference_stream_bad_json_input_exits(run_cli: CliRunner) -> None:
     with pytest.raises(SystemExit):
         run_cli(["inference", "stream", "dep-1", "--input", "not-json"])
+
+
+def test_inference_run_waits_ten_minutes_by_default(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.inference", return_value={}) as infer:
+        run_cli(["inference", "run", "dep-1", "--input", '{"x":1}'])
+    infer.assert_called_once_with("dep-1", {"x": 1}, timeout=600)
+
+
+def test_inference_run_passes_timeout_through(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.inference", return_value={}) as infer:
+        run_cli(["inference", "run", "dep-1", "--input", '{"x":1}', "--timeout", "45"])
+    infer.assert_called_once_with("dep-1", {"x": 1}, timeout=45)
+
+
+def test_inference_batch_waits_ten_minutes_by_default(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.inference_batch", return_value=[]) as infer:
+        run_cli(["inference", "batch", "dep-1", "--inputs", "[1]"])
+    infer.assert_called_once_with("dep-1", [1], timeout=600)
+
+
+def test_inference_batch_passes_timeout_through(run_cli: CliRunner) -> None:
+    with mock.patch("dagnam.inference_batch", return_value=[]) as infer:
+        run_cli(["inference", "batch", "dep-1", "--inputs", "[1]", "--timeout", "45"])
+    infer.assert_called_once_with("dep-1", [1], timeout=45)
+
+
+@pytest.mark.parametrize("command", ["run", "batch"])
+def test_inference_timeout_help_explains_the_cold_start(
+    run_cli: CliRunner, capsys: StrCapture, command: str
+) -> None:
+    with pytest.raises(SystemExit):
+        run_cli(["inference", command, "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Seconds to wait; a first call after idle can take several minutes." in out
+
+
+@pytest.mark.parametrize("command_args", [["run", "--input", "{}"], ["batch", "--inputs", "[]"]])
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5"])
+def test_inference_timeout_must_be_a_positive_integer(
+    run_cli: CliRunner, capsys: StrCapture, command_args: list[str], bad: str
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_cli(["inference", command_args[0], "dep-1", *command_args[1:], "--timeout", bad])
+    assert exc_info.value.code == 2
+    assert "--timeout" in capsys.readouterr().err

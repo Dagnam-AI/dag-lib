@@ -10,14 +10,19 @@ once by `deploy_model_version` (or by rotating it). The account key is refused. 
 health` and `stream` use the account key. Never print or log a deployment key.
 
 ## CLI (`dagnam inference ...`)
-- `DAGNAM_API_KEY=<deployment key> dagnam inference run <deployment_id> (--input '<json>' | --input-file PATH) [--json] [--output]`: one request. `--input`/`--input-file` are mutually exclusive and one is required.
-- `DAGNAM_API_KEY=<deployment key> dagnam inference batch <deployment_id> (--inputs '<json-array>' | --inputs-file PATH) [--json] [--output]`: many requests in one call.
+- `DAGNAM_API_KEY=<deployment key> dagnam inference run <deployment_id> (--input '<json>' | --input-file PATH) [--timeout SECONDS] [--json] [--output]`: one request. `--input`/`--input-file` are mutually exclusive and one is required.
+- `DAGNAM_API_KEY=<deployment key> dagnam inference batch <deployment_id> (--inputs '<json-array>' | --inputs-file PATH) [--timeout SECONDS] [--json] [--output]`: many requests in one call.
 - `dagnam inference health <deployment_id> [--json] [--output]`: deployment health/readiness.
+
+`--timeout` is whole seconds (default 600). A first call after idle can take several minutes
+while the deployment starts, so do not lower it unless the user prefers to fail fast and retry
+on a 503 with `Retry-After`. Do not retry a timed-out call blindly: the platform may still
+answer, and bill, the first one.
 
 ## SDK (`import dagnam`)
 Pass the model input itself (for example `{"text": "..."}`); the SDK sends it as `{"input": ...}`.
-- `dagnam.inference(deployment_id, inputs, api_key=deployment_key, timeout=30) -> dict`: single prediction.
-- `dagnam.inference_batch(deployment_id, inputs, api_key=deployment_key, timeout=30) -> list`: batched predictions.
+- `dagnam.inference(deployment_id, inputs, api_key=deployment_key, timeout=600) -> dict`: single prediction.
+- `dagnam.inference_batch(deployment_id, inputs, api_key=deployment_key, timeout=600) -> list`: batched predictions.
 - `dagnam.deployment_health(deployment_id, api_key=deployment_key) -> dict`: readiness/health snapshot.
 
 ## Recipe

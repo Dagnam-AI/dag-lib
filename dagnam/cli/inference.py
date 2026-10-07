@@ -6,6 +6,7 @@ import argparse
 import json
 from typing import TYPE_CHECKING
 
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT
 from dagnam._types import ensure_json_array, ensure_json_object
 from dagnam.cli.common import error, load_json_arg, print_json, write_json_file
 
@@ -22,7 +23,7 @@ def cmd_inference_run(args: argparse.Namespace) -> None:
     except (json.JSONDecodeError, OSError, TypeError) as exc:
         error(f"Failed to parse --input: {exc}")
 
-    result = dagnam.inference(args.deployment_id, payload)
+    result = dagnam.inference(args.deployment_id, payload, timeout=args.timeout)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -37,7 +38,7 @@ def cmd_inference_batch(args: argparse.Namespace) -> None:
     except (json.JSONDecodeError, OSError, TypeError) as exc:
         error(f"Failed to parse --inputs: {exc}")
 
-    result = dagnam.inference_batch(args.deployment_id, payload)
+    result = dagnam.inference_batch(args.deployment_id, payload, timeout=args.timeout)
     if args.output:
         write_json_file(args.output, result)
     print_json(result)
@@ -99,6 +100,22 @@ def cmd_inference_stream(args: argparse.Namespace) -> None:
             error(str(data.get("message") or "streaming inference failed"))
 
 
+def _positive_int(value: str) -> int:
+    seconds = int(value)  # a non-integer raises ValueError, which argparse reports as a usage error
+    if seconds < 1:
+        raise argparse.ArgumentTypeError("must be a whole number of seconds, at least 1")
+    return seconds
+
+
+def _add_timeout_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--timeout",
+        type=_positive_int,
+        default=DEFAULT_PREDICT_TIMEOUT,
+        help="Seconds to wait; a first call after idle can take several minutes.",
+    )
+
+
 def register_inference(subparsers: SubParsersAction) -> None:
     """Register the ``inference`` command group on the top-level subparsers."""
     inference = subparsers.add_parser(
@@ -120,6 +137,7 @@ def register_inference(subparsers: SubParsersAction) -> None:
     run_input.add_argument("--input-file", help="Path to a JSON object file.")
     run.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     run.add_argument("--output", help="Write the JSON response to this path.")
+    _add_timeout_arg(run)
     run.set_defaults(func=cmd_inference_run)
     batch = inference_sub.add_parser(
         "batch", help="Run batch inference.", description="Send multiple inputs to a deployment."
@@ -130,6 +148,7 @@ def register_inference(subparsers: SubParsersAction) -> None:
     batch_input.add_argument("--inputs-file", help="Path to a JSON array file.")
     batch.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     batch.add_argument("--output", help="Write the JSON response to this path.")
+    _add_timeout_arg(batch)
     batch.set_defaults(func=cmd_inference_batch)
     health = inference_sub.add_parser(
         "health", help="Check deployment health.", description="Report deployment health status."
