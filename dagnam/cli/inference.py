@@ -100,10 +100,17 @@ def cmd_inference_stream(args: argparse.Namespace) -> None:
             error(str(data.get("message") or "streaming inference failed"))
 
 
+def _positive_int(value: str) -> int:
+    seconds = int(value)  # a non-integer raises ValueError, which argparse reports as a usage error
+    if seconds < 1:
+        raise argparse.ArgumentTypeError("must be a whole number of seconds, at least 1")
+    return seconds
+
+
 def _add_timeout_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--timeout",
-        type=int,
+        type=_positive_int,
         default=DEFAULT_PREDICT_TIMEOUT,
         help="Seconds to wait; a first call after idle can take several minutes.",
     )

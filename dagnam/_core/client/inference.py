@@ -37,7 +37,7 @@ class InferenceClientMixin(BaseDagnamClient):
             url,
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
             json={"input": inputs},
-            timeout=timeout,
+            timeout=(min(DEFAULT_TIMEOUT, timeout), timeout),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return resp.json()
@@ -53,7 +53,7 @@ class InferenceClientMixin(BaseDagnamClient):
             url,
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
             json={"inputs": inputs},
-            timeout=timeout,
+            timeout=(min(DEFAULT_TIMEOUT, timeout), timeout),
             allow_redirects=ALLOW_REDIRECTS,
         )
         return resp.json()

@@ -75,7 +75,7 @@ class BaseAsyncDagnamClient:
         data: FormData | None = None,
         files: UploadFiles | None = None,
         headers: dict[str, str] | None = None,
-        timeout: int | None = None,
+        timeout: float | httpx.Timeout | None = None,
         raise_for: Callable[[httpx.Response], None] | None = None,
         idempotent: bool = False,
         idempotency_key: str | None = None,

@@ -332,3 +332,14 @@ def test_inference_timeout_help_explains_the_cold_start(
         run_cli(["inference", command, "--help"])
     out = " ".join(capsys.readouterr().out.split())
     assert "Seconds to wait; a first call after idle can take several minutes." in out
+
+
+@pytest.mark.parametrize("command_args", [["run", "--input", "{}"], ["batch", "--inputs", "[]"]])
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5"])
+def test_inference_timeout_must_be_a_positive_integer(
+    run_cli: CliRunner, capsys: StrCapture, command_args: list[str], bad: str
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_cli(["inference", command_args[0], "dep-1", *command_args[1:], "--timeout", bad])
+    assert exc_info.value.code == 2
+    assert "--timeout" in capsys.readouterr().err

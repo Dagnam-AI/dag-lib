@@ -8,7 +8,7 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from dagnam._core.aio.base import SSE_READ_TIMEOUT, BaseAsyncDagnamClient
-from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, scrub_secret_params
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, DEFAULT_TIMEOUT, scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
@@ -24,6 +24,11 @@ from dagnam._core.sse import (
 from dagnam._types import JsonArray, JsonObject
 
 
+def _predict_timeout(read: int) -> httpx.Timeout:
+    """A long read wait with the connect phase kept short (a cold start is slow to answer, not to reach)."""
+    return httpx.Timeout(read, connect=min(DEFAULT_TIMEOUT, read))
+
+
 class AsyncInferenceMixin(BaseAsyncDagnamClient):
     """Async Inference resource methods."""
 
@@ -36,7 +41,7 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict",
             json={"input": inputs},
             headers=self._headers(),
-            timeout=timeout,
+            timeout=_predict_timeout(timeout),
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
         return resp.json()
@@ -49,7 +54,7 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
             f"/api/v1/inference/{quote_path_segment(deployment_id)}/predict/batch",
             json={"inputs": inputs},
             headers=self._headers(),
-            timeout=timeout,
+            timeout=_predict_timeout(timeout),
             raise_for=lambda r: raise_for_deployment(r, deployment_id),
         )
         return resp.json()

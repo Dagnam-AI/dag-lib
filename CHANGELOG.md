@@ -19,7 +19,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - `inference`, `inference_batch` and the client `predict` / `predict_batch` wait up to
   600 seconds by default (was 30), so a first call after idle survives a cold start
   instead of being abandoned while the platform still answers it. Lower `timeout` to
-  fail fast.
+  fail fast. The async client's `predict` / `predict_batch` now default to 600 seconds
+  too, rather than the client's own timeout (an explicit `timeout=` still wins). The
+  connection phase stays at 30 seconds.
 - `deployments.create_revision` and `dagnam audit run` no longer send a
   `capacity_policy` unless you pass one; the platform keeps the deployment's current
   policy (including a warm pin) and applies its own default when nothing is live.

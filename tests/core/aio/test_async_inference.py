@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
-from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, DEFAULT_TIMEOUT
 from dagnam._core.exceptions import (
     AccountSuspendedError,
     APIError,
@@ -282,7 +282,9 @@ async def test_async_predict_waits_the_cold_start_budget_by_default(
         return_value=httpx.Response(200, json={"y": 1})
     )
     await client.predict("dep1", {"x": 1})
-    assert _timeouts(route)["read"] == DEFAULT_PREDICT_TIMEOUT
+    seen = _timeouts(route)
+    assert seen["read"] == DEFAULT_PREDICT_TIMEOUT
+    assert seen["connect"] == DEFAULT_TIMEOUT
 
 
 async def test_async_predict_batch_waits_the_cold_start_budget_by_default(
@@ -292,7 +294,9 @@ async def test_async_predict_batch_waits_the_cold_start_budget_by_default(
         return_value=httpx.Response(200, json=[])
     )
     await client.predict_batch("dep1", [{"x": 1}])
-    assert _timeouts(route)["read"] == DEFAULT_PREDICT_TIMEOUT
+    seen = _timeouts(route)
+    assert seen["read"] == DEFAULT_PREDICT_TIMEOUT
+    assert seen["connect"] == DEFAULT_TIMEOUT
 
 
 async def test_async_predict_timeout_can_be_lowered(
@@ -302,7 +306,19 @@ async def test_async_predict_timeout_can_be_lowered(
         return_value=httpx.Response(200, json={})
     )
     await client.predict("dep1", {}, timeout=5)
-    assert _timeouts(route)["read"] == 5
+    seen = _timeouts(route)
+    assert (seen["connect"], seen["read"]) == (5, 5)
+
+
+async def test_async_predict_connect_stays_short_when_the_read_timeout_is_raised(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/inference/dep1/predict/batch").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    await client.predict_batch("dep1", [], timeout=900)
+    seen = _timeouts(route)
+    assert (seen["connect"], seen["read"]) == (DEFAULT_TIMEOUT, 900)
 
 
 async def test_async_schema_keeps_the_client_timeout(

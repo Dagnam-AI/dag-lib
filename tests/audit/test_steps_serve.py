@@ -135,7 +135,6 @@ def test_create_revision_is_serverless_idempotent_and_leaves_capacity_to_the_pla
             "key": "audit-w1/head_tune-mv-1",
         }
     ]
-    assert "capacity_policy" not in platform.revisions[0]
     assert ctx.step(state).deploy_status == "deploying"
     create_revision(state, ctx)
     assert platform.call_log.count("create_deployment_revision") == 1

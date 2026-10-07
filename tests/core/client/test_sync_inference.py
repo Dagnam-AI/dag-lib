@@ -164,7 +164,7 @@ def test_predict_waits_the_cold_start_budget_by_default(
     rmock.post(f"{API}/api/v1/inference/dep1/predict", json={"y": 1})
     client.predict("dep1", {"x": 1})
     assert DEFAULT_PREDICT_TIMEOUT == 600
-    assert rmock.last_request.timeout == DEFAULT_PREDICT_TIMEOUT
+    assert rmock.last_request.timeout == (DEFAULT_TIMEOUT, DEFAULT_PREDICT_TIMEOUT)
 
 
 def test_predict_batch_waits_the_cold_start_budget_by_default(
@@ -172,13 +172,21 @@ def test_predict_batch_waits_the_cold_start_budget_by_default(
 ) -> None:
     rmock.post(f"{API}/api/v1/inference/dep1/predict/batch", json=[])
     client.predict_batch("dep1", [{"x": 1}])
-    assert rmock.last_request.timeout == DEFAULT_PREDICT_TIMEOUT
+    assert rmock.last_request.timeout == (DEFAULT_TIMEOUT, DEFAULT_PREDICT_TIMEOUT)
 
 
 def test_predict_timeout_can_be_lowered(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.post(f"{API}/api/v1/inference/dep1/predict", json={"y": 1})
     client.predict("dep1", {"x": 1}, timeout=5)
-    assert rmock.last_request.timeout == 5
+    assert rmock.last_request.timeout == (5, 5)
+
+
+def test_predict_connect_stays_short_when_the_read_timeout_is_raised(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict/batch", json=[])
+    client.predict_batch("dep1", [], timeout=900)
+    assert rmock.last_request.timeout == (DEFAULT_TIMEOUT, 900)
 
 
 def test_schema_keeps_the_short_default_timeout(
