@@ -82,6 +82,7 @@ from dagnam.resources.datasets import (
     update_dataset,
     update_dataset_roles,
 )
+from dagnam.resources.deployments import set_warm
 from dagnam.resources.inference import (
     deployment_health,
     inference,
@@ -224,6 +225,7 @@ __all__ = [
     "restore_checkpoint",
     "save_checksum",
     "save_metadata",
+    "set_warm",
     "stream_training",
     "studio",
     "touch_cache",

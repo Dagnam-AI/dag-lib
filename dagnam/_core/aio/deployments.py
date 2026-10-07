@@ -179,6 +179,17 @@ class AsyncDeploymentsMixin(BaseAsyncDagnamClient):
             return None
         return ensure_json_object(value)
 
+    async def set_deployment_warm(self, deployment_id: str, warm: bool) -> JsonObject:
+        """Pin or release a warm container. ``PATCH /api/v1/deployments/{id}/capacity``."""
+        return ensure_json_object(
+            await self._deployment_req(
+                "PATCH",
+                f"/api/v1/deployments/{quote_path_segment(deployment_id)}/capacity",
+                deployment_id=deployment_id,
+                json_body={"warm": warm},
+            )
+        )
+
     async def pause_deployment(self, deployment_id: str) -> JsonObject:
         return ensure_json_object(
             await self._deployment_req(

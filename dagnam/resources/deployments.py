@@ -185,19 +185,15 @@ def create_revision(
     Returns the revision object as created (``id``, ``revision_number``,
     ``status``, ``is_active``, ...) — a plain object, not an LRO. The platform
     activates the revision asynchronously, so poll :func:`revisions` until the
-    new one reports ``is_active``. ``capacity_policy`` defaults to
-    ``{"min_replicas": 0, "max_replicas": 1}``; ``region`` and
-    ``engine_override`` are only sent when given. An ``idempotency_key`` makes
+    new one reports ``is_active``. ``capacity_policy``, ``region`` and
+    ``engine_override`` are only sent when given: without a ``capacity_policy``
+    the platform keeps the deployment's current one (including a
+    :func:`set_warm` pin), or applies its own default when nothing is live yet. An ``idempotency_key`` makes
     a retried call replay the same revision; one is minted when omitted.
     """
-    policy: JsonMapping = (
-        capacity_policy if capacity_policy is not None else {"min_replicas": 0, "max_replicas": 1}
-    )
-    payload: JsonObject = {
-        "model_version_id": model_version_id,
-        "capacity_mode": capacity_mode,
-        "capacity_policy": _json_object_from_mapping(policy),
-    }
+    payload: JsonObject = {"model_version_id": model_version_id, "capacity_mode": capacity_mode}
+    if capacity_policy is not None:
+        payload["capacity_policy"] = _json_object_from_mapping(capacity_policy)
     if region is not None:
         payload["region"] = region
     if engine_override is not None:
@@ -206,6 +202,28 @@ def create_revision(
     return resolved.create_deployment_revision(
         _stringify_id(deployment_id), payload, idempotency_key=idempotency_key
     )
+
+
+def set_warm(
+    deployment_id: str,
+    warm: bool,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Keep a deployment warm (``True``) or let it scale to zero when idle (``False``).
+
+    Warm pins one GPU container continuously, so it costs for as long as it is
+    on. It is only available on plans that include remote GPU. A deployment
+    that is not serving yet answers 409 (:class:`DeploymentStateError`), and one
+    that is not yours answers 404 (:class:`DeploymentNotFoundError`). Returns
+    the updated capacity.
+
+    >>> dagnam.set_warm("dep_abc123", True)
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.set_deployment_warm(_stringify_id(deployment_id), warm)
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +529,7 @@ __all__ = [
     "predict_stream",
     "resume",
     "revisions",
+    "set_warm",
     "stream_events",
     "update",
     "validate",

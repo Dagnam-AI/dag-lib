@@ -122,7 +122,7 @@ def test_create_deployment_without_a_key_leaves_no_key_ref(
     assert ctx.step(create_deployment(_trained(), ctx)).key_ref is None
 
 
-def test_create_revision_is_serverless_and_idempotent(
+def test_create_revision_is_serverless_idempotent_and_leaves_capacity_to_the_platform(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
     ctx = make_ctx()
@@ -131,11 +131,11 @@ def test_create_revision_is_serverless_and_idempotent(
         {
             "model_version_id": "mv-1",
             "capacity_mode": "serverless",
-            "capacity_policy": {"min_replicas": 0, "max_replicas": 1},
             "deployment_id": "dep-1",
             "key": "audit-w1/head_tune-mv-1",
         }
     ]
+    assert "capacity_policy" not in platform.revisions[0]
     assert ctx.step(state).deploy_status == "deploying"
     create_revision(state, ctx)
     assert platform.call_log.count("create_deployment_revision") == 1

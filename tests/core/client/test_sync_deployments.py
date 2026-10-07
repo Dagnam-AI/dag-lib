@@ -454,3 +454,28 @@ def test_first_create_with_its_key_does_not_rotate(
 )
 def test_removed_client_methods_are_gone(name: str) -> None:
     assert not hasattr(DagnamClient, name)
+
+
+def test_set_deployment_warm_patches_the_capacity_route(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.patch(f"{API}/api/v1/deployments/dep1/capacity", json={"warm": True})
+    assert client.set_deployment_warm("dep1", True) == {"warm": True}
+    assert rmock.last_request.json() == {"warm": True}
+
+
+def test_set_deployment_warm_off_sends_false_and_quotes_the_id(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.patch(f"{API}/api/v1/deployments/a%2Fb/capacity", json={"warm": False})
+    client.set_deployment_warm("a/b", False)
+    assert rmock.last_request.json() == {"warm": False}
+
+
+def test_set_deployment_warm_maps_409_and_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.patch(f"{API}/api/v1/deployments/dep1/capacity", status_code=409)
+    with pytest.raises(DeploymentStateError):
+        client.set_deployment_warm("dep1", True)
+    rmock.patch(f"{API}/api/v1/deployments/missing/capacity", status_code=404)
+    with pytest.raises(DeploymentNotFoundError):
+        client.set_deployment_warm("missing", True)

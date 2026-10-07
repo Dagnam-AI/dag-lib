@@ -12,6 +12,7 @@ from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
     APIError,
     DeploymentNotFoundError,
+    DeploymentStateError,
 )
 
 if TYPE_CHECKING:
@@ -423,3 +424,34 @@ async def test_async_first_create_with_its_key_does_not_rotate(
 )
 async def test_async_removed_client_methods_are_gone(name: str) -> None:
     assert not hasattr(AsyncDagnamClient, name)
+
+
+async def test_async_set_deployment_warm_patches_the_capacity_route(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.patch("/api/v1/deployments/dep1/capacity").mock(
+        return_value=httpx.Response(200, json={"warm": True})
+    )
+    assert await client.set_deployment_warm("dep1", True) == {"warm": True}
+    assert json.loads(route.calls[0].request.content) == {"warm": True}
+
+
+async def test_async_set_deployment_warm_off_sends_false_and_quotes_the_id(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.patch("/api/v1/deployments/a%2Fb/capacity").mock(
+        return_value=httpx.Response(200, json={"warm": False})
+    )
+    await client.set_deployment_warm("a/b", False)
+    assert json.loads(route.calls[0].request.content) == {"warm": False}
+
+
+async def test_async_set_deployment_warm_maps_409_and_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.patch("/api/v1/deployments/dep1/capacity").mock(return_value=httpx.Response(409))
+    with pytest.raises(DeploymentStateError):
+        await client.set_deployment_warm("dep1", True)
+    mock.patch("/api/v1/deployments/missing/capacity").mock(return_value=httpx.Response(404))
+    with pytest.raises(DeploymentNotFoundError):
+        await client.set_deployment_warm("missing", True)
