@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
+    DEFAULT_PREDICT_TIMEOUT,
     DEFAULT_TIMEOUT,
     SSE_READ_TIMEOUT,
     STREAM_CONNECT_TIMEOUT,
@@ -23,7 +24,7 @@ class InferenceClientMixin(BaseDagnamClient):
     """Inference resource methods for DagnamClient."""
 
     def predict(
-        self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_TIMEOUT
+        self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonObject:
         """POST /api/v1/inference/{deployment_id}/predict with body ``{"input": inputs}``.
 
@@ -42,7 +43,7 @@ class InferenceClientMixin(BaseDagnamClient):
         return resp.json()
 
     def predict_batch(
-        self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_TIMEOUT
+        self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonArray:
         """POST /api/v1/inference/{deployment_id}/predict/batch"""
         deployment_path = quote_path_segment(deployment_id)

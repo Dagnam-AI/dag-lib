@@ -8,7 +8,7 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from dagnam._core.aio.base import SSE_READ_TIMEOUT, BaseAsyncDagnamClient
-from dagnam._core.client.base import scrub_secret_params
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_deployment,
@@ -28,7 +28,7 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
     """Async Inference resource methods."""
 
     async def predict(
-        self, deployment_id: str, inputs: JsonObject, timeout: int | None = None
+        self, deployment_id: str, inputs: JsonObject, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonObject:
         """Async mirror of ``InferenceClientMixin.predict``: sends ``{"input": inputs}``."""
         resp = await self._request(
@@ -42,7 +42,7 @@ class AsyncInferenceMixin(BaseAsyncDagnamClient):
         return resp.json()
 
     async def predict_batch(
-        self, deployment_id: str, inputs: JsonArray, timeout: int | None = None
+        self, deployment_id: str, inputs: JsonArray, timeout: int = DEFAULT_PREDICT_TIMEOUT
     ) -> JsonArray:
         resp = await self._request(
             "POST",

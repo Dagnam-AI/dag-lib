@@ -8,6 +8,7 @@ import pytest
 import requests as requests_lib
 
 from dagnam._core.client import DagnamClient
+from dagnam._core.client.base import DEFAULT_PREDICT_TIMEOUT, DEFAULT_TIMEOUT
 from dagnam._core.exceptions import (
     AccountSuspendedError,
     APIError,
@@ -152,3 +153,37 @@ def test_predict_blocked_ip_403_raises_auth_error(
     )
     with pytest.raises(AuthError, match=r"IP not permitted\."):
         client.predict("dep1", {"x": 1})
+
+
+# ------------------------------------------------ cold-start timeout defaults
+
+
+def test_predict_waits_the_cold_start_budget_by_default(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict", json={"y": 1})
+    client.predict("dep1", {"x": 1})
+    assert DEFAULT_PREDICT_TIMEOUT == 600
+    assert rmock.last_request.timeout == DEFAULT_PREDICT_TIMEOUT
+
+
+def test_predict_batch_waits_the_cold_start_budget_by_default(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict/batch", json=[])
+    client.predict_batch("dep1", [{"x": 1}])
+    assert rmock.last_request.timeout == DEFAULT_PREDICT_TIMEOUT
+
+
+def test_predict_timeout_can_be_lowered(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/inference/dep1/predict", json={"y": 1})
+    client.predict("dep1", {"x": 1}, timeout=5)
+    assert rmock.last_request.timeout == 5
+
+
+def test_schema_keeps_the_short_default_timeout(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/inference/dep1/schema", json={})
+    client.schema("dep1")
+    assert rmock.last_request.timeout == DEFAULT_TIMEOUT
