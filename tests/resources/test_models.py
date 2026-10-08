@@ -277,6 +277,18 @@ class TestGetLineage:
         client.get_model_version_lineage.assert_called_once_with("v1")
 
 
+class TestListArtifacts:
+    def test_delegates_to_client(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        artifacts = [{"id": "a1", "logical_key": "weights/model.safetensors"}]
+        client.list_model_version_artifacts.return_value = artifacts
+
+        result = models.list_artifacts("v1", client=client)
+
+        assert result == artifacts
+        client.list_model_version_artifacts.assert_called_once_with("v1")
+
+
 class TestGetTaskContract:
     def test_delegates_to_client(self) -> None:
         client = MagicMock(spec=DagnamClient)

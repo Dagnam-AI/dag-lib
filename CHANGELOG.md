@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a
+  model version's artifacts, so the artifact id `dagnam models download` needs can be found.
+- `dagnam training get` prints `Model version: <id>` when the job has registered one.
+
 ## [0.17.0] - 2026-10-07
 
 ### Added

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
@@ -168,6 +168,60 @@ class TestRegisterModels:
         ):
             args.func(args)
         assert json.loads(capsys.readouterr().out) == {"id": "m1"}
+
+    # --------------------------------------------------------- artifacts
+
+    _ARTIFACTS: ClassVar[list[dict[str, object]]] = [
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "version_id": "v1",
+            "artifact_type": "weights",
+            "logical_key": "weights/model.safetensors",
+            "size_bytes": 2048,
+            "verification_status": "verified",
+        },
+        {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "version_id": "v1",
+            "artifact_type": "tokenizer",
+            "logical_key": "tokenizer/tokenizer.json",
+            "size_bytes": None,
+            "verification_status": "pending",
+        },
+    ]
+
+    @patch("dagnam.cli.models.models.list_artifacts")
+    def test_artifacts_prints_table(self, mock_list: MagicMock, capsys: StrCapture) -> None:
+        mock_list.return_value = self._ARTIFACTS
+        args = _build_parser().parse_args(["models", "artifacts", "v1"])
+        args.func(args)
+        mock_list.assert_called_once_with("v1")
+        out = capsys.readouterr().out
+        assert "11111111-1111-4111-8111-111111111111" in out
+        assert "weights/model.safetensors" in out
+        assert "2.0 KB" in out
+        assert "tokenizer" in out
+        assert '"verification_status"' not in out
+
+    @patch("dagnam.cli.models.models.list_artifacts")
+    def test_artifacts_json_and_output(
+        self, mock_list: MagicMock, capsys: StrCapture, tmp_path: Path
+    ) -> None:
+        mock_list.return_value = self._ARTIFACTS
+        output = tmp_path / "artifacts.json"
+        args = _build_parser().parse_args(
+            ["models", "artifacts", "v1", "--json", "--output", str(output)]
+        )
+        args.func(args)
+        assert json.loads(capsys.readouterr().out) == self._ARTIFACTS
+        assert json.loads(output.read_text(encoding="utf-8")) == self._ARTIFACTS
+
+    @patch("dagnam.cli.models.models.list_artifacts")
+    def test_artifacts_empty(self, mock_list: MagicMock, capsys: StrCapture) -> None:
+        mock_list.return_value = []
+        args = _build_parser().parse_args(["models", "artifacts", "v1"])
+        args.func(args)
+        assert "No artifacts found." in capsys.readouterr().out
 
     # -------------------------------------------------------------- list
 

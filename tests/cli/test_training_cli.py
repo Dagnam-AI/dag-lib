@@ -179,6 +179,29 @@ def test_training_get(run_cli: CliRunner, capsys: StrCapture) -> None:
     assert '"id": "j1"' not in out
 
 
+def test_training_get_prints_model_version_when_present(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    payload = {
+        "id": "j1",
+        "status": "completed",
+        "model_version_id": "9b1f0c2e-6d3a-4c58-9a47-0e5f1d2a7b83",
+    }
+    with mock.patch("dagnam.get_training_job", mock.Mock(return_value=payload)):
+        run_cli(["training", "get", "j1"])
+    assert "Model version: 9b1f0c2e-6d3a-4c58-9a47-0e5f1d2a7b83" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("extra", [{}, {"model_version_id": None}])
+def test_training_get_omits_model_version_when_absent(
+    run_cli: CliRunner, capsys: StrCapture, extra: dict[str, object]
+) -> None:
+    payload = {"id": "j1", "status": "running", **extra}
+    with mock.patch("dagnam.get_training_job", mock.Mock(return_value=payload)):
+        run_cli(["training", "get", "j1"])
+    assert "Model version" not in capsys.readouterr().out
+
+
 def test_training_get_json_prints_full_payload(run_cli: CliRunner, capsys: StrCapture) -> None:
     payload = {"id": "j1", "status": "running"}
     with mock.patch("dagnam.get_training_job", mock.Mock(return_value=payload)):

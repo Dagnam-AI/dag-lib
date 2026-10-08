@@ -107,6 +107,8 @@ def cmd_training_get(args: argparse.Namespace) -> None:
     print(f"Framework: {result.get('framework') or '-'}")
     print(f"Epoch: {result.get('current_epoch', 0)}/{result.get('total_epochs', 0)}")
     print(f"Progress: {result.get('progress_percentage', 0)}%")
+    if result.get("model_version_id"):
+        print(f"Model version: {result['model_version_id']}")
 
 
 def _render_jobs(result: object) -> str:

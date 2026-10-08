@@ -31,7 +31,7 @@ from dagnam._core.client.base import (
 from dagnam._core.config import load_config
 from dagnam._core.exceptions import APIError, ChecksumError, ModelError, ModelNotFoundError
 from dagnam._core.resolver import resolve_client
-from dagnam._types import JsonObject, JsonValue, ensure_json_array, ensure_json_object
+from dagnam._types import JsonArray, JsonObject, JsonValue, ensure_json_array, ensure_json_object
 from dagnam.data.cache import (
     cache_dir_name,
     compute_file_checksum,
@@ -344,6 +344,24 @@ def get_lineage(
     return resolved.get_model_version_lineage(version_id)
 
 
+def list_artifacts(
+    version_id: str,
+    *,
+    client: DagnamClient | None = None,
+    api_key: str | None = None,
+    api_url: str | None = None,
+) -> JsonArray:
+    """List a model version's artifacts (``id``, ``artifact_type``, ``logical_key``, ...).
+
+    The ``id`` of an entry is what :func:`download` takes as ``artifact_id``.
+
+    Raises:
+        ModelNotFoundError: ``version_id`` does not exist.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.list_model_version_artifacts(version_id)
+
+
 def get_task_contract(
     key: str,
     version: str,
@@ -478,6 +496,7 @@ __all__ = [
     "download",
     "get_lineage",
     "get_task_contract",
+    "list_artifacts",
     "push",
     "push_run_artifacts",
     "resolve",
