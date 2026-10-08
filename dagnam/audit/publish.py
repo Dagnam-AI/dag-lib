@@ -132,7 +132,7 @@ class Publisher:
         self._resume = True
         """Each request asks to resume until the account applies one, or :meth:`resume` succeeds."""
         self.create_failed: str | None = None
-        """Why ``create_audit`` failed, once it did: the run halts before it uploads anything."""
+        """Why the audit cannot exist (a failed ``create_audit``, a run too wide to publish): the run halts before it uploads anything."""
         self.stopped: str | None = None
         """``cancelled``/``deleted`` once the account ended the audit mid-run: nothing more goes."""
 
@@ -209,9 +209,9 @@ class Publisher:
             return
         refusal = too_many_selected(sum(1 for entry in entries if str(entry["id"]) in selected))
         if refusal is not None:
-            _LOGGER.warning("audit publish: %s", refusal)
-            # Said out loud: the person is waiting for a link that is not coming.
-            self._guard("the workload-cap notice", lambda: self._announce(refusal))
+            # The run halts (it never goes on unpublished): the halt line says it out loud.
+            _LOGGER.warning("audit publish: %s; the run halts", refusal)
+            self.create_failed = refusal
             return
         published = capped(entries, selected)
         nonce = self._state.project_nonce

@@ -157,7 +157,9 @@ def _halt_line(audit_dir: Path, halted: Mapping[str, Any]) -> str:
     reason, detail = halted["reason"], halted.get("detail")
     line = f"audit halted: {reason}" + (f": {detail}" if detail else "")
     if reason == "publish_failed":
-        line += "; nothing was uploaded or spent: run `dagnam audit run` again"
+        line += (
+            "; nothing was uploaded or spent; once the cause is fixed, run `dagnam audit run` again"
+        )
     return f"{line} ({audit_dir / 'audit-report.md'} written)"
 
 
