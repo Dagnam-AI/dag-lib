@@ -395,6 +395,7 @@ dagnam deployments deploy-version <version-id> --name support-classifier
 dagnam hub search --search resnet
 dagnam models push --name tiny-chat --slug tiny-chat --description "..." --file weights.safetensors
 dagnam models list
+dagnam models artifacts <version-id>
 dagnam models download <version-id> <artifact-id>
 dagnam projects list
 dagnam codegen preview <project-id>

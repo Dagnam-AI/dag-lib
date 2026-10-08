@@ -1,4 +1,4 @@
-"""`dagnam models` CLI subcommand — push, get, list, download, lineage, task-contract."""
+"""`dagnam models` CLI subcommand — push, get, list, artifacts, download, lineage, task-contract."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import argparse
 import json
 from typing import TYPE_CHECKING
 
-from dagnam.cli.common import add_collection_output_args, print_json
-from dagnam.cli.presentation import emit_result
+from dagnam.cli.common import add_collection_output_args, human_size, print_json
+from dagnam.cli.presentation import Column, emit_result, render_table
 from dagnam.resources import models
 
 if TYPE_CHECKING:
@@ -53,6 +53,40 @@ def cmd_models_download(args: argparse.Namespace) -> None:
     print_json({"path": str(path)})
 
 
+def _render_artifacts(result: object) -> str:
+    items = result if isinstance(result, list) else []
+    if not items:
+        return "No artifacts found."
+    rows: list[dict[str, object]] = []
+    for item in items:
+        artifact = item if isinstance(item, dict) else {}
+        size = artifact.get("size_bytes")
+        rows.append(
+            {
+                **artifact,
+                "size": human_size(size) if isinstance(size, int) else "-",
+            }
+        )
+    return render_table(
+        (
+            Column("ID", "id", 36),
+            Column("Type", "artifact_type", 18),
+            Column("Size", "size", 10, "right"),
+            Column("Key", "logical_key", 48),
+        ),
+        rows,
+    )
+
+
+def cmd_models_artifacts(args: argparse.Namespace) -> None:
+    emit_result(
+        models.list_artifacts(args.version_id),
+        output=args.output,
+        json_stdout=args.json or args.verbose,
+        render_human=_render_artifacts,
+    )
+
+
 def cmd_models_lineage(args: argparse.Namespace) -> None:
     result = models.get_lineage(args.version_id)
     print_json(result)
@@ -67,7 +101,7 @@ def register_models(subparsers: SubParsersAction) -> None:
     """Register the ``models`` command group on the top-level subparsers."""
     parser = subparsers.add_parser(
         "models",
-        help="Model registry: push, get, list, download, lineage, task-contract.",
+        help="Model registry: push, get, list, artifacts, download, lineage, task-contract.",
         description=(
             "Push, inspect, and download model registry entries, versions, and artifacts."
         ),
@@ -116,6 +150,11 @@ def register_models(subparsers: SubParsersAction) -> None:
     )
     download.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     download.set_defaults(func=cmd_models_download)
+
+    artifacts = models_sub.add_parser("artifacts", help="List a version's artifacts.")
+    artifacts.add_argument("version_id", help="ID of the model version.")
+    add_collection_output_args(artifacts)
+    artifacts.set_defaults(func=cmd_models_artifacts)
 
     lineage = models_sub.add_parser("lineage", help="Get a version's lineage graph.")
     lineage.add_argument("version_id", help="ID of the model version.")
