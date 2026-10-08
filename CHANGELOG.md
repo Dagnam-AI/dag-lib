@@ -15,6 +15,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A `402 insufficient_credits` answer raises `InsufficientCreditsError`, a `QuotaExceededError`
+  subclass, so existing `except QuotaExceededError` code keeps working. It carries `message`
+  (the platform's own sentence, printed once), `required_credits`, `available_credits` (`None`
+  when the platform does not disclose the balance) and `next_steps`. The CLI prints the message
+  and a short hint for each next step.
 - `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a
   model version's artifacts, so the artifact id `dagnam models download` needs can be found.
 - `dagnam training get` prints `Model version: <id>` when the job has registered one.

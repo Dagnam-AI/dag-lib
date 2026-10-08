@@ -23,6 +23,7 @@ from dagnam._core.exceptions import (
     DeploymentStateError,
     DeploymentValidationError,
     HubModelNotFoundError,
+    InsufficientCreditsError,
     LROFailedError,
     LROTimeoutError,
     ModelNotFoundError,
@@ -281,6 +282,36 @@ def test_quota_error_suggests_usage() -> None:
     out = errors_mod.render_error(QuotaExceededError("Storage quota exceeded"))
     assert "Error: plan limit reached" in out
     assert "dagnam usage" in out
+
+
+def _credits(*steps: str, available: int | None = 30) -> InsufficientCreditsError:
+    return InsufficientCreditsError(
+        "You don't have enough credits to start this training run.",
+        required_credits=120,
+        available_credits=available,
+        next_steps=steps,
+    )
+
+
+def test_insufficient_credits_prints_the_message_once_with_a_hint_per_next_step() -> None:
+    out = errors_mod.render_error(_credits("request_credits", "reduce_job_size"))
+    assert "Error: not enough credits" in out
+    assert out.count("You don't have enough credits to start this training run.") == 1
+    assert "Ask for more credits at https://dagnam.ai/support" in out
+    assert "Or make the run smaller and try again" in out
+    assert "request_credits" not in out
+    assert "dagnam usage" not in out
+
+
+def test_top_up_and_add_payment_method_share_one_hint() -> None:
+    out = errors_mod.render_error(_credits("top_up_credits", "add_payment_method"))
+    assert out.count("Add credits or a payment card in Settings") == 1
+
+
+def test_an_unknown_next_step_is_ignored() -> None:
+    out = errors_mod.render_error(_credits("teleport", available=None))
+    assert "teleport" not in out
+    assert "Try:" not in out
 
 
 def test_architecture_validation_lists_problems() -> None:

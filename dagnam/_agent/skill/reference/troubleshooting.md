@@ -8,6 +8,9 @@ All inherit from `DagnamError`:
   `DeploymentNotFoundError`, `CheckpointNotFoundError`, `HubModelNotFoundError`,
   `ArchitectureVersionNotFoundError`, `TaskNotFoundError` (404 on that resource).
 - `QuotaExceededError` — over a plan/storage limit (check `dagnam.account.entitlements()`).
+  `InsufficientCreditsError` (a subclass) means the credits do not cover the work: `.message` is
+  the platform's sentence, `.required_credits`, `.available_credits` (`None` when the platform
+  does not disclose the balance) and `.next_steps` say what to do.
 - `DeploymentValidationError` / `DeploymentStateError`, `CodegenError` / `CodegenValidationError`,
   `HubError`, `UploadError`, `CheckpointError`, `ChecksumError`, `StreamError`.
 - `LROTimeoutError` / `LROFailedError` — a long-running op timed out or reached a failure state

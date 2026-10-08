@@ -25,7 +25,11 @@ from dagnam.cli.common import DOCS_URL
 from dagnam.cli.presentation import sanitize_terminal_text
 
 if TYPE_CHECKING:
-    from dagnam._core.exceptions import APIError, ArchitectureValidationError
+    from dagnam._core.exceptions import (
+        APIError,
+        ArchitectureValidationError,
+        InsufficientCreditsError,
+    )
 
 _RESET = "\x1b[0m"
 _ANSI = {
@@ -289,6 +293,25 @@ def _quota_report(exc: BaseException) -> ErrorReport:
     )
 
 
+_NEXT_STEP_HINTS = {
+    "request_credits": "Ask for more credits at https://dagnam.ai/support",
+    "top_up_credits": "Add credits or a payment card in Settings",
+    "add_payment_method": "Add credits or a payment card in Settings",
+    "reduce_job_size": "Or make the run smaller and try again",
+}
+"""The platform's ``next_steps`` tokens as plain sentences; a token this version lacks is skipped."""
+
+
+def _credits_report(exc: BaseException) -> ErrorReport:
+    steps = cast("InsufficientCreditsError", exc).next_steps
+    hints = dict.fromkeys(_NEXT_STEP_HINTS[s] for s in steps if s in _NEXT_STEP_HINTS)
+    return ErrorReport(
+        title="not enough credits",
+        fields=[("Detail", str(exc))],
+        tries=[("", hint) for hint in hints],
+    )
+
+
 def _not_found_report(list_command: str) -> Callable[[BaseException], ErrorReport]:
     def build(exc: BaseException) -> ErrorReport:
         return ErrorReport(
@@ -386,6 +409,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
 
     return (
         (m.AuthError, _auth_report),
+        (m.InsufficientCreditsError, _credits_report),
         (m.QuotaExceededError, _quota_report),
         (m.ArchitectureValidationError, _architecture_report),
         (m.DeploymentValidationError, _validation_report),

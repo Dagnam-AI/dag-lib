@@ -291,6 +291,35 @@ class QuotaExceededError(DagnamError):
     """Plan/usage limit reached: a storage quota (413) or a plan resource limit (402)."""
 
 
+class InsufficientCreditsError(QuotaExceededError):
+    """The account's credits do not cover the work (402 ``insufficient_credits``).
+
+    ``message`` is the platform's own complete sentence and is also ``str(exc)``; it is printed
+    once and nothing is appended to it. ``required_credits`` is what the work needs to start;
+    ``available_credits`` is the balance, ``None`` when the platform did not disclose it (the
+    caller is not the account's owner). ``next_steps`` are the platform's tokens for what to do
+    about it (for example ``request_credits``, ``top_up_credits``, ``add_payment_method``,
+    ``reduce_job_size``).
+
+    A subclass of :class:`QuotaExceededError` so existing ``except QuotaExceededError`` handlers
+    still catch it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        required_credits: int,
+        available_credits: int | None = None,
+        next_steps: tuple[str, ...] = (),
+    ) -> None:
+        self.message = message
+        self.required_credits = required_credits
+        self.available_credits = available_credits
+        self.next_steps = next_steps
+        super().__init__(message)
+
+
 class PayloadTooLargeError(QuotaExceededError):
     """Upload rejected for exceeding the server's per-request size cap (413).
 

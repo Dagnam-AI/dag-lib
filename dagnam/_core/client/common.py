@@ -10,6 +10,7 @@ from collections.abc import Mapping
 import json
 from urllib.parse import quote, urlparse
 
+from dagnam._core.client.credits import credit_refusal
 from dagnam._core.exceptions import (
     AccountLockedError,
     AccountSuspendedError,
@@ -273,6 +274,9 @@ def _check_entitlement(resp: ResponseLike) -> None:
     numeric plan-limit hit to 402 Payment Required.)
     """
     if _status_code(resp) == 402:
+        refusal = credit_refusal(_response_payload(resp))
+        if refusal is not None:
+            raise refusal
         raise QuotaExceededError(_entitlement_message(resp))
 
 
