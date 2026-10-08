@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `dagnam audit run` no longer carries on as an unpublished run when the audit cannot be
+  published because it selected more than 200 workloads. It halts before creating anything,
+  and says to choose fewer with `--workloads` or to add `--local-only`.
+
 ### Added
 
 - `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a

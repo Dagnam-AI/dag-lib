@@ -34,7 +34,7 @@ MAX_WORKLOADS = 200
 """``AuditCreate.workloads``' own cap; a larger scan publishes the ones that matter.
 
 More *selected* than this is the one shape that cannot be published at all --
-see :func:`too_many_selected`.
+see :func:`too_many_selected`: that run halts.
 """
 
 EXCERPT_MAX = 200
@@ -257,15 +257,16 @@ def too_many_selected(count: int) -> str | None:
 
     A candidate is opened against a workload the audit carries, so publishing a
     list the cap truncated would 404 every candidate of every row it dropped.
-    There is no honest body to send for a run this wide: it stays local, with
-    every number still in ``audit-report.json``.
+    There is no honest body to send for a run this wide, and a published run
+    never continues unpublished (what it creates would carry no audit's tag), so
+    the run halts with this as its reason before it creates anything.
     """
     if count <= MAX_WORKLOADS:
         return None
     return (
-        f"not published: this run took {count} workloads and an audit page holds"
-        f" {MAX_WORKLOADS}; every number stays in the local report."
-        " Run fewer at a time (--workloads) to publish it."
+        f"This audit selected {count} workloads; published audits support at most"
+        f" {MAX_WORKLOADS}. Re-run with --workloads to choose fewer,"
+        " or add --local-only to run without publishing."
     )
 
 

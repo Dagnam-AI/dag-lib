@@ -116,14 +116,15 @@ def test_a_scan_bigger_than_the_account_holds_publishes_the_run_s_own_first(
     assert "the scan found 201 workloads and the account holds 200" in caplog.text
 
 
-def test_more_selected_workloads_than_the_account_holds_publishes_nothing(
+def test_more_selected_workloads_than_the_account_holds_publishes_nothing_and_halts(
     publisher: Publisher, platform: FakePlatform, state: AuditState, audit_dir: Path
 ) -> None:
     """Publishing a truncated list would 404 every candidate the cap dropped.
 
     The cap ranks selected workloads first, so it only ever drops unselected
     ones -- unless the run itself took more than the page holds, and then there
-    is no honest body to send. The run keeps every number locally.
+    is no honest body to send. A published run never goes on unpublished, so
+    the refusal is the reason the run halts.
     """
     selected = [entry(f"w{i}", "enum_label", "candidate") for i in range(MAX_WORKLOADS + 1)]
     lines: list[str] = []
@@ -140,11 +141,11 @@ def test_more_selected_workloads_than_the_account_holds_publishes_nothing(
 
     assert platform.audits == []
     assert state.audit_id is None
-    assert lines == [
-        "not published: this run took 201 workloads and an audit page holds 200;"
-        " every number stays in the local report. Run fewer at a time (--workloads)"
-        " to publish it."
-    ]
+    assert publisher.create_failed == (
+        "This audit selected 201 workloads; published audits support at most 200."
+        " Re-run with --workloads to choose fewer, or add --local-only to run without publishing."
+    )
+    assert lines == []  # the halt line says it; no link is announced
 
 
 def test_exactly_as_many_selected_workloads_as_the_account_holds_is_published(
