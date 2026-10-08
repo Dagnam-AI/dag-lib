@@ -202,6 +202,12 @@ def _replay_file(ctx: StepContext) -> Path:
     return replay_file(ctx.audit_dir, ctx.workload_id, ctx.spec.kind)
 
 
+def _forget_balance(path: Path) -> None:
+    """Rewrite the answers file's head with an unknown opening balance; every answer line stays."""
+    head, _, answers = read_regular(path).partition("\n")
+    write_atomic(path, json.dumps({**json.loads(head), "balance_before": None}) + "\n" + answers)
+
+
 def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
     """Replay the holdout, record agreement, latency and the replay's credit cost; done once ``scored``.
 
@@ -244,32 +250,35 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
         before = None if path.exists() else _balance(ctx)
         head = {"deployment_id": deployment_id, "balance_before": before}
         write_atomic(path, json.dumps(head) + "\n")
-    with open_append(path) as sink:
+    try:
+        with open_append(path) as sink:
 
-        def landed(position: int, answer: str | None, ms: float) -> None:
-            index = todo[position]
-            answers[index] = (answer, ms)
-            sink.write(json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
-            sink.flush()
+            def landed(position: int, answer: str | None, ms: float) -> None:
+                index = todo[position]
+                answers[index] = (answer, ms)
+                sink.write(json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
+                sink.flush()
 
-        try:
             replay_holdout(
                 Endpoint(ctx.client.api_url, deployment_id, key),
                 [{"messages": rows[index][0]} for index in todo],
                 on_result=landed,
             )
-        except InsufficientCreditsError:
-            # The account ran dry, which says nothing about the candidate: the refused
-            # row and the unsent ones are not in the file, so a rerun sends exactly them.
-            state.halted = {
-                "reason": "budget",
-                "detail": (
-                    f"the account ran out of credits during the {ctx.label} replay; nothing "
-                    "was lost, and running `dagnam audit run` again resumes where it stopped"
-                ),
-                "next": f"{ctx.label} replay",
-            }
-            return state
+    except InsufficientCreditsError:
+        # The account ran dry, which says nothing about the candidate: the refused row and
+        # the unsent ones are not in the file, so a rerun sends exactly them. The user
+        # tops up before that rerun, so the opening balance no longer brackets the replay:
+        # it is forgotten, the cost stays unknown and the budget counts it at its projection.
+        _forget_balance(path)
+        state.halted = {
+            "reason": "budget",
+            "detail": (
+                f"the account ran out of credits during the {ctx.label} replay; nothing was "
+                "lost: add credits, then run `dagnam audit run` again to resume where it stopped"
+            ),
+            "next": f"{ctx.label} replay",
+        }
+        return state
     after = _balance(ctx)
     if before is not None and after is not None:
         # Clamped: a grant landing mid-replay would otherwise read as a refund.

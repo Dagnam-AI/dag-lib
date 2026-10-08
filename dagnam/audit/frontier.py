@@ -142,7 +142,8 @@ def _completion(
                     backoff = min(
                         RATE_LIMIT_SLEEP_SECONDS * 2**attempt, RATE_LIMIT_SLEEP_MAX_SECONDS
                     )
-                    time.sleep(backoff if wait is None else wait)
+                    # Interruptible: a refusal elsewhere ends the wait, and the loop top returns.
+                    stop.wait(backoff if wait is None else wait)
                 continue
             response.raise_for_status()
             content: Any = response.json()["choices"][0]["message"]["content"]

@@ -179,7 +179,7 @@ def test_an_account_that_runs_dry_mid_replay_stops_like_the_budget_refusal(
     assert (
         "audit halted: budget: the account ran out of credits during the w1/head_tune replay" in err
     )
-    assert "resumes where it stopped" in err
+    assert "add credits, then run `dagnam audit run` again to resume where it stopped" in err
     assert "unreliable" not in err
     assert platform.halts == [("audit-1", "budget")]
     assert "scored" not in [body.get("status") for _, body in platform.patches]

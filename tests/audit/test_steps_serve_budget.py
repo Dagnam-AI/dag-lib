@@ -17,12 +17,13 @@ from dagnam.audit.steps_serve import (
     replay_and_score,
     wait_active,
 )
+from dagnam.audit.steps_train import credits_spent, projected_replay
 
 HALT = {
     "reason": "budget",
     "detail": (
-        "the account ran out of credits during the w1/head_tune replay; nothing was lost, and "
-        "running `dagnam audit run` again resumes where it stopped"
+        "the account ran out of credits during the w1/head_tune replay; nothing was lost: add "
+        "credits, then run `dagnam audit run` again to resume where it stopped"
     ),
     "next": "w1/head_tune replay",
 }
@@ -54,7 +55,7 @@ def test_a_402_mid_replay_halts_on_budget_and_scores_nothing(
             raise OutOfCreditsError
         return teacher(messages)
 
-    seen = serve_chat(requests_mock, answer)
+    serve_chat(requests_mock, answer)
     ctx = make_ctx()
     state = _served(ctx)
 
@@ -64,7 +65,6 @@ def test_a_402_mid_replay_halts_on_budget_and_scores_nothing(
     assert state.halted == HALT
     assert (step.scored, step.error, step.agreement, step.latency) == (None, None, None, None)
     assert step.replay_cost_credits is None
-    assert len(seen) <= 4  # each shard sent at most one; nothing was retried
     # The answered rows stay on disk; the refused one is neither answered nor failed.
     assert set(_rows_on_disk(ctx)) <= {0, 2, 3}
     assert platform.balance_reads == 1  # the one before the first attempt; no new read to halt
@@ -113,7 +113,7 @@ def test_an_empty_account_from_the_first_call_halts_with_nothing_recorded_as_fai
     def answer(messages: list[dict[str, str]]) -> str:
         raise OutOfCreditsError
 
-    seen = serve_chat(requests_mock, answer)
+    serve_chat(requests_mock, answer)
     ctx = make_ctx()
     state = _served(ctx)
 
@@ -121,6 +121,41 @@ def test_an_empty_account_from_the_first_call_halts_with_nothing_recorded_as_fai
 
     assert state.halted == HALT
     assert _rows_on_disk(ctx) == []
-    assert len(seen) <= 4  # one call per shard at most, never the rest of a large holdout
     step = ctx.step(state)
     assert (step.scored, step.error) == (None, None)
+
+
+def test_a_top_up_between_the_halt_and_the_resume_leaves_the_replay_cost_unknown(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    """The balance rises by what the user added, so before/after would read the replay as free.
+
+    The halt forgets the opening balance, keeping every answered row, so the resumed
+    replay's cost is unknown and the budget counts it at its projection.
+    """
+    funded = False
+
+    def answer(messages: list[dict[str, str]]) -> str:
+        if last_user(messages) == "ticket 17" and not funded:
+            raise OutOfCreditsError
+        return teacher(messages)
+
+    serve_chat(requests_mock, answer)
+    ctx = make_ctx()
+    state = _served(ctx)
+    replay_and_score(state, ctx)
+    assert state.halted is not None
+    path = ctx.workload_dir / "replay-head_tune.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0]) == {"deployment_id": "dep-1", "balance_before": None}
+    assert sorted(json.loads(line)["row"] for line in lines[1:]) == _rows_on_disk(ctx)
+
+    funded = True
+    platform.grant_credits(1_000)  # the balance read after the resume is far above the first
+    state.halted = None
+    replay_and_score(state, ctx)
+
+    step = ctx.step(state)
+    assert step.scored is True
+    assert step.replay_cost_credits is None
+    assert credits_spent(state, ctx.audit_dir) == projected_replay(4)

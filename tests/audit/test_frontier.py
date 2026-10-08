@@ -190,8 +190,21 @@ OK_RESPONSE = {"json": {"choices": [{"message": {"content": "ok"}}]}}
 def slept(monkeypatch: PytestMonkeyPatch) -> list[float]:
     """Every second the replay waits, without waiting any of them."""
     recorded: list[float] = []
-    # ``frontier`` calls ``time.sleep`` through this same module object.
-    monkeypatch.setattr(time, "sleep", recorded.append)
+
+    class Unwaiting(threading.Event):
+        """The replay's stop flag, whose wait (its only way of backing off) is recorded, not slept."""
+
+        @override
+        def wait(self, timeout: float | None = None) -> bool:
+            assert timeout is not None
+            recorded.append(timeout)
+            return self.is_set()
+
+    # ``frontier`` waits on its stop flag; only its own ``threading`` is swapped, as
+    # ``concurrent.futures`` builds its events from the real one.
+    monkeypatch.setattr(
+        sys.modules["dagnam.audit.frontier"], "threading", SimpleNamespace(Event=Unwaiting)
+    )
     return recorded
 
 
@@ -469,9 +482,8 @@ def test_a_402_in_one_shard_stops_the_others_and_keeps_what_they_answered(
     assert sorted(landed) == [1, 2]  # the two in flight still land; the refused row does not
 
 
-def test_a_shard_waiting_out_a_429_does_not_ask_again_after_a_402(
+def test_a_shard_waiting_out_a_429_returns_at_once_on_a_402_and_asks_no_more(
     serve_status: Callable[[Callable[[str], int]], tuple[Endpoint, list[str]]],
-    stop_seen: threading.Event,
     monkeypatch: PytestMonkeyPatch,
 ) -> None:
     asked = threading.Event()
@@ -483,15 +495,16 @@ def test_a_shard_waiting_out_a_429_does_not_ask_again_after_a_402(
         asked.set()
         return 429
 
-    def back_off(_seconds: float) -> None:
-        assert stop_seen.wait(timeout=30.0)
-
-    monkeypatch.setattr(time, "sleep", back_off)
+    # A backoff that, slept through, would outlast the test: it must be cut short.
+    monkeypatch.setattr(sys.modules["dagnam.audit.frontier"], "RATE_LIMIT_SLEEP_SECONDS", 600.0)
+    monkeypatch.setattr(sys.modules["dagnam.audit.frontier"], "RATE_LIMIT_SLEEP_MAX_SECONDS", 600.0)
     endpoint, calls = serve_status(respond)
+    started = time.monotonic()
 
     with pytest.raises(InsufficientCreditsError):
         replay_holdout(endpoint, _rows(2), concurrency=2)
 
+    assert time.monotonic() - started < 30.0
     assert sorted(calls) == ["q0", "q1"]  # q1's one 429 -- never asked again
 
 
