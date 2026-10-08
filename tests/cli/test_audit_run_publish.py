@@ -8,15 +8,17 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.audit._chat import OutOfCreditsError, serve_chat
 from tests.audit._platform import FakePlatform
 from tests.cli._audit_run import Build
 
 from dagnam._core.exceptions import APIError
+from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.state import load_state
 from dagnam.cli.audit_run import PUBLISH_LINE
 
 if TYPE_CHECKING:
-    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
+    from tests.typing_helpers import CliRunner, PytestMonkeyPatch, RequestsMocker, StrCapture
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +156,35 @@ def test_run_halted_tells_the_account_why(
     # w1 submitted; the submit w2's budget check refused is not published as a
     # step that happened, so exactly one `submit` reached the account.
     assert [body["step"] for _, body in platform.patches].count("submit") == 1
+
+
+def test_an_account_that_runs_dry_mid_replay_stops_like_the_budget_refusal(
+    run_cli: CliRunner,
+    prepared_dir: Path,
+    platform: FakePlatform,
+    requests_mock: RequestsMocker,
+    capsys: StrCapture,
+) -> None:
+    """Exit 1 with the budget halt; the account hears `budget`, never a scored or failed candidate."""
+
+    def empty(_messages: list[dict[str, str]]) -> str:
+        raise OutOfCreditsError
+
+    serve_chat(requests_mock, empty)
+    with pytest.raises(SystemExit) as exc:
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--floor", "0.5"])
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert (
+        "audit halted: budget: the account ran out of credits during the w1/head_tune replay" in err
+    )
+    assert "add credits, then run `dagnam audit run` again to resume where it stopped" in err
+    assert "unreliable" not in err
+    assert platform.halts == [("audit-1", "budget")]
+    assert "scored" not in [body.get("status") for _, body in platform.patches]
+    step = load_state(prepared_dir).workloads["w1"][CandidateKind.HEAD_TUNE]
+    assert (step.scored, step.error) == (None, None)
 
 
 def test_a_resumed_run_that_stops_again_publishes_its_own_halt(

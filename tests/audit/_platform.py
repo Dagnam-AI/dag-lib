@@ -149,6 +149,10 @@ class FakePlatform:
         self._ids[prefix] += 1
         return f"{prefix}-{self._ids[prefix]}"
 
+    def grant_credits(self, credits: int) -> None:
+        """The owner tops the account up: every balance read from now on is ``credits`` higher."""
+        self.credit_balance += credits
+
     def get_credit_balance(self) -> int:
         """The metered balance: it drops by ``replay_charge`` on every second read."""
         self._log("get_credit_balance")

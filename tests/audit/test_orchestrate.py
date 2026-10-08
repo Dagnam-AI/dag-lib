@@ -9,7 +9,7 @@ import socket
 from typing import Any
 
 import pytest
-from tests.audit._chat import Clock, json_row, last_user, serve_chat, teacher
+from tests.audit._chat import Clock, OutOfCreditsError, json_row, last_user, serve_chat, teacher
 from tests.audit._platform import FakePlatform
 from tests.audit.conftest import HOLDOUT, SCAN_REPORT as SCANNED, TRAIN, stats
 from tests.typing_helpers import RequestsMocker
@@ -123,6 +123,37 @@ def test_402_from_the_platform_halts_the_budget(
     state = run()
     assert state.halted == {"reason": "budget", "detail": "out of credits", "next": "w1/head_tune"}
     assert state.workloads["w1"][HEAD].pii_agrees is True
+
+
+def test_an_account_that_runs_dry_mid_replay_halts_on_budget_and_resumes_when_funded(
+    run: Callable[..., AuditState],
+    platform: FakePlatform,
+    requests_mock: RequestsMocker,
+    audit_dir: Path,
+) -> None:
+    """A 402 from the endpoint is the account's, not the candidate's: nothing is scored or failed."""
+    funded = False
+
+    def answer(messages: list[dict[str, str]]) -> str:
+        if not funded:
+            raise OutOfCreditsError
+        return teacher(messages)
+
+    serve_chat(requests_mock, answer)
+    state = run(workloads=["w1"])
+
+    step = state.workloads["w1"][HEAD]
+    assert state.halted is not None
+    assert (state.halted["reason"], state.halted["next"]) == ("budget", "w1/head_tune replay")
+    assert (step.scored, step.error) == (None, None)
+    assert load_state(audit_dir).halted == state.halted
+    assert platform.halts == []  # a local run has no audit to tell
+
+    funded = True
+    resumed = run(workloads=["w1"])
+    assert resumed.halted is None
+    assert resumed.workloads["w1"][HEAD].scored is True
+    assert resumed.workloads["w1"][HEAD].error is None
 
 
 def test_capacity_503_is_retried_after_retry_after(
