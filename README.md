@@ -517,7 +517,7 @@ things that touch its resources. `dagnam audit cancel ./audit` and `dagnam audit
 ask the platform once, print its receipt, record what it decided, write `cancelled.json` /
 `deleted.json`, and (for a delete the platform completed) remove the local `workloads/` rows and
 the deployment keys. They never finish the job with calls of their own: if the platform does not
-answer, refuses, or times out, the receipt has one `audit blocked [not_answered]` row, nothing
+answer, refuses (other than for a serving endpoint, below), or times out, the receipt has one `audit blocked [not_answered]` row, nothing
 remote or local is touched, and the exit status is 1 -- run it again. If another cancel or delete
 of the same audit is still walking it (`409 teardown_in_progress`), or the platform cannot take its
 lock just now (`503 teardown_unavailable`), the command waits (the platform's `Retry-After`, whatever
@@ -528,7 +528,22 @@ row, the deployment keys and `state.json`, and exits 1; ask again with the right
 platform's positive answer marks an audit deleted. If you know it is deleted (the website, or an
 older platform answering a repeat delete with 404), `dagnam audit delete ./audit
 --already-deleted` removes the local files; that cannot be undone, so check `dagnam whoami` first. A delete the platform reports `halted` (something was
-refused) removes nothing local and exits 1; the next delete asks again. A run still going keeps
+refused) removes nothing local and exits 1; the next delete asks again.
+
+**An endpoint that is serving.** On a platform that supports it, `dagnam audit delete` deletes
+nothing while an endpoint of the audit is serving, because deleting it would break any app that
+calls it. It prints the platform's sentence, a table of the blocking endpoints and the two ways
+forward, writes no receipt, removes no file, keeps the deployment keys, and exits 1 (under `--json`,
+stdout is `{"error", "hint", "code": "endpoints_serving", "endpoints"}`; in Python it is
+`dagnam.exceptions.EndpointsServingError`, an `APIError`). Run `dagnam audit cancel ./audit`, which
+pauses every endpoint that is serving now, and delete again; an endpoint that is still rolling
+out cannot be paused, so wait for it to finish. To delete the endpoints too, whatever calls them,
+pass `--include-endpoints` (`include_endpoints=True` in Python); the receipt then marks each
+deployment it deleted while it was serving `(was serving)`. The endpoints this client deletes
+itself (an unpublished audit's, and any the platform declined to claim) are checked the same way
+before anything is deleted, and only an endpoint known to be paused, stopped, failed or not yet
+provisioned is treated as safe: `deploying`, an unreadable state and a state this version does not
+know all count as serving. A platform that does not support the check deletes without asking. A run still going keeps
 `state.json` and its lock: a cancel asks the platform, which halts the audit, and the run stops at
 its next step. A deleted audit's directory refuses `run` and `cancel`.
 

@@ -135,6 +135,8 @@ class WorldClient:
             raise DeploymentNotFoundError(deployment_id)
         if self.world.res[deployment_id].status == "deploying":
             raise DeploymentStateError("Cannot delete a deployment that is still deploying")
+        if not self.world.res[deployment_id].paused:
+            self.world.deleted_while_live.append(deployment_id)
         self.world.destroy(SDK, deployment_id)
         return None
 

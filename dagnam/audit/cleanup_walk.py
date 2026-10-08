@@ -57,7 +57,7 @@ from dagnam.audit.receipt_rows import (
     blocked,
     decide,
 )
-from dagnam.audit.serving import refuse_if_serving
+from dagnam.audit.serving import refuse_if_serving, serving_here
 from dagnam.audit.state import AuditState
 
 OWNER_ONLY_READS = frozenset({"deployment", "training_job"})
@@ -127,15 +127,29 @@ def cancel_unpublished(
 
     Every stop is tried and every outcome is a row, so one that fails never keeps the next from
     being tried. Only what stopped or was found gone is marked; a run that had already finished
-    answers ``already_stopped`` and stays resumable. An id marked kept is not stopped, and when
+    answers ``already_stopped`` and stays resumable. An endpoint is stopped when it reads as
+    possibly serving NOW, whatever the state saved after an earlier cancel. An id marked kept is not stopped, and when
     no answer proves the key sees the owner's account nothing is marked (see the module docstring).
     """
-    targets = [
-        (kind, item_id)
-        for step in state.all_steps()
-        for kind, item_id in live(step)
-        if item_id not in state.kept_ids and (only is None or item_id in only)
-    ]
+    targets: list[tuple[str, str]] = []
+    for step in state.all_steps():
+        found = live(step)
+        deployment = step.deployment_id
+        # Saved as paused by an earlier cancel: the owner may have resumed it since, and the
+        # delete reads the live status, so this must too or the refusal can never be cleared.
+        if (
+            deployment is not None
+            and ("deployment", deployment) not in found
+            and deployment not in state.kept_ids
+            and (only is None or deployment in only)
+            and serving_here(client, [deployment], unreadable_is_serving=True)
+        ):
+            found.append(("deployment", deployment))
+        targets += [
+            (kind, item_id)
+            for kind, item_id in found
+            if item_id not in state.kept_ids and (only is None or item_id in only)
+        ]
     entries = [STOPS[kind](client, item_id) for kind, item_id in targets]
     ids: dict[str, list[str]] = {kind: [] for kind in STOPS}
     for kind, item_id in targets:

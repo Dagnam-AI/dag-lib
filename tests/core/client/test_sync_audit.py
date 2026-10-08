@@ -127,7 +127,11 @@ SERVING_SENTENCE = (
     "Stop them first with `dagnam audit cancel <audit-dir>`, or Pause on each one's page under "
     "Deployments in the Studio, then delete again. "
     "To delete them anyway, send include_endpoints=true "
-    "(`dagnam audit delete <audit-dir> --include-endpoints`, dagnam 0.18.0 or later)."
+    "(`dagnam audit delete <audit-dir> --include-endpoints`, dagnam 0.18.0 or later). "
+    "An endpoint that is resuming cannot be paused until it is running; "
+    "wait for it to finish, then stop it. "
+    "If it is stuck deploying, delete that endpoint from its own page under Deployments, "
+    "then delete the audit again."
 )
 SERVING_ENDPOINTS: JsonArray = [
     {
@@ -364,3 +368,23 @@ def test_create_audit_with_a_nonce_replays_for_that_nonce_and_is_read_back(
     assert again == other == created
     assert seen[0] == seen[1] != seen[2]  # the same nonce is the same key, another nonce is not
     assert [r.path for r in rmock.request_history if r.method == "GET"] == ["/api/v1/audits/a1"]
+
+
+def test_a_long_refusal_sentence_is_not_cut_at_the_generic_error_cap(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    long = "Nothing was deleted: " + "x" * 5000
+    rmock.delete(
+        f"{AUDITS}/a1", json={"detail": long, "error": "endpoints_serving"}, status_code=409
+    )
+    with pytest.raises(EndpointsServingError) as exc:
+        client.delete_audit("a1")
+    assert exc.value.message == long
+    rmock.delete(
+        f"{AUDITS}/a2",
+        json={"detail": "y" * 20000, "error": "endpoints_serving"},
+        status_code=409,
+    )
+    with pytest.raises(EndpointsServingError) as huge:
+        client.delete_audit("a2")
+    assert len(huge.value.message) == 8192

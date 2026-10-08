@@ -211,6 +211,29 @@ def _listing(audit_dir: Path, *, include_endpoints: bool = False) -> str:
     return "\n".join(lines) or "  (nothing recorded)"
 
 
+MAX_ROWS = 10
+"""How many blocking endpoints the table lists; the rest are counted."""
+NAME_WIDTH = 40
+ID_WIDTH = 64
+
+
+def _clean(value: object, width: int) -> str:
+    """Text from the platform on one line: control characters and line breaks gone, clipped to ``width``."""
+    text = " ".join(sanitize_terminal_text(str(value if value is not None else "?")).split())
+    return text if len(text) <= width else text[: width - 3] + "..."
+
+
+def _state(endpoint: Mapping[str, Any], *, from_platform: bool) -> str:
+    """``serving`` for a running endpoint; any other the platform lists is resuming (its word).
+
+    An endpoint this client found itself is shown with the status it read: it cannot know that a
+    ``deploying`` one ever served.
+    """
+    if endpoint.get("status") == "running":
+        return "serving"
+    return "resuming" if from_platform else _clean(endpoint.get("status"), NAME_WIDTH)
+
+
 def _last_request(endpoint: Mapping[str, Any]) -> str:
     """When the platform last saw a request to the endpoint; nothing when it does not say."""
     if "last_request_at" not in endpoint:
@@ -251,22 +274,26 @@ def _refuse_serving(
             )
         )
         sys.exit(1)
+    shown = exc.endpoints[:MAX_ROWS]
     rows = [
         (
-            # The renderer cleans values but not labels, and the name is the platform's text.
-            sanitize_terminal_text(str(e.get("name") or e.get("id") or "?")),
+            _clean(
+                e.get("name") or e.get("id"), NAME_WIDTH
+            ),  # the renderer cleans values, not labels
             "  ".join(
                 part
                 for part in (
-                    str(e.get("id") or "?"),
-                    "serving" if e.get("status") == "running" else "resuming",
+                    _clean(e.get("id"), ID_WIDTH),
+                    _state(e, from_platform=exc.from_platform),
                     _last_request(e),
                 )
                 if part
             ),
         )
-        for e in exc.endpoints
+        for e in shown
     ]
+    if len(exc.endpoints) > len(shown):
+        rows.append((f"(+{len(exc.endpoints) - len(shown)} more)", ""))
     report = ErrorReport(
         title=exc.message,
         fields=rows,
@@ -422,7 +449,8 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         error(
             f"{what}{more}; nothing local was removed unless the platform deleted the audit;"
             f" the receipt is {path}{hint}",
-            hint=f"dagnam audit delete {audit_dir} --yes",
+            hint=f"dagnam audit delete {audit_dir} --yes"
+            + (" --include-endpoints" if args.include_endpoints else ""),
         )
     if kept:
         print(

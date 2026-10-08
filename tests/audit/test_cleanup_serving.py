@@ -10,9 +10,9 @@ from tests.audit import _receipts as r
 from tests.audit._cleanup import FakeCleanup, as_cleanup_client
 from tests.audit._recorded import HEAD, recorded_state
 
-from dagnam._core.exceptions import EndpointsServingError, TeardownInProgressError
+from dagnam._core.exceptions import APIError, EndpointsServingError, TeardownInProgressError
 from dagnam._types import JsonObject
-from dagnam.audit.cleanup import DELETED_FILE, delete_audit
+from dagnam.audit.cleanup import DELETED_FILE, cancel_audit, delete_audit
 from dagnam.audit.secrets import SecretStore
 from dagnam.audit.state import load_state, save_state
 
@@ -229,3 +229,112 @@ class TestTheClientsOwnDirectWalk:
         assert platform.include_endpoints == [True]
         assert ("delete_deployment", "dep-1") in platform.call_log
         assert HEAD in load_state(audit_dir).workloads["w1"]
+
+
+class TestTheRemedyClearsTheRefusal:
+    """``audit cancel`` reads the endpoints' live status, not the one it saved after an earlier cancel."""
+
+    def test_an_endpoint_the_owner_resumed_after_a_cancel_is_paused_by_the_next_cancel(
+        self, audit_dir: Path, platform: FakeCleanup
+    ) -> None:
+        _prepare(audit_dir, audit_id=None)
+        platform.statuses = {"dep-1": "running", "dep-2": "running"}
+        cancel_audit(audit_dir, as_cleanup_client(platform))
+        assert load_state(audit_dir).workloads["w1"][HEAD].deploy_status == "paused"
+        platform.statuses["dep-1"] = "running"  # the owner resumed it: production calls it again
+        with pytest.raises(EndpointsServingError):
+            delete_audit(audit_dir, as_cleanup_client(platform))
+        platform.call_log.clear()
+
+        cancel_audit(audit_dir, as_cleanup_client(platform))
+
+        assert ("pause_deployment", "dep-1") in platform.call_log
+        assert ("pause_deployment", "dep-2") not in platform.call_log  # it reads paused: left alone
+        assert delete_audit(audit_dir, as_cleanup_client(platform))["audit_status"] == "deleted"
+
+    def test_the_same_for_an_endpoint_the_platform_refused_to_claim(
+        self, audit_dir: Path, platform: FakeCleanup
+    ) -> None:
+        _prepare(audit_dir, audit_id="audit-1", unclaimed=["dep-1"])
+        platform.statuses = {"dep-1": "running"}
+        platform.server_receipt = r.designed(status="halted", schema=r.SCHEMA_CANCELLED)
+        cancel_audit(audit_dir, as_cleanup_client(platform))
+        platform.statuses["dep-1"] = "running"  # resumed after that cancel
+        platform.call_log.clear()
+
+        cancel_audit(audit_dir, as_cleanup_client(platform))
+
+        assert ("pause_deployment", "dep-1") in platform.call_log
+        assert ("pause_deployment", "dep-2") not in platform.call_log
+
+    def test_an_endpoint_that_cannot_be_read_is_tried_for_a_pause_and_one_that_is_gone_is_not(
+        self, audit_dir: Path, platform: FakeCleanup
+    ) -> None:
+        _prepare(audit_dir, audit_id=None)
+        cancel_audit(audit_dir, as_cleanup_client(platform))  # both read paused: nothing to stop
+        platform.call_log.clear()
+        platform.unreadable = {"dep-1": APIError(503, "unavailable")}
+        platform.present["deployment"].discard("dep-2")
+
+        cancel_audit(audit_dir, as_cleanup_client(platform))
+
+        assert ("pause_deployment", "dep-1") in platform.call_log
+        assert ("pause_deployment", "dep-2") not in platform.call_log
+
+
+class TestAnEndpointResumedWhileThePlatformWalked:
+    """The pre-check ran before the platform's walk; the direct walk re-reads right before it deletes."""
+
+    def _receipt(self, platform: FakeCleanup) -> None:
+        platform.server_receipt = r.designed(
+            r.row("deployment", "dep-1", "kept", "not_created_here"),
+            r.row("project", "proj-1", "deleted"),
+        )
+
+    def test_one_that_serves_by_then_is_left_in_place_and_recorded_as_blocked(
+        self, audit_dir: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _prepare(audit_dir, audit_id="audit-1", unclaimed=["dep-1"])
+        self._receipt(platform)
+        real = platform.delete_audit
+
+        def resumed_meanwhile(audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
+            platform.statuses["dep-1"] = "running"
+            return real(audit_id, include_endpoints=include_endpoints)
+
+        monkeypatch.setattr(platform, "delete_audit", resumed_meanwhile)
+
+        receipt = delete_audit(audit_dir, as_cleanup_client(platform))
+
+        assert ("delete_deployment", "dep-1") not in platform.call_log
+        assert "dep-1" in platform.present["deployment"]
+        row = next(e for e in receipt["entries"] if e["id"] == "dep-1" and e["status"] == "blocked")
+        assert "serving" in row["reason"]
+        assert "dep-1" in load_state(audit_dir).kept_ids  # never walked again
+        assert SecretStore(audit_dir).load("w1/head_tune") == "dk-secret"  # the key that calls it
+
+    def test_the_override_deletes_it_anyway(self, audit_dir: Path, platform: FakeCleanup) -> None:
+        _prepare(audit_dir, audit_id="audit-1", unclaimed=["dep-1"])
+        platform.statuses["dep-1"] = "running"
+        self._receipt(platform)
+
+        delete_audit(audit_dir, as_cleanup_client(platform), include_endpoints=True)
+
+        assert ("delete_deployment", "dep-1") in platform.call_log
+
+    def test_one_that_cannot_be_read_by_then_is_left_in_place_too(
+        self, audit_dir: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _prepare(audit_dir, audit_id="audit-1", unclaimed=["dep-1"])
+        self._receipt(platform)
+        real = platform.delete_audit
+
+        def unreadable_meanwhile(audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
+            platform.unreadable = {"dep-1": APIError(503, "unavailable")}
+            return real(audit_id, include_endpoints=include_endpoints)
+
+        monkeypatch.setattr(platform, "delete_audit", unreadable_meanwhile)
+
+        delete_audit(audit_dir, as_cleanup_client(platform))
+
+        assert ("delete_deployment", "dep-1") not in platform.call_log

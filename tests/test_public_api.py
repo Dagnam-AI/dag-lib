@@ -35,6 +35,7 @@ EXCEPTION_EXPORTS = [
     "DeploymentStateError",
     "DeploymentValidationError",
     "EmailNotVerifiedError",
+    "EndpointsServingError",
     "FoundationRunNotFoundError",
     "HubError",
     "HubModelNotFoundError",

@@ -89,3 +89,47 @@ def test_an_endpoint_that_cannot_be_read_is_not_guessed_at() -> None:
         refuse_if_serving(as_cleanup_client(fake), ["a"], include=False)
 
     assert not isinstance(exc.value, EndpointsServingError)
+
+
+@pytest.mark.parametrize("status", ["paused", "stopped", "failed", "not_provisioned"])
+def test_only_a_status_known_to_be_quiet_lets_an_endpoint_be_deleted(status: str) -> None:
+    fake = _platform(a=status)
+    refuse_if_serving(as_cleanup_client(fake), ["a"], include=False)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [{"id": "a"}, {"id": "a", "status": None}, {"id": "a", "status": "updating"}, {"status": 7}],
+    ids=["no status", "null status", "a status from a later platform", "not a string"],
+)
+def test_a_status_it_cannot_read_as_quiet_counts_as_serving(
+    monkeypatch: pytest.MonkeyPatch, answer: dict[str, object]
+) -> None:
+    fake = _platform(a="paused")
+    monkeypatch.setattr(fake, "get_deployment", lambda _: answer)
+
+    with pytest.raises(EndpointsServingError) as exc:
+        refuse_if_serving(as_cleanup_client(fake), ["a"], include=False)
+
+    assert [e["id"] for e in exc.value.endpoints] == ["a"]
+
+
+def test_the_sentence_names_the_remedy_that_works_for_what_is_listed() -> None:
+    running = _platform(a="running")
+    rolling = _platform(a="deploying")
+    mixed = _platform(a="running", b="deploying")
+
+    def said(fake: FakeCleanup, ids: list[str]) -> str:
+        with pytest.raises(EndpointsServingError) as exc:
+            refuse_if_serving(as_cleanup_client(fake), ids, include=False)
+        return exc.value.message
+
+    assert "Stop it first with `dagnam audit cancel`." in said(running, ["a"])
+    assert "cannot be paused" not in said(running, ["a"])
+    only_rolling = said(rolling, ["a"])
+    assert "audit cancel" not in only_rolling  # it cannot clear a deploying endpoint
+    assert "cannot be paused from here: wait for it to settle" in only_rolling
+    assert "include_endpoints=True" in only_rolling
+    both = said(mixed, ["a", "b"])
+    assert "Stop the running ones first with `dagnam audit cancel`." in both
+    assert "wait for it to settle" in both

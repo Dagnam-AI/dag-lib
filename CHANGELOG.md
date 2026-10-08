@@ -9,13 +9,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `audit delete` stops before deleting anything while an endpoint of the audit is serving. The
-  platform answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError`
-  subclass, also importable from `dagnam.audit`) with the blocking endpoints. The endpoints the
-  SDK deletes itself (an unpublished audit's, and any the platform declined to claim) get the
-  same all-or-nothing check first, and treat an endpoint that is `deploying` as serving. A
-  refusal changes nothing: no file is removed, `state.json` is as it was, and the deployment
-  keys stay.
+- `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
+  platform that supports it (an older platform still deletes without asking). The platform
+  answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,
+  also importable from `dagnam.exceptions` and `dagnam.audit`) with the blocking endpoints. The
+  endpoints the SDK deletes itself (an unpublished audit's, and any the platform declined to
+  claim) get the same all-or-nothing check first, and only a status known to be quiet (`paused`,
+  `stopped`, `failed`, `not_provisioned`) lets one be deleted: `deploying`, a missing status and
+  a status this version does not know all count as serving. A refusal removes no file, deletes
+  nothing and keeps the deployment keys; an accepted claim of older resources, recorded before
+  the delete was asked, stays. `audit cancel` pauses every recorded endpoint that reads as
+  serving now, so cancelling clears the refusal even after an endpoint was resumed.
 
 ### Fixed
 

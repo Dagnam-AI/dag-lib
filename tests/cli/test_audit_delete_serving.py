@@ -28,7 +28,11 @@ SENTENCE = (
     "Stop them first with `dagnam audit cancel <audit-dir>`, or Pause on each one's page under "
     "Deployments in the Studio, then delete again. "
     "To delete them anyway, send include_endpoints=true "
-    "(`dagnam audit delete <audit-dir> --include-endpoints`, dagnam 0.18.0 or later)."
+    "(`dagnam audit delete <audit-dir> --include-endpoints`, dagnam 0.18.0 or later). "
+    "An endpoint that is resuming cannot be paused until it is running; "
+    "wait for it to finish, then stop it. "
+    "If it is stuck deploying, delete that endpoint from its own page under Deployments, "
+    "then delete the audit again."
 )
 ENDPOINTS: list[JsonObject] = [
     {
@@ -201,8 +205,9 @@ def test_an_unpublished_audit_with_a_serving_endpoint_is_refused_the_same_way(
 
     err = " ".join(capsys.readouterr().err.split())
     assert "Nothing was deleted: 2 endpoints of this audit may still be serving" in err
-    assert "dep-1 dep-1 resuming" in err
+    assert "dep-1 dep-1 deploying" in err  # not "resuming": this client cannot know it ever served
     assert "dep-2 dep-2 serving" in err
+    assert "cannot be paused from here: wait for it to settle" in err
     assert "last request" not in err
     assert "no requests recorded" not in err
     assert {name for name, _ in fake.call_log} == {"get_deployment"}
@@ -216,3 +221,51 @@ def test_the_flag_defaults_off_and_is_documented(run_cli: CliRunner, capsys: Str
     out = " ".join(capsys.readouterr().out.split())
     assert "--include-endpoints" in out
     assert "Also delete endpoints that are still serving" in out
+
+
+def test_a_half_finished_delete_run_with_the_override_suggests_the_override(
+    run_cli: CliRunner, published: Path, platform: FakeCleanup, capsys: StrCapture
+) -> None:
+    platform.serving_refusal = None
+    platform.server_receipt = r.designed(r.row("deployment", "dep-1", "deleted"), status="halted")
+
+    with pytest.raises(SystemExit):
+        run_cli(["audit", "delete", str(published), "--yes", "--include-endpoints"])
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert f"dagnam audit delete {published} --yes --include-endpoints" in err
+
+
+def test_a_half_finished_delete_without_the_override_does_not_suggest_it(
+    run_cli: CliRunner, published: Path, platform: FakeCleanup, capsys: StrCapture
+) -> None:
+    platform.serving_refusal = None
+    platform.server_receipt = r.designed(r.row("deployment", "dep-1", "deleted"), status="halted")
+
+    with pytest.raises(SystemExit):
+        run_cli(["audit", "delete", str(published), "--yes"])
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert f"dagnam audit delete {published} --yes" in err
+    assert "--include-endpoints" not in err
+
+
+def test_names_from_the_platform_stay_on_one_line_and_the_table_is_bounded(
+    run_cli: CliRunner, published: Path, platform: FakeCleanup, capsys: StrCapture
+) -> None:
+    many: list[JsonObject] = [
+        {"id": f"d-{i}", "name": f"n{i}\nfake row\tx", "status": "running"} for i in range(13)
+    ]
+    many[0]["name"] = "L" * 255
+    platform.serving_refusal = EndpointsServingError("Nothing was deleted: many.", many)
+
+    _refused(run_cli, str(published), "--yes")
+
+    lines = capsys.readouterr().err.splitlines()
+    rows = [line for line in lines if line.startswith("    ") and "d-" in line]
+    assert len(rows) == 10  # capped
+    assert any("(+3 more)" in line for line in lines)
+    assert all("fake row" not in line or line.lstrip().startswith("n") for line in rows)
+    assert not any(line.strip().startswith("fake row") for line in lines)  # no split row
+    assert max(len(line) for line in rows) < 140  # a 255-character name is clipped
+    assert any("L" * 37 + "..." in line for line in rows)

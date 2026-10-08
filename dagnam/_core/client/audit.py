@@ -40,6 +40,8 @@ TEARDOWN_UNAVAILABLE = "teardown_unavailable"
 """The ``error`` a 503 carries when the platform cannot take the lock just now: ask again shortly."""
 ENDPOINTS_SERVING = "endpoints_serving"
 """The ``error`` a 409 carries when the delete stopped because an endpoint of the audit is serving."""
+SERVING_TEXT_MAX = 8192
+"""The longest refusal sentence kept: it names up to five endpoints, whose names can be long."""
 WAIT_MARKERS = {409: TEARDOWN_BUSY, 503: TEARDOWN_UNAVAILABLE}
 """Which ``error`` marks a wait-and-ask-again answer, by status."""
 
@@ -72,7 +74,7 @@ def raise_for_audit(resp: requests.Response) -> None:
             words = source.get("message") or (detail if isinstance(detail, str) else None)
             listed = source.get("endpoints")
             raise EndpointsServingError(
-                short_error_text(str(words or marker)),
+                str(words or marker)[:SERVING_TEXT_MAX],
                 [e for e in listed if isinstance(e, dict)] if isinstance(listed, list) else [],
             )
     raise_for_generic(resp)

@@ -137,8 +137,12 @@ class EndpointsServingError(APIError):
     with ``include_endpoints=True``.
     """
 
-    def __init__(self, message: str, endpoints: list[JsonObject]) -> None:
+    def __init__(
+        self, message: str, endpoints: list[JsonObject], *, from_platform: bool = True
+    ) -> None:
         self.endpoints = endpoints
+        self.from_platform = from_platform
+        """``False`` when this client found the endpoints itself, so it knows only their status."""
         super().__init__(409, message)
 
 

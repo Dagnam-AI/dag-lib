@@ -59,8 +59,10 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
 ) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "k")
     with mock.patch("dagnam._core.client.DagnamClient") as client:
+        client.return_value.get_deployment.return_value = {"status": "paused"}
         assert run_cli(["audit", "cancel", str(audit_dir)]) == 0
     assert client.return_value.method_calls == [
+        mock.call.get_deployment("dep-2"),  # saved as paused: its live status is read, not trusted
         mock.call.cancel_training_job("job-1"),
         mock.call.pause_deployment("dep-1"),
     ]
@@ -74,8 +76,10 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
     assert (head.run_status, head.deploy_status) == ("cancelled", "paused")
 
     with mock.patch("dagnam._core.client.DagnamClient") as client:
+        client.return_value.get_deployment.return_value = {"status": "paused"}
         assert run_cli(["audit", "cancel", str(audit_dir), "--json"]) == 0
-    assert client.return_value.method_calls == []  # idempotent: nothing left in flight
+    # idempotent: nothing left in flight, so nothing but reads
+    assert {c[0] for c in client.return_value.method_calls} == {"get_deployment"}
     receipt = json.loads(capsys.readouterr().out)
     assert (receipt["schema"], receipt["entries"]) == (CANCELLED, [])
 
@@ -250,8 +254,10 @@ def test_cancel_pauses_a_scored_candidates_live_endpoint_exactly_once(
     assert (step.run_status, step.deploy_status, step.error) == ("completed", "paused", None)
 
     with mock.patch("dagnam._core.client.DagnamClient") as client:
+        client.return_value.get_deployment.return_value = {"status": "paused"}
         assert run_cli(["audit", "cancel", str(root)]) == 0
-    assert client.return_value.method_calls == []  # the state says it is already paused
+    # The state says it is paused; the live read agrees, so there is no second pause.
+    assert client.return_value.method_calls == [mock.call.get_deployment("dep-1")]
 
 
 def test_a_deployment_error_that_is_not_an_api_error_is_still_that_ids_row(

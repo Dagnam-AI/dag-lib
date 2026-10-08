@@ -56,3 +56,8 @@ class Sdk(Directory):
         return self._exit(
             "cancel", exit_status(receipt_rows(receipt), receipt.get("audit_status"), verb="cancel")
         )
+
+    def resume(self) -> None:
+        """The owner resumes every endpoint of the directory (production calls the winner again)."""
+        for res in self.world.alive("deployment"):
+            res.paused = False

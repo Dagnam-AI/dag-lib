@@ -40,6 +40,8 @@ class Directory:
         """The destructive acts a test has already judged."""
         self.answered = True
         """Whether the platform answered the last ``cancel`` or ``delete``."""
+        self.live_seen = 0
+        """How many of the world's deletes of a live endpoint a test has already judged."""
         self._n = 0
         save_state(audit_dir, AuditState())
 

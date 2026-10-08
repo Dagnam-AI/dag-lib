@@ -161,6 +161,7 @@ class FakeCleanup:
             raise DeploymentNotFoundError(deployment_id)
         if deployment_id in self.unpausable:
             raise DeploymentStateError("Invalid status transition from not_provisioned to paused")
+        self.statuses[deployment_id] = "paused"  # what a read says from now on
         return {"id": deployment_id, "status": "paused"}
 
     def get_deployment(self, deployment_id: str) -> JsonObject:
