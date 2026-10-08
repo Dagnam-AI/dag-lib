@@ -131,7 +131,8 @@ class EndpointsServingError(APIError):
     Deleting would break any app that calls the endpoint. ``message`` is the sentence that says
     so and what to do instead; ``endpoints`` are the blocking endpoints as objects with ``id``,
     ``name``, ``status`` (``running`` reads as serving, anything else as rolling out) and
-    ``last_request_at`` (``None`` when none is recorded or known). Unlike
+    ``last_request_at`` (``None`` when the platform has no request on record; absent when this
+    client found the endpoint itself). Unlike
     :class:`TeardownInProgressError` waiting does not help: stop the endpoints, or delete again
     with ``include_endpoints=True``.
     """

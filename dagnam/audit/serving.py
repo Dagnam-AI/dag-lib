@@ -23,7 +23,11 @@ MAY_SERVE = frozenset({"running", "deploying"})
 
 
 def serving_here(client: CleanupClient, ids: Iterable[str]) -> list[JsonObject]:
-    """The endpoints among ``ids`` that may be serving, as the platform's refusal lists them."""
+    """The endpoints among ``ids`` that may be serving, as the platform's refusal lists them.
+
+    Without ``last_request_at``: only the platform records requests, and a read of a deployment
+    does not carry the newest one.
+    """
     found: list[JsonObject] = []
     for deployment_id in ids:
         try:
@@ -38,7 +42,6 @@ def serving_here(client: CleanupClient, ids: Iterable[str]) -> list[JsonObject]:
                     "id": deployment_id,
                     "name": name if isinstance(name, str) and name else deployment_id,
                     "status": status,
-                    "last_request_at": None,
                 }
             )
     return found

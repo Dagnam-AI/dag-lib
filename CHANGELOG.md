@@ -25,6 +25,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `dagnam audit delete --include-endpoints` deletes endpoints that are still serving too; apps
+  calling them start getting errors. Without it, a delete that finds a serving endpoint prints
+  the platform's sentence once, a table of the blocking endpoints and the exact next commands
+  (`dagnam audit cancel <dir>`, or the same delete with `--include-endpoints`), and exits 1
+  having changed nothing; under `--json` stdout is the refusal object. The receipt marks a
+  deployment deleted while it was serving with `(was serving)`.
 - `dagnam.audit.delete_audit(audit_dir, client, include_endpoints=True)` and
   `DagnamClient.delete_audit(audit_id, include_endpoints=True)` delete the audit's endpoints too,
   even while they are serving; apps calling them start getting errors.

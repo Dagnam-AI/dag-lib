@@ -36,7 +36,7 @@ def test_an_endpoint_that_is_gone_is_not_serving_and_a_nameless_one_is_listed_by
 
     found = serving_here(as_cleanup_client(fake), ["gone", "up"])
 
-    assert found == [{"id": "up", "name": "up", "status": "running", "last_request_at": None}]
+    assert found == [{"id": "up", "name": "up", "status": "running"}]
 
 
 def test_the_name_the_platform_gives_is_the_one_listed(monkeypatch: pytest.MonkeyPatch) -> None:
