@@ -137,7 +137,7 @@ def test_a_refusal_without_a_numeric_requirement_is_the_old_quota_error(required
 
 
 def test_a_refusal_without_a_message_still_says_something() -> None:
-    body = {**TRAINING_BODY, "message": ""}
+    body = {**TRAINING_BODY, "message": "", "user_message": ""}
     with pytest.raises(InsufficientCreditsError) as caught:
         common.raise_for_generic(_Resp(body))
     assert str(caught.value) == "You don't have enough credits for this."
@@ -168,3 +168,29 @@ def test_the_sync_client_raises_it(client: DagnamClient, rmock: RequestsMocker) 
     with pytest.raises(InsufficientCreditsError) as caught:
         client.restart_training_job("j1")
     assert caught.value.required_credits == 120
+
+
+def test_a_platform_that_sends_only_the_legacy_detail_is_still_typed() -> None:
+    body = {"detail": TRAINING_BODY["detail"]}
+
+    with pytest.raises(InsufficientCreditsError) as caught:
+        common.raise_for_generic(_Resp(body))
+
+    exc = caught.value
+    assert str(exc) == TRAINING_MESSAGE
+    assert (exc.required_credits, exc.available_credits, exc.next_steps) == (120, 30, ())
+
+
+def test_a_legacy_detail_without_a_balance_or_a_number_is_read_as_far_as_it_goes() -> None:
+    legacy = {"error": "insufficient_credits", "message": "Out of credits.", "required_credits": 5}
+    with pytest.raises(InsufficientCreditsError) as caught:
+        common.raise_for_generic(_Resp({"detail": legacy}))
+    assert (str(caught.value), caught.value.available_credits) == ("Out of credits.", None)
+
+    with pytest.raises(QuotaExceededError) as old:
+        common.raise_for_generic(_Resp({"detail": {**legacy, "required_credits": "5"}}))
+    assert not isinstance(old.value, InsufficientCreditsError)
+
+    with pytest.raises(QuotaExceededError) as other:
+        common.raise_for_generic(_Resp({"detail": {"error": "limit_exceeded"}}))
+    assert not isinstance(other.value, InsufficientCreditsError)

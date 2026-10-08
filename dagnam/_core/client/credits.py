@@ -2,8 +2,10 @@
 
 The body is ``{"error": "insufficient_credits", "message": <a complete sentence>,
 "required_credits": int, "available_credits": int (omitted when the caller is not the
-account's owner), "next_steps": [<token>, ...], ...}``. A body without that marker, or without a
-numeric ``required_credits``, is not read here: it stays the plan-limit shape the caller maps.
+account's owner), "next_steps": [<token>, ...], ...}``. A platform that predates it sends only
+the ``detail`` copy of the same fields (``user_message`` for the sentence), which is read when the
+top level carries no marker. A body without the marker, or without a numeric
+``required_credits``, is not read here: it stays the plan-limit shape the caller maps.
 """
 
 from __future__ import annotations
@@ -23,16 +25,20 @@ def _count(value: object) -> int | None:
 
 def credit_refusal(data: JsonObject | None) -> InsufficientCreditsError | None:
     """The typed error for a decoded 402 body, or ``None`` when it is not a credit refusal."""
-    if data is None or data.get("error") != INSUFFICIENT_CREDITS:
+    if data is None:
         return None
-    required = _count(data.get("required_credits"))
+    detail = data.get("detail")
+    source = data if data.get("error") == INSUFFICIENT_CREDITS else detail
+    if not isinstance(source, dict) or source.get("error") != INSUFFICIENT_CREDITS:
+        return None
+    required = _count(source.get("required_credits"))
     if required is None:
         return None
-    message = data.get("message")
+    message = source.get("message") or source.get("user_message")
     steps = data.get("next_steps")
     return InsufficientCreditsError(
         message if isinstance(message, str) and message else FALLBACK_MESSAGE,
         required_credits=required,
-        available_credits=_count(data.get("available_credits")),
+        available_credits=_count(source.get("available_credits")),
         next_steps=tuple(s for s in steps if isinstance(s, str)) if isinstance(steps, list) else (),
     )

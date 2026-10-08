@@ -293,22 +293,38 @@ def _quota_report(exc: BaseException) -> ErrorReport:
     )
 
 
-_NEXT_STEP_HINTS = {
-    "request_credits": "Ask for more credits at https://dagnam.ai/support",
-    "top_up_credits": "Add credits or a payment card in Settings",
-    "add_payment_method": "Add credits or a payment card in Settings",
-    "reduce_job_size": "Or make the run smaller and try again",
-}
-"""The platform's ``next_steps`` tokens as plain sentences; a token this version lacks is skipped."""
+SUPPORT_URL = "https://dagnam.ai/support"
+_REQUEST_HINT = f"Ask for more credits at {SUPPORT_URL}"
+_SMALLER_HINT = "Or make the run smaller and try again"
+
+
+def _credit_hints(exc: InsufficientCreditsError) -> list[str]:
+    """Hints for the platform's ``next_steps`` that its message does not already give.
+
+    Only steps whose destination exists are translated: the support page for ``request_credits``
+    (not for a caller who is not the account's owner, whose refusal carries no balance and says
+    the owner must act), and the smaller-run sentence for ``reduce_job_size``. Any other token,
+    and any advice the message already contains, is skipped.
+    """
+    said = exc.message.lower()
+    hints: list[str] = []
+    if (
+        "request_credits" in exc.next_steps
+        and exc.available_credits is not None
+        and SUPPORT_URL not in said
+    ):
+        hints.append(_REQUEST_HINT)
+    if "reduce_job_size" in exc.next_steps and "smaller" not in said:
+        hints.append(_SMALLER_HINT)
+    return hints
 
 
 def _credits_report(exc: BaseException) -> ErrorReport:
-    steps = cast("InsufficientCreditsError", exc).next_steps
-    hints = dict.fromkeys(_NEXT_STEP_HINTS[s] for s in steps if s in _NEXT_STEP_HINTS)
+    credits = cast("InsufficientCreditsError", exc)
     return ErrorReport(
         title="not enough credits",
         fields=[("Detail", str(exc))],
-        tries=[("", hint) for hint in hints],
+        tries=[("", hint) for hint in _credit_hints(credits)],
     )
 
 
