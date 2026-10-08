@@ -24,6 +24,7 @@ from dagnam_contracts.prompts import parse_chat_prompt
 from dagnam._core.exceptions import (
     APIError,
     DeploymentStateError,
+    InsufficientCreditsError,
     LROFailedError,
     LROTimeoutError,
 )
@@ -214,6 +215,9 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
     balance read before the first attempt, so an interrupted replay resumes
     with only the rows it never heard back from -- and its cost still counts
     what the interrupted attempt burned.
+
+    A 402 mid-replay (the account ran out of credits) halts the audit on
+    ``budget`` with nothing scored and no error recorded on the candidate.
     """
     step = ctx.step(state)
     if step.scored:
@@ -248,11 +252,24 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
             sink.write(json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
             sink.flush()
 
-        replay_holdout(
-            Endpoint(ctx.client.api_url, deployment_id, key),
-            [{"messages": rows[index][0]} for index in todo],
-            on_result=landed,
-        )
+        try:
+            replay_holdout(
+                Endpoint(ctx.client.api_url, deployment_id, key),
+                [{"messages": rows[index][0]} for index in todo],
+                on_result=landed,
+            )
+        except InsufficientCreditsError:
+            # The account ran dry, which says nothing about the candidate: the refused
+            # row and the unsent ones are not in the file, so a rerun sends exactly them.
+            state.halted = {
+                "reason": "budget",
+                "detail": (
+                    f"the account ran out of credits during the {ctx.label} replay; nothing "
+                    "was lost, and running `dagnam audit run` again resumes where it stopped"
+                ),
+                "next": f"{ctx.label} replay",
+            }
+            return state
     after = _balance(ctx)
     if before is not None and after is not None:
         # Clamped: a grant landing mid-replay would otherwise read as a refund.

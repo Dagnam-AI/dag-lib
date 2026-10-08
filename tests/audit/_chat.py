@@ -12,16 +12,33 @@ from tests.typing_helpers import RequestsMocker
 CHAT_URL = "https://x/v1/chat/completions"
 
 
+class OutOfCreditsError(Exception):
+    """Raised by an ``answer`` callback: the owner's balance is empty, so the route answers 402."""
+
+
 def serve_chat(
     requests_mock: RequestsMocker, answer: Callable[[list[dict[str, str]]], str | None]
 ) -> list[dict[str, Any]]:
-    """Serve the OpenAI-compatible route from ``answer(messages)``; ``None`` answers 500."""
+    """Serve the OpenAI-compatible route from ``answer(messages)``.
+
+    ``None`` answers 500; raising :class:`OutOfCreditsError` answers the route's OpenAI-style 402.
+    """
     seen: list[dict[str, Any]] = []
 
     def respond(request: Any, context: Any) -> dict[str, Any]:
         body = json.loads(request.text)
         seen.append({"body": body, "authorization": request.headers.get("Authorization")})
-        content = answer(body["messages"])
+        try:
+            content = answer(body["messages"])
+        except OutOfCreditsError:
+            context.status_code = 402
+            return {
+                "error": {
+                    "type": "insufficient_quota",
+                    "code": "insufficient_credits",
+                    "message": "You have no credits left.",
+                }
+            }
         if content is None:
             context.status_code = 500
             return {"error": "replica crashed"}

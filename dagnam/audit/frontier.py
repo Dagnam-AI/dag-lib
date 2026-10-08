@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import math
+import threading
 import time
 from typing import Any
 
@@ -23,6 +24,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from dagnam._core._retry import parse_retry_after
+from dagnam._core.exceptions import InsufficientCreditsError
 from dagnam._types import JsonValue
 from dagnam.audit.steps import Answer
 
@@ -55,6 +57,12 @@ answer, so none of them is counted against it. Every other status -- any other
 4xx, and a 500, which is the candidate answering badly -- fails its call at
 once. Narrower than ``dagnam._core._retry.TRANSIENT_STATUS`` for exactly that
 reason: a replay must not retry a candidate's own 500 into agreement.
+"""
+OUT_OF_CREDITS_STATUS = 402
+"""The route's refusal of an owner whose balance is empty -- read by status alone.
+
+Like a ``TRANSIENT_STATUSES`` reply it is not the candidate's answer, but waiting
+does not cure it: the replay stops (see :func:`replay_holdout`).
 """
 
 
@@ -90,9 +98,17 @@ def percentile(values: Sequence[float], q: float) -> float | None:
 
 
 def _completion(
-    session: requests.Session, endpoint: Endpoint, messages: JsonValue, timeout: float
-) -> tuple[str | None, float]:
+    session: requests.Session,
+    endpoint: Endpoint,
+    messages: JsonValue,
+    timeout: float,
+    stop: threading.Event,
+) -> Answer | None:
     """The answer, and the milliseconds the round trip that produced it took.
+
+    A 402 sets ``stop`` and raises :class:`InsufficientCreditsError`: the
+    account, not the candidate, could not pay for the call. ``None`` means the
+    call was never (or no longer) sent because ``stop`` was already set.
 
     A ``TRANSIENT_STATUSES`` reply refuses the *replay* -- the gateway's rate
     limit, or the gateway failing to reach the replica behind it -- rather than
@@ -102,6 +118,8 @@ def _completion(
     that one successful attempt's -- the waits are nobody's latency.
     """
     for attempt in range(RATE_LIMIT_RETRIES):
+        if stop.is_set():
+            return None
         started = time.perf_counter()
         try:
             response = session.post(
@@ -110,6 +128,12 @@ def _completion(
                 headers={"Authorization": f"Bearer {endpoint.api_key}"},
                 timeout=timeout,
             )
+            if response.status_code == OUT_OF_CREDITS_STATUS:
+                stop.set()
+                # ``required_credits`` is the least a call needs: one -- the body is not read.
+                raise InsufficientCreditsError(
+                    "the account has no credits left for the replay", required_credits=1
+                )
             if response.status_code in TRANSIENT_STATUSES:
                 if attempt + 1 < RATE_LIMIT_RETRIES:
                     wait = parse_retry_after(
@@ -150,6 +174,12 @@ def replay_holdout(
 ) -> tuple[list[str | None], Latency]:
     """Send each row's ``messages`` to the endpoint; ``None`` where the call failed.
 
+    A 402 (the account is out of credits) stops the replay: no further call is
+    sent, a call already in flight still lands, and once those have been
+    reported :class:`InsufficientCreditsError` is raised. The refused row is
+    never reported to ``on_result`` -- it is neither answered nor failed -- nor
+    is a row that was never sent.
+
     Results keep the rows' order. At most ``concurrency`` calls are in flight,
     so the replay never becomes a load test of a serverless replica.
     ``on_result(index, answer, ms)`` hears each row the moment it lands, so a
@@ -163,26 +193,39 @@ def replay_holdout(
     session.mount("https://", HTTPAdapter(pool_connections=1, pool_maxsize=workers))
     session.mount("http://", HTTPAdapter(pool_connections=1, pool_maxsize=workers))
 
-    def call(row: Mapping[str, Any]) -> Answer:
-        return _completion(session, endpoint, row["messages"], timeout)
+    stop = threading.Event()
+    refusal: InsufficientCreditsError | None = None
+
+    def call(row: Mapping[str, Any]) -> Answer | None:
+        return _completion(session, endpoint, row["messages"], timeout, stop)
 
     results: list[Answer] = [(None, 0.0)] * len(rows)
     with session, ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(call, row): index for index, row in enumerate(rows)}
         try:
             for future in as_completed(futures):
+                try:
+                    answer = future.result()
+                except InsufficientCreditsError as exc:
+                    refusal = exc  # keep draining: the calls still in flight were paid for
+                    continue
+                if answer is None:
+                    continue
                 index = futures[future]
-                results[index] = future.result()
+                results[index] = answer
                 if on_result is not None:
-                    on_result(index, *results[index])
+                    on_result(index, *answer)
         except BaseException:
             pool.shutdown(wait=False, cancel_futures=True)
             raise
+    if refusal is not None:
+        raise refusal
     return [content for content, _ in results], latency_of(results)
 
 
 __all__ = [
     "CHAT_TIMEOUT_SECONDS",
+    "OUT_OF_CREDITS_STATUS",
     "RATE_LIMIT_RETRIES",
     "RATE_LIMIT_SLEEP_MAX_SECONDS",
     "RATE_LIMIT_SLEEP_SECONDS",

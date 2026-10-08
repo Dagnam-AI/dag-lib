@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, ClassVar, override
 
 import pytest
 import requests
 from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
+from dagnam._core.exceptions import InsufficientCreditsError
 from dagnam.audit.candidates import CandidateKind
 from dagnam.audit.frontier import (
     RATE_LIMIT_RETRIES,
@@ -336,6 +339,160 @@ def test_a_504_on_every_attempt_exhausts_the_budget_and_counts_one_error(
     # The full doubling sequence, and no wait after the attempt that gives up.
     assert slept == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
     assert max(slept) <= RATE_LIMIT_SLEEP_MAX_SECONDS
+
+
+OUT_OF_CREDITS = {
+    "status_code": 402,
+    "json": {"error": {"type": "insufficient_quota", "code": "insufficient_credits"}},
+}
+
+
+def test_a_402_stops_the_replay_and_the_refused_row_is_not_reported(
+    requests_mock: RequestsMocker, slept: list[float]
+) -> None:
+    """An empty balance is the account's, not the candidate's: raised typed, never counted."""
+    requests_mock.post(CHAT_URL, [OK_RESPONSE, OK_RESPONSE, OUT_OF_CREDITS, OK_RESPONSE])
+    landed: list[int] = []
+
+    with pytest.raises(InsufficientCreditsError):
+        replay_holdout(
+            ENDPOINT, _rows(5), concurrency=1, on_result=lambda i, _a, _ms: landed.append(i)
+        )
+
+    assert landed == [0, 1]  # row 2 (refused) and rows 3, 4 (never sent) are not recorded
+    assert requests_mock.call_count == 3
+    assert slept == []  # not a transient status: no waiting for it
+
+
+def test_a_402_is_read_by_status_alone(requests_mock: RequestsMocker) -> None:
+    requests_mock.post(CHAT_URL, status_code=402, text="not even json")
+
+    with pytest.raises(InsufficientCreditsError) as refused:
+        replay_holdout(ENDPOINT, _rows(1), concurrency=1)
+
+    assert "dk-secret" not in str(refused.value)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+def test_every_other_4xx_still_fails_only_its_own_call(
+    requests_mock: RequestsMocker, status: int
+) -> None:
+    requests_mock.post(CHAT_URL, [_refused(status), OK_RESPONSE])
+
+    answers, latency = replay_holdout(ENDPOINT, _rows(2), concurrency=1)
+
+    assert answers == [None, "ok"]
+    assert (latency.calls, latency.errors) == (2, 1)
+
+
+class _StopSeen(threading.Event):
+    """The replay's stop flag, which also tells the test the moment it is raised."""
+
+    raised = threading.Event()
+
+    @override
+    def set(self) -> None:
+        super().set()
+        type(self).raised.set()
+
+
+@pytest.fixture
+def stop_seen(monkeypatch: PytestMonkeyPatch) -> threading.Event:
+    """Set once the replay under test has raised its stop flag (only ``frontier`` is patched)."""
+    _StopSeen.raised = threading.Event()
+    monkeypatch.setattr(
+        sys.modules["dagnam.audit.frontier"], "threading", SimpleNamespace(Event=_StopSeen)
+    )
+    return _StopSeen.raised
+
+
+@pytest.fixture
+def serve_status() -> Iterator[Callable[[Callable[[str], int]], tuple[Endpoint, list[str]]]]:
+    """A real HTTP chat endpoint on localhost whose status per call is ``respond(content)``.
+
+    Real, because ``requests_mock`` holds a lock while its handler runs, so a
+    call could never wait for another one there.
+    """
+    servers: list[ThreadingHTTPServer] = []
+
+    def serve(respond: Callable[[str], int]) -> tuple[Endpoint, list[str]]:
+        calls: list[str] = []
+
+        class Route(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                length = int(self.headers["Content-Length"])
+                content = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+                calls.append(content)
+                status = respond(content)
+                body = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            @override
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Route)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return Endpoint(f"http://127.0.0.1:{server.server_address[1]}", "dep-1", "dk"), calls
+
+    yield serve
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_402_in_one_shard_stops_the_others_and_keeps_what_they_answered(
+    serve_status: Callable[[Callable[[str], int]], tuple[Endpoint, list[str]]],
+    stop_seen: threading.Event,
+) -> None:
+    """No storm of calls against an empty account; a call already in flight still lands."""
+
+    def respond(content: str) -> int:
+        if content == "q0":
+            return 402
+        assert stop_seen.wait(timeout=30.0)  # answered only after the refusal is recorded
+        return 200
+
+    endpoint, calls = serve_status(respond)
+    landed: list[int] = []
+
+    with pytest.raises(InsufficientCreditsError):
+        replay_holdout(
+            endpoint, _rows(60), concurrency=3, on_result=lambda i, _a, _ms: landed.append(i)
+        )
+
+    assert sorted(calls) == ["q0", "q1", "q2"]  # the three shards' first calls, nothing like 60
+    assert sorted(landed) == [1, 2]  # the two in flight still land; the refused row does not
+
+
+def test_a_shard_waiting_out_a_429_does_not_ask_again_after_a_402(
+    serve_status: Callable[[Callable[[str], int]], tuple[Endpoint, list[str]]],
+    stop_seen: threading.Event,
+    monkeypatch: PytestMonkeyPatch,
+) -> None:
+    asked = threading.Event()
+
+    def respond(content: str) -> int:
+        if content == "q0":
+            assert asked.wait(timeout=30.0)  # refuse only once the other shard is backing off
+            return 402
+        asked.set()
+        return 429
+
+    def back_off(_seconds: float) -> None:
+        assert stop_seen.wait(timeout=30.0)
+
+    monkeypatch.setattr(time, "sleep", back_off)
+    endpoint, calls = serve_status(respond)
+
+    with pytest.raises(InsufficientCreditsError):
+        replay_holdout(endpoint, _rows(2), concurrency=2)
+
+    assert sorted(calls) == ["q0", "q1"]  # q1's one 429 -- never asked again
 
 
 class _ChatHandler(BaseHTTPRequestHandler):

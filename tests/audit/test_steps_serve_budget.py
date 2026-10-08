@@ -1,0 +1,126 @@
+"""A replay the account cannot pay for stops as a budget halt, never as a verdict on the candidate."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+import json
+
+from tests.audit._chat import OutOfCreditsError, last_user, serve_chat, teacher
+from tests.audit._platform import FakePlatform
+from tests.typing_helpers import RequestsMocker
+
+from dagnam.audit.state import AuditState, StepState
+from dagnam.audit.steps import StepContext
+from dagnam.audit.steps_serve import (
+    create_deployment,
+    create_revision,
+    replay_and_score,
+    wait_active,
+)
+
+HALT = {
+    "reason": "budget",
+    "detail": (
+        "the account ran out of credits during the w1/head_tune replay; nothing was lost, and "
+        "running `dagnam audit run` again resumes where it stopped"
+    ),
+    "next": "w1/head_tune replay",
+}
+
+
+def _served(ctx: StepContext) -> AuditState:
+    state = AuditState(project_id="proj-1")
+    state.workloads["w1"] = {
+        ctx.spec.kind: StepState(
+            training_job_id="job-1", run_status="completed", model_version_id="mv-1"
+        )
+    }
+    for step in (create_deployment, create_revision, wait_active):
+        state = step(state, ctx)
+    return state
+
+
+def _rows_on_disk(ctx: StepContext) -> list[int]:
+    """The row numbers the answers file holds, after its head line."""
+    lines = (ctx.workload_dir / "replay-head_tune.jsonl").read_text(encoding="utf-8").splitlines()
+    return sorted(json.loads(line)["row"] for line in lines[1:])
+
+
+def test_a_402_mid_replay_halts_on_budget_and_scores_nothing(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    def answer(messages: list[dict[str, str]]) -> str:
+        if last_user(messages) == "ticket 17":
+            raise OutOfCreditsError
+        return teacher(messages)
+
+    seen = serve_chat(requests_mock, answer)
+    ctx = make_ctx()
+    state = _served(ctx)
+
+    replay_and_score(state, ctx)
+
+    step = ctx.step(state)
+    assert state.halted == HALT
+    assert (step.scored, step.error, step.agreement, step.latency) == (None, None, None, None)
+    assert step.replay_cost_credits is None
+    assert len(seen) <= 4  # each shard sent at most one; nothing was retried
+    # The answered rows stay on disk; the refused one is neither answered nor failed.
+    assert set(_rows_on_disk(ctx)) <= {0, 2, 3}
+    assert platform.balance_reads == 1  # the one before the first attempt; no new read to halt
+
+
+def test_resuming_after_the_credits_are_added_sends_the_refused_row_and_scores(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    funded = False
+
+    def answer(messages: list[dict[str, str]]) -> str:
+        if last_user(messages) == "ticket 17" and not funded:
+            raise OutOfCreditsError
+        return teacher(messages)
+
+    seen = serve_chat(requests_mock, answer)
+    ctx = make_ctx()
+    state = _served(ctx)
+    replay_and_score(state, ctx)
+    assert state.halted is not None
+
+    answered = set(_rows_on_disk(ctx))
+    funded = True
+    state.halted = None  # what the next `audit run` does first
+    del seen[:]
+    replay_and_score(state, ctx)
+
+    step = ctx.step(state)
+    # Exactly the rows without an answer -- the refused one among them -- are sent again.
+    assert sorted(last_user(s["body"]["messages"]) for s in seen) == [
+        f"ticket {16 + i}" for i in range(4) if i not in answered
+    ]
+    assert 1 not in answered
+    assert state.halted is None
+    assert step.scored is True
+    assert step.error is None
+    assert step.agreement is not None
+    assert step.agreement["n"] == 4
+    assert step.latency is not None
+    assert (step.latency["calls"], step.latency["errors"]) == (4, 0)
+
+
+def test_an_empty_account_from_the_first_call_halts_with_nothing_recorded_as_failed(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    def answer(messages: list[dict[str, str]]) -> str:
+        raise OutOfCreditsError
+
+    seen = serve_chat(requests_mock, answer)
+    ctx = make_ctx()
+    state = _served(ctx)
+
+    replay_and_score(state, ctx)
+
+    assert state.halted == HALT
+    assert _rows_on_disk(ctx) == []
+    assert len(seen) <= 4  # one call per shard at most, never the rest of a large holdout
+    step = ctx.step(state)
+    assert (step.scored, step.error) == (None, None)

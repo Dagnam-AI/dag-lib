@@ -23,6 +23,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `dagnam audit run` no longer blames a candidate when the account runs out of credits during the
+  holdout replay. A `402` from the serving endpoint stops the replay at once (no further calls are
+  sent, including from the other concurrent workers) and halts the audit with `budget`, the same
+  halt as the credit ceiling: nothing is scored, no `unreliable` error is recorded, and the row
+  that was refused is not saved as an answer or a failure. Answers already received are kept;
+  after adding credits, running `dagnam audit run` again sends only the rows still missing.
 - `dagnam audit run` no longer carries on as an unpublished run when the audit cannot be
   published because it selected more than 200 workloads. It halts before creating anything,
   and says to choose fewer with `--workloads` or to add `--local-only`.
