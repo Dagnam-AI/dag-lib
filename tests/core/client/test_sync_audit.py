@@ -10,8 +10,13 @@ import pytest
 from dagnam._core.client import DagnamClient
 from dagnam._core.client.audit import WALK_TIMEOUT
 from dagnam._core.client.base import DEFAULT_TIMEOUT
-from dagnam._core.exceptions import APIError, AuthError, TeardownInProgressError
-from dagnam._types import JsonObject
+from dagnam._core.exceptions import (
+    APIError,
+    AuthError,
+    EndpointsServingError,
+    TeardownInProgressError,
+)
+from dagnam._types import JsonArray, JsonObject
 
 if TYPE_CHECKING:
     from tests.typing_helpers import RequestsMocker
@@ -113,6 +118,108 @@ def test_any_other_409_stays_a_plain_api_error(client: DagnamClient, rmock: Requ
     with pytest.raises(APIError) as plain:
         client.delete_audit("a2")
     assert not isinstance(plain.value, TeardownInProgressError)
+
+
+SERVING_SENTENCE = (
+    "Nothing was deleted: this audit still has 2 serving endpoints: tickets-ft-small "
+    "(3f2a0c1e-0000-4000-8000-000000000001), tickets-ft-base (9b1c0c1e-0000-4000-8000-000000000002). "
+    "Deleting the audit would delete them, and any app calling them would start getting errors. "
+    "Stop them first with `dagnam audit cancel <audit-dir>`, or Pause on each one's page under "
+    "Deployments in the Studio, then delete again. "
+    "To delete them anyway, send include_endpoints=true "
+    "(`dagnam audit delete <audit-dir> --include-endpoints`, dagnam 0.18.0 or later). "
+    "An endpoint that is resuming cannot be paused until it is running; "
+    "wait for it to finish, then stop it. "
+    "If it is stuck deploying, delete that endpoint from its own page under Deployments, "
+    "then delete the audit again."
+)
+SERVING_ENDPOINTS: JsonArray = [
+    {
+        "id": "3f2a0c1e-0000-4000-8000-000000000001",
+        "name": "tickets-ft-small",
+        "status": "running",
+        "last_request_at": "2026-10-07T14:03:11Z",
+    },
+    {
+        "id": "9b1c0c1e-0000-4000-8000-000000000002",
+        "name": "tickets-ft-base",
+        "status": "deploying",
+        "last_request_at": None,
+    },
+]
+SERVING_BODY: JsonObject = {
+    "detail": SERVING_SENTENCE,
+    "error": "endpoints_serving",
+    "endpoints": SERVING_ENDPOINTS,
+}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        SERVING_BODY,
+        {
+            "detail": {
+                "error": "endpoints_serving",
+                "message": SERVING_SENTENCE,
+                "endpoints": SERVING_ENDPOINTS,
+            }
+        },
+    ],
+    ids=["as the platform sends it", "nested under detail"],
+)
+def test_a_409_saying_endpoints_are_serving_is_typed_with_the_endpoints_it_names(
+    client: DagnamClient, rmock: RequestsMocker, body: JsonObject
+) -> None:
+    rmock.delete(f"{AUDITS}/a1", json=body, status_code=409)
+    with pytest.raises(EndpointsServingError) as exc:
+        client.delete_audit("a1")
+    assert isinstance(exc.value, APIError)  # existing `except APIError` handlers still catch it
+    assert not isinstance(exc.value, TeardownInProgressError)  # and nothing waits on it
+    assert exc.value.status_code == 409
+    assert exc.value.message == SERVING_SENTENCE
+    assert exc.value.endpoints == SERVING_ENDPOINTS
+    assert len(rmock.request_history) == 1  # a refusal is never retried
+
+
+def test_an_endpoints_list_that_is_not_a_list_of_objects_is_read_as_far_as_it_goes(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.delete(
+        f"{AUDITS}/a1",
+        json={"detail": "x", "error": "endpoints_serving", "endpoints": [SERVING_ENDPOINTS[0], 7]},
+        status_code=409,
+    )
+    with pytest.raises(EndpointsServingError) as exc:
+        client.delete_audit("a1")
+    assert exc.value.endpoints == [SERVING_ENDPOINTS[0]]
+    rmock.delete(
+        f"{AUDITS}/a2", json={"error": "endpoints_serving", "endpoints": "none"}, status_code=409
+    )
+    with pytest.raises(EndpointsServingError) as bare:
+        client.delete_audit("a2")
+    assert (bare.value.endpoints, bare.value.message) == ([], "endpoints_serving")
+
+
+def test_the_serving_marker_on_any_other_status_is_not_the_refusal(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.delete(f"{AUDITS}/a1", json=SERVING_BODY, status_code=503)
+    with pytest.raises(APIError) as exc:
+        client.delete_audit("a1")
+    assert not isinstance(exc.value, EndpointsServingError)
+
+
+def test_include_endpoints_is_sent_as_a_query_parameter_only_when_asked_for(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.delete(f"{AUDITS}/a1", json=RECEIPT)
+    client.delete_audit("a1")
+    assert rmock.last_request.qs == {}
+    client.delete_audit("a1", include_endpoints=True)
+    assert rmock.last_request.qs == {"include_endpoints": ["true"]}
+    client.delete_audit("a1", include_endpoints=False)
+    assert rmock.last_request.qs == {}
 
 
 def test_cancel_and_delete_audit_return_the_receipt(
@@ -261,3 +368,23 @@ def test_create_audit_with_a_nonce_replays_for_that_nonce_and_is_read_back(
     assert again == other == created
     assert seen[0] == seen[1] != seen[2]  # the same nonce is the same key, another nonce is not
     assert [r.path for r in rmock.request_history if r.method == "GET"] == ["/api/v1/audits/a1"]
+
+
+def test_a_long_refusal_sentence_is_not_cut_at_the_generic_error_cap(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    long = "Nothing was deleted: " + "x" * 5000
+    rmock.delete(
+        f"{AUDITS}/a1", json={"detail": long, "error": "endpoints_serving"}, status_code=409
+    )
+    with pytest.raises(EndpointsServingError) as exc:
+        client.delete_audit("a1")
+    assert exc.value.message == long
+    rmock.delete(
+        f"{AUDITS}/a2",
+        json={"detail": "y" * 20000, "error": "endpoints_serving"},
+        status_code=409,
+    )
+    with pytest.raises(EndpointsServingError) as huge:
+        client.delete_audit("a2")
+    assert len(huge.value.message) == 8192

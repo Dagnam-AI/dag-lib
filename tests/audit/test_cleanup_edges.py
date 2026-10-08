@@ -66,11 +66,11 @@ def _answers(
     real = platform.delete_audit
     calls: list[str] = []
 
-    def delete(audit_id: str) -> JsonObject:
+    def delete(audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
         calls.append(audit_id)
         if pending:
             raise pending.pop(0)
-        return real(audit_id)
+        return real(audit_id, include_endpoints=include_endpoints)
 
     monkeypatch.setattr(platform, "delete_audit", delete)
     return calls

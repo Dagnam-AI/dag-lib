@@ -6,12 +6,16 @@ that refuses once, a ``--local-only`` audit with the owner's own work beside it 
 and one whose dataset the owner linked elsewhere before it was published (the claim refuses it).
 Each is driven through every sequence of up to three of the eight actions (delete; delete when the
 platform does not answer, answers 404 for this key, or its walk dies after one step; cancel; cancel
-when it does not answer or answers 404; run; run while the claim request fails) over the SDK's real
+when it does not answer or answers 404; the owner resumes the endpoints; run; run while the claim request fails) over the SDK's real
 ``cancel`` and ``delete`` and a platform that answers as the contract's table says. After every step:
 
 * for a published audit the SDK touched only what the platform refused to claim, which this
   directory created;
 * nothing the directory did not create is destroyed, by anyone, and no registry entry by the SDK;
+* the SDK never deletes an endpoint whose live status is not paused (the owner may resume one at
+  any point, so what a cancel saved locally proves nothing);
+* a cancel that answers and exits 0 leaves none of the directory's endpoints running, so the
+  command a refused delete names always clears the refusal;
 * a cancel never marks a finished run cancelled;
 * a delete exits 0 only if nothing of the audit's own is left and the audit record is gone, and
   exits 1 only if something is, or the platform did not answer, or its audit record is still there;
@@ -38,6 +42,7 @@ ACTIONS = (
     "cancel",
     "cancel!500",
     "cancel!404",
+    "resume",
     "run",
     "run!claim500",
 )
@@ -129,6 +134,8 @@ def _apply(sdk: Sdk, action: str) -> None:
         sdk.platform.refuse.clear()  # a refusal is transient: the next walk finds the slice willing
     elif verb == "cancel":
         sdk.cancel(failure or None)
+    elif verb == "resume":
+        sdk.resume()
     else:
         sdk.client.claim_failure = failure == "claim500"
         sdk.run()
@@ -176,11 +183,18 @@ def violations(sdk: Sdk, action: str) -> list[str]:
             out.append(f"{what} {rid} destroyed by {actor}, and the directory did not create it")
         if index >= fresh and actor == SDK and what == "model_entry":
             out.append(f"the SDK deleted the registry entry of {rid}")
+    live = world.deleted_while_live[sdk.live_seen :]
+    sdk.live_seen = len(world.deleted_while_live)
+    out += [f"the SDK deleted endpoint {rid} while its live status was not paused" for rid in live]
     for steps in state.workloads.values():
         for step in steps.values():
             job = world.res.get(step.training_job_id or "")
             if job is not None and job.status == "completed" and step.run_status == "cancelled":
                 out.append(f"finished run {job.id} marked cancelled")
+    if action == "cancel" and sdk.answered and sdk.exits[-1][1] == 0:
+        for r in world.alive("deployment"):
+            if r.chain == CHAIN and r.project == state.project_id and not r.paused:
+                out.append(f"cancel exit 0 with endpoint {r.id} still running")
     if action.startswith("delete"):
         code = sdk.exits[-1][1]
         left = _own_left(sdk)

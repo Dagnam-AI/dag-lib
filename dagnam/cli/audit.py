@@ -290,5 +290,14 @@ def register_audit(subparsers: SubParsersAction) -> None:
             " check `dagnam whoami` first."
         ),
     )
+    delete.add_argument(
+        "--include-endpoints",
+        action="store_true",
+        help=(
+            "Also delete endpoints that are still serving; apps calling them will start"
+            " getting errors. Without it the delete stops before deleting anything while one"
+            " is serving."
+        ),
+    )
     delete.add_argument("--json", action="store_true", help="Print the receipt as JSON.")
     delete.set_defaults(func=cmd_audit_delete)

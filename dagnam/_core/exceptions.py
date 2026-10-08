@@ -4,6 +4,8 @@ from collections.abc import Mapping
 
 from dagnam_contracts import ParamError
 
+from dagnam._types import JsonObject
+
 
 class DagnamError(Exception):
     """Base exception for all dagnam errors."""
@@ -121,6 +123,27 @@ class TeardownInProgressError(APIError):
     The platform holds a lock for the walk; the caller waits (``Retry-After`` says how long)
     and asks again.
     """
+
+
+class EndpointsServingError(APIError):
+    """A delete stopped, having changed nothing, because an endpoint is still serving (``409 endpoints_serving``).
+
+    Deleting would break any app that calls the endpoint. ``message`` is the sentence that says
+    so and what to do instead; ``endpoints`` are the blocking endpoints as objects with ``id``,
+    ``name``, ``status`` (``running`` reads as serving, anything else as rolling out) and
+    ``last_request_at`` (``None`` when the platform has no request on record; absent when this
+    client found the endpoint itself). Unlike
+    :class:`TeardownInProgressError` waiting does not help: stop the endpoints, or delete again
+    with ``include_endpoints=True``.
+    """
+
+    def __init__(
+        self, message: str, endpoints: list[JsonObject], *, from_platform: bool = True
+    ) -> None:
+        self.endpoints = endpoints
+        self.from_platform = from_platform
+        """``False`` when this client found the endpoints itself, so it knows only their status."""
+        super().__init__(409, message)
 
 
 class DownloadTooLargeError(APIError):
@@ -289,6 +312,35 @@ class InvalidURLError(UploadError):
 
 class QuotaExceededError(DagnamError):
     """Plan/usage limit reached: a storage quota (413) or a plan resource limit (402)."""
+
+
+class InsufficientCreditsError(QuotaExceededError):
+    """The account's credits do not cover the work (402 ``insufficient_credits``).
+
+    ``message`` is the platform's own complete sentence and is also ``str(exc)``; it is printed
+    once and nothing is appended to it. ``required_credits`` is what the work needs to start;
+    ``available_credits`` is the balance, ``None`` when the platform did not disclose it (the
+    caller is not the account's owner). ``next_steps`` are the platform's tokens for what to do
+    about it (for example ``request_credits``, ``top_up_credits``, ``add_payment_method``,
+    ``reduce_job_size``).
+
+    A subclass of :class:`QuotaExceededError` so existing ``except QuotaExceededError`` handlers
+    still catch it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        required_credits: int,
+        available_credits: int | None = None,
+        next_steps: tuple[str, ...] = (),
+    ) -> None:
+        self.message = message
+        self.required_credits = required_credits
+        self.available_credits = available_credits
+        self.next_steps = next_steps
+        super().__init__(message)
 
 
 class PayloadTooLargeError(QuotaExceededError):

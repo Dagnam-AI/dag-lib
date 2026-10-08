@@ -23,6 +23,7 @@ from dagnam._core.exceptions import (
     DeploymentStateError,
     DeploymentValidationError,
     HubModelNotFoundError,
+    InsufficientCreditsError,
     LROFailedError,
     LROTimeoutError,
     ModelNotFoundError,
@@ -281,6 +282,51 @@ def test_quota_error_suggests_usage() -> None:
     out = errors_mod.render_error(QuotaExceededError("Storage quota exceeded"))
     assert "Error: plan limit reached" in out
     assert "dagnam usage" in out
+
+
+def _credits(
+    *steps: str, available: int | None = 30, message: str = "You are out of credits."
+) -> InsufficientCreditsError:
+    return InsufficientCreditsError(
+        message, required_credits=120, available_credits=available, next_steps=steps
+    )
+
+
+def test_insufficient_credits_prints_the_message_once_and_a_hint_for_what_it_leaves_out() -> None:
+    out = errors_mod.render_error(_credits("request_credits", "reduce_job_size"))
+    assert "Error: not enough credits" in out
+    assert out.count("You are out of credits.") == 1
+    assert "Ask for more credits at https://dagnam.ai/support" in out
+    assert "Or make the run smaller and try again" in out
+    assert "request_credits" not in out
+    assert "dagnam usage" not in out
+
+
+def test_a_hint_is_not_repeated_when_the_message_already_gives_that_advice() -> None:
+    said = (
+        "You don't have enough credits. Ask us for more credits at https://dagnam.ai/support, "
+        "or make the run smaller (fewer epochs) and try again."
+    )
+
+    out = errors_mod.render_error(_credits("request_credits", "reduce_job_size", message=said))
+
+    assert out.count("https://dagnam.ai/support") == 1
+    assert out.count("smaller") == 1
+    assert "Try:" not in out
+
+
+def test_a_caller_who_is_not_the_owner_is_not_told_to_ask_for_credits() -> None:
+    """The inference refusal carries no balance: the account owner has to act, not the caller."""
+    out = errors_mod.render_error(_credits("request_credits", available=None))
+    assert "Ask for more credits" not in out
+    assert "Try:" not in out
+
+
+def test_payment_tokens_have_no_page_to_point_at_and_unknown_tokens_are_ignored() -> None:
+    out = errors_mod.render_error(_credits("top_up_credits", "add_payment_method", "teleport"))
+    assert "Settings" not in out
+    assert "teleport" not in out
+    assert "Try:" not in out
 
 
 def test_architecture_validation_lists_problems() -> None:

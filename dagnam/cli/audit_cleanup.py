@@ -17,16 +17,21 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
+from datetime import UTC, datetime
+import json
 from pathlib import Path
+import shlex
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from dagnam.cli.audit_run import client_from_env, fail, resolve_audit_dir
 from dagnam.cli.common import confirm_or_abort, error, mask_key
-from dagnam.cli.presentation import emit_result
+from dagnam.cli.errors import ErrorReport, color_enabled, render_report
+from dagnam.cli.presentation import emit_result, sanitize_terminal_text
 
 if TYPE_CHECKING:
     from dagnam._core.client import DagnamClient
+    from dagnam._core.exceptions import EndpointsServingError
 
 
 def _asked() -> str:
@@ -76,7 +81,11 @@ def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
         code = row.get("code")
         tag = f" [{code}]" if code and code != row.get("status") else ""
         reason = f" ({row['reason']})" if row.get("reason") else ""
-        return f"{row.get('kind', '?')} {row.get('id', '?')}: {row.get('status', '?')}{tag}{reason}"
+        served = " (was serving)" if row.get("was_serving") is True else ""
+        return (
+            f"{row.get('kind', '?')} {row.get('id', '?')}: {row.get('status', '?')}{tag}"
+            f"{served}{reason}"
+        )
 
     return "\n".join([*map(line, receipt_rows(receipt)), f"Receipt: {path}"])
 
@@ -185,7 +194,7 @@ def cmd_audit_cancel(args: argparse.Namespace) -> None:
         )
 
 
-def _listing(audit_dir: Path) -> str:
+def _listing(audit_dir: Path, *, include_endpoints: bool = False) -> str:
     """What the delete is about to remove, from the state, for the confirmation prompt."""
     from dagnam.audit.cleanup import recorded_ids
     from dagnam.audit.state import load_state
@@ -194,7 +203,108 @@ def _listing(audit_dir: Path) -> str:
     lines = [f"  {kind}: {', '.join(ids)}" for kind, ids in recorded_ids(state).items() if ids]
     if state.audit_id is not None:
         lines.append(f"  audit: {state.audit_id} (and its published report)")
+    if include_endpoints:
+        lines.append(
+            "  --include-endpoints: endpoints that are still serving are deleted too,"
+            " and apps calling them will start getting errors."
+        )
     return "\n".join(lines) or "  (nothing recorded)"
+
+
+MAX_ROWS = 10
+"""How many blocking endpoints the table lists; the rest are counted."""
+NAME_WIDTH = 40
+ID_WIDTH = 64
+
+
+def _clean(value: object, width: int) -> str:
+    """Text from the platform on one line: control characters and line breaks gone, clipped to ``width``."""
+    text = " ".join(sanitize_terminal_text(str(value if value is not None else "?")).split())
+    return text if len(text) <= width else text[: width - 3] + "..."
+
+
+def _state(endpoint: Mapping[str, Any], *, from_platform: bool) -> str:
+    """``serving`` for a running endpoint; any other the platform lists is resuming (its word).
+
+    An endpoint this client found itself is shown with the status it read: it cannot know that a
+    ``deploying`` one ever served.
+    """
+    if endpoint.get("status") == "running":
+        return "serving"
+    return "resuming" if from_platform else _clean(endpoint.get("status"), NAME_WIDTH)
+
+
+def _last_request(endpoint: Mapping[str, Any]) -> str:
+    """When the platform last saw a request to the endpoint; nothing when it does not say."""
+    if "last_request_at" not in endpoint:
+        return ""
+    when = endpoint["last_request_at"]
+    if when is None:
+        return "no requests recorded"
+    try:
+        stamp = datetime.fromisoformat(str(when).replace("Z", "+00:00"))
+        return f"last request {stamp.astimezone(UTC):%Y-%m-%d %H:%M} UTC"
+    except ValueError:
+        return f"last request {when}"
+
+
+def _refuse_serving(
+    args: argparse.Namespace, audit_dir: Path, exc: EndpointsServingError
+) -> NoReturn:
+    """Say that nothing was deleted because an endpoint is serving, and what to run instead; exit 1.
+
+    The platform's sentence once, the endpoints, then the two exits as commands that can be
+    pasted. Nothing was removed here, so the directory is named as it is. Under ``--json``
+    stdout is the refusal object alone.
+    """
+    where = shlex.quote(str(audit_dir))
+    cancel = f"dagnam audit cancel {where}"
+    again = f"dagnam audit delete {where}"
+    override = f"{again} --include-endpoints"
+    if args.json:
+        hint = f"{cancel}, then {again}; or {override} to delete the endpoints too"
+        print(
+            json.dumps(
+                {
+                    "error": exc.message,
+                    "hint": hint,
+                    "code": "endpoints_serving",
+                    "endpoints": exc.endpoints,
+                }
+            )
+        )
+        sys.exit(1)
+    shown = exc.endpoints[:MAX_ROWS]
+    rows = [
+        (
+            _clean(
+                e.get("name") or e.get("id"), NAME_WIDTH
+            ),  # the renderer cleans values, not labels
+            "  ".join(
+                part
+                for part in (
+                    _clean(e.get("id"), ID_WIDTH),
+                    _state(e, from_platform=exc.from_platform),
+                    _last_request(e),
+                )
+                if part
+            ),
+        )
+        for e in shown
+    ]
+    if len(exc.endpoints) > len(shown):
+        rows.append((f"(+{len(exc.endpoints) - len(shown)} more)", ""))
+    report = ErrorReport(
+        title=exc.message,
+        fields=rows,
+        tries=[
+            ("", f"Nothing in {audit_dir} was removed."),
+            (cancel, "stop every endpoint (and run), then delete again"),
+            (override, "delete the endpoints too; apps calling them will get errors"),
+        ],
+    )
+    print(render_report(report, color=color_enabled()), file=sys.stderr)
+    sys.exit(1)
 
 
 def _asks(prompt: str, *, assume_yes: bool) -> bool:
@@ -289,6 +399,7 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
     platform kept on purpose is shown and does not fail it. When the platform did not delete the
     audit, NOTHING local is removed and the next ``audit delete`` finishes it.
     """
+    from dagnam._core.exceptions import EndpointsServingError
     from dagnam.audit.cleanup import DELETED_FILE, delete_audit
     from dagnam.audit.state import AuditBusyError, lock_audit
     from dagnam.audit.workspace import UnsafeWorkloadsError
@@ -298,7 +409,9 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         # Held from before the listing: a live run would go on creating what this deletes.
         with lock_audit(audit_dir):
             confirm_or_abort(
-                f"This deletes from your account:\n{_listing(audit_dir)}", assume_yes=args.yes
+                "This deletes from your account:\n"
+                + _listing(audit_dir, include_endpoints=args.include_endpoints),
+                assume_yes=args.yes,
             )
             client = client_from_env()
             _offer_claim(args, audit_dir, client)
@@ -307,7 +420,10 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
                 client,
                 on_missing=lambda: _wrong_account_note(clearing=args.already_deleted),
                 assume_gone=args.already_deleted,
+                include_endpoints=args.include_endpoints,
             )
+    except EndpointsServingError as exc:
+        _refuse_serving(args, audit_dir, exc)
     except (AuditBusyError, FileNotFoundError, UnsafeWorkloadsError) as exc:
         fail(args, str(exc))
     path = audit_dir / DELETED_FILE
@@ -333,7 +449,8 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         error(
             f"{what}{more}; nothing local was removed unless the platform deleted the audit;"
             f" the receipt is {path}{hint}",
-            hint=f"dagnam audit delete {audit_dir} --yes",
+            hint=f"dagnam audit delete {audit_dir} --yes"
+            + (" --include-endpoints" if args.include_endpoints else ""),
         )
     if kept:
         print(

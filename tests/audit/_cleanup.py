@@ -16,6 +16,7 @@ from dagnam._core.exceptions import (
     DatasetNotFoundError,
     DeploymentNotFoundError,
     DeploymentStateError,
+    EndpointsServingError,
     ModelNotFoundError,
     ProjectNotFoundError,
     TrainingJobNotFoundError,
@@ -80,11 +81,16 @@ class FakeCleanup:
         """Deployment ids whose revision never activated: pausing one is a 409."""
         self.statuses: dict[str, str] = {}
         """id -> the ``status`` a read of a job or an endpoint reports (else: a run that has not
-        ended is ``running``, an endpoint that is up is ``running``)."""
+        ended is ``running``; an endpoint is ``paused`` unless it cannot be paused, which a delete of
+        this client's own would otherwise refuse to touch as serving)."""
         self.account_error: DagnamError | None = None
         """Raised by the account's own ``cancel_audit`` / ``delete_audit`` (a 5xx, a timeout)."""
         self.server_receipt: JsonObject = {"schema": "x", "deleted_at": "t", "entries": []}
         """What the published audit's cancel or delete answers; a ``deleted`` row takes its id."""
+        self.serving_refusal: EndpointsServingError | None = None
+        """What the account's ``delete_audit`` refuses with, until it is asked with the override."""
+        self.include_endpoints: list[bool] = []
+        """The ``include_endpoints`` of each ``delete_audit`` request."""
 
     def _take(self, kind: str, item_id: str, absent: type[DagnamError]) -> None:
         if item_id not in self.present[kind]:
@@ -105,11 +111,14 @@ class FakeCleanup:
             raise self.account_error
         return dict(self.server_receipt)
 
-    def delete_audit(self, audit_id: str) -> JsonObject:
+    def delete_audit(self, audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
         """The server's walk: every row it calls ``deleted`` is gone from the platform after."""
         self.call_log.append(("delete_audit", audit_id))
+        self.include_endpoints.append(include_endpoints)
         if self.account_error is not None:
             raise self.account_error
+        if self.serving_refusal is not None and not include_endpoints:
+            raise self.serving_refusal
         entries = self.server_receipt.get("entries")
         for row in entries if isinstance(entries, list) else []:
             if isinstance(row, dict) and row.get("status") == "deleted":
@@ -152,12 +161,14 @@ class FakeCleanup:
             raise DeploymentNotFoundError(deployment_id)
         if deployment_id in self.unpausable:
             raise DeploymentStateError("Invalid status transition from not_provisioned to paused")
+        self.statuses[deployment_id] = "paused"  # what a read says from now on
         return {"id": deployment_id, "status": "paused"}
 
     def get_deployment(self, deployment_id: str) -> JsonObject:
         self.call_log.append(("get_deployment", deployment_id))
         found = self._need("deployment", deployment_id, DeploymentNotFoundError)
-        return {**found, "status": self.statuses.get(deployment_id, "running")}
+        default = "running" if deployment_id in self.unpausable else "paused"
+        return {**found, "status": self.statuses.get(deployment_id, default)}
 
     def delete_deployment(self, deployment_id: str) -> JsonObject | None:
         self.call_log.append(("delete_deployment", deployment_id))

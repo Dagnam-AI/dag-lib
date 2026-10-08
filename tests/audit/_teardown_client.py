@@ -49,7 +49,7 @@ class WorldClient:
             status, self.audit_failure = int(self.audit_failure), None
             raise APIError(status, "server error" if status == 500 else "audit not found")
 
-    def delete_audit(self, audit_id: str) -> JsonObject:
+    def delete_audit(self, audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
         self._answer("delete_audit", audit_id)
         crash = 1 if self.audit_failure == "crash1" else None
         self.audit_failure = None
@@ -122,7 +122,12 @@ class WorldClient:
     def get_deployment(self, deployment_id: str) -> JsonObject:
         if not self._owned("deployment", deployment_id):
             raise DeploymentNotFoundError(deployment_id)
-        return {"id": deployment_id, "status": "running"}
+        paused = self.world.res[deployment_id].paused
+        return {
+            "id": deployment_id,
+            "name": deployment_id,
+            "status": "paused" if paused else "running",
+        }
 
     def delete_deployment(self, deployment_id: str) -> JsonObject | None:
         self.calls.append(f"delete_deployment:{deployment_id}")
@@ -130,6 +135,8 @@ class WorldClient:
             raise DeploymentNotFoundError(deployment_id)
         if self.world.res[deployment_id].status == "deploying":
             raise DeploymentStateError("Cannot delete a deployment that is still deploying")
+        if not self.world.res[deployment_id].paused:
+            self.world.deleted_while_live.append(deployment_id)
         self.world.destroy(SDK, deployment_id)
         return None
 

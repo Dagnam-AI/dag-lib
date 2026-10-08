@@ -67,6 +67,8 @@ class World:
         self.audits: dict[str, Audit] = {}
         self.destroyed: list[tuple[str, str, str]] = []
         """``(actor, what, id)`` per destructive act: delete, purge, pause or stop."""
+        self.deleted_while_live: list[str] = []
+        """The SDK's own deletes of an endpoint that was not paused at that moment."""
 
     def add(self, res: Res) -> Res:
         self.res[res.id] = res

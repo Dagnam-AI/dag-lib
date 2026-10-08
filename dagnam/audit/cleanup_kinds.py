@@ -64,7 +64,7 @@ class CleanupClient(Protocol):
         """``POST /api/v1/audits/{id}/cancel``: the platform's own walk, one receipt."""
         ...
 
-    def delete_audit(self, audit_id: str) -> JsonObject:
+    def delete_audit(self, audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
         """``DELETE /api/v1/audits/{id}``: the platform's own walk, one receipt."""
         ...
 

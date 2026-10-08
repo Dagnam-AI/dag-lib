@@ -57,6 +57,7 @@ from dagnam.audit.receipt_rows import (
     blocked,
     decide,
 )
+from dagnam.audit.serving import refuse_if_serving, serving_here
 from dagnam.audit.state import AuditState
 
 OWNER_ONLY_READS = frozenset({"deployment", "training_job"})
@@ -126,15 +127,29 @@ def cancel_unpublished(
 
     Every stop is tried and every outcome is a row, so one that fails never keeps the next from
     being tried. Only what stopped or was found gone is marked; a run that had already finished
-    answers ``already_stopped`` and stays resumable. An id marked kept is not stopped, and when
+    answers ``already_stopped`` and stays resumable. An endpoint is stopped when it reads as
+    possibly serving NOW, whatever the state saved after an earlier cancel. An id marked kept is not stopped, and when
     no answer proves the key sees the owner's account nothing is marked (see the module docstring).
     """
-    targets = [
-        (kind, item_id)
-        for step in state.all_steps()
-        for kind, item_id in live(step)
-        if item_id not in state.kept_ids and (only is None or item_id in only)
-    ]
+    targets: list[tuple[str, str]] = []
+    for step in state.all_steps():
+        found = live(step)
+        deployment = step.deployment_id
+        # Saved as paused by an earlier cancel: the owner may have resumed it since, and the
+        # delete reads the live status, so this must too or the refusal can never be cleared.
+        if (
+            deployment is not None
+            and ("deployment", deployment) not in found
+            and deployment not in state.kept_ids
+            and (only is None or deployment in only)
+            and serving_here(client, [deployment], unreadable_is_serving=True)
+        ):
+            found.append(("deployment", deployment))
+        targets += [
+            (kind, item_id)
+            for kind, item_id in found
+            if item_id not in state.kept_ids and (only is None or item_id in only)
+        ]
     entries = [STOPS[kind](client, item_id) for kind, item_id in targets]
     ids: dict[str, list[str]] = {kind: [] for kind in STOPS}
     for kind, item_id in targets:
@@ -236,8 +251,13 @@ def delete_unpublished(
     state: AuditState,
     *,
     assume_gone: bool = False,
+    include_endpoints: bool = False,
 ) -> dict[str, Any]:
     """Delete every recorded id of an unpublished audit, write ``deleted.json``, then local files.
+
+    Before the first destructive call every recorded endpoint is read, and one that may be
+    serving stops the whole delete (:func:`~dagnam.audit.serving.refuse_if_serving`) unless
+    ``include_endpoints``: nothing is deleted, no receipt is written, ``state.json`` stays.
 
     Each id is deleted and re-read expecting not-found; a refusal, a failure, or a delete that
     still reads back is that id's ``blocked`` row, never the end of the walk. A registry version
@@ -249,6 +269,7 @@ def delete_unpublished(
     ``assume_gone``.
     """
     ids = recorded_ids(state)
+    refuse_if_serving(client, ids["deployment"], include=include_endpoints)
     rows = walk(client, ids, state.project_id)
     if rows and not assume_gone and not proven(client, state, rows, ids):
         receipt = none_visible(len(rows), "delete")

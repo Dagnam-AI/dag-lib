@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
+  platform that supports it (an older platform still deletes without asking). The platform
+  answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,
+  also importable from `dagnam.exceptions` and `dagnam.audit`) with the blocking endpoints. The
+  endpoints the SDK deletes itself (an unpublished audit's, and any the platform declined to
+  claim) get the same all-or-nothing check first, and only a status known to be quiet (`paused`,
+  `stopped`, `failed`, `not_provisioned`) lets one be deleted: `deploying`, a missing status and
+  a status this version does not know all count as serving. A refusal removes no file, deletes
+  nothing and keeps the deployment keys; an accepted claim of older resources, recorded before
+  the delete was asked, stays. `audit cancel` pauses every recorded endpoint that reads as
+  serving now, so cancelling clears the refusal even after an endpoint was resumed.
+
 ### Fixed
 
 - `dagnam audit run` no longer carries on as an unpublished run when the audit cannot be
@@ -15,6 +29,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `dagnam audit delete --include-endpoints` deletes endpoints that are still serving too; apps
+  calling them start getting errors. Without it, a delete that finds a serving endpoint prints
+  the platform's sentence once, a table of the blocking endpoints and the exact next commands
+  (`dagnam audit cancel <dir>`, or the same delete with `--include-endpoints`), and exits 1
+  having changed nothing; under `--json` stdout is the refusal object. The receipt marks a
+  deployment deleted while it was serving with `(was serving)`.
+- `dagnam.audit.delete_audit(audit_dir, client, include_endpoints=True)` and
+  `DagnamClient.delete_audit(audit_id, include_endpoints=True)` delete the audit's endpoints too,
+  even while they are serving; apps calling them start getting errors.
+- A `402 insufficient_credits` answer raises `InsufficientCreditsError`, a `QuotaExceededError`
+  subclass, so existing `except QuotaExceededError` code keeps working. It carries `message`
+  (the platform's own sentence, printed once), `required_credits`, `available_credits` (`None`
+  when the platform does not disclose the balance) and `next_steps`. The CLI prints the message
+  and a short hint for each next step.
 - `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a
   model version's artifacts, so the artifact id `dagnam models download` needs can be found.
 - `dagnam training get` prints `Model version: <id>` when the job has registered one.

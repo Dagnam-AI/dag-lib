@@ -25,7 +25,11 @@ from dagnam.cli.common import DOCS_URL
 from dagnam.cli.presentation import sanitize_terminal_text
 
 if TYPE_CHECKING:
-    from dagnam._core.exceptions import APIError, ArchitectureValidationError
+    from dagnam._core.exceptions import (
+        APIError,
+        ArchitectureValidationError,
+        InsufficientCreditsError,
+    )
 
 _RESET = "\x1b[0m"
 _ANSI = {
@@ -289,6 +293,41 @@ def _quota_report(exc: BaseException) -> ErrorReport:
     )
 
 
+SUPPORT_URL = "https://dagnam.ai/support"
+_REQUEST_HINT = f"Ask for more credits at {SUPPORT_URL}"
+_SMALLER_HINT = "Or make the run smaller and try again"
+
+
+def _credit_hints(exc: InsufficientCreditsError) -> list[str]:
+    """Hints for the platform's ``next_steps`` that its message does not already give.
+
+    Only steps whose destination exists are translated: the support page for ``request_credits``
+    (not for a caller who is not the account's owner, whose refusal carries no balance and says
+    the owner must act), and the smaller-run sentence for ``reduce_job_size``. Any other token,
+    and any advice the message already contains, is skipped.
+    """
+    said = exc.message.lower()
+    hints: list[str] = []
+    if (
+        "request_credits" in exc.next_steps
+        and exc.available_credits is not None
+        and SUPPORT_URL not in said
+    ):
+        hints.append(_REQUEST_HINT)
+    if "reduce_job_size" in exc.next_steps and "smaller" not in said:
+        hints.append(_SMALLER_HINT)
+    return hints
+
+
+def _credits_report(exc: BaseException) -> ErrorReport:
+    credits = cast("InsufficientCreditsError", exc)
+    return ErrorReport(
+        title="not enough credits",
+        fields=[("Detail", str(exc))],
+        tries=[("", hint) for hint in _credit_hints(credits)],
+    )
+
+
 def _not_found_report(list_command: str) -> Callable[[BaseException], ErrorReport]:
     def build(exc: BaseException) -> ErrorReport:
         return ErrorReport(
@@ -386,6 +425,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
 
     return (
         (m.AuthError, _auth_report),
+        (m.InsufficientCreditsError, _credits_report),
         (m.QuotaExceededError, _quota_report),
         (m.ArchitectureValidationError, _architecture_report),
         (m.DeploymentValidationError, _validation_report),
