@@ -21,7 +21,7 @@ from dagnam._core.client.common import (
     response_json_object,
     short_error_text,
 )
-from dagnam._core.exceptions import TeardownInProgressError
+from dagnam._core.exceptions import EndpointsServingError, TeardownInProgressError
 from dagnam._types import JsonArray, JsonObject
 
 if TYPE_CHECKING:
@@ -38,31 +38,42 @@ TEARDOWN_BUSY = "teardown_in_progress"
 """The ``error`` a 409 carries while another walk of the same audit holds its lock."""
 TEARDOWN_UNAVAILABLE = "teardown_unavailable"
 """The ``error`` a 503 carries when the platform cannot take the lock just now: ask again shortly."""
+ENDPOINTS_SERVING = "endpoints_serving"
+"""The ``error`` a 409 carries when the delete stopped because an endpoint of the audit is serving."""
 WAIT_MARKERS = {409: TEARDOWN_BUSY, 503: TEARDOWN_UNAVAILABLE}
 """Which ``error`` marks a wait-and-ask-again answer, by status."""
 
 
 def raise_for_audit(resp: requests.Response) -> None:
-    """``raise_for_generic``, except that the platform's "ask again shortly" answers are typed.
+    """``raise_for_generic``, except that the platform's refusals to go on are typed.
 
-    That is the 409 "a teardown is running" and the 503 "the lock is unavailable". The backend's
-    body is ``{"detail": "<words>", "error": "<marker>"}``; the marker is also read under a
-    ``detail`` object, whichever a platform sends; any other 409 or 503 stays an ``APIError``.
+    The 409 "a teardown is running" and the 503 "the lock is unavailable" are "ask again
+    shortly" answers; the 409 "endpoints are serving" is a refusal a person must act on. The
+    backend's body is ``{"detail": "<words>", "error": "<marker>"}``; the marker is also read
+    under a ``detail`` object, whichever a platform sends; any other 409 or 503 stays an
+    ``APIError``.
     """
-    marker = WAIT_MARKERS.get(resp.status_code)
-    if marker is not None:
+    if resp.status_code in (409, 503):
         try:
             data = resp.json()
         except UNPARSEABLE_BODY:
             data = None
         detail = data.get("detail") if isinstance(data, dict) else None
         source = detail if isinstance(detail, dict) else data
-        if isinstance(source, dict) and source.get("error") == marker:
+        marker = source.get("error") if isinstance(source, dict) else None
+        if isinstance(source, dict) and marker == WAIT_MARKERS[resp.status_code]:
             words = source.get("message") or (detail if isinstance(detail, str) else None)
             raise TeardownInProgressError(
                 resp.status_code,
                 short_error_text(str(words or marker)),
                 retry_after_header=resp.headers.get("Retry-After"),
+            )
+        if isinstance(source, dict) and resp.status_code == 409 and marker == ENDPOINTS_SERVING:
+            words = source.get("message") or (detail if isinstance(detail, str) else None)
+            listed = source.get("endpoints")
+            raise EndpointsServingError(
+                short_error_text(str(words or marker)),
+                [e for e in listed if isinstance(e, dict)] if isinstance(listed, list) else [],
             )
     raise_for_generic(resp)
 
@@ -80,12 +91,14 @@ class AuditClientMixin(BaseDagnamClient):
         resumable: bool = False,
         resume_nonce: str | None = None,
         walk: bool = False,
+        params: dict[str, str] | None = None,
     ) -> JsonObject:
         resp = self._request(
             method,
             f"{self.api_url}{path}",
             raise_for=raise_for_audit,
             json=json_body,
+            params=params,
             timeout=WALK_TIMEOUT if walk else DEFAULT_TIMEOUT,
             allow_redirects=ALLOW_REDIRECTS,
             idempotent=idempotent,
@@ -155,14 +168,20 @@ class AuditClientMixin(BaseDagnamClient):
             "POST", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}/cancel", walk=True
         )
 
-    def delete_audit(self, audit_id: str) -> JsonObject:
+    def delete_audit(self, audit_id: str, *, include_endpoints: bool = False) -> JsonObject:
         """``DELETE /api/v1/audits/{id}``: delete every artifact it published, with a receipt.
 
         Sent once, with a long read timeout (see :meth:`cancel_audit`); repeating it
-        after a failure is what finishes a partial walk.
+        after a failure is what finishes a partial walk. While an endpoint of the audit is
+        serving the platform deletes nothing and answers ``409 endpoints_serving``, raised as
+        :class:`~dagnam.audit.EndpointsServingError`; ``include_endpoints=True`` deletes those
+        endpoints too, and apps calling them start getting errors.
         """
         return self._audit_request(
-            "DELETE", f"{AUDITS_PATH}/{quote_path_segment(audit_id)}", walk=True
+            "DELETE",
+            f"{AUDITS_PATH}/{quote_path_segment(audit_id)}",
+            walk=True,
+            params={"include_endpoints": "true"} if include_endpoints else None,
         )
 
     def claim_audit_resources(self, audit_id: str, entries: JsonArray) -> JsonObject:

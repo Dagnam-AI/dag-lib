@@ -13,7 +13,8 @@ serve, replay the holdout -- keeping a resumable :class:`AuditState`, and
 floor. :func:`replaceability` judges each workload by the design's economics,
 :func:`build_scan_report` assembles the scan report and
 :func:`build_audit_report` the audit report; :func:`dagnam.audit.cleanup.delete_audit` removes
-everything a run created and writes the receipt. :func:`replaceability` judges each workload by the design's economics
+everything a run created and writes the receipt (or raises :class:`EndpointsServingError`,
+having deleted nothing, while one of its endpoints is serving). :func:`replaceability` judges each workload by the design's economics
 and :func:`build_scan_report` assembles the report. :func:`replaceability` judges each
 workload by the design's economics and :func:`build_scan_report` assembles
 the report.
@@ -21,6 +22,7 @@ the report.
 
 from __future__ import annotations
 
+from dagnam._core.exceptions import EndpointsServingError
 from dagnam.audit.candidates import CANDIDATES, CandidateKind, CandidateSpec
 from dagnam.audit.cleanup import delete_audit
 from dagnam.audit.derive import (
@@ -79,6 +81,7 @@ __all__ = [
     "DedupStats",
     "DeriveStats",
     "Endpoint",
+    "EndpointsServingError",
     "Latency",
     "MalformedExportError",
     "Message",

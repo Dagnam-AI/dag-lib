@@ -12,6 +12,7 @@ from typing import override
 from tests.audit._teardown_client import as_cleanup_client
 from tests.audit._teardown_dir import Directory
 
+from dagnam._core.exceptions import EndpointsServingError
 from dagnam.audit.claims import ClaimError, claim_recorded
 from dagnam.audit.cleanup import AuditDeletedError, cancel_audit, delete_audit, receipt_rows
 from dagnam.audit.receipt_rows import exit_status
@@ -34,7 +35,11 @@ class Sdk(Directory):
     def delete(self, failure: str | None = None) -> int:
         """``audit delete``: the exit status comes from the receipt alone."""
         self.client.audit_failure = failure
-        receipt = delete_audit(self.audit_dir, as_cleanup_client(self.client))
+        try:
+            receipt = delete_audit(self.audit_dir, as_cleanup_client(self.client))
+        except EndpointsServingError:  # the command refuses: exit 1, and nothing was touched
+            self.answered = True
+            return self._exit("delete", 1)
         self.answered = not any(r.get("code") == "not_answered" for r in receipt_rows(receipt))
         return self._exit(
             "delete", exit_status(receipt_rows(receipt), receipt.get("audit_status"), verb="delete")

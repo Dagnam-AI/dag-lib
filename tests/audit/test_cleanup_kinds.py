@@ -152,6 +152,7 @@ def test_a_stop_that_fails_is_that_ids_row_and_never_a_raise(
     monkeypatch: pytest.MonkeyPatch, kind: str, item: str, method: str
 ) -> None:
     platform = FakeCleanup(job=["j1"], deployment=["d1"])
+    platform.statuses.update({"j1": "running", "d1": "running"})  # still up: the stop failed
 
     def broken(_: str) -> JsonObject:
         raise APIError(500, "boom")
@@ -185,6 +186,7 @@ def test_a_pause_the_platform_refuses_says_why_and_a_wrong_shaped_answer_is_a_ro
         raise TypeError("not an object")
 
     platform = FakeCleanup(deployment=["d1"])
+    platform.statuses["d1"] = "running"
     monkeypatch.setattr(platform, "pause_deployment", malformed)
     assert STOPS["deployment"](as_cleanup_client(platform), "d1")["reason"] == (
         "TypeError('not an object')"

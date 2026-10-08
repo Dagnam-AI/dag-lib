@@ -259,6 +259,7 @@ def test_a_deployment_error_that_is_not_an_api_error_is_still_that_ids_row(
 ) -> None:
     """The deployment client types a refused pause as its own error, not an ``APIError``."""
     fake = _platform(monkeypatch)
+    fake.statuses["dep-1"] = "running"
 
     def refuse(_: str) -> JsonObject:
         raise DeploymentStateError("Invalid status transition from paused to paused")

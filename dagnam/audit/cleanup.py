@@ -25,7 +25,12 @@ import time
 from typing import Any
 
 from dagnam._core._retry import parse_retry_after
-from dagnam._core.exceptions import APIError, DagnamError, TeardownInProgressError
+from dagnam._core.exceptions import (
+    APIError,
+    DagnamError,
+    EndpointsServingError,
+    TeardownInProgressError,
+)
 from dagnam.audit.cleanup_kinds import CleanupClient
 from dagnam.audit.cleanup_local import (
     CANCELLED_ERROR,
@@ -56,6 +61,7 @@ from dagnam.audit.cleanup_walk import (
     walk,
 )
 from dagnam.audit.receipt_rows import KEPT, Verdict, decide
+from dagnam.audit.serving import refuse_if_serving
 from dagnam.audit.state import DELETED_STATE, AuditDeletedError, AuditState, load_state, save_state
 
 NOT_FOUND = 404
@@ -94,7 +100,9 @@ def ask_platform(
     A 404 is :attr:`Answer.missing`, not a decision. A 409 saying another walk holds the audit
     (or a 503 saying its lock is unavailable, which also carries a ``Retry-After``) is waited
     out -- the platform's own pause, whatever its size, else :data:`TEARDOWN_POLL` -- up to
-    :data:`TEARDOWN_WAIT` in all, then asked again; past that it is a failure to answer. A 200
+    :data:`TEARDOWN_WAIT` in all, then asked again; past that it is a failure to answer. A 409
+    saying an endpoint is serving is neither waited on nor a failure to answer: it is the
+    platform's refusal, and is raised for the caller to show. A 200
     that is not a receipt (no list of rows: a proxy, another host) is a failure too, never
     "nothing is left": an empty list is a receipt, a missing one is not.
     """
@@ -111,6 +119,8 @@ def ask_platform(
                 )
             sleep(pause)
             waited += pause
+        except EndpointsServingError:
+            raise
         except DagnamError as exc:
             if isinstance(exc, APIError) and exc.status_code == NOT_FOUND:
                 return Answer(failure=NO_SUCH_AUDIT, missing=True)
@@ -223,6 +233,7 @@ def delete_audit(
     *,
     on_missing: Callable[[], None] = lambda: None,
     assume_gone: bool = False,
+    include_endpoints: bool = False,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """Delete the audit in ``audit_dir`` (the caller holds its lock); write ``deleted.json``.
@@ -234,6 +245,16 @@ def delete_audit(
     direct call but for what the platform refused to claim. Unpublished: the recorded ids are
     deleted here. A directory whose audit is already deleted is not asked about again: only local
     leftovers are retried.
+
+    All or nothing while an endpoint is serving: the platform answers ``409 endpoints_serving``
+    and deletes nothing, and the endpoints this client would delete itself (an unpublished
+    audit's, and those the platform refused to claim) are read before the first destructive call.
+    Either way :class:`~dagnam._core.exceptions.EndpointsServingError` is raised with nothing
+    deleted, no receipt written and ``state.json`` as it was. ``include_endpoints=True`` deletes
+    them anyway.
+
+    Raises:
+        EndpointsServingError: an endpoint of the audit is serving and ``include_endpoints`` is off.
     """
     state = load_state(audit_dir)
     if state.halted == DELETED_STATE:
@@ -241,8 +262,21 @@ def delete_audit(
         write_receipt(audit_dir, receipt)
         return receipt
     if state.audit_id is None:
-        return delete_unpublished(audit_dir, client, state, assume_gone=assume_gone)
-    answer = ask_platform(client.delete_audit, state.audit_id, sleep=sleep)
+        return delete_unpublished(
+            audit_dir, client, state, assume_gone=assume_gone, include_endpoints=include_endpoints
+        )
+    # Before the platform's walk: it must not delete, and then find this client refusing.
+    mine = unclaimed(state)
+    refuse_if_serving(
+        client,
+        [i for i in recorded_ids(state)["deployment"] if i in mine],
+        include=include_endpoints,
+    )
+
+    def ask(audit_id: str) -> dict[str, Any]:
+        return client.delete_audit(audit_id, include_endpoints=include_endpoints)
+
+    answer = ask_platform(ask, state.audit_id, sleep=sleep)
     if answer.receipt is not None:
         return settle_delete(audit_dir, state, answer.receipt, client)
     if answer.missing:

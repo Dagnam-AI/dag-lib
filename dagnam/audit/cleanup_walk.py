@@ -57,6 +57,7 @@ from dagnam.audit.receipt_rows import (
     blocked,
     decide,
 )
+from dagnam.audit.serving import refuse_if_serving
 from dagnam.audit.state import AuditState
 
 OWNER_ONLY_READS = frozenset({"deployment", "training_job"})
@@ -236,8 +237,13 @@ def delete_unpublished(
     state: AuditState,
     *,
     assume_gone: bool = False,
+    include_endpoints: bool = False,
 ) -> dict[str, Any]:
     """Delete every recorded id of an unpublished audit, write ``deleted.json``, then local files.
+
+    Before the first destructive call every recorded endpoint is read, and one that may be
+    serving stops the whole delete (:func:`~dagnam.audit.serving.refuse_if_serving`) unless
+    ``include_endpoints``: nothing is deleted, no receipt is written, ``state.json`` stays.
 
     Each id is deleted and re-read expecting not-found; a refusal, a failure, or a delete that
     still reads back is that id's ``blocked`` row, never the end of the walk. A registry version
@@ -249,6 +255,7 @@ def delete_unpublished(
     ``assume_gone``.
     """
     ids = recorded_ids(state)
+    refuse_if_serving(client, ids["deployment"], include=include_endpoints)
     rows = walk(client, ids, state.project_id)
     if rows and not assume_gone and not proven(client, state, rows, ids):
         receipt = none_visible(len(rows), "delete")

@@ -119,7 +119,9 @@ def test_a_delete_that_got_one_positive_answer_proves_its_key_but_not_an_unanswe
     platform.delete_errors = {"dep-1": APIError(503, "unavailable")}
     platform.unreadable = {"dep-1": APIError(503, "unavailable")}
 
-    receipt = delete_unpublished(local, as_cleanup_client(platform), load_state(local))
+    receipt = delete_unpublished(
+        local, as_cleanup_client(platform), load_state(local), include_endpoints=True
+    )
 
     rows = {(r["kind"], r["id"]): r for r in receipt_rows(receipt)}
     assert rows[("deployment", "dep-1")]["code"] == "not_answered"

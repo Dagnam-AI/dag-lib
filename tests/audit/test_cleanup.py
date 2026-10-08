@@ -82,10 +82,12 @@ def test_delete_removes_every_recorded_id_and_writes_receipt(
         {"kind": "project", "id": "proj-1", "status": "deleted"},
     ]
     assert json.loads((prepared / DELETED_FILE).read_text(encoding="utf-8")) == receipt
+    # Before anything is deleted every endpoint is read, to refuse if one may be serving.
+    assert platform.call_log[:2] == [("get_deployment", "dep-1"), ("get_deployment", "dep-2")]
     # Each id: delete, then a read that must answer not-found; a version through its own purge route.
-    assert platform.call_log[:2] == [("delete_deployment", "dep-1"), ("get_deployment", "dep-1")]
+    assert platform.call_log[2:4] == [("delete_deployment", "dep-1"), ("get_deployment", "dep-1")]
     # The purge answers its own receipt row, so it is trusted and the version is not re-read.
-    assert platform.call_log[4:6] == [
+    assert platform.call_log[6:8] == [
         ("purge_model_version", "mv-1"),
         ("purge_model_version", "mv-2"),
     ]

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 
 from dagnam_contracts import ParamError
 
+from dagnam._types import JsonObject
+
 
 class DagnamError(Exception):
     """Base exception for all dagnam errors."""
@@ -121,6 +123,22 @@ class TeardownInProgressError(APIError):
     The platform holds a lock for the walk; the caller waits (``Retry-After`` says how long)
     and asks again.
     """
+
+
+class EndpointsServingError(APIError):
+    """A delete stopped, having changed nothing, because an endpoint is still serving (``409 endpoints_serving``).
+
+    Deleting would break any app that calls the endpoint. ``message`` is the sentence that says
+    so and what to do instead; ``endpoints`` are the blocking endpoints as objects with ``id``,
+    ``name``, ``status`` (``running`` reads as serving, anything else as rolling out) and
+    ``last_request_at`` (``None`` when none is recorded or known). Unlike
+    :class:`TeardownInProgressError` waiting does not help: stop the endpoints, or delete again
+    with ``include_endpoints=True``.
+    """
+
+    def __init__(self, message: str, endpoints: list[JsonObject]) -> None:
+        self.endpoints = endpoints
+        super().__init__(409, message)
 
 
 class DownloadTooLargeError(APIError):
