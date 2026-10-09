@@ -30,15 +30,13 @@ if TYPE_CHECKING:
 
 
 def cmd_stream(args: argparse.Namespace) -> None:
-    import dagnam
+    from dagnam._core.sse import is_pause
+    from dagnam.resources.training import follow_training
 
     paused = False
     try:
-        for ev in dagnam.stream_training(
-            args.job_id,
-            include_heartbeats=args.heartbeats,
-        ):
-            paused = paused or ev.event == "paused"
+        for ev in follow_training(args.job_id, include_heartbeats=args.heartbeats):
+            paused = paused or is_pause(ev)
             if args.json:
                 print(json.dumps(asdict(ev)))
             else:

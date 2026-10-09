@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def test_stream_emits_human_readable(run_cli: CliRunner, capsys: StrCapture) -> None:
     fake_event = SimpleNamespace(event="progress", data={"step": 1}, id="e1", retry=None)
-    with mock.patch("dagnam.stream_training", return_value=iter([fake_event])):
+    with mock.patch("dagnam.resources.training.stream_training", return_value=iter([fake_event])):
         run_cli(["stream", "job-1"])
     assert "[progress]" in capsys.readouterr().out
 
@@ -28,7 +28,7 @@ def test_stream_json_mode(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.sse import SSEEvent
 
     ev = SSEEvent(event="progress", data={"step": 1}, id="e1", retry=None)
-    with mock.patch("dagnam.stream_training", return_value=iter([ev])):
+    with mock.patch("dagnam.resources.training.stream_training", return_value=iter([ev])):
         run_cli(["stream", "job-1", "--json"])
     assert json.loads(capsys.readouterr().out.strip()) == {
         "event": "progress",
@@ -39,7 +39,7 @@ def test_stream_json_mode(run_cli: CliRunner, capsys: StrCapture) -> None:
 
 
 def test_stream_keyboard_interrupt_exits_130(run_cli: CliRunner) -> None:
-    with mock.patch("dagnam.stream_training", side_effect=KeyboardInterrupt):
+    with mock.patch("dagnam.resources.training.stream_training", side_effect=KeyboardInterrupt):
         with pytest.raises(SystemExit) as exc_info:
             run_cli(["stream", "job-1"])
     assert exc_info.value.code == 130
@@ -48,7 +48,7 @@ def test_stream_keyboard_interrupt_exits_130(run_cli: CliRunner) -> None:
 def test_stream_apierror_exits(run_cli: CliRunner, capsys: StrCapture) -> None:
     from dagnam._core.exceptions import APIError
 
-    with mock.patch("dagnam.stream_training", side_effect=APIError(500, "boom")):
+    with mock.patch("dagnam.resources.training.stream_training", side_effect=APIError(500, "boom")):
         assert run_cli(["stream", "job-1"]) == 1
     err = capsys.readouterr().err
     assert "the Dagnam API had an internal error (HTTP 500)" in err

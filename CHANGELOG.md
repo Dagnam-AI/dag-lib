@@ -64,27 +64,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
   previous run is still stopping; the CLI says what to do for each.
 - A paused job shows up everywhere a status does. `dagnam training get` prints `Status: paused`,
   the pause reason the platform gave (the job's `error_message`) and the command to resume.
-  `dagnam stream` prints the `paused` event and, when the stream ends on it, the resume command.
-  The agent skill's `watch_training.py` (`dagnam-watch`) exits with status `3` on a pause
-  (0 complete, 1 failed or cancelled), so a script can tell "add credits and resume" from a
-  failure. The event stream stops on the `stream_end` that follows `paused`, as it always has.
-- `dagnam audit delete --include-endpoints` deletes endpoints that are still serving too; apps
-  calling them start getting errors. Without it, a delete that finds a serving endpoint prints
-  the platform's sentence once, a table of the blocking endpoints and the exact next commands
-  (`dagnam audit cancel <dir>`, or the same delete with `--include-endpoints`), and exits 1
-  having changed nothing; under `--json` stdout is the refusal object. The receipt marks a
-  deployment deleted while it was serving with `(was serving)`.
-- `dagnam.audit.delete_audit(audit_dir, client, include_endpoints=True)` and
-  `DagnamClient.delete_audit(audit_id, include_endpoints=True)` delete the audit's endpoints too,
-  even while they are serving; apps calling them start getting errors.
-- A `402 insufficient_credits` answer raises `InsufficientCreditsError`, a `QuotaExceededError`
-  subclass, so existing `except QuotaExceededError` code keeps working. It carries `message`
-  (the platform's own sentence, printed once), `required_credits`, `available_credits` (`None`
-  when the platform does not disclose the balance) and `next_steps`. The CLI prints the message
-  and a short hint for each next step.
-- `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a
-  model version's artifacts, so the artifact id `dagnam models download` needs can be found.
-- `dagnam training get` prints `Model version: <id>` when the job has registered one.
+  `dagnam stream` and the agent skill's `watch_training.py` (`dagnam-watch`) recognise a pause from
+  a `paused` event, a `status` event with `new_status` `paused`, or a `stream_end` with `reason`
+  `paused`, and also from the job itself: its status is read before the stream is opened (a job
+  that is already paused is reported at once) and then once a minute while events or heartbeats
+  arrive, so a stream that only sends heartbeats cannot hold them for ever. `dagnam stream`
+  suggests the resume command when it ends on a pause; `dagnam-watch` exits with status `3`
+  (0 complete, 1 failed or cancelled), so a script can tell "add credits and resume" from a failure.
+  `dagnam.resources.training.follow_training` is that pause-aware stream. `dagnam.stream_training`
+  is unchanged.
 
 ## [0.17.0] - 2026-10-07
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -160,7 +161,7 @@ def test_stream_that_ends_on_a_pause_suggests_resuming(
         SSEEvent(event="paused", data={"message": PAUSE}),
         SSEEvent(event="stream_end", data={}),
     ]
-    with mock.patch("dagnam.stream_training", return_value=iter(events)):
+    with mock.patch("dagnam.resources.training.stream_training", return_value=iter(events)):
         assert run_cli(["stream", "job-1"]) == 0
     captured = capsys.readouterr()
     assert "[paused]" in captured.out
@@ -169,6 +170,56 @@ def test_stream_that_ends_on_a_pause_suggests_resuming(
 
 def test_stream_without_a_pause_suggests_nothing(run_cli: CliRunner, capsys: StrCapture) -> None:
     events = [SSEEvent(event="complete", data={})]
-    with mock.patch("dagnam.stream_training", return_value=iter(events)):
+    with mock.patch("dagnam.resources.training.stream_training", return_value=iter(events)):
         run_cli(["stream", "job-1"])
     assert "Next:" not in capsys.readouterr().err
+
+
+def test_stream_of_an_already_paused_job_ends_with_the_resume_hint_and_never_waits(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    def never(*_a: object, **_k: object) -> object:
+        raise AssertionError("the stream must not be opened")
+
+    paused = {"status": "paused", "error_message": PAUSE}
+    with (
+        mock.patch("dagnam.resources.training.stream_training", never),
+        mock.patch("dagnam.resources.training.get_training_job", return_value=paused),
+    ):
+        assert run_cli(["stream", "job-1"]) == 0
+    captured = capsys.readouterr()
+    assert "[paused]" in captured.out
+    assert "Next: dagnam training resume job-1" in captured.err
+
+
+def test_stream_of_nothing_but_heartbeats_ends_when_the_job_is_found_paused(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    states = iter([{"status": "running"}, {"status": "running"}, {"status": "paused"}])
+    with (
+        mock.patch("dagnam.resources.training.PAUSE_CHECK_SECONDS", 0.0),
+        mock.patch(
+            "dagnam.resources.training.stream_training",
+            side_effect=lambda *_a, **_k: itertools.repeat(SSEEvent(event="heartbeat", data={})),
+        ),
+        mock.patch(
+            "dagnam.resources.training.get_training_job", side_effect=lambda *_a, **_k: next(states)
+        ),
+    ):
+        assert run_cli(["stream", "job-1"]) == 0
+    assert "Next: dagnam training resume job-1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        SSEEvent(event="status", data={"new_status": "paused"}),
+        SSEEvent(event="stream_end", data={"reason": "paused"}),
+    ],
+)
+def test_stream_that_ends_on_a_status_or_end_that_says_paused_suggests_resuming(
+    run_cli: CliRunner, capsys: StrCapture, event: SSEEvent
+) -> None:
+    with mock.patch("dagnam.resources.training.stream_training", return_value=iter([event])):
+        run_cli(["stream", "job-1"])
+    assert "Next: dagnam training resume job-1" in capsys.readouterr().err

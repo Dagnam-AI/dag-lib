@@ -24,7 +24,6 @@ _TERMINAL_OK = "complete"
 _TERMINAL_FAIL = frozenset({"failed", "cancelled"})
 # A run the platform paused because the account could not fund its next stretch. It is neither
 # done nor failed: the progress is saved and ``dagnam training resume`` continues it.
-_PAUSED = "paused"
 PAUSED_EXIT_CODE = 3
 
 
@@ -110,24 +109,27 @@ def watch_training(job_id: str) -> int:
     and 0 if the stream ends without a terminal event (the job may still be running; the
     agent re-checks).
     """
-    import dagnam
+    from dagnam._core.sse import is_pause
+    from dagnam._core.text import sanitize_terminal_text
+    from dagnam.resources.training import follow_training
 
     seen = 0
-    for event in dagnam.stream_training(job_id):
+    for event in follow_training(job_id):
         name = getattr(event, "event", "")
         raw = getattr(event, "data", None)
         data = raw if isinstance(raw, dict) else {}
         seen += 1
+        if is_pause(event):
+            # The text is the platform's and embeds the job name: no terminal escapes through.
+            reason = sanitize_terminal_text(data.get("message") or data.get("error_message") or "")
+            print(f"[paused] training paused for {job_id}" + (f": {reason}" if reason else ""))
+            print(f"[paused] progress is saved; resume with `dagnam training resume {job_id}`")
+            return PAUSED_EXIT_CODE
         if name == "metric":
             print(f"[metric] {data.get('name')}={data.get('value')} (step {data.get('step')})")
         elif name == _TERMINAL_OK:
             print(f"[done] training complete for {job_id}")
             return 0
-        elif name == _PAUSED:
-            reason = data.get("message") or data.get("error_message")
-            print(f"[paused] training paused for {job_id}" + (f": {reason}" if reason else ""))
-            print(f"[paused] progress is saved; resume with `dagnam training resume {job_id}`")
-            return PAUSED_EXIT_CODE
         elif name in _TERMINAL_FAIL:
             print(f"[error] training {name} for {job_id}: {data.get('error', 'unknown')}")
             return 1

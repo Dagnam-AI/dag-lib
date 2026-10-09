@@ -84,6 +84,20 @@ class SSEClientModule(Protocol):
     SSEClient: SSEClientFactory
 
 
+def is_pause(event: SSEEvent) -> bool:
+    """Whether ``event`` says the job was paused, in any of the ways the platform says it.
+
+    A ``paused`` event, a ``status`` event whose ``new_status`` is ``paused``, or a
+    ``stream_end`` whose ``reason`` is ``paused``.
+    """
+    data = event.data if isinstance(event.data, dict) else {}
+    if event.event == "status":
+        return data.get("new_status") == "paused"
+    if event.event == "stream_end":
+        return data.get("reason") == "paused"
+    return event.event == "paused"
+
+
 def parse_raw_event(raw: object) -> SSEEvent:
     raw_event_type = getattr(raw, "event", None) or "message"
     event_type = raw_event_type if isinstance(raw_event_type, str) else str(raw_event_type)
