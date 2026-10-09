@@ -67,7 +67,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `dagnam.exceptions`) whose `reason` is `not_paused`, `checkpoint_unavailable`, or `None` when the
   previous run is still stopping; the CLI says what to do for each.
 - A paused job shows up everywhere a status does. `dagnam training get` prints `Status: paused`,
-  the pause reason the platform gave (the job's `error_message`) and the command to resume.
+  when it paused (the job's `completed_at`), the reason the platform gave (the job's
+  `error_message`) and the command to resume.
   `dagnam stream` and the agent skill's `watch_training.py` (`dagnam-watch`) recognise a pause from
   a `paused` event, a `status` event with `new_status` `paused`, or a `stream_end` with `reason`
   `paused`, and also from the job itself: its status is read before the stream is opened (a job

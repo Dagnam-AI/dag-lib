@@ -115,6 +115,8 @@ def cmd_training_get(args: argparse.Namespace) -> None:
     if result.get("status") == "paused":
         # A pause is the platform's way of saying the account could not fund the next stretch;
         # its sentence is the job's error_message. The progress is saved, so say how to go on.
+        if result.get("completed_at"):
+            print(f"Paused since: {format_local(result['completed_at'])}")
         if result.get("error_message"):
             print(f"Paused: {sanitize_terminal_text(result['error_message'])}")
         print_next_step(f"dagnam training resume {result.get('id') or args.job_id}")

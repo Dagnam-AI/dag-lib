@@ -15,6 +15,7 @@ from dagnam._core.exceptions import (
     TrainingStateError,
 )
 from dagnam._core.sse import SSEEvent
+from dagnam.cli.common import format_local
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, StrCapture
@@ -120,6 +121,24 @@ def test_training_get_shows_the_pause_reason_and_how_to_resume(
     assert "Status: paused" in captured.out
     assert f"Paused: {PAUSE}" in captured.out
     assert "Next: dagnam training resume j1" in captured.err
+
+
+def test_training_get_shows_when_the_job_was_paused(run_cli: CliRunner, capsys: StrCapture) -> None:
+    stamp = "2026-10-09T12:00:00+00:00"
+    payload = {"id": "j1", "status": "paused", "error_message": PAUSE, "completed_at": stamp}
+    with mock.patch("dagnam.get_training_job", mock.Mock(return_value=payload)):
+        run_cli(["training", "get", "j1"])
+    out = capsys.readouterr().out
+    assert f"Paused since: {format_local(stamp)}" in out
+
+
+def test_training_get_of_a_job_that_is_not_paused_shows_no_pause_date(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    payload = {"id": "j1", "status": "completed", "completed_at": "2026-10-09T12:00:00+00:00"}
+    with mock.patch("dagnam.get_training_job", mock.Mock(return_value=payload)):
+        run_cli(["training", "get", "j1"])
+    assert "Paused since" not in capsys.readouterr().out
 
 
 def test_training_get_strips_terminal_escapes_from_the_pause_reason(
