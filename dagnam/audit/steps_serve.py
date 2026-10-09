@@ -252,12 +252,17 @@ def replay_and_score(state: AuditState, ctx: StepContext) -> AuditState:
         write_atomic(path, json.dumps(head) + "\n")
     try:
         with open_append(path) as sink:
+            # A crash left the last line short: the first answer goes on a line of its
+            # own, or it merges with the fragment and neither parses back.
+            lead = "" if read_regular(path).endswith("\n") else "\n"
 
             def landed(position: int, answer: str | None, ms: float) -> None:
+                nonlocal lead
                 index = todo[position]
                 answers[index] = (answer, ms)
-                sink.write(json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
+                sink.write(lead + json.dumps({"row": index, "answer": answer, "ms": ms}) + "\n")
                 sink.flush()
+                lead = ""
 
             replay_holdout(
                 Endpoint(ctx.client.api_url, deployment_id, key),

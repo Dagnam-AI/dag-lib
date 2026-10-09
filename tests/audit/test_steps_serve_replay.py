@@ -312,6 +312,31 @@ def test_an_interrupted_replay_counts_what_it_already_answered(
     assert ctx.step(state).scored is True
 
 
+def test_an_answer_after_a_cut_off_line_lands_on_a_line_of_its_own(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    """A crash left the last line short; appending onto it would merge it with the next answer.
+
+    The merged line parses as nothing, so the answer was lost on disk and a later
+    resume paid for it again. The fragment keeps its bytes and is still skipped.
+    """
+    serve_chat(requests_mock, teacher)
+    ctx = make_ctx()
+    state = _served(_trained(), ctx)
+    path = ctx.workload_dir / "replay-head_tune.jsonl"
+    head = '{"deployment_id": "dep-1", "balance_before": 1000}\n'
+    kept = '{"row": 0, "answer": "a", "ms": 1.0}\n{"row": 1, "answer": "b", "ms'
+    path.write_text(head + kept, encoding="utf-8")
+
+    replay_and_score(state, ctx)
+
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(head + kept + "\n")
+    parsed = [json.loads(line) for line in text.splitlines() if line.endswith("}")]
+    assert sorted(row["row"] for row in parsed[1:]) == [0, 1, 2, 3]
+    assert ctx.step(state).scored is True
+
+
 def test_a_replay_that_could_pass_the_ceiling_is_never_started(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
 ) -> None:
