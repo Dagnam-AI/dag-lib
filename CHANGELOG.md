@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-09
+
+### Platform compatibility
+
+- `dagnam training resume` (and `dagnam.resume`, `resume_training_job`) calls a platform route that older
+  platforms do not have yet: until the platform you are connected to supports it, the command fails with a
+  not-found error. `push_checkpoint` likewise needs a newer platform and is refused, harmlessly, by an
+  older one. Everything else in this release works against the current platform.
+
 ### Changed
 
 - `dagnam account usage` labels the new always-on deployments limit (`deployments.warm_count`)
