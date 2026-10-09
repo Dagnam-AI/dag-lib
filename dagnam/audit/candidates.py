@@ -21,17 +21,24 @@ StudentKind = Literal["cpu-classifier", "gpu-small-llm"]
 
 RECIPE_MAX_MINUTES = 60
 """Both recipes' own time bound: the platform stops a run at ``max_duration_seconds=3_600``."""
+PROVIDER_MARGIN_MINUTES = 15
+"""The platform bills a run up to its time bound PLUS this provider-side margin."""
 CREDITS_PER_GPU_MINUTE = 2
 """The A10G rate every base the audit picks is priced on (the smallest tier that fits it)."""
-TRAINING_CREDITS_MAX = RECIPE_MAX_MINUTES * CREDITS_PER_GPU_MINUTE
+TRAINING_CREDITS_MAX = (RECIPE_MAX_MINUTES + PROVIDER_MARGIN_MINUTES) * CREDITS_PER_GPU_MINUTE
 """What one audit training run can cost at most, known before it is submitted.
 
-The platform offers no pre-submit estimate for a foundation run -- its
-``credits_estimate_max`` arrives in the submit's response -- so the budget
-holds each run to the most its recipe lets it charge.
+This is the most the platform can bill the run: the whole span it can be billed (its
+time bound plus the provider margin) at the tier's rate, 75 minutes at 2 credits.
+``--max-credits`` is a spending ceiling, so the budget counts a live run at this figure;
+a smaller one let spending pass the ceiling by up to the difference per run.
 
-ponytail: mirrors two platform constants (the recipe bound and the tier rate);
-a server-side pre-submit estimate replaces it when one exists.
+The platform offers no pre-submit estimate for a foundation run -- its
+``credits_estimate_max`` arrives in the submit's response, and that is a
+smaller, display-only band -- so the SDK mirrors the billing bound's inputs.
+
+ponytail: mirrors three platform constants (the recipe bound, the provider margin and
+the tier rate); a server-side pre-submit estimate replaces it when one exists.
 """
 
 
@@ -94,6 +101,7 @@ __all__ = [
     "CREDITS_PER_GPU_MINUTE",
     "HEAD_TUNE",
     "HOSTED_FLOOR",
+    "PROVIDER_MARGIN_MINUTES",
     "RECIPE_MAX_MINUTES",
     "SFT_SMALL",
     "TRAINING_CREDITS_MAX",

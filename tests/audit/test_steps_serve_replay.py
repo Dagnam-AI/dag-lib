@@ -293,14 +293,14 @@ def test_an_interrupted_replay_counts_what_it_already_answered(
 ) -> None:
     """The answered rows count as spent, and only the rows left to send are projected.
 
-    120 for training, 4 for the three rows already answered, 2 for the last one:
-    126 fits a 127 ceiling -- projecting the whole holdout again on top of the
-    answered rows (129) would refuse a replay that cannot pass it.
+    150 for training, 4 for the three rows already answered, 2 for the last one:
+    156 fits a 157 ceiling -- projecting the whole holdout again on top of the
+    answered rows (159) would refuse a replay that cannot pass it.
     """
     serve_chat(requests_mock, teacher)
-    ctx = make_ctx(max_credits=127)
+    ctx = make_ctx(max_credits=157)
     state = _served(_trained(), ctx)
-    ctx.step(state).training_cost_credits = 120.0
+    ctx.step(state).training_cost_credits = 150.0
     answers = ctx.workload_dir / "replay-head_tune.jsonl"
     answers.write_text(
         '{"deployment_id": "dep-1", "balance_before": 1000}\n'
@@ -309,6 +309,31 @@ def test_an_interrupted_replay_counts_what_it_already_answered(
     )
     replay_and_score(state, ctx)
     assert state.halted is None
+    assert ctx.step(state).scored is True
+
+
+def test_an_answer_after_a_cut_off_line_lands_on_a_line_of_its_own(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    """A crash left the last line short; appending onto it would merge it with the next answer.
+
+    The merged line parses as nothing, so the answer was lost on disk and a later
+    resume paid for it again. The fragment keeps its bytes and is still skipped.
+    """
+    serve_chat(requests_mock, teacher)
+    ctx = make_ctx()
+    state = _served(_trained(), ctx)
+    path = ctx.workload_dir / "replay-head_tune.jsonl"
+    head = '{"deployment_id": "dep-1", "balance_before": 1000}\n'
+    kept = '{"row": 0, "answer": "a", "ms": 1.0}\n{"row": 1, "answer": "b", "ms'
+    path.write_text(head + kept, encoding="utf-8")
+
+    replay_and_score(state, ctx)
+
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(head + kept + "\n")
+    parsed = [json.loads(line) for line in text.splitlines() if line.endswith("}")]
+    assert sorted(row["row"] for row in parsed[1:]) == [0, 1, 2, 3]
     assert ctx.step(state).scored is True
 
 

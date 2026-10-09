@@ -125,6 +125,37 @@ def test_an_empty_account_from_the_first_call_halts_with_nothing_recorded_as_fai
     assert (step.scored, step.error) == (None, None)
 
 
+def test_a_halt_rewrites_only_the_head_and_leaves_every_later_byte_alone(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
+) -> None:
+    """A resumed replay's file: a head, two answers and a line a crash cut short.
+
+    The 402 forgets the opening balance in the head and nothing else -- the answers
+    stay, and so does the torn last line, byte for byte.
+    """
+
+    def answer(messages: list[dict[str, str]]) -> str:
+        raise OutOfCreditsError
+
+    serve_chat(requests_mock, answer)
+    ctx = make_ctx()
+    state = _served(ctx)
+    path = ctx.workload_dir / "replay-head_tune.jsonl"
+    kept = (
+        '{"row": 0, "answer": "a", "ms": 1.5}\n'
+        '{"row": 1, "answer": "b\u00e9", "ms": 2.25}\n'
+        '{"row": 2, "answer": "c", "ms'
+    )
+    path.write_text('{"deployment_id": "dep-1", "balance_before": 1000}\n' + kept, encoding="utf-8")
+
+    replay_and_score(state, ctx)
+
+    assert state.halted == HALT
+    head, _, rest = path.read_bytes().partition(b"\n")
+    assert json.loads(head) == {"deployment_id": "dep-1", "balance_before": None}
+    assert rest == kept.encode("utf-8")
+
+
 def test_a_top_up_between_the_halt_and_the_resume_leaves_the_replay_cost_unknown(
     make_ctx: Callable[..., StepContext], platform: FakePlatform, requests_mock: RequestsMocker
 ) -> None:

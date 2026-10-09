@@ -209,11 +209,11 @@ def test_the_first_submit_is_held_to_the_ceiling_too(
 
 
 def test_the_default_ceiling_is_the_plan_rounded_up_to_a_hundred(audit_dir: Path) -> None:
-    """Each trained candidate at its 120-credit ceiling plus 5 for its 4-row replay."""
+    """Each trained candidate at its 150-credit ceiling plus 5 for its 4-row replay."""
     w1 = ("w1", StructureClass.ENUM_LABEL)
     w2 = ("w2", StructureClass.JSON_OBJECT)
     assert plan_credits(audit_dir, [w1]) == 200
-    assert plan_credits(audit_dir, [w1, w2]) == 300
+    assert plan_credits(audit_dir, [w1, w2]) == 400
     assert plan_credits(audit_dir, []) == 0
 
 
@@ -283,14 +283,14 @@ def test_the_default_ceiling_counts_what_the_audit_already_spent(audit_dir: Path
     w1.run_id, w1.run_status, w1.scored = "run-1", "completed", True
     w1.training_cost_credits, w1.replay_cost_credits = 146.0, 4.0
     w2 = ("w2", StructureClass.JSON_OBJECT)
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 spent + 125 still to come
-    assert plan_credits(audit_dir, [("w1", StructureClass.ENUM_LABEL), w2], state) == 300
+    assert plan_credits(audit_dir, [w2], state) == 400  # 150 spent + 155 still to come
+    assert plan_credits(audit_dir, [("w1", StructureClass.ENUM_LABEL), w2], state) == 400
 
     live = state.candidate("w2", SFT)
     live.run_id, live.run_status = "run-2", "running"  # its ceiling is in what was spent
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 + 120 live + 5 replay
+    assert plan_credits(audit_dir, [w2], state) == 400  # 150 + 150 live + 5 replay
     live.error = "deploy_failed: no gpu"
-    assert plan_credits(audit_dir, [w2], state) == 300  # 150 + 120: nothing left to run
+    assert plan_credits(audit_dir, [w2], state) == 300  # 150 + 150: nothing left to run
 
 
 def test_a_delete_while_the_run_waits_on_training_ends_it_as_deleted(
