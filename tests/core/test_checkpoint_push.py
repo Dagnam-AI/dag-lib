@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import requests
 import requests_mock as rm_module
+from tests.core.client.test_common_credits import TRAINING_BODY
 
 from dagnam._core import auth, checkpoint_push
 from dagnam._core.checkpoint_push import push_checkpoint
@@ -220,6 +221,7 @@ def test_a_passing_refusal_is_logged_and_the_next_push_is_tried(
     [
         (400, "HTTP 400"),
         (401, "HTTP 401"),
+        (402, "HTTP 402"),
         (403, "HTTP 403"),
         (404, "HTTP 404"),
         (405, "HTTP 405"),
@@ -519,3 +521,18 @@ def test_a_file_that_vanishes_while_it_is_sent_says_so_and_not_network_error(
 
     assert "FileNotFoundError" in log.text
     assert "network error" not in log.text
+
+
+def test_an_unfunded_account_is_warned_once_and_ends_the_pushing(
+    tmp_path: Path, rmock: RequestsMocker, log: _Log
+) -> None:
+    # The typed credit refusal is a QuotaExceededError too: it is not an APIError.
+    rmock.post(PUSH, status_code=402, json=TRAINING_BODY)
+
+    for epoch in (3, 4, 5):
+        assert push_checkpoint(_file(tmp_path), epoch=epoch, step=epoch, log=log) is None
+
+    assert rmock.call_count == 1
+    assert len(log.lines) == 1
+    assert "HTTP 402" in log.text
+    assert "no more checkpoints will be pushed" in log.text

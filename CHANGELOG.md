@@ -87,7 +87,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   warning in the run's log (a status or an error type, no URL, token or response body) and skipped.
   It does nothing outside a platform run, under `DAGNAM_INTERNAL`, or for an empty file. A refusal
   is remembered for the rest of the process, because each push sends its whole body first: a
-  rejected token or run (401, 403, 404, 405, 410), a checkpoint that is too large (413) or any other
+  rejected token or run (401, 403, 404, 405, 410), an unfunded account (402), a checkpoint that is too large (413) or any other
   request the platform will not take (4xx other than 408, 409, 429) warns once and ends the
   pushing; a 429 pauses it silently for the platform's `Retry-After` (300 seconds if it gives
   none); `not_accepting_checkpoints` ends it silently.

@@ -25,6 +25,7 @@ from dagnam._core.exceptions import (
     APIError,
     AuthError,
     PayloadTooLargeError,
+    QuotaExceededError,
     TrainingJobNotFoundError,
     TrainingStateError,
 )
@@ -65,6 +66,8 @@ def _status(exc: Exception) -> int | None:
     """The HTTP status a failure stands for, or ``None`` for a transport or local failure."""
     if isinstance(exc, PayloadTooLargeError):
         return 413
+    if isinstance(exc, QuotaExceededError):  # also InsufficientCreditsError; not an APIError
+        return 402
     if isinstance(exc, AuthError):
         return 401
     if isinstance(exc, TrainingJobNotFoundError):
