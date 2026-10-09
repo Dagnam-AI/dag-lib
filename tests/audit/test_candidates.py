@@ -55,8 +55,8 @@ def test_trained_candidates_name_their_recipe_base_serving_rate_and_ceiling() ->
 def test_a_run_is_budgeted_at_everything_the_platform_can_bill_it() -> None:
     """The recipes' hour plus the provider margin, at the A10G's 2 credits a minute.
 
-    The platform reserves exactly this span when it admits a run, so a smaller
-    figure here would let ``--max-credits`` pass a run the account cannot start.
+    The platform can bill a run for exactly this span, so a smaller figure here
+    would let spending pass ``--max-credits``.
     """
     assert RECIPE_MAX_MINUTES + PROVIDER_MARGIN_MINUTES == 75
     assert TRAINING_CREDITS_MAX == 150

@@ -630,8 +630,9 @@ and which to move. The rows are already uploaded when the check runs; `dagnam au
 ./audit` removes them, and, since there is no narrower form, the whole audit with them.
 
 **`--max-credits` is a hard ceiling.** `dagnam audit run` never starts a training run or a
-holdout replay that could take the credits spent past it: a run is budgeted at the most its
-recipe can charge (120 credits) and a replay at one credit per holdout row plus 10%. Without
+holdout replay that could take the credits spent past it: a run is budgeted at the most the
+platform can bill it (150 credits: the recipe's one-hour limit plus a 15-minute provider margin,
+at 2 credits a minute) and a replay at one credit per holdout row plus 10%. Without
 the flag the ceiling is what the audit already spent plus the plan's estimate for what is
 left, rounded up to 100, printed in the listing you confirm. A candidate whose replay saw more than 10% of its calls fail is reported
 `unreliable` and never becomes the winner.

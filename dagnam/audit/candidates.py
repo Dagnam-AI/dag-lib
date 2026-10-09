@@ -28,15 +28,14 @@ CREDITS_PER_GPU_MINUTE = 2
 TRAINING_CREDITS_MAX = (RECIPE_MAX_MINUTES + PROVIDER_MARGIN_MINUTES) * CREDITS_PER_GPU_MINUTE
 """What one audit training run can cost at most, known before it is submitted.
 
-This is the same quantity the platform reserves when it admits the run: the whole
-span the run can be billed (its time bound plus the provider margin) at the tier's
-rate, 75 minutes at 2 credits. The budget holds each run to it, so ``--max-credits``
-never admits a run the account could not start, and the platform returns whatever the
-run does not use.
+This is the most the platform can bill the run: the whole span it can be billed (its
+time bound plus the provider margin) at the tier's rate, 75 minutes at 2 credits.
+``--max-credits`` is a spending ceiling, so the budget counts a live run at this figure;
+a smaller one let spending pass the ceiling by up to the difference per run.
 
 The platform offers no pre-submit estimate for a foundation run -- its
 ``credits_estimate_max`` arrives in the submit's response, and that is a
-smaller, display-only band -- so the SDK mirrors the reservation's inputs.
+smaller, display-only band -- so the SDK mirrors the billing bound's inputs.
 
 ponytail: mirrors three platform constants (the recipe bound, the provider margin and
 the tier rate); a server-side pre-submit estimate replaces it when one exists.
