@@ -45,6 +45,7 @@ from dagnam._core.exceptions import (
     StreamError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
+    TrainingStateError,
     UploadError,
 )
 
@@ -84,5 +85,6 @@ __all__ = [
     "StreamError",
     "TaskNotFoundError",
     "TrainingJobNotFoundError",
+    "TrainingStateError",
     "UploadError",
 ]

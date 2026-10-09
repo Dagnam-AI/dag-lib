@@ -125,6 +125,21 @@ class TeardownInProgressError(APIError):
     """
 
 
+class TrainingStateError(APIError):
+    """A training-job request was refused because of the job's current state (``409``).
+
+    ``reason`` is the platform's machine-readable marker when it sent one:
+    ``not_paused`` (resume of a job that is not paused), ``checkpoint_unavailable`` (the paused
+    job's saved checkpoint cannot be read) or ``not_accepting_checkpoints`` (a checkpoint push
+    to a job that is not running). A 409 without a marker, such as a resume while the previous
+    run is still stopping, has ``reason=None``; ``message`` is the platform's own sentence.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        self.reason = reason
+        super().__init__(409, message)
+
+
 class EndpointsServingError(APIError):
     """A delete stopped, having changed nothing, because an endpoint is still serving (``409 endpoints_serving``).
 

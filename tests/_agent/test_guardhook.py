@@ -191,3 +191,60 @@ def test_allows_on_malformed_event(monkeypatch: PytestMonkeyPatch, capsys: StrCa
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     assert guardhook.main() == 0
     assert capsys.readouterr().out.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "dagnam training resume j1",
+        "dagnam training restart j1",
+        "dagnam training restore j1 c1",
+        "dagnam \\\n  training resume j1",
+        'python -c "import dagnam; dagnam.resume(jid)"',
+        'python -c "import dagnam; dagnam.restart(jid)"',
+        'python -c "import dagnam; dagnam.restore_checkpoint(jid, cid)"',
+        'python -c "import dagnam; dagnam.DagnamClient().resume_training_job(jid)"',
+        'python -c "from dagnam._core.client import DagnamClient as C; C().restart_training_job(j)"',
+        'python -c "import dagnam; C.restore_from_checkpoint(j, c)"',
+    ],
+)
+def test_denies_unconfirmed_commands_that_charge_credits_to_continue_training(
+    command: str, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    code, payload = _run(
+        {"tool_name": "Bash", "tool_input": {"command": command}}, monkeypatch, capsys
+    )
+    assert code == 0
+    assert payload["permissionDecision"] == "deny"
+
+
+def test_allows_a_confirmed_resume(monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
+    code, payload = _run(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "DAGNAM_CONFIRM=1 dagnam training resume j1"},
+        },
+        monkeypatch,
+        capsys,
+    )
+    assert code == 0
+    assert payload == {}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "dagnam training get j1",
+        "dagnam stream j1",
+        "python watch_training.py j1",
+        'python -c "import dagnam; dagnam.get_training_job(j)"',
+    ],
+)
+def test_allows_reading_a_training_job(
+    command: str, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    code, payload = _run(
+        {"tool_name": "Bash", "tool_input": {"command": command}}, monkeypatch, capsys
+    )
+    assert code == 0
+    assert payload == {}

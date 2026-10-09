@@ -37,6 +37,7 @@ from dagnam._core.exceptions import (
     ResponseError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
+    TrainingStateError,
     UploadError,
     VersionKeptError,
 )
@@ -470,6 +471,16 @@ def raise_for_deployment(resp: ResponseLike, deployment_id: str) -> None:
 
 def raise_for_training_job(resp: ResponseLike, job_id: str) -> None:
     raise_for_generic(resp, TrainingJobNotFoundError, job_id)
+
+
+def raise_for_training_state(resp: ResponseLike, job_id: str) -> None:
+    """Like :func:`raise_for_training_job`, but a 409 is a :class:`TrainingStateError`.
+
+    Its ``reason`` is the platform's ``error`` marker when the body carries one.
+    """
+    if _status_code(resp) == 409:
+        raise TrainingStateError(_text(resp), reason=_error_marker(_error_detail_source(resp)))
+    raise_for_training_job(resp, job_id)
 
 
 def raise_for_checkpoint(resp: ResponseLike, checkpoint_id: str) -> None:

@@ -528,7 +528,7 @@ def test_attach_cli_parses_command_after_separator(
     run_cli, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DAGNAM_API_KEY", "sk_test")
-    with mock.patch("dagnam.cli.training.cmd_training_attach") as attach:
+    with mock.patch("dagnam.cli.training_parser.cmd_training_attach") as attach:
         run_cli(
             [
                 "training",

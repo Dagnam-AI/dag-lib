@@ -23,6 +23,7 @@ from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
     raise_for_training_job,
+    raise_for_training_state,
     requests_query_params,
     response_json_object,
     response_json_value,
@@ -171,6 +172,25 @@ class TrainingClientMixin(BaseDagnamClient):
                 job_id=job_id,
             )
         )
+
+    def resume_training_job(self, job_id: str) -> JsonObject:
+        """Put a paused job back in the queue, under the same id.
+
+        ``POST /api/v1/training/jobs/{id}/resume``. The platform picks the checkpoint the pause
+        saved and charges the first stretch up front, so a balance that cannot cover it raises
+        :class:`~dagnam.InsufficientCreditsError`. A job that is not paused, whose saved
+        checkpoint cannot be read, or whose previous run is still stopping raises
+        :class:`~dagnam.TrainingStateError`; an unknown job raises
+        :class:`~dagnam.TrainingJobNotFoundError`.
+        """
+        url = f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/resume"
+        resp = self._request(
+            "POST",
+            url,
+            raise_for=lambda r: raise_for_training_state(r, job_id),
+            allow_redirects=ALLOW_REDIRECTS,
+        )
+        return response_json_object(resp)
 
     def restore_from_checkpoint(self, job_id: str, checkpoint_id: str) -> JsonObject:
         """Start a new job from one of a job's checkpoints; returns the new job.

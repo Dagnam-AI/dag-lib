@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
+from typing import BinaryIO
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
@@ -12,9 +14,21 @@ from dagnam._core.client.base import (
     is_success_response,
     safe_error_body_from_response,
 )
-from dagnam._core.client.common import quote_path_segment, raise_for_training_job
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_training_job,
+    raise_for_training_state,
+    response_json_object,
+)
 from dagnam._core.exceptions import AuthError, CheckpointNotFoundError
 from dagnam._types import JsonObject, ensure_json_array
+
+PUSH_TIMEOUT = (10, 900)
+"""Connect and read timeouts, in seconds, for a checkpoint push.
+
+The platform answers only after it has stored the bytes, and it holds the run's one push slot
+for 900 s, so there is nothing to wait for past that.
+"""
 
 
 class CheckpointsClientMixin(BaseDagnamClient):
@@ -74,3 +88,40 @@ class CheckpointsClientMixin(BaseDagnamClient):
 
         written = self._stream_response_to_file(resp, Path(dest_path))
         return written, expected_checksum
+
+    def push_checkpoint(
+        self,
+        job_id: str,
+        body: BinaryIO | Iterable[bytes],
+        *,
+        epoch: int,
+        step: int,
+        name: str,
+    ) -> JsonObject:
+        """Send a run's checkpoint, raw, while the run is still going.
+
+        ``POST /api/v1/training/jobs/{job_id}/checkpoints/push?epoch=&step=&name=``. ``body`` is
+        an open binary file, or a sized iterable of bytes such as
+        :class:`~dagnam._core.tar_stream.DirectoryTar` for a directory; either is streamed, never
+        read into memory, and goes with a ``Content-Length`` (the platform refuses a push without
+        one). ``name`` supplies the stored file's extension. Authenticates with the run token the
+        client was built with, so it can push for its own job only.
+
+        Returns ``{"checkpoint_id", "epoch", "step", "size_bytes", "sha256"}``. Not retried: the
+        body is consumed, and the run's next checkpoint is the retry. A 409 raises
+        :class:`~dagnam.TrainingStateError` (``reason`` ``not_accepting_checkpoints`` when the
+        job is no longer running), a 413 :class:`~dagnam.PayloadTooLargeError`; a 429, 5xx or
+        transport failure an :class:`~dagnam.APIError`.
+        """
+        resp = self._request(
+            "POST",
+            f"{self.api_url}/api/v1/training/jobs/{quote_path_segment(job_id)}/checkpoints/push",
+            raise_for=lambda r: raise_for_training_state(r, job_id),
+            params={"epoch": epoch, "step": step, "name": name},
+            data=body,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=PUSH_TIMEOUT,
+            allow_redirects=ALLOW_REDIRECTS,
+            retry=False,
+        )
+        return response_json_object(resp)

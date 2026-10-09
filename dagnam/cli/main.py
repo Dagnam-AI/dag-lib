@@ -57,7 +57,7 @@ def build_parser() -> DagnamArgumentParser:
     from dagnam.cli.models import register_models
     from dagnam.cli.project import register_projects
     from dagnam.cli.register import register_register
-    from dagnam.cli.training import register_training
+    from dagnam.cli.training_parser import register_training
 
     parser = DagnamArgumentParser(
         prog="dagnam",

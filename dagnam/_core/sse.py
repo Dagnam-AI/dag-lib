@@ -34,6 +34,8 @@ _LOGGER = logging.getLogger("dagnam.sse")
 DEFAULT_MAX_RECONNECTS = 50
 DEFAULT_BACKOFF_BASE = 1.0
 
+# A job the platform paused streams ``paused`` and then ``stream_end``; ``stream_end`` is what stops
+# the iteration, so the caller sees the pause first.
 TERMINAL_TRAINING_EVENTS = frozenset({"complete", "failed", "cancelled", "stream_end"})
 TERMINAL_DEPLOYMENT_EVENTS = frozenset({"deployment_ready", "deployment_failed", "stream_end"})
 TERMINAL_INFERENCE_EVENTS = frozenset({"complete", "error"})
@@ -80,6 +82,20 @@ class SSEClientModule(Protocol):
     """sseclient module surface used by this module."""
 
     SSEClient: SSEClientFactory
+
+
+def is_pause(event: SSEEvent) -> bool:
+    """Whether ``event`` says the job was paused, in any of the ways the platform says it.
+
+    A ``paused`` event, a ``status`` event whose ``new_status`` is ``paused``, or a
+    ``stream_end`` whose ``reason`` is ``paused``.
+    """
+    data = event.data if isinstance(event.data, dict) else {}
+    if event.event == "status":
+        return data.get("new_status") == "paused"
+    if event.event == "stream_end":
+        return data.get("reason") == "paused"
+    return event.event == "paused"
 
 
 def parse_raw_event(raw: object) -> SSEEvent:

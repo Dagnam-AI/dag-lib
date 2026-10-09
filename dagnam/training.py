@@ -1,7 +1,8 @@
 """Local training metrics reporter for generated training scripts.
 
 Generated training code imports this module to emit structured JSON events to a
-local metrics file. It never makes network calls and never touches credentials.
+local metrics file. Reporting never makes network calls and never touches credentials; only
+:func:`push_checkpoint` and the opt-in live-streaming uploader talk to the platform.
 
 The metrics path resolves in this order:
 
@@ -260,6 +261,30 @@ def write_training_state(
             "Dagnam metrics reporter: failed to write training state; "
             "crash-recovery progress may be unavailable.\n",
         )
+
+
+def push_checkpoint(path: str | os.PathLike[str], *, epoch: int, step: int) -> str | None:
+    """Send a checkpoint to the platform while the run is still going; never raise.
+
+    ``path`` is a checkpoint file (sent as it is) or a directory (sent as an uncompressed tar;
+    symlinks in it are not followed). A run on the platform's compute loses its disk when it
+    ends, so this is what lets a paused run continue from its newest checkpoint. Returns the
+    platform's checkpoint id, or ``None`` when nothing was saved: outside a platform run, under
+    ``DAGNAM_INTERNAL`` (the platform collects checkpoints from its own host), or when the push
+    was refused or failed, which is logged as a warning and does not stop the run.
+    """
+    try:
+        # Loaded here, not at import: this module stays free of the SDK client (and so of any
+        # network code) until a checkpoint is actually pushed. See the stdlib-only test.
+        push_mod = __import__("dagnam._core.checkpoint_push", fromlist=["push_checkpoint"])
+        saved = push_mod.push_checkpoint(path, epoch=epoch, step=step, log=report_log)
+        return saved if isinstance(saved, str) else None
+    except Exception:
+        _warn_once(
+            "push_checkpoint",
+            "Dagnam: could not push a checkpoint to the platform; training continues.\n",
+        )
+        return None
 
 
 def _online_context() -> bool:

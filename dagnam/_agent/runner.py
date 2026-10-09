@@ -22,6 +22,9 @@ _SPEND_ACTIONS = ("deploy", "train")
 # ``dagnam._core.sse.TERMINAL_TRAINING_EVENTS``).
 _TERMINAL_OK = "complete"
 _TERMINAL_FAIL = frozenset({"failed", "cancelled"})
+# A run the platform paused because the account could not fund its next stretch. It is neither
+# done nor failed: the progress is saved and ``dagnam training resume`` continues it.
+PAUSED_EXIT_CODE = 3
 
 
 def _entitlement_lines() -> list[str]:
@@ -101,18 +104,27 @@ def plan_main(argv: Sequence[str] | None = None) -> int:
 def watch_training(job_id: str) -> int:
     """Stream a training job's SSE events, print a compact summary, return an exit code.
 
-    Returns 0 on the ``complete`` terminal event, 1 on ``failed``/``cancelled``, and
-    0 if the stream ends without a terminal event (the job may still be running; the
+    Returns 0 on the ``complete`` terminal event, 1 on ``failed``/``cancelled``,
+    ``PAUSED_EXIT_CODE`` (3) on ``paused`` (add credits, then ``dagnam training resume``),
+    and 0 if the stream ends without a terminal event (the job may still be running; the
     agent re-checks).
     """
-    import dagnam
+    from dagnam._core.sse import is_pause
+    from dagnam._core.text import sanitize_terminal_text
+    from dagnam.resources.training_follow import follow_training
 
     seen = 0
-    for event in dagnam.stream_training(job_id):
+    for event in follow_training(job_id):
         name = getattr(event, "event", "")
         raw = getattr(event, "data", None)
         data = raw if isinstance(raw, dict) else {}
         seen += 1
+        if is_pause(event):
+            # The text is the platform's and embeds the job name: no terminal escapes through.
+            reason = sanitize_terminal_text(data.get("message") or data.get("error_message") or "")
+            print(f"[paused] training paused for {job_id}" + (f": {reason}" if reason else ""))
+            print(f"[paused] progress is saved; resume with `dagnam training resume {job_id}`")
+            return PAUSED_EXIT_CODE
         if name == "metric":
             print(f"[metric] {data.get('name')}={data.get('value')} (step {data.get('step')})")
         elif name == _TERMINAL_OK:

@@ -64,6 +64,7 @@ from dagnam.exceptions import (
     StreamError,
     TaskNotFoundError,
     TrainingJobNotFoundError,
+    TrainingStateError,
     UploadError,
 )
 from dagnam.resources import (
@@ -109,6 +110,7 @@ from dagnam.resources.training import (
     list_training_jobs,
     restart,
     restore_checkpoint,
+    resume,
     stream_training,
     training_logs,
     training_metrics,
@@ -180,6 +182,7 @@ __all__ = [
     "TaskNotFoundError",
     "TrainingEvent",
     "TrainingJobNotFoundError",
+    "TrainingStateError",
     "UploadError",
     "__version__",
     "account",
@@ -227,6 +230,7 @@ __all__ = [
     "report_system",
     "restart",
     "restore_checkpoint",
+    "resume",
     "save_checksum",
     "save_metadata",
     "set_warm",

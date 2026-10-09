@@ -13,6 +13,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
   for up to 75 minutes at the tier's 2 credits a minute (the recipe's one-hour limit plus a
   15-minute provider margin), so a run budgeted at 120 could take the credits spent past
   `--max-credits` by up to 30. The default ceiling rises by 30 per trained candidate, before it is rounded up to the next 100.
+- The agent skill's guard hook now asks for `DAGNAM_CONFIRM=1` before `dagnam training resume`,
+  `restart` or `restore` (CLI, `dagnam.resume(...)` and the client methods), which each charge
+  credits up front, and the skill documents `paused`, the watcher's exit code `3`, `resume` as a
+  confirmed action, and `push_checkpoint`.
 - `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
   platform that supports it (an older platform still deletes without asking). The platform
   answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,
@@ -60,6 +64,41 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - `dagnam.models.list_artifacts(version_id)` and `dagnam models artifacts VERSION_ID` list a
   model version's artifacts, so the artifact id `dagnam models download` needs can be found.
 - `dagnam training get` prints `Model version: <id>` when the job has registered one.
+- `dagnam.training.push_checkpoint(path, *, epoch, step)` sends a checkpoint to the platform while a
+  run on its compute is still going, so a run that is paused can continue from its newest one.
+  A regular file is sent as it is; a directory is sent as an uncompressed tar, streamed from disk
+  (with its exact length up front) and never held in memory. Symlinks, pipes and devices inside
+  the directory are left out rather than followed, and a path that is itself a pipe or a device
+  is refused. A file that is shorter, longer, rewritten or swapped for a link while it is being
+  sent, or a file added to or removed from the directory meanwhile, abandons the push (a padded or cut file would be stored as a checkpoint to resume from).
+  It authorizes with the run token and URL in the run's environment, never a key set with
+  `dagnam.configure()`, and returns the checkpoint id. It never raises: a failure is logged as a
+  warning in the run's log (a status or an error type, no URL, token or response body) and skipped.
+  It does nothing outside a platform run, under `DAGNAM_INTERNAL`, or for an empty file. A refusal
+  is remembered for the rest of the process, because each push sends its whole body first: a
+  rejected token or run (401, 403, 404, 405, 410), an unfunded account (402), a checkpoint that is too large (413) or any other
+  request the platform will not take (4xx other than 408, 409, 429) warns once and ends the
+  pushing; a 429 pauses it silently for the platform's `Retry-After` (300 seconds if it gives
+  none); `not_accepting_checkpoints` ends it silently.
+- `dagnam training resume JOB_ID`, `dagnam.resume(job_id)` and `DagnamClient.resume_training_job`
+  (plus the `AsyncDagnamClient` twin) continue a paused training job from its last saved
+  checkpoint, under the same job id; the next stretch is charged up front. A balance that cannot
+  cover it raises `InsufficientCreditsError`, an unknown job `TrainingJobNotFoundError`. A `409`
+  raises the new `TrainingStateError` (an `APIError` subclass, also importable from
+  `dagnam.exceptions`) whose `reason` is `not_paused`, `checkpoint_unavailable`, or `None` when the
+  previous run is still stopping; the CLI says what to do for each.
+- A paused job shows up everywhere a status does. `dagnam training get` prints `Status: paused`,
+  when it paused (the job's `completed_at`), the reason the platform gave (the job's
+  `error_message`) and the command to resume.
+  `dagnam stream` and the agent skill's `watch_training.py` (`dagnam-watch`) recognise a pause from
+  a `paused` event, a `status` event with `new_status` `paused`, or a `stream_end` with `reason`
+  `paused`, and also from the job itself: its status is read before the stream is opened (a job
+  that is already paused is reported at once) and then once a minute while events or heartbeats
+  arrive, so a stream that only sends heartbeats cannot hold them for ever. `dagnam stream`
+  suggests the resume command when it ends on a pause; `dagnam-watch` exits with status `3`
+  (0 complete, 1 failed or cancelled), so a script can tell "add credits and resume" from a failure.
+  `dagnam.resources.training_follow.follow_training` is that pause-aware stream. `dagnam.stream_training`
+  is unchanged.
 
 ## [0.17.0] - 2026-10-07
 
