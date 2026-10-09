@@ -18,7 +18,7 @@ import pytest
 from dagnam._core.exceptions import APIError
 from dagnam._core.sse import SSEEvent, is_pause
 from dagnam._types import JsonObject
-from dagnam.resources import training as training_mod
+from dagnam.resources import training as training_mod, training_follow
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch
@@ -67,7 +67,7 @@ class _World:
             self.closed += 1
 
     def follow(self, *, include_heartbeats: bool = False) -> Iterator[SSEEvent]:
-        return training_mod.follow_training(
+        return training_follow.follow_training(
             "job-1", include_heartbeats=include_heartbeats, clock=self.clock
         )
 

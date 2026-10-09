@@ -216,7 +216,7 @@ def test_stream_of_nothing_but_heartbeats_ends_when_the_job_is_found_paused(
 ) -> None:
     states = iter([{"status": "running"}, {"status": "running"}, {"status": "paused"}])
     with (
-        mock.patch("dagnam.resources.training.PAUSE_CHECK_SECONDS", 0.0),
+        mock.patch("dagnam.resources.training_follow.PAUSE_CHECK_SECONDS", 0.0),
         mock.patch(
             "dagnam.resources.training.stream_training",
             side_effect=lambda *_a, **_k: itertools.repeat(SSEEvent(event="heartbeat", data={})),

@@ -76,7 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   arrive, so a stream that only sends heartbeats cannot hold them for ever. `dagnam stream`
   suggests the resume command when it ends on a pause; `dagnam-watch` exits with status `3`
   (0 complete, 1 failed or cancelled), so a script can tell "add credits and resume" from a failure.
-  `dagnam.resources.training.follow_training` is that pause-aware stream. `dagnam.stream_training`
+  `dagnam.resources.training_follow.follow_training` is that pause-aware stream. `dagnam.stream_training`
   is unchanged.
 
 ## [0.17.0] - 2026-10-07

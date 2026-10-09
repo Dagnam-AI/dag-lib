@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from dagnam._agent import runner
-from dagnam.resources import training as training_mod
+from dagnam.resources import training as training_mod, training_follow
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, StrCapture
@@ -242,7 +242,7 @@ def test_watch_training_on_an_already_paused_job_does_not_wait_for_a_stream(
 def test_watch_training_a_stream_of_only_heartbeats_ends_when_the_job_is_found_paused(
     monkeypatch: PytestMonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(training_mod, "PAUSE_CHECK_SECONDS", 0.0)
+    monkeypatch.setattr(training_follow, "PAUSE_CHECK_SECONDS", 0.0)
     polls: list[int] = []
 
     def job(*_a: object, **_k: object) -> dict[str, str]:

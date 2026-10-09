@@ -26,7 +26,7 @@ from dagnam.cli.presentation import (
 
 def cmd_stream(args: argparse.Namespace) -> None:
     from dagnam._core.sse import is_pause
-    from dagnam.resources.training import follow_training
+    from dagnam.resources.training_follow import follow_training
 
     paused = False
     try:

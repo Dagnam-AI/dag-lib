@@ -111,7 +111,7 @@ def watch_training(job_id: str) -> int:
     """
     from dagnam._core.sse import is_pause
     from dagnam._core.text import sanitize_terminal_text
-    from dagnam.resources.training import follow_training
+    from dagnam.resources.training_follow import follow_training
 
     seen = 0
     for event in follow_training(job_id):
