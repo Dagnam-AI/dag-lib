@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `dagnam account usage` labels the new always-on deployments limit (`deployments.warm_count`)
+  instead of printing the raw key.
 - The audit budgets each training run at 150 credits, not 120: the platform bills a trained run
   for up to 75 minutes at the tier's 2 credits a minute (the recipe's one-hour limit plus a
   15-minute provider margin), so a run budgeted at 120 could take the credits spent past
