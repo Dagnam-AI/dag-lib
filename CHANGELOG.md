@@ -81,7 +81,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   (with its exact length up front) and never held in memory. Symlinks, pipes and devices inside
   the directory are left out rather than followed, and a path that is itself a pipe or a device
   is refused. A file that is shorter, longer, rewritten or swapped for a link while it is being
-  sent abandons the push (a padded or cut file would be stored as a checkpoint to resume from).
+  sent, or a file added to or removed from the directory meanwhile, abandons the push (a padded or cut file would be stored as a checkpoint to resume from).
   It authorizes with the run token and URL in the run's environment, never a key set with
   `dagnam.configure()`, and returns the checkpoint id. It never raises: a failure is logged as a
   warning in the run's log (a status or an error type, no URL, token or response body) and skipped.

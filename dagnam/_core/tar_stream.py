@@ -158,13 +158,19 @@ class DirectoryTar:
     """
 
     def __init__(self, root: str | Path) -> None:
+        self._root = os.fspath(root)
         self._entries: list[_Entry] = []
-        self.skipped = _scan(os.fspath(root), "", self._entries)
+        self.skipped = _scan(self._root, "", self._entries)
         self.files = len(self._entries)
         self.failure: OSError | None = None
         self._length = len(_END_OF_ARCHIVE) + sum(
             len(_header(entry)) + entry.size + _padding(entry.size) for entry in self._entries
         )
+
+    def _names(self) -> list[str]:
+        found: list[_Entry] = []
+        _scan(self._root, "", found)
+        return [entry.arcname for entry in found]
 
     def __len__(self) -> int:
         return self._length
@@ -175,6 +181,10 @@ class DirectoryTar:
             for entry in self._entries:
                 yield _header(entry)
                 yield from _content(entry)
+            # A shard created after the scan (an async save still going) would be missing from
+            # the tar, and a checkpoint with a missing shard must not become the resume point.
+            if self._names() != [entry.arcname for entry in self._entries]:
+                raise FileChangedError("the set of files changed while it was being sent")
         except OSError as exc:
             self.failure = exc
             raise

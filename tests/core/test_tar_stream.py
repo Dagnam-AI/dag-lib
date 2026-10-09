@@ -231,6 +231,61 @@ def test_a_file_swapped_for_a_fifo_after_planning_does_not_block(tmp_path: Path)
         _tar_bytes(stream)
 
 
+def test_a_file_added_to_the_directory_after_planning_aborts_the_stream(tmp_path: Path) -> None:
+    root, _ = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    parts = iter(stream)
+    next(parts)
+    next(parts)
+    (root / "w-00002.bin").write_bytes(b"late shard")
+
+    with pytest.raises(FileChangedError, match="set of files"):
+        list(parts)
+
+    assert isinstance(stream.failure, FileChangedError)
+
+
+def test_a_file_added_in_a_new_subdirectory_after_planning_aborts_the_stream(
+    tmp_path: Path,
+) -> None:
+    root, _ = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    (root / "late").mkdir()
+    (root / "late" / "shard.bin").write_bytes(b"s")
+
+    with pytest.raises(FileChangedError, match="set of files"):
+        _tar_bytes(stream)
+
+
+def test_a_file_removed_after_it_was_sent_aborts_the_stream(tmp_path: Path) -> None:
+    root = tmp_path / "ckpt"
+    root.mkdir()
+    (root / "a.bin").write_bytes(b"a" * 10)
+    (root / "b.bin").write_bytes(b"b" * 10)
+    parts = iter(DirectoryTar(root))
+    next(parts)  # a.bin's header
+    next(parts)  # a.bin's bytes
+    next(parts)  # a.bin's padding
+    (root / "a.bin").unlink()
+    next(parts)  # b.bin's header
+    next(parts)
+    next(parts)
+
+    with pytest.raises(FileChangedError, match="set of files"):
+        next(parts)
+
+
+def test_a_link_or_a_pipe_added_after_planning_does_not_change_what_is_sent(
+    tmp_path: Path,
+) -> None:
+    root, _ = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    (root / "link").symlink_to(tmp_path)
+    os.mkfifo(root / "pipe")
+
+    assert len(_tar_bytes(stream)) == len(stream)
+
+
 def test_a_failure_is_forgotten_by_the_next_pass(tmp_path: Path) -> None:
     root, victim = _ckpt(tmp_path, b"x" * 10)
     stream = DirectoryTar(root)
