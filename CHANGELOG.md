@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The agent skill's guard hook now asks for `DAGNAM_CONFIRM=1` before `dagnam training resume`,
+  `restart` or `restore` (CLI, `dagnam.resume(...)` and the client methods), which each charge
+  credits up front, and the skill documents `paused`, the watcher's exit code `3`, `resume` as a
+  confirmed action, and `push_checkpoint`.
 - `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
   platform that supports it (an older platform still deletes without asking). The platform
   answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,
