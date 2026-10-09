@@ -28,6 +28,7 @@ _LIMIT_LABELS = {
     "projects.private_count": "private projects",
     "hub.private_model_count": "private hub models",
     "deployments.count": "deployments",
+    "deployments.warm_count": "always-on deployments",
     "api_keys.count": "API keys",
     "projects.version_retention": "project versions retained",
 }
@@ -43,6 +44,7 @@ _LIMIT_UNITS = {
     "projects.private_count": "projects",
     "hub.private_model_count": "models",
     "deployments.count": "deploys",
+    "deployments.warm_count": "warm",
     "api_keys.count": "keys",
     "projects.version_retention": "versions",
 }
