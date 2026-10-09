@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         APIError,
         ArchitectureValidationError,
         InsufficientCreditsError,
+        TrainingStateError,
     )
 
 _RESET = "\x1b[0m"
@@ -363,6 +364,27 @@ def _state_report(exc: BaseException) -> ErrorReport:
     )
 
 
+_JOB_GET_TRY = ("dagnam training get <id>", "check the job's current status")
+_TRAINING_STATE_TITLES: dict[str | None, tuple[str, tuple[str, str]]] = {
+    "not_paused": ("the training job is not paused", _JOB_GET_TRY),
+    "checkpoint_unavailable": (
+        "the paused job's saved checkpoint cannot be read",
+        ("dagnam checkpoint list <id>", "see which checkpoints are saved, then restore one"),
+    ),
+    "not_accepting_checkpoints": ("the training job is not accepting checkpoints", _JOB_GET_TRY),
+}
+_TRAINING_NOT_READY = (
+    "the training job is not ready for that yet",
+    ("", "Wait a few minutes, then retry."),
+)
+
+
+def _training_state_report(exc: BaseException) -> ErrorReport:
+    state = cast("TrainingStateError", exc)
+    title, hint = _TRAINING_STATE_TITLES.get(state.reason, _TRAINING_NOT_READY)
+    return ErrorReport(title=title, fields=[("Detail", state.message)], tries=[hint])
+
+
 def _stream_report(exc: BaseException) -> ErrorReport:
     return ErrorReport(
         title="the live event stream failed",
@@ -431,6 +453,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.DeploymentValidationError, _validation_report),
         (m.CodegenValidationError, _validation_report),
         (m.DeploymentStateError, _state_report),
+        (m.TrainingStateError, _training_state_report),
         (m.ProjectNotFoundError, _not_found_report("dagnam projects list")),
         (
             m.ArchitectureVersionNotFoundError,

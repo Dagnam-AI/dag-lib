@@ -1,6 +1,6 @@
 """Delegation coverage for the training-lifecycle resource functions.
 
-Covers ``restart``, ``restore_checkpoint``, ``estimate_resources``,
+Covers ``restart``, ``resume``, ``restore_checkpoint``, ``estimate_resources``,
 ``allowed_strategies``, ``download_code``, and ``download_dag`` - each thin
 wrapper's delegation to the resolved client - plus the shared
 ``_build_training_config`` helper that ``create_training_job`` and
@@ -22,6 +22,7 @@ from dagnam.resources.training import (
     estimate_resources,
     restart,
     restore_checkpoint,
+    resume,
 )
 
 
@@ -29,6 +30,12 @@ def test_restart_delegates() -> None:
     c = MagicMock(spec=DagnamClient, restart_training_job=MagicMock(return_value={"id": "j2"}))
     assert restart("j1", client=c) == {"id": "j2"}
     c.restart_training_job.assert_called_once_with("j1")
+
+
+def test_resume_delegates() -> None:
+    c = MagicMock(spec=DagnamClient, resume_training_job=MagicMock(return_value={"id": "j1"}))
+    assert resume("j1", client=c) == {"id": "j1"}
+    c.resume_training_job.assert_called_once_with("j1")
 
 
 def test_restore_checkpoint_delegates() -> None:

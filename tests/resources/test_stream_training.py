@@ -80,3 +80,27 @@ def test_stream_training_remints_stream_token_on_reconnect(rmock, monkeypatch):
     assert stream_route.request_history[1].qs == {"token": ["stream-t-2"]}
     assert "api_key" not in stream_route.request_history[0].qs
     assert "api_key" not in stream_route.request_history[1].qs
+
+
+def test_stream_training_yields_a_pause_then_stops_on_stream_end(rmock):
+    """A paused job's stream is ``paused`` then ``stream_end``: the caller sees the pause, then it stops."""
+    client = DagnamClient("https://api.test", "k")
+    rmock.post(
+        "https://api.test/api/v1/training/jobs/job_x/stream-access-token",
+        json={"token": "stream-t-1"},
+    )
+    stream_route = rmock.get(
+        "https://api.test/api/v1/streaming/training-jobs/job_x/stream",
+        text=(
+            'event: paused\ndata: {"message": "Paused at epoch 3."}\nid: evt-1\n\n'
+            "event: stream_end\ndata: {}\nid: evt-2\n\n"
+            'event: progress\ndata: {"after": "the end"}\nid: evt-3\n\n'
+        ),
+        headers={"Content-Type": "text/event-stream"},
+    )
+
+    events = list(training_mod.stream_training("job_x", client=client))
+
+    assert [event.event for event in events] == ["paused", "stream_end"]
+    assert events[0].data == {"message": "Paused at epoch 3."}
+    assert stream_route.call_count == 1

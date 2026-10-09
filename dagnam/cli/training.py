@@ -17,7 +17,13 @@ from dagnam.cli.common import (
     print_next_step,
     write_json_file,
 )
-from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
+from dagnam.cli.presentation import (
+    Column,
+    emit_result,
+    pagination_footer,
+    render_table,
+    sanitize_terminal_text,
+)
 
 if TYPE_CHECKING:
     from dagnam.cli.common import SubParsersAction
@@ -26,17 +32,21 @@ if TYPE_CHECKING:
 def cmd_stream(args: argparse.Namespace) -> None:
     import dagnam
 
+    paused = False
     try:
         for ev in dagnam.stream_training(
             args.job_id,
             include_heartbeats=args.heartbeats,
         ):
+            paused = paused or ev.event == "paused"
             if args.json:
                 print(json.dumps(asdict(ev)))
             else:
                 print(f"[{ev.event}] {ev.data}")
     except KeyboardInterrupt:
         sys.exit(130)
+    if paused:
+        print_next_step(f"dagnam training resume {args.job_id}")
 
 
 def cmd_training_attach(args: argparse.Namespace) -> None:
@@ -109,6 +119,12 @@ def cmd_training_get(args: argparse.Namespace) -> None:
     print(f"Progress: {result.get('progress_percentage', 0)}%")
     if result.get("model_version_id"):
         print(f"Model version: {result['model_version_id']}")
+    if result.get("status") == "paused":
+        # A pause is the platform's way of saying the account could not fund the next stretch;
+        # its sentence is the job's error_message. The progress is saved, so say how to go on.
+        if result.get("error_message"):
+            print(f"Paused: {sanitize_terminal_text(result['error_message'])}")
+        print_next_step(f"dagnam training resume {result.get('id') or args.job_id}")
 
 
 def _render_jobs(result: object) -> str:
@@ -218,6 +234,14 @@ def cmd_training_restart(args: argparse.Namespace) -> None:
     import dagnam
 
     result = dagnam.restart(args.job_id)
+    print_json(result)
+    print_next_step(f"dagnam stream {result.get('id') or '<job-id>'}")
+
+
+def cmd_training_resume(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.resume(args.job_id)
     print_json(result)
     print_next_step(f"dagnam stream {result.get('id') or '<job-id>'}")
 
@@ -436,6 +460,17 @@ def register_training(subparsers: SubParsersAction) -> None:
     )
     training_restart.add_argument("job_id", help="ID of the training job.")
     training_restart.set_defaults(func=cmd_training_restart)
+
+    training_resume = training_sub.add_parser(
+        "resume",
+        help="Resume a paused training job.",
+        description=(
+            "Continue a paused training job from its last saved checkpoint, under the same id. "
+            "The next stretch is charged up front."
+        ),
+    )
+    training_resume.add_argument("job_id", help="ID of the paused training job.")
+    training_resume.set_defaults(func=cmd_training_resume)
 
     training_restore = training_sub.add_parser(
         "restore",

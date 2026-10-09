@@ -34,6 +34,8 @@ _LOGGER = logging.getLogger("dagnam.sse")
 DEFAULT_MAX_RECONNECTS = 50
 DEFAULT_BACKOFF_BASE = 1.0
 
+# A job the platform paused streams ``paused`` and then ``stream_end``; ``stream_end`` is what stops
+# the iteration, so the caller sees the pause first.
 TERMINAL_TRAINING_EVENTS = frozenset({"complete", "failed", "cancelled", "stream_end"})
 TERMINAL_DEPLOYMENT_EVENTS = frozenset({"deployment_ready", "deployment_failed", "stream_end"})
 TERMINAL_INFERENCE_EVENTS = frozenset({"complete", "error"})

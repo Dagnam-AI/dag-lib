@@ -315,6 +315,29 @@ def restart(
     return resolved.restart_training_job(_stringify_id(job_id))
 
 
+def resume(
+    job_id: str | UUID,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Resume a paused training job, under the same id, and return the job record.
+
+    A run pauses at its last saved checkpoint when the account cannot fund its next stretch.
+    Resuming charges that stretch up front and continues from the checkpoint.
+
+    Raises:
+        InsufficientCreditsError: the balance cannot cover the next stretch.
+        TrainingStateError: the job is not paused (``reason == "not_paused"``), its saved
+            checkpoint cannot be read (``"checkpoint_unavailable"``), or the previous run is
+            still stopping (``reason`` is ``None``); try again in a few minutes.
+        TrainingJobNotFoundError: no such job for this credential.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.resume_training_job(_stringify_id(job_id))
+
+
 def restore_checkpoint(
     job_id: str | UUID,
     checkpoint_id: str | UUID,
@@ -431,6 +454,7 @@ __all__ = [
     "list_training_jobs",
     "restart",
     "restore_checkpoint",
+    "resume",
     "stream_training",
     "training_logs",
     "training_metrics",

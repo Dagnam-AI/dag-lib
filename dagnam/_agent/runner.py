@@ -22,6 +22,10 @@ _SPEND_ACTIONS = ("deploy", "train")
 # ``dagnam._core.sse.TERMINAL_TRAINING_EVENTS``).
 _TERMINAL_OK = "complete"
 _TERMINAL_FAIL = frozenset({"failed", "cancelled"})
+# A run the platform paused because the account could not fund its next stretch. It is neither
+# done nor failed: the progress is saved and ``dagnam training resume`` continues it.
+_PAUSED = "paused"
+PAUSED_EXIT_CODE = 3
 
 
 def _entitlement_lines() -> list[str]:
@@ -101,8 +105,9 @@ def plan_main(argv: Sequence[str] | None = None) -> int:
 def watch_training(job_id: str) -> int:
     """Stream a training job's SSE events, print a compact summary, return an exit code.
 
-    Returns 0 on the ``complete`` terminal event, 1 on ``failed``/``cancelled``, and
-    0 if the stream ends without a terminal event (the job may still be running; the
+    Returns 0 on the ``complete`` terminal event, 1 on ``failed``/``cancelled``,
+    ``PAUSED_EXIT_CODE`` (3) on ``paused`` (add credits, then ``dagnam training resume``),
+    and 0 if the stream ends without a terminal event (the job may still be running; the
     agent re-checks).
     """
     import dagnam
@@ -118,6 +123,11 @@ def watch_training(job_id: str) -> int:
         elif name == _TERMINAL_OK:
             print(f"[done] training complete for {job_id}")
             return 0
+        elif name == _PAUSED:
+            reason = data.get("message") or data.get("error_message")
+            print(f"[paused] training paused for {job_id}" + (f": {reason}" if reason else ""))
+            print(f"[paused] progress is saved; resume with `dagnam training resume {job_id}`")
+            return PAUSED_EXIT_CODE
         elif name in _TERMINAL_FAIL:
             print(f"[error] training {name} for {job_id}: {data.get('error', 'unknown')}")
             return 1

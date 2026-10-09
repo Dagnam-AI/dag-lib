@@ -2,6 +2,10 @@
 
 Usage: ``python watch_training.py <job_id>``
 
+Exit code: 0 complete (or the stream ended with the job still running), 1 failed or
+cancelled, 3 paused because the account could not fund the next stretch (add credits, then
+``dagnam training resume <job_id>``).
+
 A thin shim over :func:`dagnam._agent.runner.watch_main`; all logic and tests live
 in ``runner.py`` so this stays trivial.
 """

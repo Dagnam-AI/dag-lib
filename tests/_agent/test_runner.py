@@ -169,6 +169,32 @@ def test_watch_training_returns_one_on_cancel(monkeypatch: PytestMonkeyPatch) ->
     assert runner.watch_training("j1") == 1
 
 
+def test_watch_training_returns_three_on_a_pause_and_says_how_to_resume(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    _patch_stream(
+        monkeypatch,
+        [
+            _FakeEvent("metric", {"name": "loss", "value": 0.5, "step": 1}),
+            _FakeEvent("paused", {"message": "Paused at epoch 3: not enough credits."}),
+            _FakeEvent("stream_end", {}),
+        ],
+    )
+    code = runner.watch_training("j1")
+    out = capsys.readouterr().out
+    assert code == runner.PAUSED_EXIT_CODE == 3
+    assert "Paused at epoch 3: not enough credits." in out
+    assert "dagnam training resume j1" in out
+
+
+def test_watch_training_a_pause_without_a_message_still_says_how_to_resume(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    _patch_stream(monkeypatch, [_FakeEvent("paused", "plain text"), _FakeEvent("stream_end", {})])
+    assert runner.watch_training("j1") == 3
+    assert "dagnam training resume j1" in capsys.readouterr().out
+
+
 def test_watch_training_no_terminal_event_returns_zero(
     monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:

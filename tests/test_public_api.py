@@ -53,6 +53,7 @@ EXCEPTION_EXPORTS = [
     "StreamError",
     "TaskNotFoundError",
     "TrainingJobNotFoundError",
+    "TrainingStateError",
     "UploadError",
 ]
 
@@ -112,6 +113,7 @@ EXPECTED_ALL = sorted(
         "report_system",
         "restart",
         "restore_checkpoint",
+        "resume",
         "save_checksum",
         "save_metadata",
         "set_warm",

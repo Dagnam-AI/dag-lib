@@ -31,6 +31,7 @@ from dagnam._core.client.common import (
     quote_path_segment,
     raise_for_generic,
     raise_for_training_job,
+    raise_for_training_state,
     response_json_object,
     response_json_value,
     stream_query_params,
@@ -177,6 +178,15 @@ class AsyncTrainingMixin(BaseAsyncDagnamClient):
                 job_id=job_id,
             )
         )
+
+    async def resume_training_job(self, job_id: str) -> JsonObject:
+        """Async mirror of ``TrainingClientMixin.resume_training_job``."""
+        resp = await self._request(
+            "POST",
+            f"/api/v1/training/jobs/{quote_path_segment(job_id)}/resume",
+            raise_for=lambda r: raise_for_training_state(r, job_id),
+        )
+        return response_json_object(resp)
 
     async def restore_from_checkpoint(self, job_id: str, checkpoint_id: str) -> JsonObject:
         """Start a new job from one of a job's checkpoints; returns the new job.

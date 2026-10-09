@@ -39,6 +39,19 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `dagnam training resume JOB_ID`, `dagnam.resume(job_id)` and `DagnamClient.resume_training_job`
+  (plus the `AsyncDagnamClient` twin) continue a paused training job from its last saved
+  checkpoint, under the same job id; the next stretch is charged up front. A balance that cannot
+  cover it raises `InsufficientCreditsError`, an unknown job `TrainingJobNotFoundError`. A `409`
+  raises the new `TrainingStateError` (an `APIError` subclass, also importable from
+  `dagnam.exceptions`) whose `reason` is `not_paused`, `checkpoint_unavailable`, or `None` when the
+  previous run is still stopping; the CLI says what to do for each.
+- A paused job shows up everywhere a status does. `dagnam training get` prints `Status: paused`,
+  the pause reason the platform gave (the job's `error_message`) and the command to resume.
+  `dagnam stream` prints the `paused` event and, when the stream ends on it, the resume command.
+  The agent skill's `watch_training.py` (`dagnam-watch`) exits with status `3` on a pause
+  (0 complete, 1 failed or cancelled), so a script can tell "add credits and resume" from a
+  failure. The event stream stops on the `stream_end` that follows `paused`, as it always has.
 - `dagnam audit delete --include-endpoints` deletes endpoints that are still serving too; apps
   calling them start getting errors. Without it, a delete that finds a serving endpoint prints
   the platform's sentence once, a table of the blocking endpoints and the exact next commands
