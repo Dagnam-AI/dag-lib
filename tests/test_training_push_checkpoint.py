@@ -28,6 +28,7 @@ def reporter(tmp_path: Path, monkeypatch: PytestMonkeyPatch):
     monkeypatch.setenv("DAGNAM_API_KEY", "run-token")
     monkeypatch.setenv("DAGNAM_API_URL", API)
     monkeypatch.setattr(checkpoint_push, "_stopped", False)
+    monkeypatch.setattr(checkpoint_push, "_not_before", 0.0)
     import dagnam.training as training
 
     training._reset()
@@ -53,13 +54,13 @@ def test_a_refused_push_lands_in_the_runs_log_and_the_run_goes_on(reporter, tmp_
     checkpoint = tmp_path / "checkpoint_epoch_1.pth"
     checkpoint.write_bytes(b"w")
     with rm_module.Mocker() as m:
-        m.post(PUSH, status_code=429, json={"detail": "too soon"})
+        m.post(PUSH, status_code=503, json={"detail": "storage down"})
         assert training.push_checkpoint(str(checkpoint), epoch=1, step=10) is None
 
     [event] = _events(metrics)
     assert event["type"] == "log"
     assert event["level"] == "WARNING"
-    assert "HTTP 429" in str(event["message"])
+    assert "HTTP 503" in str(event["message"])
 
 
 def test_nothing_the_push_does_can_raise_into_the_training_loop(

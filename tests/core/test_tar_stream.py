@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import tarfile
 
 import pytest
 
-from dagnam._core.tar_stream import DirectoryTar
+from dagnam._core.tar_stream import DirectoryTar, FileChangedError, FileStream
 
 
 def _tar_bytes(stream: DirectoryTar) -> bytes:
@@ -19,13 +20,6 @@ def _tar_bytes(stream: DirectoryTar) -> bytes:
 def _members(blob: bytes) -> dict[str, tarfile.TarInfo]:
     with tarfile.open(fileobj=io.BytesIO(blob)) as tar:
         return {member.name: member for member in tar.getmembers()}
-
-
-def _file(blob: bytes, name: str) -> bytes:
-    with tarfile.open(fileobj=io.BytesIO(blob)) as tar:
-        member = tar.extractfile(name)
-        assert member is not None
-        return member.read()
 
 
 def _tree(root: Path) -> Path:
@@ -135,43 +129,174 @@ def test_every_member_name_is_relative_and_stays_inside(tmp_path: Path) -> None:
     assert {"..sneaky", "model/..."} <= set(names)
 
 
-def test_a_file_that_shrinks_after_planning_is_zero_padded_to_the_declared_size(
-    tmp_path: Path,
-) -> None:
+def _ckpt(tmp_path: Path, data: bytes) -> tuple[Path, Path]:
     root = tmp_path / "ckpt"
     root.mkdir()
     victim = root / "w.bin"
-    victim.write_bytes(b"S" * 3000)
+    victim.write_bytes(data)
+    return root, victim
+
+
+def test_a_file_that_shrinks_after_planning_aborts_the_stream(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"S" * 3000)
     stream = DirectoryTar(root)
     victim.write_bytes(b"S" * 10)
 
-    blob = _tar_bytes(stream)
+    with pytest.raises(FileChangedError):
+        _tar_bytes(stream)
 
-    assert len(blob) == len(stream)
-    assert _file(blob, "w.bin") == b"S" * 10 + bytes(2990)
+    assert isinstance(stream.failure, FileChangedError)
 
 
-def test_a_file_that_grows_after_planning_is_cut_at_the_declared_size(tmp_path: Path) -> None:
-    root = tmp_path / "ckpt"
-    root.mkdir()
-    victim = root / "w.bin"
-    victim.write_bytes(b"G" * 100)
+def test_a_file_that_grows_after_planning_aborts_the_stream(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"G" * 100)
     stream = DirectoryTar(root)
     victim.write_bytes(b"G" * 5000)
 
-    blob = _tar_bytes(stream)
-
-    assert len(blob) == len(stream)
-    assert _members(blob)["w.bin"].size == 100
+    with pytest.raises(FileChangedError):
+        _tar_bytes(stream)
 
 
-def test_a_file_that_vanishes_after_planning_raises_while_streaming(tmp_path: Path) -> None:
-    root = tmp_path / "ckpt"
-    root.mkdir()
-    victim = root / "w.bin"
-    victim.write_bytes(b"x")
+def test_a_file_that_shrinks_mid_read_aborts_the_stream(tmp_path: Path) -> None:
+    size = 3 * 1024 * 1024
+    root, victim = _ckpt(tmp_path, b"S" * size)
+    parts = iter(DirectoryTar(root))
+    next(parts)  # the header
+    next(parts)  # the first slice of the file
+    with victim.open("r+b") as shrinking:
+        shrinking.truncate(1024)
+
+    with pytest.raises(FileChangedError, match="shrank"):
+        list(parts)
+
+
+def test_a_file_that_grows_mid_read_aborts_the_stream(tmp_path: Path) -> None:
+    size = 3 * 1024 * 1024
+    root, victim = _ckpt(tmp_path, b"G" * size)
+    parts = iter(DirectoryTar(root))
+    next(parts)
+    next(parts)
+    with victim.open("ab") as growing:
+        growing.write(b"more")
+
+    with pytest.raises(FileChangedError, match="grew"):
+        list(parts)
+
+
+def test_a_file_rewritten_in_place_to_the_same_size_aborts_the_stream(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"R" * 100)
+    stream = DirectoryTar(root)
+    parts = iter(stream)
+    next(parts)
+    next(parts)
+    os.utime(victim, ns=(1, 1))
+
+    with pytest.raises(FileChangedError, match="changed"):
+        list(parts)
+
+
+def test_a_file_that_vanishes_after_planning_aborts_the_stream(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"x")
     stream = DirectoryTar(root)
     victim.unlink()
 
     with pytest.raises(FileNotFoundError):
         _tar_bytes(stream)
+
+    assert isinstance(stream.failure, FileNotFoundError)
+
+
+def test_a_file_swapped_for_a_symlink_after_planning_is_not_read_through_it(
+    tmp_path: Path,
+) -> None:
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"TOP-SECRET")
+    root, victim = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    victim.unlink()
+    victim.symlink_to(secret)
+
+    with pytest.raises(OSError) as caught:
+        _tar_bytes(stream)
+    assert caught.value.errno == errno.ELOOP
+
+
+def test_a_file_swapped_for_a_fifo_after_planning_does_not_block(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    victim.unlink()
+    os.mkfifo(victim)
+
+    with pytest.raises(OSError, match="not a regular file"):
+        _tar_bytes(stream)
+
+
+def test_a_failure_is_forgotten_by_the_next_pass(tmp_path: Path) -> None:
+    root, victim = _ckpt(tmp_path, b"x" * 10)
+    stream = DirectoryTar(root)
+    victim.unlink()
+    with pytest.raises(FileNotFoundError):
+        _tar_bytes(stream)
+    victim.write_bytes(b"y" * 10)
+    assert len(_tar_bytes(stream)) == len(stream)
+    assert stream.failure is None
+
+
+def test_it_reports_when_there_is_nothing_to_send(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "only-a-link").symlink_to(tmp_path)
+    assert DirectoryTar(empty).files == 0
+    assert DirectoryTar(_tree(tmp_path / "ckpt")).files == 4
+
+
+# ------------------------------------------------------------------ a single file
+
+
+def test_a_file_is_streamed_exactly(tmp_path: Path) -> None:
+    path = tmp_path / "w.pth"
+    path.write_bytes(b"W" * (2 * 1024 * 1024 + 5))
+    stream = FileStream(path)
+    assert len(stream) == 2 * 1024 * 1024 + 5
+    assert b"".join(stream) == path.read_bytes()
+    assert b"".join(stream) == path.read_bytes()
+    assert stream.failure is None
+
+
+@pytest.mark.parametrize("make", ["fifo", "directory"])
+def test_only_a_regular_file_can_be_streamed(tmp_path: Path, make: str) -> None:
+    target = tmp_path / "x"
+    if make == "fifo":
+        os.mkfifo(target)
+    else:
+        target.mkdir()
+    with pytest.raises(OSError, match="not a regular file"):
+        FileStream(target)
+
+
+def test_a_missing_file_cannot_be_streamed(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        FileStream(tmp_path / "missing")
+
+
+def test_a_file_that_changes_size_while_being_sent_aborts_the_stream(tmp_path: Path) -> None:
+    path = tmp_path / "w.pth"
+    path.write_bytes(b"W" * 100)
+    stream = FileStream(path)
+    path.write_bytes(b"W" * 101)
+    with pytest.raises(FileChangedError):
+        b"".join(stream)
+    assert isinstance(stream.failure, FileChangedError)
+
+
+def test_a_file_swapped_for_a_symlink_is_not_read_through_it(tmp_path: Path) -> None:
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"T" * 10)
+    path = tmp_path / "w.pth"
+    path.write_bytes(b"W" * 10)
+    stream = FileStream(path)
+    path.unlink()
+    path.symlink_to(secret)
+    with pytest.raises(OSError) as caught:
+        b"".join(stream)
+    assert caught.value.errno == errno.ELOOP

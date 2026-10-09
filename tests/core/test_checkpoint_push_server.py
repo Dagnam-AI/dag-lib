@@ -14,13 +14,13 @@ import json
 from pathlib import Path
 import threading
 import tracemalloc
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
 from dagnam._core import checkpoint_push
 from dagnam._core.checkpoint_push import push_checkpoint
-from dagnam._core.tar_stream import DirectoryTar
+from dagnam._core.tar_stream import DirectoryTar, FileStream
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch
@@ -35,6 +35,7 @@ class _Received:
         self.path = ""
         self.length = 0
         self.sha256 = ""
+        self.complete = False
 
 
 class _Server(ThreadingHTTPServer):
@@ -44,12 +45,12 @@ class _Server(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.received: list[_Received] = []
         self.status = 201
+        self.heard = threading.Event()
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server: _Server  # pyright: ignore[reportIncompatibleVariableOverride]
-
     def do_POST(self) -> None:
+        server = cast("_Server", self.server)
         got = _Received()
         got.headers = {key.lower(): value for key, value in self.headers.items()}
         got.path = self.path
@@ -63,9 +64,13 @@ class _Handler(BaseHTTPRequestHandler):
             got.length += len(chunk)
             remaining -= len(chunk)
         got.sha256 = digest.hexdigest()
-        self.server.received.append(got)
+        got.complete = not remaining
+        server.received.append(got)
+        server.heard.set()
+        if remaining:  # the client gave up mid-body: there is nobody to answer
+            return
         body = json.dumps({"checkpoint_id": "ck-live", "size_bytes": got.length}).encode()
-        self.send_response(self.server.status)
+        self.send_response(server.status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -86,6 +91,7 @@ def server(monkeypatch: PytestMonkeyPatch) -> Iterator[_Server]:
     monkeypatch.setenv("DAGNAM_API_KEY", "run-token")
     monkeypatch.setenv("DAGNAM_API_URL", f"http://127.0.0.1:{srv.server_address[1]}")
     monkeypatch.setattr(checkpoint_push, "_stopped", False)
+    monkeypatch.setattr(checkpoint_push, "_not_before", 0.0)
     yield srv
     srv.shutdown()
     srv.server_close()
@@ -203,3 +209,37 @@ def test_a_server_that_is_gone_is_a_logged_skip(tmp_path: Path, server: _Server)
     assert saved is None
     assert len(lines) == 1
     assert "network error" in lines[0]
+
+
+class _ShrinksAfterTheFirstSlice(FileStream):
+    """A file that is truncated by its writer after the first slice has been read."""
+
+    @override
+    def __iter__(self) -> Iterator[bytes]:
+        parts = super().__iter__()
+        yield next(parts)
+        with Path(self._path).open("r+b") as writer:
+            writer.truncate(1024)
+        yield from parts
+
+
+def test_a_file_that_shrinks_mid_send_abandons_the_push_without_a_stall(
+    tmp_path: Path, server: _Server, monkeypatch: PytestMonkeyPatch
+) -> None:
+    monkeypatch.setattr(checkpoint_push, "FileStream", _ShrinksAfterTheFirstSlice)
+    lines: list[str] = []
+
+    saved = push_checkpoint(
+        _sparse(tmp_path / "w.pth", 4 * 1024 * 1024),
+        epoch=1,
+        step=1,
+        log=lambda level, message: lines.append(message),
+    )
+
+    assert saved is None
+    assert len(lines) == 1
+    assert "changed while it was being sent" in lines[0]
+    assert server.heard.wait(10)
+    [got] = server.received
+    assert not got.complete
+    assert got.length < 4 * 1024 * 1024

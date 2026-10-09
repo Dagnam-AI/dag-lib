@@ -41,13 +41,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 - `dagnam.training.push_checkpoint(path, *, epoch, step)` sends a checkpoint to the platform while a
   run on its compute is still going, so a run that is paused can continue from its newest one.
-  A file is sent as it is; a directory is sent as an uncompressed tar, streamed from disk (with
-  its exact length up front) and never held in memory. Symlinks inside the directory are left out
-  rather than followed. It authorizes with the run token the platform puts in the run's
-  environment and returns the checkpoint id. It never raises: a refusal (409, 413, 429, 5xx) or a
-  network failure is logged as a warning in the run's log and skipped, and it does nothing outside
-  a platform run or under `DAGNAM_INTERNAL`. Once the platform answers
-  `not_accepting_checkpoints` (the job is no longer running) it stops asking, quietly.
+  A regular file is sent as it is; a directory is sent as an uncompressed tar, streamed from disk
+  (with its exact length up front) and never held in memory. Symlinks, pipes and devices inside
+  the directory are left out rather than followed, and a path that is itself a pipe or a device
+  is refused. A file that is shorter, longer, rewritten or swapped for a link while it is being
+  sent abandons the push (a padded or cut file would be stored as a checkpoint to resume from).
+  It authorizes with the run token and URL in the run's environment, never a key set with
+  `dagnam.configure()`, and returns the checkpoint id. It never raises: a failure is logged as a
+  warning in the run's log (a status or an error type, no URL, token or response body) and skipped.
+  It does nothing outside a platform run, under `DAGNAM_INTERNAL`, or for an empty file. A refusal
+  is remembered for the rest of the process, because each push sends its whole body first: a
+  rejected token or run (401, 403, 404, 405, 410), a checkpoint that is too large (413) or any other
+  request the platform will not take (4xx other than 408, 409, 429) warns once and ends the
+  pushing; a 429 pauses it silently for the platform's `Retry-After` (300 seconds if it gives
+  none); `not_accepting_checkpoints` ends it silently.
 - `dagnam training resume JOB_ID`, `dagnam.resume(job_id)` and `DagnamClient.resume_training_job`
   (plus the `AsyncDagnamClient` twin) continue a paused training job from its last saved
   checkpoint, under the same job id; the next stretch is charged up front. A balance that cannot
