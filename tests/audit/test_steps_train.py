@@ -216,7 +216,7 @@ def test_the_budget_projection_counts_the_previous_replay(
 def test_the_first_submit_is_held_to_the_ceiling(
     make_ctx: Callable[..., StepContext], platform: FakePlatform
 ) -> None:
-    """`--max-credits 10` never submits a run whose own ceiling is 120 credits."""
+    """`--max-credits 10` never submits a run whose own ceiling is 150 credits."""
     state = submit(_ready(), make_ctx(max_credits=10))
     assert state.halted == {
         "reason": "budget",
@@ -232,18 +232,18 @@ def test_the_next_submit_is_projected_at_its_own_ceiling_not_the_largest_so_far(
 ) -> None:
     """A cheap first candidate no longer vouches for a dearer second one.
 
-    9 spent, then 120 for this run's ceiling and 5 for its 4-row replay: 134.
+    9 spent, then 150 for this run's ceiling and 5 for its 4-row replay: 164.
     """
     state = _ready()
     done = state.candidate("w0", CandidateKind.HEAD_TUNE)
     done.run_id, done.run_status = "run-0", "completed"
     done.training_cost_credits, done.replay_cost_credits = 5.0, 4.0
-    submit(state, make_ctx(max_credits=133))
+    submit(state, make_ctx(max_credits=163))
     assert state.halted is not None
     assert state.halted["spent_credits"] == 9.0
     assert platform.submits == 0
     state.halted = None
-    submit(state, make_ctx(max_credits=134))
+    submit(state, make_ctx(max_credits=164))
     assert state.halted is None
     assert platform.submits == 1
 

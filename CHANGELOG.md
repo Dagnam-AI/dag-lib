@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The audit budgets each training run at 150 credits, not 120: the platform bills a trained run
+  for up to 75 minutes at the tier's 2 credits a minute (the recipe's one-hour limit plus a
+  15-minute provider margin), so a run budgeted at 120 could take the credits spent past
+  `--max-credits` by up to 30. The default ceiling rises by 30 per trained candidate, before it is rounded up to the next 100.
 - `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
   platform that supports it (an older platform still deletes without asking). The platform
   answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,
