@@ -220,7 +220,10 @@ def test_denies_unconfirmed_commands_that_charge_credits_to_continue_training(
 
 def test_allows_a_confirmed_resume(monkeypatch: PytestMonkeyPatch, capsys: StrCapture) -> None:
     code, payload = _run(
-        {"tool_name": "Bash", "tool_input": {"command": "DAGNAM_CONFIRM=1 dagnam training resume j1"}},
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "DAGNAM_CONFIRM=1 dagnam training resume j1"},
+        },
         monkeypatch,
         capsys,
     )
