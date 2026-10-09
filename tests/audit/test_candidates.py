@@ -6,6 +6,8 @@ from dagnam.audit.candidates import (
     CANDIDATES,
     HEAD_TUNE,
     HOSTED_FLOOR,
+    PROVIDER_MARGIN_MINUTES,
+    RECIPE_MAX_MINUTES,
     SFT_SMALL,
     TRAINING_CREDITS_MAX,
     CandidateKind,
@@ -50,9 +52,14 @@ def test_trained_candidates_name_their_recipe_base_serving_rate_and_ceiling() ->
     )
 
 
-def test_a_run_is_budgeted_at_its_recipe_bound_on_the_gpu_it_lands_on() -> None:
-    """An hour (the recipes' own ``max_duration_seconds``) at the A10G's 2 credits a minute."""
-    assert TRAINING_CREDITS_MAX == 120
+def test_a_run_is_budgeted_at_everything_the_platform_can_bill_it() -> None:
+    """The recipes' hour plus the provider margin, at the A10G's 2 credits a minute.
+
+    The platform reserves exactly this span when it admits a run, so a smaller
+    figure here would let ``--max-credits`` pass a run the account cannot start.
+    """
+    assert RECIPE_MAX_MINUTES + PROVIDER_MARGIN_MINUTES == 75
+    assert TRAINING_CREDITS_MAX == 150
 
 
 def test_hosted_floor_needs_no_run() -> None:

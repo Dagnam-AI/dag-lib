@@ -51,9 +51,9 @@ def test_run_lists_exactly_what_will_be_uploaded_and_needs_yes(
     assert "w3" not in listing
     assert "  to: a new private project 'workload-audit-audit'" in listing
     # No --max-credits, so the ceiling is the plan's own estimate rounded up to
-    # 100 -- per workload a 120-credit training ceiling plus 5 for a 4-row replay.
+    # 100 -- per workload a 150-credit training ceiling plus 5 for a 4-row replay.
     assert (
-        "credit ceiling: 300 (the plan's estimate, rounded up to 100; --max-credits sets your own)"
+        "credit ceiling: 400 (the plan's estimate, rounded up to 100; --max-credits sets your own)"
     ) in captured.out
     assert "refusing to upload without confirmation on a non-interactive terminal" in captured.err
     assert f"dagnam audit run {prepared_dir} --yes" in captured.err
@@ -127,17 +127,17 @@ def test_run_halted_exits_nonzero_with_the_reason(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform, capsys: StrCapture
 ) -> None:
     with pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "160"])
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert "audit halted: budget" in captured.err
     assert f"dagnam audit status {prepared_dir}" in captured.err
     assert (prepared_dir / "audit-report.md").exists()
-    # w1 fits (a 120-credit ceiling and a 5-credit replay); after its 104 credits, w2 does not.
+    # w1 fits (a 150-credit ceiling and a 5-credit replay); after its 104 credits, w2 does not.
     assert platform.submits == 1
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130", "--json"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "160", "--json"])
     assert exc.value.code == 1
     out = capsys.readouterr().out
     error = json.loads(out[out.index("\n{") + 1 :])
@@ -314,7 +314,7 @@ def test_the_directory_is_held_from_the_listing_to_the_end_of_the_run(
     assert capsys.readouterr().err.count("is in use by another `dagnam audit` command") == 2
     assert platform.submits == 2  # the first run went on to submit what it had listed, once
     assert platform.call_log.count("create_project") == 1
-    assert credits_spent(load_state(prepared_dir), prepared_dir) <= 300  # the ceiling it listed
+    assert credits_spent(load_state(prepared_dir), prepared_dir) <= 400  # the ceiling it listed
 
 
 def test_the_directory_is_free_again_once_a_run_ends_or_is_declined(

@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The audit budgets each training run at 150 credits, not 120: the platform reserves a run's
+  whole billable span (its one-hour bound plus a 15-minute provider margin, at 2 credits a
+  minute), so `--max-credits` could pass a run the account then could not start. The unused
+  part is returned when the run ends.
 - `audit delete` stops before deleting anything while an endpoint of the audit is serving, on a
   platform that supports it (an older platform still deletes without asking). The platform
   answers `409 endpoints_serving`, raised as `EndpointsServingError` (an `APIError` subclass,

@@ -293,14 +293,14 @@ def test_an_interrupted_replay_counts_what_it_already_answered(
 ) -> None:
     """The answered rows count as spent, and only the rows left to send are projected.
 
-    120 for training, 4 for the three rows already answered, 2 for the last one:
-    126 fits a 127 ceiling -- projecting the whole holdout again on top of the
-    answered rows (129) would refuse a replay that cannot pass it.
+    150 for training, 4 for the three rows already answered, 2 for the last one:
+    156 fits a 157 ceiling -- projecting the whole holdout again on top of the
+    answered rows (159) would refuse a replay that cannot pass it.
     """
     serve_chat(requests_mock, teacher)
-    ctx = make_ctx(max_credits=127)
+    ctx = make_ctx(max_credits=157)
     state = _served(_trained(), ctx)
-    ctx.step(state).training_cost_credits = 120.0
+    ctx.step(state).training_cost_credits = 150.0
     answers = ctx.workload_dir / "replay-head_tune.jsonl"
     answers.write_text(
         '{"deployment_id": "dep-1", "balance_before": 1000}\n'

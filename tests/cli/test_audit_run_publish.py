@@ -151,7 +151,7 @@ def test_run_halted_tells_the_account_why(
     run_cli: CliRunner, prepared_dir: Path, platform: FakePlatform
 ) -> None:
     with pytest.raises(SystemExit):
-        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
+        run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "160"])
     assert platform.halts == [("audit-1", "budget")]
     # w1 submitted; the submit w2's budget check refused is not published as a
     # step that happened, so exactly one `submit` reached the account.
@@ -193,7 +193,7 @@ def test_a_resumed_run_that_stops_again_publishes_its_own_halt(
     """The second run un-halted the audit when it started, so its halt is a new one."""
     for _ in range(2):
         with pytest.raises(SystemExit):
-            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "160"])
     assert platform.halts == [("audit-1", "budget"), ("audit-1", "budget")]
     assert platform.call_log.count("resume_audit") == 1  # the first run created the audit
 
@@ -205,7 +205,7 @@ def test_on_an_older_platform_a_run_that_stops_again_does_not_repeat_the_halt(
     platform.resume_route = False
     for _ in range(2):
         with pytest.raises(SystemExit):
-            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "130"])
+            run_cli(["audit", "run", str(prepared_dir), "--yes", "--max-credits", "160"])
     assert platform.halts == [("audit-1", "budget")]
 
 
