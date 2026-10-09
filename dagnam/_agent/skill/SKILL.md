@@ -30,11 +30,15 @@ problem, tell the user to run `dagnam login` (interactive) — never invent or e
   states are resource-specific (e.g. a paused deployment's is `paused`); `result()` raises on
   failure.
 - **Training** streams Server-Sent Events: iterate `dagnam.stream_training(job_id)` (or run
-  `dagnam stream <job_id>`); terminal event names are `complete`, `failed`, `cancelled`, and
-  `paused` (the account could not fund the next stretch; progress is saved). For long runs,
-  delegate to the `dagnam-runner` subagent / `scripts/watch_training.py` so the metric firehose
-  stays off the main context. `watch_training.py` exits 0 on `complete`, 1 on `failed` or
-  `cancelled`, and **3 on `paused`**. A paused job is continued with
+  `dagnam stream <job_id>`); its terminal event names are `complete`, `failed`, `cancelled` (and
+  `stream_end`). A job the platform **pauses** (the account could not fund the next stretch;
+  progress is saved) is NOT a terminal event of `stream_training`: it ends only when the platform
+  closes the stream, and a stream opened on an already paused job may send only heartbeats. For
+  anything that must stop on a pause use `dagnam stream`, `scripts/watch_training.py` or
+  `dagnam.resources.training_follow.follow_training(job_id)`, which also read the job's status.
+  For long runs, delegate to the `dagnam-runner` subagent / `scripts/watch_training.py` so the
+  metric firehose stays off the main context. `watch_training.py` exits 0 on `complete`, 1 on
+  `failed` or `cancelled`, and **3 on `paused`**. A paused job is continued with
   `dagnam training resume <job_id>` (SDK `dagnam.resume(job_id)`), which **charges the next
   stretch up front**: it is a guardrailed costly action, so report the pause (and the reason
   the platform gave) to the user and resume only after they confirm. Never resume on your own.
