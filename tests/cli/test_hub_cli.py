@@ -191,6 +191,7 @@ def test_hub_publish_calls_orchestrator_and_prints_progress(
     assert kwargs["name"] == "n"
     assert kwargs["files"] == [str(weights)]
     assert kwargs["visibility"] == "public"
+    assert kwargs["model_id"] is None
     captured = capsys.readouterr()
     assert "[1/1]" in captured.err
     assert "weights.bin" in captured.err
@@ -225,6 +226,38 @@ def test_hub_publish_upload_failure_exits_1(
             == 1
         )
     assert "halted" in capsys.readouterr().err
+
+
+def test_hub_publish_model_id_resumes_a_draft(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    weights = tmp_path / "w.safetensors"
+    weights.write_bytes(b"x")
+    done = {"model": {"id": "d1"}, "files": [], "version": None, "finalized": True}
+    with mock.patch("dagnam.hub.publish", return_value=done) as m:
+        assert (
+            run_cli(
+                [
+                    "hub",
+                    "publish",
+                    "--model-id",
+                    "d1",
+                    "--name",
+                    "n",
+                    "--description",
+                    "d",
+                    "--task-type",
+                    "classification",
+                    "--framework",
+                    "pytorch",
+                    "--file",
+                    str(weights),
+                ]
+            )
+            == 0
+        )
+    assert m.call_args.kwargs["model_id"] == "d1"
+    assert json.loads(capsys.readouterr().out)["model"]["id"] == "d1"
 
 
 def test_hub_update(run_cli: CliRunner, capsys: StrCapture) -> None:

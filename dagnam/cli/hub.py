@@ -148,6 +148,7 @@ def cmd_hub_publish(args: argparse.Namespace) -> None:
         task_type=args.task_type,
         framework=args.framework,
         files=args.file,
+        model_id=args.model_id,
         version=args.version,
         changelog=args.changelog,
         license=args.license,
@@ -313,6 +314,11 @@ def register_hub(subparsers: SubParsersAction) -> None:
         "--visibility", default="public", help="public or private (default: public)."
     )
     hub_publish.add_argument("--tags", help="Comma-separated tags.")
+    hub_publish.add_argument(
+        "--model-id",
+        dest="model_id",
+        help="Resume a draft: upload into this model instead of creating a new one.",
+    )
     hub_publish.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     hub_publish.set_defaults(func=cmd_hub_publish)
 

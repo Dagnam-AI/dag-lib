@@ -19,6 +19,7 @@ from dagnam._core.exceptions import (
     UploadError,
 )
 from dagnam._types import JsonObject
+from dagnam.resources.hub_publish import stored_name
 
 Progress = Callable[[str, int, int, str], object]
 
@@ -41,6 +42,7 @@ def _publish(
     client: MagicMock,
     files: list[str],
     *,
+    model_id: str | None = None,
     max_retries_per_file: int = 2,
     on_file_progress: Progress | None = None,
 ) -> JsonObject:
@@ -50,6 +52,7 @@ def _publish(
         task_type="classification",
         framework="pytorch",
         files=files,
+        model_id=model_id,
         max_retries_per_file=max_retries_per_file,
         on_file_progress=on_file_progress,
         client=client,
@@ -197,3 +200,99 @@ class TestFinalize:
         result = _publish(client, files)
         assert result["finalized"] is True
         assert result["model"] == {"id": "m1", "status": "published"}
+
+
+class TestResume:
+    def test_model_id_skips_create_and_uploads_into_the_draft(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        result = _publish(client, files, model_id="draft-1")
+        client.create_hub_model.assert_not_called()
+        targets = [call.args[0] for call in client.upload_model_file.call_args_list]
+        assert targets == ["draft-1", "draft-1"]
+        client.finalize_hub_model.assert_called_once_with("draft-1")
+        assert result["finalized"] is True
+        assert result["model"] == {"id": "m1", "status": "published"}
+
+    def test_resume_skips_a_file_the_draft_already_holds(self, tmp_path: Path) -> None:
+        """The platform answers 409 to a name the model already has: skipped, not a halt."""
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(409, "already on the model"), {"id": "f2"}]
+        states: list[str] = []
+        result = _publish(
+            client,
+            files,
+            model_id="draft-1",
+            on_file_progress=lambda _p, _i, _t, s: states.append(s),
+        )
+        assert states == ["uploading", "skipped", "uploading", "uploaded"]
+        assert result["files"] == [{"id": "f2"}]
+        client.finalize_hub_model.assert_called_once_with("draft-1")
+
+    def test_resume_skip_needs_no_progress_callback(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(409, "dup"), {"id": "f2"}]
+        assert _publish(client, files, model_id="draft-1")["files"] == [{"id": "f2"}]
+
+    def test_409_on_a_fresh_publish_halts_with_the_resume_hint(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = APIError(409, "dup")
+        with pytest.raises(UploadError, match=r"hub\.publish\(\.\.\., model_id='m1'\)"):
+            _publish(client, files)
+        assert client.upload_model_file.call_count == 1
+        client.finalize_hub_model.assert_not_called()
+
+    def test_409_after_a_retry_of_the_same_file_counts_as_uploaded(self, tmp_path: Path) -> None:
+        """The first attempt stored the file but its answer was lost; the retry's 409 is success."""
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = [
+            APIError(503, "blip"),
+            APIError(409, "already on the model"),
+            {"id": "f2"},
+        ]
+        states: list[str] = []
+        result = _publish(client, files, on_file_progress=lambda _p, _i, _t, s: states.append(s))
+        assert states == ["uploading", "retrying", "skipped", "uploading", "uploaded"]
+        assert result["files"] == [{"id": "f2"}]
+        client.create_hub_model.assert_called_once()
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_duplicate_base_names_are_refused_before_any_network_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        (tmp_path / "b").mkdir()
+        twin = tmp_path / "b" / "weights.safetensors"
+        twin.write_bytes(b"z")
+        with pytest.raises(ValueError, match=r"weights\.safetensors"):
+            _publish(client, [*files, str(twin)])
+        client.create_hub_model.assert_not_called()
+        client.upload_model_file.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [("a.pt", "a.safetensors"), ("a.pt", "a.pth"), ("A.PT", "a.safetensors")],
+    )
+    def test_names_that_collide_after_conversion_are_refused(
+        self, tmp_path: Path, first: str, second: str
+    ) -> None:
+        """A PyTorch file is stored as <stem>.safetensors, so these pairs are one name on the hub."""
+        client, _files = _client(tmp_path)
+        pair = [tmp_path / first, tmp_path / second]
+        for path in pair:
+            path.write_bytes(b"z")
+        with pytest.raises(ValueError, match=r"a\.safetensors"):
+            _publish(client, [str(path) for path in pair])
+        client.create_hub_model.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("local", "stored"),
+    [
+        ("weights.pt", "weights.safetensors"),
+        ("weights.pth", "weights.safetensors"),
+        ("v2.final.PT", "v2.final.safetensors"),
+        ("weights.safetensors", "weights.safetensors"),
+        ("head.onnx", "head.onnx"),
+        ("noext", "noext"),
+    ],
+)
+def test_stored_name_maps_pytorch_files_to_safetensors(local: str, stored: str) -> None:
+    assert stored_name(f"/tmp/some/dir/{local}") == stored

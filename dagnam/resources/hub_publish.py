@@ -79,6 +79,23 @@ def finalize(
     return resolved.finalize_hub_model(str(model_id))
 
 
+_CONVERTED_SUFFIXES = frozenset({"pt", "pth"})
+
+
+def stored_name(file_path: str) -> str:
+    """The name the hub stores a local file under.
+
+    A PyTorch ``.pt``/``.pth`` file is converted on upload and stored as ``<stem>.safetensors``;
+    every other file keeps its base name. Two local files with the same stored name are one
+    file to the hub, which is why ``publish`` refuses them up front.
+    """
+    name = Path(file_path).name
+    stem, dot, suffix = name.rpartition(".")
+    if dot and suffix.lower() in _CONVERTED_SUFFIXES:
+        return f"{stem}.safetensors"
+    return name
+
+
 def publish(
     *,
     name: str,
@@ -86,6 +103,7 @@ def publish(
     task_type: str,
     framework: str,
     files: Sequence[str],
+    model_id: Optional[str] = None,
     version: Optional[str] = None,
     changelog: Optional[str] = None,
     license: str = "mit",
@@ -98,39 +116,62 @@ def publish(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Publish a model to the hub: create -> upload files -> finalize.
+    """Publish a model to the hub: create -> upload files -> (version) -> finalize.
 
-    Follows the draft-to-finalize publish contract: the model record is created
-    first, every file is uploaded (with ``max_retries_per_file`` retries per
-    file), an optional version is recorded, and a finalize call flips the
-    model live.
+    With ``model_id`` the create step is skipped and the files go into that draft: a file the
+    draft already holds (the platform answers 409) is reported ``skipped`` and the rest are
+    uploaded, so a halted publish is resumed by calling again with the id from its error.
+    ``name``, ``description``, ``task_type`` and ``framework`` are not sent on a resume.
 
     ``on_file_progress(path, index, total, state)`` receives per-file states:
-    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed``.
+    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed`` | ``skipped``.
 
-    Raises ``FileNotFoundError`` before any network call if a local file is
-    missing, and ``UploadError`` if a file still fails after retries -- the
-    created model and already-uploaded files are left in place so the publish
-    can be resumed with ``upload_file`` + a re-run.
+    An upload is retried up to ``max_retries_per_file`` times, and only on a transport
+    failure, a timeout (408), a rate limit (429) or a server error; any other 4xx, a file
+    above the size ceiling and a local file that changed mid-send halt at once. A 409 after
+    such a retry means the first attempt stored the file; it is ``skipped``.
+
+    Files above about 500 MB are not supported yet: the platform refuses the request
+    whatever the plan allows. A PyTorch ``.pt``/``.pth`` file is converted on upload and
+    stored as ``<stem>.safetensors``; ``.safetensors`` and ``.onnx`` are stored as they are.
+
+    Raises ``ValueError`` before any network call if two files would be stored under one
+    name (``stored_name``) and ``FileNotFoundError`` if a local file is missing;
+    ``UploadError`` if a file still fails (the draft and its uploaded files are kept: resume
+    with ``model_id``); ``HubError`` if the platform answers 404 or 405 to finalize (the model
+    is still a draft: ``hub.finalize(model_id)`` retries that step alone). The result is
+    ``{"model", "files", "version", "finalized"}``; ``finalized`` is always ``True`` and is
+    kept for callers that read it.
     """
     for file_path in files:
         if not Path(file_path).is_file():
             raise FileNotFoundError(f"No such file: {file_path}")
+    # Names are compared ignoring case: refusing a pair that only differs by case costs a
+    # rename, accepting one the hub treats as a duplicate would finalize a resume without it.
+    stored = [stored_name(file_path).casefold() for file_path in files]
+    duplicates = sorted({entry for entry in stored if stored.count(entry) > 1})
+    if duplicates:
+        raise ValueError(
+            "Two files would be stored under one name (the hub keeps one file per name, and a "
+            f"PyTorch .pt/.pth file is stored as <stem>.safetensors): {', '.join(duplicates)}"
+        )
 
     resolved = resolve_client(client, api_key, api_url)
-    model = resolved.create_hub_model(
-        create_payload(
-            name=name,
-            description=description,
-            task_type=task_type,
-            framework=framework,
-            license=license,
-            visibility=visibility,
-            tags=tags,
-            metadata=metadata,
+    resume = model_id is not None
+    if model_id is None:
+        created = resolved.create_hub_model(
+            create_payload(
+                name=name,
+                description=description,
+                task_type=task_type,
+                framework=framework,
+                license=license,
+                visibility=visibility,
+                tags=tags,
+                metadata=metadata,
+            )
         )
-    )
-    model_id = str(model["id"])
+        model_id = str(created["id"])
 
     total = len(files)
     uploaded: list[JsonValue] = []
@@ -145,6 +186,10 @@ def publish(
                     on_file_progress(file_path, index, total, "uploaded")
                 break
             except (APIError, HubError, UploadError, PayloadTooLargeError, OSError) as exc:
+                if isinstance(exc, APIError) and exc.status_code == 409 and (resume or attempts):
+                    if on_file_progress is not None:
+                        on_file_progress(file_path, index, total, "skipped")
+                    break
                 attempts += 1
                 if attempts > max_retries_per_file or not _retryable(exc):
                     if on_file_progress is not None:
@@ -153,7 +198,7 @@ def publish(
                     raise UploadError(
                         f"Publish of hub model {model_id} halted: {file_path} failed "
                         f"after {attempts} attempt(s) ({exc}). Uploaded so far: {done}. "
-                        f"Fix the issue, then resume with hub.upload_file({model_id!r}, ...)."
+                        f"Fix the issue, then resume with hub.publish(..., model_id={model_id!r})."
                     ) from exc
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "retrying")
@@ -179,4 +224,4 @@ def publish(
     return {"model": model, "files": uploaded, "version": version_record, "finalized": True}
 
 
-__all__ = ["create_payload", "finalize", "publish"]
+__all__ = ["create_payload", "finalize", "publish", "stored_name"]
