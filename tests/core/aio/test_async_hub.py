@@ -31,6 +31,17 @@ async def test_async_list_hub_models(client: AsyncDagnamClient, mock: RespxMockR
     assert await client.list_hub_models() == {"items": []}
 
 
+async def test_async_list_hub_models_repeats_list_filters(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/hub/models").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    await client.list_hub_models(tags=["vision", "tiny"], framework=["pytorch", "flax"])
+    expected = b"tags=vision&tags=tiny&framework=pytorch&framework=flax"
+    assert route.calls[0].request.url.query == expected
+
+
 async def test_async_get_hub_model_404(client: AsyncDagnamClient, mock: RespxMockRouter) -> None:
     mock.get("/api/v1/hub/models/missing").mock(return_value=httpx.Response(404))
     with pytest.raises(HubModelNotFoundError):

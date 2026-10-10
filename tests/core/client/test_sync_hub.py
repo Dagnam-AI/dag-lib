@@ -34,6 +34,20 @@ def test_list_hub_models(client: DagnamClient, rmock: RequestsMocker) -> None:
     assert rmock.last_request.qs == {"category": ["vision"]}
 
 
+def test_list_hub_models_repeats_list_filters(client: DagnamClient, rmock: RequestsMocker) -> None:
+    """Each list item is its own key=value pair; the platform reads them as a list."""
+    rmock.get(f"{API}/api/v1/hub/models", json={"items": []})
+    client.list_hub_models(
+        tags=["vision", "tiny"], framework=["pytorch", "flax"], task_type="classification"
+    )
+    assert rmock.last_request.qs == {
+        "tags": ["vision", "tiny"],
+        "framework": ["pytorch", "flax"],
+        "task_type": ["classification"],
+    }
+    assert "tags=vision&tags=tiny" in rmock.last_request.url
+
+
 def test_get_hub_model(client: DagnamClient, rmock: RequestsMocker) -> None:
     rmock.get(f"{API}/api/v1/hub/models/m1", json={"id": "m1"})
     assert client.get_hub_model("m1") == {"id": "m1"}
