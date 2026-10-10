@@ -10,20 +10,20 @@ model visible per its `visibility` — treat it as a public, irreversible-ish ac
 - `dagnam hub trending [--days 7]` (+ `--json/--verbose/--output`) — trending models.
 - `dagnam hub star <model_id>` / `dagnam hub unstar <model_id>` — (un)star a model.
 - `dagnam hub fork <model_id>` — fork a model into your account.
-
-> There is no `dagnam hub publish`/`create` CLI command — publishing is SDK-only (below).
+- `dagnam hub download <model_id> [--file-id ID] [--out DIR]`: save a model's files into a directory (prints one path per line).
+- `dagnam hub publish --name N --description D --task-type T --framework F --file model.safetensors [--file PATH ...] [--version V --changelog C] [--license mit] [--visibility public|private|unlisted] [--tags a,b] [--model-id ID] [--json]`: **[guardrail: publishing / public]** create, upload and finalize in one go; `--model-id` resumes a draft a halted run left behind. Files: `.safetensors`, `.onnx`, or PyTorch `.pt`/`.pth` (converted to `.safetensors` on upload); files above about 500 MB are not supported yet. Task types: classification, detection, segmentation, generation, nlp, audio, multimodal, other. Licences: mit, apache2, gpl, proprietary, custom.
 
 ## SDK (`import dagnam`)
 - `dagnam.hub.search(search=None, task_type=None, framework=None, license=None, tags=None, sort_by="popular", page=1, limit=20) -> dict`.
 - `dagnam.hub.get(model_id)`, `dagnam.hub.featured()`, `dagnam.hub.trending(days=7)`, `dagnam.hub.categories()`.
 - `dagnam.hub.create(name, description=None, task_type=None, framework=None, license=None, visibility="private", tags=None, metadata=None) -> dict` — **[guardrail: publishing / public]** this is how you publish/share a model.
 - `dagnam.hub.update(model_id, ...)`, `dagnam.hub.delete(model_id) -> None` — **[guardrail: delete is irreversible]**.
-- `dagnam.hub.list_files(model_id)`, `dagnam.hub.download(model_id, file_id)`, `dagnam.hub.list_versions(model_id)`, `dagnam.hub.create_version(model_id, version, changelog=None)`.
+- `dagnam.hub.list_files(model_id)`, `dagnam.hub.download(model_id, dest_dir, file_id=None) -> list[str]` (saves the files, returns their paths), `dagnam.hub.list_versions(model_id)`, `dagnam.hub.create_version(model_id, version, changelog=None)`.
 
 ## Recipe — publish (with guardrail)
 ```python
 import dagnam
 # confirm with the user that this should be public, THEN:
-model = dagnam.hub.create(name="my-cnn", description="...", task_type="image-classification",
-                          framework="pytorch", license="apache-2.0", visibility="public")
+model = dagnam.hub.create(name="my-cnn", description="...", task_type="classification",
+                          framework="pytorch", license="apache2", visibility="public")
 ```

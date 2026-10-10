@@ -47,6 +47,15 @@ def test_top_level_help_includes_workflow_examples(run_cli: CliRunner, capsys: S
         (["training", "restore", "--help"], "the same checks as restart"),
         (["register", "--help"], "API keys need a paid plan"),
         (["deployments", "update", "--help"], "Rename a deployment"),
+        (
+            ["hub", "publish", "--help"],
+            "classification, detection, segmentation, generation, nlp, audio, multimodal other",
+        ),
+        (["hub", "publish", "--help"], "public, private unlisted"),
+        (["hub", "publish", "--help"], "publish always prints JSON"),
+        (["hub", "update", "--help"], "public, private unlisted"),
+        (["hub", "publish", "--help"], "Files above about 500 MB are not supported yet"),
+        (["hub", "upload-file", "--help"], "Files above about 500 MB are not supported yet"),
     ],
 )
 def test_help_documents_supported_values_and_file_inputs(

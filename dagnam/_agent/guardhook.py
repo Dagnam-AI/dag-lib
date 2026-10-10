@@ -39,10 +39,11 @@ _COSTLY = re.compile(
     r"|deployments?\s*\.\s*(?:create|delete|deploy_model_version)"  # SDK shape of the above
     r"|training\s*\.\s*(?:create|delete)"  # SDK: dagnam.training.create(
     r"|projects?\s*\.\s*delete"
-    r"|hub\s*\.\s*create"  # SDK: publish to the hub
+    r"|hub\s+publish"  # CLI: dagnam hub publish (public by default)
+    r"|hub\s*\.\s*(?:create|publish|finalize)"  # SDK: publish to the hub / make a draft live
     r"|(?:resume|restart|restore_checkpoint)\s*\("  # SDK: dagnam.resume(jid), restart(jid), ...
     r"|create_training_job|create_deployment|deploy_model_version"  # client method shapes
-    r"|resume_training_job|restart_training_job|restore_from_checkpoint"
+    r"|resume_training_job|restart_training_job|restore_from_checkpoint|finalize_hub_model"
     r"|visibility\s*=\s*[\\'\"]*public"  # any public create/upload (quotes/escapes optional)
     r")",
     re.DOTALL,

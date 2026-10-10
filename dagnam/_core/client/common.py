@@ -75,6 +75,15 @@ def quote_path_segment(value: str) -> str:
     return quote(str(value), safe="")
 
 
+def same_origin(api_url: str, url: str) -> bool:
+    """True when ``url`` has the API's scheme and host: the only origin the API key may go to."""
+    base, other = urlparse(api_url), urlparse(url)
+    return (base.scheme.lower(), base.netloc.lower()) == (
+        other.scheme.lower(),
+        other.netloc.lower(),
+    )
+
+
 def _response_status(resp: JsonResponseLike) -> int:
     code = getattr(resp, "status_code", 0)
     return code if isinstance(code, int) else 0
@@ -498,6 +507,8 @@ def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
         if model_id:
             raise HubModelNotFoundError(model_id)
         raise HubError(_text(resp))
+    if code == 413:
+        raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     if code in (400, 422):
         raise HubError(_text(resp))
     raise APIError(code, _text(resp))

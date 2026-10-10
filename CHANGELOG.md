@@ -7,6 +7,57 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dagnam.hub.finalize(model_id)` publishes a draft on its own, and `dagnam.hub.publish(..., model_id=...)`
+  (CLI: `dagnam hub publish --model-id <id>`) resumes one: the create step is skipped, a file the draft
+  already holds is reported `skipped` (the platform answers 409 to it), the rest are uploaded, then the
+  model is finalized. The halt message of a failed upload now names this resume.
+- `dagnam hub download <model id> [--file-id <id>] [--out <dir>]` saves a model's files and prints one
+  path per line. The async client gains `download_hub_model_files(model_id, dest_dir, file_id=None)`.
+
+### Changed
+
+- `dagnam.hub.download(model_id, dest_dir, file_id=None)` saves the files into `dest_dir` and returns
+  their paths. It used the wrong HTTP method before and never succeeded, so no working call changes;
+  a call written against the old signature now fails with a `TypeError` for the missing `dest_dir`.
+  Each file's download link is requested just before that file is fetched (a link lasts a few
+  minutes). The API key is sent only to the API's own origin: a content link on another host, or a
+  302/307 redirect to object storage, is fetched without it. A file name from the platform is
+  reduced to a bare basename and the final path is checked to lie inside `dest_dir`.
+- `dagnam.hub.publish` raises `HubError` when the finalize call answers 404 or 405, instead of
+  returning a model that is still a draft with `finalized=False`. The result's `finalized` key is kept
+  and is always `True`.
+- `dagnam.hub.publish` retries an upload only on a transport failure, a timeout (408), a rate limit
+  (429) or a server error. A 4xx that cannot succeed again (a rejected file name or extension, a
+  conflict, a forbidden model, a file above the size ceiling) and a local file that changed while it
+  was being sent halt at once with the resume instructions instead of after two more full uploads.
+  A 409 on a retry of the same file means the first attempt stored it and counts as uploaded; a 409
+  on a first attempt is that file refused. Two local files the hub would store under one name (the
+  same base name, or `a.pt` next to `a.safetensors`, since a PyTorch file is stored as
+  `<stem>.safetensors`) are refused with `ValueError` before any call.
+- A hub upload that exceeds the platform's request size ceiling raises `PayloadTooLargeError` (it was
+  a bare `APIError`). Files above about 500 MB are not supported yet; the upload help and docstrings
+  say so.
+- Hub file uploads (`dagnam.hub.upload_file`, `publish`, `dagnam hub upload-file`) stream the file from
+  disk with a `Content-Length` instead of reading it whole into memory first, and both clients wait
+  up to 900 s for the platform's answer after the last byte. A symlink is followed. The target must be
+  a regular file that does not change while it is sent; otherwise the upload raises `OSError`.
+- `dagnam hub publish --visibility` help lists `unlisted`.
+- The agent guard hook now asks for `DAGNAM_CONFIRM=1` before `dagnam hub publish` (public by
+  default), `dagnam.hub.publish`, `dagnam.hub.finalize` and the client's `finalize_hub_model`, as it
+  already did for `dagnam.hub.create`.
+
+### Fixed
+
+- Help text, docstring examples and the agent skill's reference use task types the platform accepts
+  (`classification`, `detection`, `segmentation`, `generation`, `nlp`, `audio`, `multimodal`,
+  `other`) and the licence id `apache2`; the old `text-generation`, `image-classification` and
+  `apache-2.0` examples answered 422.
+- `dagnam hub publish --json` help now says what the command does: it always prints JSON, and the
+  flag is accepted for compatibility.
+- The agent skill's reference no longer says there is no `dagnam hub publish` command.
+
 ## [0.18.0] - 2026-10-09
 
 ### Platform compatibility

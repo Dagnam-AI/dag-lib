@@ -10,13 +10,11 @@ the Phase 3 style (``dagnam.inference``, ``dagnam.deployments``).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 from uuid import UUID
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, HubError, HubModelNotFoundError, UploadError
 from dagnam._core.resolver import resolve_client
 from dagnam._types import (
     JsonArray,
@@ -26,6 +24,7 @@ from dagnam._types import (
     ensure_json_object,
     is_json_value,
 )
+from dagnam.resources.hub_publish import create_payload, finalize, publish
 
 
 def _stringify_id(value: object) -> str:
@@ -63,7 +62,7 @@ def search(
 ) -> JsonObject:
     """Search the model hub with optional filters.
 
-    >>> dagnam.hub.search(task_type="text-generation", sort_by="popular")["items"]
+    >>> dagnam.hub.search(task_type="generation", sort_by="popular")["items"]
     """
     resolved = resolve_client(client, api_key, api_url)
     legacy_search = getattr(resolved, "hub_search", None)
@@ -176,22 +175,20 @@ def create(
     """Create a new model in the hub.
 
     >>> dagnam.hub.create(
-    ...     name="my-model", description="...", task_type="text-generation", framework="pytorch"
+    ...     name="my-model", description="...", task_type="classification", framework="pytorch"
     ... )
     """
     resolved = resolve_client(client, api_key, api_url)
-    payload: JsonObject = {
-        "name": name,
-        "description": description,
-        "task_type": task_type,
-        "framework": framework,
-        "license": license,
-        "visibility": visibility,
-    }
-    if tags is not None:
-        payload["tags"] = [str(tag) for tag in tags]
-    if metadata is not None:
-        payload["metadata"] = metadata
+    payload = create_payload(
+        name=name,
+        description=description,
+        task_type=task_type,
+        framework=framework,
+        license=license,
+        visibility=visibility,
+        tags=tags,
+        metadata=metadata,
+    )
     legacy_create = getattr(resolved, "hub_create", None)
     if callable(legacy_create):
         return ensure_json_object(legacy_create(payload))
@@ -261,26 +258,39 @@ def upload_file(
 ) -> JsonObject:
     """Upload a file to a hub model you own.
 
-    >>> dagnam.hub.upload_file("model_abc", "./weights.safetensors")["id"]
+    ``.safetensors`` and ``.onnx`` are stored as they are; a PyTorch ``.pt``/``.pth`` file is
+    converted on upload and stored as ``<stem>.safetensors``. Files above about 500 MB are
+    not supported yet: the platform refuses the request whatever the plan allows
+    (``PayloadTooLargeError``).
+
+    >>> dagnam.hub.upload_file("model_abc", "./weights.pt")["file_name"]
+    'weights.safetensors'
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.upload_model_file(_stringify_id(model_id), file_path)
 
 
 def download(
-    model_id: str,
-    *,
+    model_id: str | UUID,
+    dest_dir: str | Path,
     file_id: Optional[str] = None,
+    *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> JsonObject:
-    """Download a model or a specific file."""
+) -> list[str]:
+    """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns their paths.
+
+    >>> dagnam.hub.download("model_abc", "./weights")
+    ['weights/model.safetensors', 'weights/head.onnx']
+    """
     resolved = resolve_client(client, api_key, api_url)
-    legacy_download = getattr(resolved, "hub_download", None)
-    if callable(legacy_download):
-        return ensure_json_object(legacy_download(_stringify_id(model_id), file_id=file_id))
-    return resolved.download_hub_model(_stringify_id(model_id), file_id=file_id)
+    return [
+        str(path)
+        for path in resolved.download_hub_model_files(
+            _stringify_id(model_id), dest_dir, file_id=file_id
+        )
+    ]
 
 
 def list_versions(
@@ -452,107 +462,6 @@ def use_in_studio(
     return resolved.use_hub_model_in_studio(_stringify_id(model_id))
 
 
-# ---------------------------------------------------------------------------
-# Publishing
-# ---------------------------------------------------------------------------
-
-
-def publish(
-    *,
-    name: str,
-    description: str,
-    task_type: str,
-    framework: str,
-    files: Sequence[str],
-    version: Optional[str] = None,
-    changelog: Optional[str] = None,
-    license: str = "mit",
-    visibility: str = "public",
-    tags: Optional[list[str]] = None,
-    metadata: Optional[JsonObject] = None,
-    max_retries_per_file: int = 2,
-    on_file_progress: Optional[Callable[[str, int, int, str], object]] = None,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Publish a model to the hub: create -> upload files -> finalize.
-
-    Follows the draft-to-finalize publish contract: the model record is created
-    first, every file is uploaded (with ``max_retries_per_file`` retries per
-    file), an optional version is recorded, and a finalize call flips the
-    model live. On servers without the finalize route the model is live from
-    creation; the result then carries ``finalized=False``.
-
-    ``on_file_progress(path, index, total, state)`` receives per-file states:
-    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed``.
-
-    Raises ``FileNotFoundError`` before any network call if a local file is
-    missing, and ``UploadError`` if a file still fails after retries -- the
-    created model and already-uploaded files are left in place so the publish
-    can be resumed with ``upload_file`` + a re-run.
-    """
-    for file_path in files:
-        if not Path(file_path).is_file():
-            raise FileNotFoundError(f"No such file: {file_path}")
-
-    resolved = resolve_client(client, api_key, api_url)
-    model = create(
-        name=name,
-        description=description,
-        task_type=task_type,
-        framework=framework,
-        license=license,
-        visibility=visibility,
-        tags=tags,
-        metadata=metadata,
-        client=resolved,
-    )
-    model_id = _stringify_id(model["id"])
-
-    total = len(files)
-    uploaded: list[JsonValue] = []
-    for index, file_path in enumerate(files, start=1):
-        if on_file_progress is not None:
-            on_file_progress(file_path, index, total, "uploading")
-        attempts = 0
-        while True:
-            try:
-                uploaded.append(upload_file(model_id, file_path, client=resolved))
-                if on_file_progress is not None:
-                    on_file_progress(file_path, index, total, "uploaded")
-                break
-            except (APIError, HubError, UploadError) as exc:
-                attempts += 1
-                if attempts > max_retries_per_file:
-                    if on_file_progress is not None:
-                        on_file_progress(file_path, index, total, "failed")
-                    done = ", ".join(str(Path(p).name) for p in files[: index - 1]) or "none"
-                    raise UploadError(
-                        f"Publish of hub model {model_id} halted: {file_path} failed "
-                        f"after {attempts} attempt(s) ({exc}). Uploaded so far: {done}. "
-                        f"Fix the issue, then resume with hub.upload_file({model_id!r}, ...)."
-                    ) from exc
-                if on_file_progress is not None:
-                    on_file_progress(file_path, index, total, "retrying")
-
-    version_record: JsonValue = None
-    if version is not None:
-        version_record = create_version(model_id, version, changelog=changelog, client=resolved)
-
-    finalized = True
-    try:
-        model = resolved.finalize_hub_model(model_id)
-    except HubModelNotFoundError:
-        finalized = False  # backend without the draft/finalize contract yet
-    except APIError as exc:
-        if exc.status_code not in (404, 405):
-            raise
-        finalized = False
-
-    return {"model": model, "files": uploaded, "version": version_record, "finalized": finalized}
-
-
 __all__ = [
     "add_review",
     "categories",
@@ -561,6 +470,7 @@ __all__ = [
     "delete",
     "download",
     "featured",
+    "finalize",
     "fork",
     "get",
     "list_files",

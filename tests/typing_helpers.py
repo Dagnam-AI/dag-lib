@@ -27,6 +27,7 @@ type StreamOpener = Callable[[str | None], object]
 
 class RequestsRecord(Protocol):
     headers: Mapping[str, str]
+    body: bytes | Iterable[bytes] | None
     method: str
     path: str
     url: str
