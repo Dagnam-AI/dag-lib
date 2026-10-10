@@ -507,6 +507,8 @@ def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
         if model_id:
             raise HubModelNotFoundError(model_id)
         raise HubError(_text(resp))
+    if code == 413:
+        raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     if code in (400, 422):
         raise HubError(_text(resp))
     raise APIError(code, _text(resp))

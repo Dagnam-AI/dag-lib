@@ -561,6 +561,11 @@ def test_raise_for_hub_other_code() -> None:
         common.raise_for_hub(_resp(500))
 
 
+def test_raise_for_hub_413_is_payload_too_large() -> None:
+    with pytest.raises(PayloadTooLargeError, match="too large"):
+        common.raise_for_hub(_resp(413, text="Request body too large"), model_id="m1")
+
+
 # raise_for_project ------------------------------------------------------
 
 
