@@ -268,19 +268,26 @@ def upload_file(
 
 
 def download(
-    model_id: str,
-    *,
+    model_id: str | UUID,
+    dest_dir: str | Path,
     file_id: Optional[str] = None,
+    *,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
-) -> JsonObject:
-    """Download a model or a specific file."""
+) -> list[str]:
+    """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns their paths.
+
+    >>> dagnam.hub.download("model_abc", "./weights")
+    ['weights/model.safetensors', 'weights/head.onnx']
+    """
     resolved = resolve_client(client, api_key, api_url)
-    legacy_download = getattr(resolved, "hub_download", None)
-    if callable(legacy_download):
-        return ensure_json_object(legacy_download(_stringify_id(model_id), file_id=file_id))
-    return resolved.download_hub_model(_stringify_id(model_id), file_id=file_id)
+    return [
+        str(path)
+        for path in resolved.download_hub_model_files(
+            _stringify_id(model_id), dest_dir, file_id=file_id
+        )
+    ]
 
 
 def list_versions(

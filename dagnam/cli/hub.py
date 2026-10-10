@@ -124,6 +124,13 @@ def cmd_hub_upload_file(args: argparse.Namespace) -> None:
     print_json(result)
 
 
+def cmd_hub_download(args: argparse.Namespace) -> None:
+    import dagnam
+
+    for path in dagnam.hub.download(args.model_id, args.out, file_id=args.file_id):
+        print(path)
+
+
 def cmd_hub_publish(args: argparse.Namespace) -> None:
     from pathlib import Path
     import sys
@@ -270,6 +277,17 @@ def register_hub(subparsers: SubParsersAction) -> None:
     hub_upload.add_argument("model_id", help="ID of the hub model.")
     hub_upload.add_argument("file_path", help="Path to the file to upload.")
     hub_upload.set_defaults(func=cmd_hub_upload_file)
+    hub_download = hub_sub.add_parser(
+        "download",
+        help="Download a model's files.",
+        description="Save a hub model's files (or one file with --file-id) into a directory.",
+    )
+    hub_download.add_argument("model_id", help="ID of the hub model.")
+    hub_download.add_argument("--file-id", dest="file_id", help="Download only this file.")
+    hub_download.add_argument(
+        "--out", default=".", help="Directory to save into (default: current directory)."
+    )
+    hub_download.set_defaults(func=cmd_hub_download)
 
     hub_publish = hub_sub.add_parser(
         "publish",

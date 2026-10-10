@@ -92,6 +92,7 @@ def test_hub_featured_output_saves_full_json(
         (["hub", "featured"], "featured"),
         (["hub", "trending"], "trending"),
         (["hub", "upload-file", "m1", "/tmp/w.bin"], "upload_file"),
+        (["hub", "download", "m1"], "download"),
     ],
 )
 def test_hub_apierrors_exit(
@@ -131,6 +132,23 @@ def test_hub_upload_file(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path)
         run_cli(["hub", "upload-file", "m1", str(f)])
     assert "f1" in capsys.readouterr().out
     fake.upload_file.assert_called_once_with("m1", str(f))
+
+
+def test_hub_download_prints_each_saved_path(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    saved = [str(tmp_path / "model.safetensors"), str(tmp_path / "head.onnx")]
+    with mock.patch("dagnam.hub.download", return_value=saved) as m:
+        assert run_cli(["hub", "download", "m1", "--out", str(tmp_path)]) == 0
+    m.assert_called_once_with("m1", str(tmp_path), file_id=None)
+    assert capsys.readouterr().out.splitlines() == saved
+
+
+def test_hub_download_one_file_into_cwd_by_default(run_cli: CliRunner, capsys: StrCapture) -> None:
+    with mock.patch("dagnam.hub.download", return_value=["model.safetensors"]) as m:
+        assert run_cli(["hub", "download", "m1", "--file-id", "f1"]) == 0
+    m.assert_called_once_with("m1", ".", file_id="f1")
+    assert capsys.readouterr().out == "model.safetensors\n"
 
 
 # ---------------------------------------------------------------- publish surface

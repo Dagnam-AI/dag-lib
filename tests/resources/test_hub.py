@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -113,11 +114,6 @@ class TestFilesAndVersions:
         c = _client(hub_list_files=MagicMock(return_value={"files": []}))
         hub.list_files("m1", client=c)
         c.hub_list_files.assert_called_once_with("m1")
-
-    def test_download_with_file_id(self) -> None:
-        c = _client(hub_download=MagicMock(return_value={"url": "https://x"}))
-        hub.download("m1", file_id="f1", client=c)
-        c.hub_download.assert_called_once_with("m1", file_id="f1")
 
     def test_list_versions_delegates(self) -> None:
         c = _client(hub_list_versions=MagicMock(return_value=[]))
@@ -276,10 +272,12 @@ class TestFilesAndVersionsNewApi:
         hub.list_files("m1", client=c)
         c.list_hub_model_files.assert_called_once_with("m1")
 
-    def test_download_uses_download_hub_model(self) -> None:
-        c = _client(download_hub_model=MagicMock(return_value={"url": "https://x"}))
-        hub.download("m1", file_id="f1", client=c)
-        c.download_hub_model.assert_called_once_with("m1", file_id="f1")
+    def test_download_saves_files_and_returns_their_paths(self, tmp_path: Path) -> None:
+        saved = [tmp_path / "model.safetensors", tmp_path / "head.onnx"]
+        c = _client(download_hub_model_files=MagicMock(return_value=saved))
+        out = hub.download("m1", tmp_path, file_id="f1", client=c)
+        c.download_hub_model_files.assert_called_once_with("m1", tmp_path, file_id="f1")
+        assert out == [str(path) for path in saved]
 
     def test_list_versions_uses_list_hub_model_versions(self) -> None:
         c = _client(list_hub_model_versions=MagicMock(return_value=[]))
