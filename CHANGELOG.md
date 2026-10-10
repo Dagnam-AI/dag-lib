@@ -44,6 +44,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
   up to 900 s for the platform's answer after the last byte. A symlink is followed. The target must be
   a regular file that does not change while it is sent; otherwise the upload raises `OSError`.
 - `dagnam hub publish --visibility` help lists `unlisted`.
+- The agent guard hook now asks for `DAGNAM_CONFIRM=1` before `dagnam hub publish` (public by
+  default), `dagnam.hub.publish`, `dagnam.hub.finalize` and the client's `finalize_hub_model`, as it
+  already did for `dagnam.hub.create`.
 
 ### Fixed
 

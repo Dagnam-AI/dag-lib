@@ -57,6 +57,22 @@ def test_denies_unconfirmed_training_delete(
     assert payload["permissionDecision"] == "deny"
 
 
+def test_denies_unconfirmed_hub_publish_cli(
+    monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    # `dagnam hub publish` defaults to public visibility, so it needs explicit confirmation.
+    code, payload = _run(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "dagnam hub publish --name n --file w.safetensors"},
+        },
+        monkeypatch,
+        capsys,
+    )
+    assert code == 0
+    assert payload["permissionDecision"] == "deny"
+
+
 def test_denies_costly_verb_split_across_newline(
     monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:
@@ -144,6 +160,9 @@ def test_allows_non_costly_command(monkeypatch: PytestMonkeyPatch, capsys: StrCa
         'python -c "import dagnam; c = dagnam.DagnamClient(u, k); c.create_deployment(p)"',
         "python -c \"import dagnam; dagnam.hub.create(visibility='public')\"",
         'python -c "import dagnam; dagnam.datasets.upload(f, visibility=\\"public\\")"',
+        "python -c \"import dagnam; dagnam.hub.publish('n', files=['w.safetensors'])\"",
+        "python -c \"import dagnam; dagnam.hub.finalize('m1')\"",
+        'python -c "import dagnam; c = dagnam.DagnamClient(u, k); c.finalize_hub_model(m)"',
     ],
 )
 def test_denies_unconfirmed_sdk_costly_calls(
