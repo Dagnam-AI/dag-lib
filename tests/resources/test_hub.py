@@ -482,27 +482,12 @@ class TestPublish:
             )
         client.finalize_hub_model.assert_not_called()
 
-    def test_publish_finalize_route_missing_falls_back(self, tmp_path) -> None:
-        from dagnam._core.exceptions import HubModelNotFoundError
+    def test_publish_finalize_404_raises_and_keeps_the_draft(self, tmp_path) -> None:
+        from dagnam._core.exceptions import HubError, HubModelNotFoundError
 
         client, files = self._client(tmp_path)
-        client.finalize_hub_model.side_effect = HubModelNotFoundError("no such route")
-        result = hub.publish(
-            name="n",
-            description="d",
-            task_type="t",
-            framework="pytorch",
-            files=files,
-            client=client,
-        )
-        assert result["finalized"] is False
-
-    def test_publish_finalize_apierror_405_falls_back_but_500_raises(self, tmp_path) -> None:
-        from dagnam._core.exceptions import APIError
-
-        client, files = self._client(tmp_path)
-        client.finalize_hub_model.side_effect = APIError(405, "method not allowed")
-        assert (
+        client.finalize_hub_model.side_effect = HubModelNotFoundError("m1")
+        with pytest.raises(HubError, match="still a draft") as exc_info:
             hub.publish(
                 name="n",
                 description="d",
@@ -510,9 +495,24 @@ class TestPublish:
                 framework="pytorch",
                 files=files,
                 client=client,
-            )["finalized"]
-            is False
-        )
+            )
+        assert "hub.finalize('m1')" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, HubModelNotFoundError)
+
+    def test_publish_finalize_405_raises_hub_error_but_500_propagates(self, tmp_path) -> None:
+        from dagnam._core.exceptions import APIError, HubError
+
+        client, files = self._client(tmp_path)
+        client.finalize_hub_model.side_effect = APIError(405, "method not allowed")
+        with pytest.raises(HubError, match="HTTP 405"):
+            hub.publish(
+                name="n",
+                description="d",
+                task_type="t",
+                framework="pytorch",
+                files=files,
+                client=client,
+            )
         client.finalize_hub_model.side_effect = APIError(500, "boom")
         with pytest.raises(APIError):
             hub.publish(

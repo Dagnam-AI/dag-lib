@@ -11,7 +11,13 @@ import pytest
 
 from dagnam import hub
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import APIError, HubError, PayloadTooLargeError, UploadError
+from dagnam._core.exceptions import (
+    APIError,
+    HubError,
+    HubModelNotFoundError,
+    PayloadTooLargeError,
+    UploadError,
+)
 from dagnam._types import JsonObject
 
 Progress = Callable[[str, int, int, str], object]
@@ -168,3 +174,26 @@ class TestMove:
             "tags": ["a"],
             "metadata": {"k": "v"},
         }
+
+
+class TestFinalize:
+    def test_finalize_delegates_to_the_client(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.finalize_hub_model.return_value = {"id": "m1", "status": "published"}
+        assert hub.finalize("m1", client=client)["status"] == "published"
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_finalize_404_propagates(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        client.finalize_hub_model.side_effect = HubModelNotFoundError("m1")
+        with pytest.raises(HubModelNotFoundError):
+            hub.finalize("m1", client=client)
+
+    def test_finalize_is_exported(self) -> None:
+        assert "finalize" in hub.__all__
+
+    def test_publish_reports_the_finalized_model(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        result = _publish(client, files)
+        assert result["finalized"] is True
+        assert result["model"] == {"id": "m1", "status": "published"}

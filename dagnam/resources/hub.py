@@ -24,7 +24,7 @@ from dagnam._types import (
     ensure_json_object,
     is_json_value,
 )
-from dagnam.resources.hub_publish import create_payload, publish
+from dagnam.resources.hub_publish import create_payload, finalize, publish
 
 
 def _stringify_id(value: object) -> str:
@@ -464,6 +464,7 @@ __all__ = [
     "delete",
     "download",
     "featured",
+    "finalize",
     "fork",
     "get",
     "list_files",

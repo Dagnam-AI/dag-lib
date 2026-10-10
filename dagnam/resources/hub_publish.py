@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable, Optional
+from uuid import UUID
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
@@ -62,6 +63,22 @@ def create_payload(
     return payload
 
 
+def finalize(
+    model_id: str | UUID,
+    *,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Publish a draft model: ``POST /hub/models/{id}/finalize``.
+
+    Raises ``HubModelNotFoundError`` when the platform answers 404 and ``APIError`` for any
+    other refusal; the model stays a draft in both cases.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    return resolved.finalize_hub_model(str(model_id))
+
+
 def publish(
     *,
     name: str,
@@ -86,8 +103,7 @@ def publish(
     Follows the draft-to-finalize publish contract: the model record is created
     first, every file is uploaded (with ``max_retries_per_file`` retries per
     file), an optional version is recorded, and a finalize call flips the
-    model live. On servers without the finalize route the model is live from
-    creation; the result then carries ``finalized=False``.
+    model live.
 
     ``on_file_progress(path, index, total, state)`` receives per-file states:
     ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed``.
@@ -149,17 +165,18 @@ def publish(
             version_payload["changelog"] = changelog
         version_record = resolved.create_hub_model_version(model_id, version_payload)
 
-    finalized = True
     try:
-        model = resolved.finalize_hub_model(model_id)
-    except HubModelNotFoundError:
-        finalized = False  # backend without the draft/finalize contract yet
-    except APIError as exc:
-        if exc.status_code not in (404, 405):
+        model = finalize(model_id, client=resolved)
+    except (HubModelNotFoundError, APIError) as exc:
+        code = exc.status_code if isinstance(exc, APIError) else 404
+        if code not in (404, 405):
             raise
-        finalized = False
+        raise HubError(
+            f"Hub model {model_id} has its files but is still a draft: the platform answered "
+            f"HTTP {code} to the finalize call. Retry that step with hub.finalize({model_id!r})."
+        ) from exc
 
-    return {"model": model, "files": uploaded, "version": version_record, "finalized": finalized}
+    return {"model": model, "files": uploaded, "version": version_record, "finalized": True}
 
 
-__all__ = ["create_payload", "publish"]
+__all__ = ["create_payload", "finalize", "publish"]
