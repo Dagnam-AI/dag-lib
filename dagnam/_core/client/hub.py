@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+import os
 from pathlib import Path
 from urllib.parse import urljoin
+import uuid
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
@@ -24,6 +27,7 @@ from dagnam._core.client.common import (
     same_origin,
 )
 from dagnam._core.exceptions import ResponseError
+from dagnam._core.tar_stream import FileStream
 from dagnam._types import (
     JsonArray,
     JsonObject,
@@ -45,6 +49,53 @@ def safe_dest(dest_dir: str | Path, name: str) -> Path:
     if (root / name).resolve().parent != root.resolve():
         raise ResponseError(0, f"Download refused: {name!r} would land outside {root}")
     return root / name
+
+
+UPLOAD_TIMEOUT = (10, 900)
+"""Connect and read timeouts, in seconds, for a hub file upload.
+
+The read half is the wait for the platform's answer after the last byte, which for a
+multi-gigabyte body can take far longer than the 30 s used for ordinary calls.
+"""
+
+
+class _MultipartFile:
+    """One file as a sized ``multipart/form-data`` body, streamed from disk.
+
+    ``requests`` reads a ``files=`` part whole into memory before sending, and a weight file
+    is gigabytes. A body with ``__len__`` goes out with a ``Content-Length`` instead, read in
+    1 MiB slices by :class:`FileStream`, so the platform can refuse an oversized upload
+    before it reads a byte and the client never holds more than one slice. The stream is
+    built from the resolved path, so a symlink uploads its target under the link's own name;
+    ``failure`` holds the ``OSError`` that aborted the send, if the file changed meanwhile.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.boundary = uuid.uuid4().hex
+        name = path.name.replace('"', "%22").replace("\r", "%0D").replace("\n", "%0A")
+        self._head = (
+            f"--{self.boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode()
+        self._tail = f"\r\n--{self.boundary}--\r\n".encode()
+        self._file = FileStream(os.path.realpath(path))
+
+    @property
+    def content_type(self) -> str:
+        return f"multipart/form-data; boundary={self.boundary}"
+
+    @property
+    def failure(self) -> OSError | None:
+        return self._file.failure
+
+    def __len__(self) -> int:
+        return len(self._head) + len(self._file) + len(self._tail)
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield self._head
+        yield from self._file
+        yield self._tail
 
 
 class HubClientMixin(BaseDagnamClient):
@@ -161,22 +212,27 @@ class HubClientMixin(BaseDagnamClient):
     def upload_model_file(self, model_id: str, file_path: str) -> JsonObject:
         """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files``.
 
-        Sends ``multipart/form-data`` with a single ``file`` part. The multipart
-        boundary Content-Type is set by ``requests`` itself, so only the bearer
-        auth header is supplied (a manual Content-Type would corrupt the body).
+        Sends ``multipart/form-data`` with a single ``file`` part, streamed from disk with a
+        ``Content-Length`` (see :class:`_MultipartFile`); a symlink is followed. The target
+        must be a regular file and must not change while it is being sent; either raises
+        ``OSError`` (before any request, or in place of the connection error the change
+        caused). Files above about 500 MB are not supported yet: the platform refuses the
+        request (``PayloadTooLargeError``) whatever the plan allows.
         """
-        path = Path(file_path)
+        body = _MultipartFile(Path(file_path))
         url = f"{self.api_url}/api/v1/hub/models/{quote_path_segment(model_id)}/files"
         try:
-            with path.open("rb") as fh:
-                resp = requests.post(
-                    url,
-                    headers=self._headers(),
-                    files={"file": (path.name, fh)},
-                    timeout=DEFAULT_TIMEOUT,
-                    allow_redirects=ALLOW_REDIRECTS,
-                )
+            resp = requests.post(
+                url,
+                headers={**self._headers(), "Content-Type": body.content_type},
+                data=body,
+                timeout=UPLOAD_TIMEOUT,
+                allow_redirects=ALLOW_REDIRECTS,
+            )
         except requests.ConnectionError as exc:
+            # requests wraps what the body raises as a connection error; the file is the cause.
+            if body.failure is not None:
+                raise body.failure from exc
             raise APIError(0, f"Connection failed: {exc}") from exc
         except requests.Timeout as exc:
             raise APIError(0, f"Request timed out: {exc}") from exc

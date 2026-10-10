@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import requests
@@ -18,6 +18,8 @@ from dagnam._core.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 API = "https://api.test"
@@ -358,22 +360,94 @@ def test_hub_timeout_wrapped(client: DagnamClient, rmock: RequestsMocker) -> Non
 # ---------------------------------------------------------------- file upload
 
 
-def test_upload_model_file(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:
-    f = tmp_path / "weights.bin"
+def test_upload_model_file_streams_a_sized_multipart_body(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """The file goes out as a streamed body with a Content-Length, never read whole into memory."""
+    f = tmp_path / "weights.safetensors"
     f.write_bytes(b"\x00\x01\x02")
     rmock.post(
         f"{API}/api/v1/hub/models/m1/files",
-        json={"id": "f1", "model_id": "m1", "file_name": "weights.bin", "file_size": 3},
+        json={
+            "id": "f1",
+            "file_name": "weights.safetensors",
+            "file_size": 3,
+            "file_type": "safetensors",
+            "checksum": "sha256:abc",
+            "created_at": "2026-10-10T00:00:00Z",
+        },
         status_code=201,
     )
     out = client.upload_model_file("m1", str(f))
     assert out["id"] == "f1"
-    assert out["file_name"] == "weights.bin"
-    # Multipart sends a `file` part; the boundary Content-Type is set by requests,
-    # not by our bearer-only headers.
-    body = rmock.last_request.text
+    sent = rmock.last_request
+    body = sent.body
     assert body is not None
-    assert 'name="file"' in body
+    assert not isinstance(body, bytes), "the multipart body was built in memory"
+    raw = b"".join(body)
+    boundary = sent.headers["Content-Type"].removeprefix("multipart/form-data; boundary=")
+    assert boundary
+    assert boundary != sent.headers["Content-Type"]
+    assert sent.headers["Content-Length"] == str(len(raw))
+    assert "Transfer-Encoding" not in sent.headers
+    assert sent.timeout == (10, 900)
+    assert raw == (
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="weights.safetensors"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode()
+        + b"\x00\x01\x02"
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+
+
+def test_upload_model_file_follows_a_symlink(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A linked file (a Hugging Face cache snapshot) uploads under the link's own name."""
+    real = tmp_path / "blobs" / "abc123"
+    real.parent.mkdir()
+    real.write_bytes(b"\x01\x02")
+    link = tmp_path / "weights.safetensors"
+    link.symlink_to(real)
+    rmock.post(f"{API}/api/v1/hub/models/m1/files", json={"id": "f1"}, status_code=201)
+    assert client.upload_model_file("m1", str(link))["id"] == "f1"
+    body = rmock.last_request.body
+    assert body is not None
+    assert not isinstance(body, bytes)
+    raw = b"".join(body)
+    assert b'filename="weights.safetensors"' in raw
+    assert b"\r\n\r\n\x01\x02\r\n" in raw
+
+
+def test_upload_model_file_raises_the_file_error_when_the_file_changes_mid_send(
+    client: DagnamClient, monkeypatch: PytestMonkeyPatch, tmp_path: Path
+) -> None:
+    """requests wraps a body error as ConnectionError; the caller must see the file error."""
+    f = tmp_path / "weights.safetensors"
+    f.write_bytes(b"\x00" * 16)
+
+    def _send(*_a: object, **kw: object) -> None:
+        f.write_bytes(b"\x00")  # the file shrinks while the body is being read
+        try:
+            for _chunk in cast("Iterable[bytes]", kw["data"]):
+                pass
+        except OSError as exc:
+            raise requests.ConnectionError("broken pipe") from exc
+        raise AssertionError("the body did not notice the change")
+
+    monkeypatch.setattr(requests, "post", _send)
+    with pytest.raises(OSError, match="changed size"):
+        client.upload_model_file("m1", str(f))
+
+
+def test_upload_model_file_refuses_a_directory_before_any_request(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    with pytest.raises(OSError, match="not a regular file"):
+        client.upload_model_file("m1", str(tmp_path))
+    assert rmock.call_count == 0
 
 
 def test_upload_model_file_404(client: DagnamClient, rmock: RequestsMocker, tmp_path: Path) -> None:

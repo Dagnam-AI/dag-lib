@@ -27,6 +27,9 @@ from dagnam._types import (
     ensure_json_object,
 )
 
+UPLOAD_TIMEOUT = httpx.Timeout(900.0, connect=10.0)
+"""The platform answers an upload only after it has stored the bytes; see the sync client."""
+
 
 class AsyncHubMixin(BaseAsyncDagnamClient):
     """Async Hub resource methods."""
@@ -108,6 +111,8 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
 
         Sends ``multipart/form-data`` with a single ``file`` part; ``httpx`` sets
         the boundary Content-Type itself, so only the bearer auth header is sent.
+        Files above about 500 MB are not supported yet: the platform refuses the request
+        whatever the plan allows.
         """
         path = Path(file_path)
         with path.open("rb") as fh:
@@ -115,6 +120,7 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
                 "POST",
                 f"/api/v1/hub/models/{quote_path_segment(model_id)}/files",
                 files={"file": (path.name, fh)},
+                timeout=UPLOAD_TIMEOUT,
             )
         raise_for_hub(resp, model_id)
         return ensure_json_object(response_json_value(resp))

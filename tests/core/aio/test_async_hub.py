@@ -353,6 +353,12 @@ async def test_async_hub_upload_model_file(
     out = await client.upload_model_file("m1", str(f))
     assert out["id"] == "f1"
     assert b'name="file"' in route.calls[0].request.content
+    assert route.calls[0].request.extensions["timeout"] == {
+        "connect": 10.0,
+        "read": 900.0,
+        "write": 900.0,
+        "pool": 900.0,
+    }
 
 
 async def test_async_hub_upload_model_file_404(

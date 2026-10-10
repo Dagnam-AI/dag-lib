@@ -31,7 +31,7 @@ _ALLOWED_SITES = {
     # Multipart uploads — _request has no files= parameter.
     ("datasets.py", "upload_dataset"),  # multipart, timeout=None
     ("projects.py", "upload_project_thumbnail"),  # multipart files={"file": ...}
-    ("hub.py", "upload_model_file"),  # multipart files={"file": ...}
+    ("hub.py", "upload_model_file"),  # multipart data= streamed body with Content-Length
     ("models.py", "upload_model_artifact_direct"),  # multipart files={"file": ...}
     ("training.py", "upload_run_artifact"),  # multipart files={"file": ...}
     # Unauthenticated bootstrap POSTs — _request always attaches the bearer
