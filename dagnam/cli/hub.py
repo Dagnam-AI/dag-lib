@@ -276,7 +276,13 @@ def register_hub(subparsers: SubParsersAction) -> None:
         description="Upload a file to a hub model you own.",
     )
     hub_upload.add_argument("model_id", help="ID of the hub model.")
-    hub_upload.add_argument("file_path", help="Path to the file to upload.")
+    hub_upload.add_argument(
+        "file_path",
+        help=(
+            "Path to the file to upload (.safetensors, .onnx, or a PyTorch .pt/.pth, which is "
+            "converted to .safetensors). Files above about 500 MB are not supported yet."
+        ),
+    )
     hub_upload.set_defaults(func=cmd_hub_upload_file)
     hub_download = hub_sub.add_parser(
         "download",
@@ -298,20 +304,30 @@ def register_hub(subparsers: SubParsersAction) -> None:
     hub_publish.add_argument("--name", required=True, help="Model name.")
     hub_publish.add_argument("--description", required=True, help="Model description.")
     hub_publish.add_argument(
-        "--task-type", required=True, dest="task_type", help="Task type (e.g. text-generation)."
+        "--task-type",
+        required=True,
+        dest="task_type",
+        help=(
+            "Task type: classification, detection, segmentation, generation, nlp, audio, "
+            "multimodal or other."
+        ),
     )
     hub_publish.add_argument("--framework", required=True, help="Framework (e.g. pytorch).")
     hub_publish.add_argument(
         "--file",
         action="append",
         required=True,
-        help="File to upload (repeat for multiple files).",
+        help=(
+            "File to upload (repeat for multiple files): .safetensors, .onnx, or a PyTorch "
+            ".pt/.pth, which is converted to .safetensors. Files above about 500 MB are not "
+            "supported yet."
+        ),
     )
     hub_publish.add_argument("--version", help="Version string to record (e.g. 1.0.0).")
     hub_publish.add_argument("--changelog", help="Changelog for --version.")
     hub_publish.add_argument("--license", default="mit", help="License (default: mit).")
     hub_publish.add_argument(
-        "--visibility", default="public", help="public or private (default: public)."
+        "--visibility", default="public", help="public, private or unlisted (default: public)."
     )
     hub_publish.add_argument("--tags", help="Comma-separated tags.")
     hub_publish.add_argument(
@@ -319,7 +335,11 @@ def register_hub(subparsers: SubParsersAction) -> None:
         dest="model_id",
         help="Resume a draft: upload into this model instead of creating a new one.",
     )
-    hub_publish.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    hub_publish.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON (publish always prints JSON; accepted for compatibility).",
+    )
     hub_publish.set_defaults(func=cmd_hub_publish)
 
     hub_update = hub_sub.add_parser(
@@ -328,7 +348,7 @@ def register_hub(subparsers: SubParsersAction) -> None:
     hub_update.add_argument("model_id", help="ID of the hub model.")
     hub_update.add_argument("--name", help="New name.")
     hub_update.add_argument("--description", help="New description.")
-    hub_update.add_argument("--visibility", help="public or private.")
+    hub_update.add_argument("--visibility", help="public, private or unlisted.")
     hub_update.add_argument("--tags", help="Comma-separated tags (replaces existing).")
     hub_update.set_defaults(func=cmd_hub_update)
 

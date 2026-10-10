@@ -296,3 +296,12 @@ class TestResume:
 )
 def test_stored_name_maps_pytorch_files_to_safetensors(local: str, stored: str) -> None:
     assert stored_name(f"/tmp/some/dir/{local}") == stored
+
+
+def test_docstring_examples_use_task_types_the_platform_accepts() -> None:
+    assert 'task_type="generation"' in (hub.search.__doc__ or "")
+    assert 'task_type="classification"' in (hub.create.__doc__ or "")
+    for fn in (hub.search, hub.create):
+        assert "text-generation" not in (fn.__doc__ or "")
+    assert "500 MB" in (hub.upload_file.__doc__ or "")
+    assert "500 MB" in (hub.publish.__doc__ or "")

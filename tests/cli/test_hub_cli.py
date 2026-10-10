@@ -260,6 +260,36 @@ def test_hub_publish_model_id_resumes_a_draft(
     assert json.loads(capsys.readouterr().out)["model"]["id"] == "d1"
 
 
+def test_hub_publish_json_flag_is_accepted_and_prints_the_same_json(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    """publish always prints JSON; --json is accepted so callers that pass it keep working."""
+    weights = tmp_path / "w.safetensors"
+    weights.write_bytes(b"x")
+    done = {"model": {"id": "m1"}, "files": [], "version": None, "finalized": True}
+    argv = [
+        "hub",
+        "publish",
+        "--name",
+        "n",
+        "--description",
+        "d",
+        "--task-type",
+        "classification",
+        "--framework",
+        "pytorch",
+        "--file",
+        str(weights),
+    ]
+    with mock.patch("dagnam.hub.publish", return_value=done):
+        assert run_cli(argv) == 0
+        plain = capsys.readouterr().out
+        assert run_cli([*argv, "--json"]) == 0
+        flagged = capsys.readouterr().out
+    assert json.loads(plain) == done
+    assert flagged == plain
+
+
 def test_hub_update(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.hub.update", return_value={"id": "m1", "name": "new"}) as m:
         assert run_cli(["hub", "update", "m1", "--name", "new", "--tags", "a,b"]) == 0

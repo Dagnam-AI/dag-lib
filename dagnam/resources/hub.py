@@ -62,7 +62,7 @@ def search(
 ) -> JsonObject:
     """Search the model hub with optional filters.
 
-    >>> dagnam.hub.search(task_type="text-generation", sort_by="popular")["items"]
+    >>> dagnam.hub.search(task_type="generation", sort_by="popular")["items"]
     """
     resolved = resolve_client(client, api_key, api_url)
     legacy_search = getattr(resolved, "hub_search", None)
@@ -175,7 +175,7 @@ def create(
     """Create a new model in the hub.
 
     >>> dagnam.hub.create(
-    ...     name="my-model", description="...", task_type="text-generation", framework="pytorch"
+    ...     name="my-model", description="...", task_type="classification", framework="pytorch"
     ... )
     """
     resolved = resolve_client(client, api_key, api_url)
@@ -258,7 +258,13 @@ def upload_file(
 ) -> JsonObject:
     """Upload a file to a hub model you own.
 
-    >>> dagnam.hub.upload_file("model_abc", "./weights.safetensors")["id"]
+    ``.safetensors`` and ``.onnx`` are stored as they are; a PyTorch ``.pt``/``.pth`` file is
+    converted on upload and stored as ``<stem>.safetensors``. Files above about 500 MB are
+    not supported yet: the platform refuses the request whatever the plan allows
+    (``PayloadTooLargeError``).
+
+    >>> dagnam.hub.upload_file("model_abc", "./weights.pt")["file_name"]
+    'weights.safetensors'
     """
     resolved = resolve_client(client, api_key, api_url)
     return resolved.upload_model_file(_stringify_id(model_id), file_path)
