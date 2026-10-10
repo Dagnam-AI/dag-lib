@@ -145,6 +145,21 @@ def test_quote_path_segment_encodes_slashes() -> None:
     assert common.quote_path_segment("a/b?c") == "a%2Fb%3Fc"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://api.test/api/v1/hub/models/m1/files/f1/content?token=t", True),
+        ("HTTPS://API.TEST/x", True),
+        ("http://api.test/x", False),
+        ("https://api.test:8443/x", False),
+        ("https://bucket.example.com/m1/f1?X-Amz-Signature=abc", False),
+        ("/api/v1/hub/models/m1/files/f1/content", False),
+    ],
+)
+def test_same_origin_compares_scheme_and_host(url: str, expected: bool) -> None:
+    assert common.same_origin("https://api.test", url) is expected
+
+
 # Header builders --------------------------------------------------------
 
 

@@ -3,23 +3,48 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urljoin
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
     DEFAULT_TIMEOUT,
     APIError,
     BaseDagnamClient,
+    is_redirect_response,
     requests,
+    safe_download_basename,
 )
 from dagnam._core.client.common import (
+    build_url,
     quote_path_segment,
     raise_for_hub,
     requests_query_params,
     response_json_object,
     response_json_value,
+    same_origin,
 )
 from dagnam._core.exceptions import ResponseError
-from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, QueryValue
+from dagnam._types import (
+    JsonArray,
+    JsonObject,
+    JsonValue,
+    QueryParams,
+    QueryValue,
+    ensure_json_array,
+    ensure_json_object,
+)
+
+
+def safe_dest(dest_dir: str | Path, name: str) -> Path:
+    """``dest_dir / name``, refused unless the result stays inside ``dest_dir``.
+
+    ``name`` is already a bare basename when the download calls this; it is the last line of
+    defence for a server-supplied name, not the first.
+    """
+    root = Path(dest_dir)
+    if (root / name).resolve().parent != root.resolve():
+        raise ResponseError(0, f"Download refused: {name!r} would land outside {root}")
+    return root / name
 
 
 class HubClientMixin(BaseDagnamClient):
@@ -159,9 +184,55 @@ class HubClientMixin(BaseDagnamClient):
         return response_json_object(resp)
 
     def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
+        """Issue content links. ``POST /api/v1/hub/models/{model_id}/download[?file_id=]``.
+
+        The platform answers ``{"files": [{"file_id", "file_name", "size", "url"}, ...],
+        "download_all_url"}``, each ``url`` a short-lived signed link. To save the bytes use
+        :meth:`download_hub_model_files`.
+        """
         path = f"/api/v1/hub/models/{quote_path_segment(model_id)}/download"
         params: QueryParams | None = {"file_id": file_id} if file_id else None
-        return self._hub_object("GET", path, model_id=model_id, params=params)
+        return self._hub_object("POST", path, model_id=model_id, params=params)
+
+    def download_hub_model_files(
+        self, model_id: str, dest_dir: str | Path, file_id: str | None = None
+    ) -> list[Path]:
+        """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns the paths.
+
+        A link lasts minutes and the files are fetched in turn, so each file's link is issued
+        just before its fetch (one ``POST`` per file after the listing). Each is streamed to
+        disk, bounded by ``max_download_bytes``. The API key is sent only to the API's own
+        origin: a link on another host, or a redirect to object storage (302 or 307), is fetched
+        WITHOUT it, since a presigned URL carries its own signature. The file name (and the
+        file id it falls back to) is reduced to a bare basename and the final path is checked
+        to lie inside ``dest_dir``, so a hostile name can never escape it.
+        """
+        saved: list[Path] = []
+        for entry in ensure_json_array(self.download_hub_model(model_id, file_id).get("files")):
+            item = ensure_json_object(entry)
+            fid = str(item.get("file_id") or "")
+            if file_id is None and fid:
+                # The listing's links age while earlier files download: issue this one's now.
+                for fresh in ensure_json_array(self.download_hub_model(model_id, fid).get("files")):
+                    item = ensure_json_object(fresh)
+            link = item.get("url")
+            if not isinstance(link, str):
+                raise ResponseError(0, "Download response names a file without a content link")
+            fallback = safe_download_basename(fid, default="model-file")
+            name = safe_download_basename(str(item.get("file_name") or ""), default=fallback)
+            if not link.startswith(("http://", "https://")):
+                link = build_url(self.api_url, link)
+            fetch = (
+                self._get_stream if same_origin(self.api_url, link) else self._get_stream_no_auth
+            )
+            resp = fetch(link)
+            if is_redirect_response(resp):
+                location = urljoin(link, resp.headers["Location"])
+                resp.close()
+                resp = self._get_stream_no_auth(location)
+            raise_for_hub(resp, model_id)
+            saved.append(self._stream_response_to_file(resp, safe_dest(dest_dir, name)))
+        return saved
 
     def list_hub_model_versions(self, model_id: str) -> JsonArray:
         return self._hub_array(

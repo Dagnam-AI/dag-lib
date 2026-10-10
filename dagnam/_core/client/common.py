@@ -75,6 +75,15 @@ def quote_path_segment(value: str) -> str:
     return quote(str(value), safe="")
 
 
+def same_origin(api_url: str, url: str) -> bool:
+    """True when ``url`` has the API's scheme and host: the only origin the API key may go to."""
+    base, other = urlparse(api_url), urlparse(url)
+    return (base.scheme.lower(), base.netloc.lower()) == (
+        other.scheme.lower(),
+        other.netloc.lower(),
+    )
+
+
 def _response_status(resp: JsonResponseLike) -> int:
     code = getattr(resp, "status_code", 0)
     return code if isinstance(code, int) else 0
