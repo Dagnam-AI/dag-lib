@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-12
+
+### Platform compatibility
+
+- `dagnam.hub.download` and `dagnam hub download` work against the current platform. Two behaviours
+  need the repaired Hub: a second file with the same name on one model answers 409, and a PyTorch
+  `.pt` / `.pth` file is accepted and stored as `<stem>.safetensors`. An older platform answers 400 to
+  a `.pt` upload; publish halts on it with the resume instructions.
+
 ### Added
 
 - `dagnam.hub.finalize(model_id)` publishes a draft on its own, and `dagnam.hub.publish(..., model_id=...)`
