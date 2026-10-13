@@ -282,18 +282,45 @@ def test_create_deployment_retries_with_same_key(
 def test_create_deployment_domain_409_raises_immediately(
     client: DagnamClient, rmock: RequestsMocker
 ) -> None:
-    """A deployment 409 is a DOMAIN state conflict, mapped by
-    ``raise_for_deployment`` to :class:`DeploymentStateError` before the retry
-    driver sees a generic ``APIError(409)`` — so it raises immediately and is
-    NOT swept into the scoped conflict-retry, even though ``idempotent=True``
-    stamps a key. (The training create, whose generic mapper yields
-    ``APIError(409)``, is where the client-side conflict-retry engages.)"""
-    rmock.post(f"{API}/api/v1/deployments", status_code=409)
+    """A deployment 409 other than the idempotency conflict is final: here the
+    active-deployment ceiling, which answers the same way until a deployment
+    stops. It maps to :class:`DeploymentStateError` and is not retried, even
+    though ``idempotent=True`` stamps a key."""
+    rmock.post(
+        f"{API}/api/v1/deployments",
+        status_code=409,
+        json={"detail": {"error": "deployment_limit_reached", "message": "Limit reached."}},
+    )
     client._sleep = lambda _s: None
     client._rng = lambda: 1.0
-    with pytest.raises(DeploymentStateError):
+    with pytest.raises(DeploymentStateError) as ei:
         client.create_deployment({"project_id": "p1"})
+    assert ei.value.reason == "deployment_limit_reached"
     assert rmock.call_count == 1  # domain 409 is terminal, no retry
+
+
+def test_create_deployment_idempotency_conflict_retries_into_replay(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    """The in-progress 409 means the first create is still running. It used to
+    map to DeploymentStateError, which the retry never sees, so the create
+    failed instead of resolving into the replayed 201."""
+    rmock.post(
+        f"{API}/api/v1/deployments",
+        [
+            {
+                "status_code": 409,
+                "json": {"detail": "A request with this Idempotency-Key is in progress"},
+            },
+            {"status_code": 201, "json": {"id": "dep1", "api_key": "dk_1"}},
+        ],
+    )
+    client._sleep = lambda _s: None
+    client._rng = lambda: 1.0
+    assert client.create_deployment({"project_id": "p1"})["id"] == "dep1"
+    keys = {req.headers.get("Idempotency-Key") for req in rmock.request_history}
+    assert len(keys) == 1
+    assert rmock.call_count == 2
 
 
 def test_create_deployment_revision_posts_body_and_explicit_key(

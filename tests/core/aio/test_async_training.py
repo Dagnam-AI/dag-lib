@@ -417,7 +417,9 @@ async def test_async_create_job_409_retries_into_replay(
     client._rng = lambda: 1.0
     route = mock.post("/api/v1/training/jobs").mock(
         side_effect=[
-            httpx.Response(409, json={}),
+            httpx.Response(
+                409, json={"detail": "A request with this Idempotency-Key is in progress"}
+            ),
             httpx.Response(201, json={"id": "j1"}),
         ]
     )

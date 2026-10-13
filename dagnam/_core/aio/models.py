@@ -10,11 +10,11 @@ from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
+    raise_for_generic,
     raise_for_model,
     response_json_value,
-    safe_response_text,
 )
-from dagnam._core.exceptions import APIError, AuthError, ModelNotFoundError, ResponseError
+from dagnam._core.exceptions import APIError, ModelNotFoundError, ResponseError
 from dagnam._types import (
     JsonArray,
     JsonObject,
@@ -207,13 +207,8 @@ class AsyncModelsMixin(BaseAsyncDagnamClient):
         raise_for_model(resp)
 
     async def _raise_for_model_artifact(self, resp: httpx.Response, artifact_id: str) -> None:
-        await resp.aread()  # populate the body for the error message
-        code = resp.status_code
-        if code == 401:
-            raise AuthError("Authentication failed: invalid or expired API key")
-        if code == 404:
-            raise ModelNotFoundError(artifact_id)
-        raise APIError(code, safe_response_text(resp))
+        await resp.aread()  # read the body so the mapper sees its markers
+        raise_for_generic(resp, ModelNotFoundError, artifact_id)
 
     async def download_model_artifact(
         self, version_id: str, artifact_id: str, dest_path: Path

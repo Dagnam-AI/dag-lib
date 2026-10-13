@@ -14,6 +14,7 @@ from dagnam._core.client.base import (
     APIError,
     BaseDagnamClient,
     is_redirect_response,
+    is_success_response,
     requests,
     safe_download_basename,
 )
@@ -311,7 +312,10 @@ class HubClientMixin(BaseDagnamClient):
                 location = urljoin(link, resp.headers["Location"])
                 resp.close()
                 resp = self._get_stream_no_auth(location)
-            raise_for_hub(resp, model_id)
+            if not is_success_response(resp):
+                # Read the (small) error body first so the mapper sees its markers.
+                _ = resp.content
+                raise_for_hub(resp, model_id)
             saved.append(self._stream_response_to_file(resp, safe_dest(dest_dir, name)))
         return saved
 

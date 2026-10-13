@@ -7,6 +7,7 @@ import dagnam
 from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
     AccountLockedError,
+    AccountPendingDeletionError,
     AccountSuspendedError,
     APIError,
     ArchitectureValidationError,
@@ -14,9 +15,11 @@ from dagnam._core.exceptions import (
     ChecksumError,
     DagnamError,
     DatasetNotFoundError,
+    DeploymentStateError,
     EmailNotVerifiedError,
     InvalidURLError,
     PayloadTooLargeError,
+    PermissionDeniedError,
     QuotaExceededError,
     ResponseError,
     UploadError,
@@ -218,3 +221,35 @@ def test_invalid_url_is_upload_error():
     exc = InvalidURLError("bad url")
     assert isinstance(exc, UploadError)
     assert isinstance(exc, DagnamError)
+
+
+def test_account_pending_deletion_is_still_caught_as_account_suspended():
+    exc = AccountPendingDeletionError("scheduled for deletion")
+    assert isinstance(exc, APIError)
+    assert isinstance(exc, AccountSuspendedError)  # the server used to send this as a suspension
+    with pytest.raises(AccountSuspendedError):
+        raise exc
+    assert exc.status_code == 403
+    assert "scheduled for deletion" in str(exc)
+
+
+def test_permission_denied_is_api_error_and_carries_reason():
+    exc = PermissionDeniedError("key lacks scope", reason="insufficient_scope")
+    assert isinstance(exc, APIError)  # a plain APIError(403) before the class existed
+    assert exc.status_code == 403
+    assert exc.reason == "insufficient_scope"
+    assert not isinstance(exc, AuthError)  # the credential is valid; a new one will not help
+    assert "key lacks scope" in str(exc)
+    assert exc.required_scopes is None
+
+
+def test_permission_denied_carries_required_scopes():
+    exc = PermissionDeniedError("no", reason="insufficient_scope", required_scopes=["write"])
+    assert exc.required_scopes == ["write"]
+
+
+def test_deployment_state_error_carries_reason():
+    assert DeploymentStateError("cap", reason="deployment_limit_reached").reason == (
+        "deployment_limit_reached"
+    )
+    assert DeploymentStateError("bad state").reason is None

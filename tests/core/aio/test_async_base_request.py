@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from dagnam._core.aio.base import BaseAsyncDagnamClient
+from dagnam._core.client.common import raise_for_generic
 from dagnam._core.exceptions import APIError
 
 API = "https://api.test"
@@ -15,8 +16,7 @@ pytestmark = pytest.mark.anyio
 
 
 def _raise_for(resp: httpx.Response) -> None:
-    if resp.status_code >= 400:
-        raise APIError(resp.status_code, "err")
+    raise_for_generic(resp)
 
 
 async def _no_sleep(_d: float) -> None: ...
@@ -178,7 +178,9 @@ async def test_async_post_409_with_idempotency_key_retries_into_replay() -> None
     def _handler(request: httpx.Request) -> httpx.Response:
         seen_keys.append(request.headers.get("Idempotency-Key"))
         if len(seen_keys) < 2:
-            return httpx.Response(409, json={})
+            return httpx.Response(
+                409, json={"detail": "A request with this Idempotency-Key is in progress"}
+            )
         return httpx.Response(201, json={"id": "j1"})
 
     try:
@@ -216,5 +218,32 @@ async def test_async_unavailable_503_waits_as_long_as_it_asks_up_to_the_cap() ->
             )
             await base._request("POST", "/x", raise_for=_raise_for, idempotency_key="k1")
         assert slept == [30.0, 60.0]
+    finally:
+        await base._client.aclose()
+
+
+async def test_async_post_409_with_the_idempotency_marker_retries_into_replay() -> None:
+    """Async mirror: the ``idempotency_in_progress`` marker alone is enough."""
+    base = BaseAsyncDagnamClient(API, "k")
+    base._async_sleep = _no_sleep
+    base._rng = lambda: 1.0
+    calls: list[int] = []
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) < 2:
+            return httpx.Response(
+                409, json={"detail": {"error": "idempotency_in_progress", "message": "Busy."}}
+            )
+        return httpx.Response(201, json={"id": "j1"})
+
+    try:
+        with respx.mock(base_url=API) as r:
+            r.post("/api/v1/jobs").mock(side_effect=_handler)
+            resp = await base._request(
+                "POST", "/api/v1/jobs", raise_for=_raise_for, idempotent=True
+            )
+        assert resp.status_code == 201
+        assert len(calls) == 2
     finally:
         await base._client.aclose()

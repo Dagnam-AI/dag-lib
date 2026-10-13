@@ -19,6 +19,7 @@ from dagnam._core import exceptions as _core_exceptions
 # ``dagnam._core.exceptions`` path.
 EXCEPTION_EXPORTS = [
     "AccountLockedError",
+    "AccountPendingDeletionError",
     "AccountSuspendedError",
     "APIError",
     "ArchitectureValidationError",
@@ -48,6 +49,7 @@ EXCEPTION_EXPORTS = [
     "ModelError",
     "ModelNotFoundError",
     "PayloadTooLargeError",
+    "PermissionDeniedError",
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",
