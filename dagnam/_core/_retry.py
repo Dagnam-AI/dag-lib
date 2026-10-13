@@ -27,6 +27,7 @@ __all__ = [
     "DEFAULT_CONFLICT_BACKOFF_CAP",
     "DEFAULT_CONFLICT_MAX_RETRIES",
     "DEFAULT_MAX_RETRIES",
+    "IDEMPOTENCY_IN_PROGRESS",
     "TRANSIENT_STATUS",
     "RetryBudget",
     "compute_backoff",
@@ -44,12 +45,28 @@ DEFAULT_BUDGET_MAX = 100.0
 DEFAULT_BUDGET_RETRY_COST = 5.0
 
 # 409 conflict-retry (idempotency keys). Deliberately separate from the
-# transient policy: a 409 is retried ONLY when an idempotency key is present (a
-# slow original resolves into a replay), with its own short, capped backoff and
-# its own attempt budget. 409 is never added to TRANSIENT_STATUS.
+# transient policy: a 409 is retried ONLY when an idempotency key is present
+# AND the body is the server's "first request still running" answer (a slow
+# original resolves into a replay), with its own short, capped backoff and its
+# own attempt budget. Any other 409 (a state conflict, the active-deployment
+# ceiling) answers the same way every time, so it is final. 409 is never added
+# to TRANSIENT_STATUS.
 DEFAULT_CONFLICT_MAX_RETRIES = 3
 DEFAULT_CONFLICT_BACKOFF_BASE = 1.0
 DEFAULT_CONFLICT_BACKOFF_CAP = 5.0
+
+# The idempotency conflict's text. The response mappers turn the conflict into
+# an APIError with exactly this message, whether the server marks it
+# ``idempotency_in_progress`` or (older servers) sends only the text.
+IDEMPOTENCY_IN_PROGRESS = "A request with this Idempotency-Key is in progress"
+
+
+def _is_idempotency_conflict(exc: APIError, idempotency_key: str | None) -> bool:
+    return (
+        idempotency_key is not None
+        and exc.status_code == 409
+        and exc.message == IDEMPOTENCY_IN_PROGRESS
+    )
 
 
 class RetryBudget:
@@ -145,10 +162,11 @@ def run_with_retry[T](
     """Issue ``call()``, retrying transient ``APIError``s per the shared policy.
 
     A 409 is handled separately from ``TRANSIENT_STATUS``: it is retried ONLY
-    when ``idempotency_key`` is set (a slow original resolves into a replay),
-    with its own short, capped backoff and its own attempt budget, charged
-    against the same ``RetryBudget``. A 409 with no idempotency key raises
-    immediately — 409 is never added to ``TRANSIENT_STATUS``.
+    when ``idempotency_key`` is set and the body is the server's idempotency
+    conflict (a slow original resolves into a replay), with its own short,
+    capped backoff and its own attempt budget, charged against the same
+    ``RetryBudget``. Any other 409 raises immediately; 409 is never added to
+    ``TRANSIENT_STATUS``.
     """
     budget.deposit()
     attempt = 0
@@ -157,7 +175,7 @@ def run_with_retry[T](
         try:
             return call()
         except APIError as exc:
-            if exc.status_code == 409 and idempotency_key is not None:
+            if _is_idempotency_conflict(exc, idempotency_key):
                 if conflict_attempt >= conflict_max_retries or not budget.try_withdraw():
                     raise
                 delay = compute_backoff(
@@ -214,9 +232,9 @@ async def run_with_retry_async[T](
 ) -> T:
     """Async twin of :func:`run_with_retry` — same policy, awaiting call/sleep.
 
-    Carries the identical scoped 409 conflict-retry: retried only when
-    ``idempotency_key`` is set, with its own short backoff and attempt budget
-    charged against the shared ``RetryBudget``.
+    Carries the identical scoped 409 conflict-retry: retried only for the
+    idempotency conflict when ``idempotency_key`` is set, with its own short
+    backoff and attempt budget charged against the shared ``RetryBudget``.
     """
     budget.deposit()
     attempt = 0
@@ -225,7 +243,7 @@ async def run_with_retry_async[T](
         try:
             return await call()
         except APIError as exc:
-            if exc.status_code == 409 and idempotency_key is not None:
+            if _is_idempotency_conflict(exc, idempotency_key):
                 if conflict_attempt >= conflict_max_retries or not budget.try_withdraw():
                     raise
                 delay = compute_backoff(

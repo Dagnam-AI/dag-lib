@@ -7,6 +7,7 @@ import dagnam
 from dagnam._core.client.common import raise_for_generic, safe_response_text
 from dagnam._core.exceptions import (
     AccountLockedError,
+    AccountPendingDeletionError,
     AccountSuspendedError,
     APIError,
     ArchitectureValidationError,
@@ -14,9 +15,11 @@ from dagnam._core.exceptions import (
     ChecksumError,
     DagnamError,
     DatasetNotFoundError,
+    DeploymentStateError,
     EmailNotVerifiedError,
     InvalidURLError,
     PayloadTooLargeError,
+    PermissionDeniedError,
     QuotaExceededError,
     ResponseError,
     UploadError,
@@ -218,3 +221,46 @@ def test_invalid_url_is_upload_error():
     exc = InvalidURLError("bad url")
     assert isinstance(exc, UploadError)
     assert isinstance(exc, DagnamError)
+
+
+def test_account_pending_deletion_is_api_error_and_distinct_from_suspended():
+    exc = AccountPendingDeletionError("scheduled for deletion")
+    assert isinstance(exc, APIError)  # still catchable as the pre-existing APIError
+    assert exc.status_code == 403
+    assert not isinstance(exc, AccountSuspendedError)  # a different remedy: cancel, not support
+    assert "scheduled for deletion" in str(exc)
+
+
+def test_permission_denied_is_api_error_and_carries_reason():
+    exc = PermissionDeniedError("key lacks scope", reason="insufficient_scope")
+    assert isinstance(exc, APIError)  # a plain APIError(403) before the class existed
+    assert exc.status_code == 403
+    assert exc.reason == "insufficient_scope"
+    assert not isinstance(exc, AuthError)  # the credential is valid; a new one will not help
+    assert "key lacks scope" in str(exc)
+    assert exc.required_scopes is None
+
+
+def test_permission_denied_carries_required_scopes():
+    exc = PermissionDeniedError("no", reason="insufficient_scope", required_scopes=["write"])
+    assert exc.required_scopes == ["write"]
+
+
+def test_quota_exceeded_carries_credit_numbers():
+    exc = QuotaExceededError("not enough credits", required_credits=120, available_credits=40)
+    assert exc.required_credits == 120
+    assert exc.available_credits == 40
+    assert str(exc) == "not enough credits"
+
+
+def test_quota_exceeded_credit_numbers_default_none():
+    exc = QuotaExceededError("plan limit")
+    assert exc.required_credits is None
+    assert exc.available_credits is None
+
+
+def test_deployment_state_error_carries_reason():
+    assert DeploymentStateError("cap", reason="deployment_limit_reached").reason == (
+        "deployment_limit_reached"
+    )
+    assert DeploymentStateError("bad state").reason is None

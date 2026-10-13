@@ -30,6 +30,7 @@ from dagnam.data.cache import (
 )
 from dagnam.exceptions import (
     AccountLockedError,
+    AccountPendingDeletionError,
     AccountSuspendedError,
     APIError,
     ArchitectureValidationError,
@@ -55,6 +56,7 @@ from dagnam.exceptions import (
     ModelError,
     ModelNotFoundError,
     PayloadTooLargeError,
+    PermissionDeniedError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -139,6 +141,7 @@ _LAZY_EXPORTS = {
 __all__ = [
     "APIError",
     "AccountLockedError",
+    "AccountPendingDeletionError",
     "AccountSuspendedError",
     "ArchitectureValidationError",
     "ArchitectureVersionNotFoundError",
@@ -167,6 +170,7 @@ __all__ = [
     "ModelError",
     "ModelNotFoundError",
     "PayloadTooLargeError",
+    "PermissionDeniedError",
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",

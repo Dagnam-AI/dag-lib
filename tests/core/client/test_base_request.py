@@ -9,6 +9,8 @@ from dagnam._core.client.base import BaseDagnamClient
 from dagnam._core.client.common import raise_for_generic
 from dagnam._core.exceptions import APIError, DatasetNotFoundError
 
+_IN_PROGRESS = {"detail": "A request with this Idempotency-Key is in progress"}
+
 
 def _client() -> BaseDagnamClient:
     c = BaseDagnamClient("https://api.test", "sk_key")
@@ -117,7 +119,7 @@ def test_post_409_with_idempotency_key_retries_into_replay(requests_mock):
     flight — the scoped conflict-retry resolves it into the replayed 201."""
     requests_mock.post(
         "https://api.test/api/v1/jobs",
-        [{"status_code": 409}, {"status_code": 201, "json": {"id": "j1"}}],
+        [{"status_code": 409, "json": _IN_PROGRESS}, {"status_code": 201, "json": {"id": "j1"}}],
     )
     c = _client()
     resp = c._request(
@@ -133,3 +135,67 @@ def test_post_409_with_idempotency_key_retries_into_replay(requests_mock):
     keys = {req.headers.get("Idempotency-Key") for req in requests_mock.request_history}
     assert len(keys) == 1
     assert next(iter(keys))
+
+
+def test_post_409_that_is_not_the_idempotency_conflict_is_not_retried(requests_mock):
+    """Only the in-progress body means "a copy is in flight". Any other 409 is
+    a real conflict and answers the same way on every attempt."""
+    requests_mock.post(
+        "https://api.test/api/v1/jobs",
+        status_code=409,
+        json={"detail": {"error": "conflict", "message": "Already running"}},
+    )
+    c = _client()
+    with pytest.raises(APIError) as ei:
+        c._request(
+            "POST",
+            "/api/v1/jobs",
+            raise_for=lambda r: raise_for_generic(r),
+            json={},
+            idempotent=True,
+        )
+    assert ei.value.status_code == 409
+    assert requests_mock.call_count == 1
+
+
+def test_503_credential_check_unavailable_waits_for_retry_after(requests_mock):
+    """A 503 means the server could not check the credential right now. It is
+    retried after the server's ``Retry-After``, never reported as a bad key."""
+    requests_mock.get(
+        "https://api.test/api/v1/ping",
+        [
+            {"status_code": 503, "headers": {"Retry-After": "2"}, "json": {"detail": "x"}},
+            {"status_code": 200, "json": {"ok": True}},
+        ],
+    )
+    c = _client()
+    slept: list[float] = []
+    c._sleep = slept.append
+    resp = c._request("GET", "/api/v1/ping", raise_for=lambda r: raise_for_generic(r))
+    assert resp.json() == {"ok": True}
+    assert slept == [2.0]
+
+
+def test_post_409_with_the_idempotency_marker_retries_into_replay(requests_mock):
+    """Newer servers add ``error: idempotency_in_progress`` to the conflict;
+    the marker alone is enough, whatever the text says."""
+    requests_mock.post(
+        "https://api.test/api/v1/jobs",
+        [
+            {
+                "status_code": 409,
+                "json": {"detail": {"error": "idempotency_in_progress", "message": "Busy."}},
+            },
+            {"status_code": 201, "json": {"id": "j1"}},
+        ],
+    )
+    c = _client()
+    resp = c._request(
+        "POST",
+        "/api/v1/jobs",
+        raise_for=lambda r: raise_for_generic(r),
+        json={},
+        idempotent=True,
+    )
+    assert resp.json() == {"id": "j1"}
+    assert requests_mock.call_count == 2

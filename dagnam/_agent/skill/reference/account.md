@@ -54,16 +54,29 @@ explicit argument -> `dagnam.configure(...)` -> `DAGNAM_API_KEY` / `DAGNAM_API_U
   and check the operation's result rather than assuming the return of
   `upload_from_url` means the dataset landed.
 - **Account-status rejections.** If the API key's owning account is
-  administratively suspended, calls raise `dagnam.AccountSuspendedError` — this
-  is not self-clearing; contact support. A request from a blocked IP address
-  raises the existing `dagnam.AuthError` (no dedicated exception type, since
-  there is no different remediation an SDK caller can take for it). Both are
-  `APIError` subclasses carrying `.status_code == 403`, as is
-  `EmailNotVerifiedError`, so an existing `except dagnam.APIError` handler still
-  catches them.
+  administratively suspended, calls raise `dagnam.AccountSuspendedError`. It is
+  not self-clearing; contact support. If the account is scheduled for deletion,
+  calls raise `dagnam.AccountPendingDeletionError`; the owner can cancel the
+  deletion in the web app, after which calls work again. Both are `APIError`
+  subclasses with `.status_code == 403`, as is `EmailNotVerifiedError`, so an
+  existing `except dagnam.APIError` handler still catches them. A request from
+  a blocked IP address raises `dagnam.AuthError` (no dedicated type, since an
+  SDK caller has no different remedy for it); `AuthError` is not an `APIError`.
+- **Permission refusals.** When the server knows who is calling and still says
+  no, calls raise `dagnam.PermissionDeniedError` (an `APIError`, `.status_code
+  == 403`). Its `.reason` says what would help: `insufficient_scope` (use a key
+  with one of the scopes in `.required_scopes`), `api_key_not_allowed` (the
+  route accepts only a web-app session), or `feature_gated`,
+  `remote_gpu_not_entitled`, `compute_strategy_not_in_tier` (the plan does not
+  include it). A new key or a retry does not change the answer. A 401 always means the key is missing,
+  invalid or expired.
+- **Credits.** A job the credit balance cannot cover raises
+  `dagnam.QuotaExceededError` with `.required_credits` and
+  `.available_credits` set.
 - **Lockout applies to interactive login only.** After repeated failed
   interactive-login attempts the account is temporarily locked out, and the
-  login endpoint answers 423 — so `dagnam login` (and any direct login call)
-  raises `dagnam.AccountLockedError` (an `APIError` subclass, `.status_code ==
-  423`). It clears itself once the lockout window elapses; retry after waiting.
-  API-key requests are not subject to the lockout and never raise it.
+  login endpoint answers 423. `dagnam register` logs in once to create the
+  first key, so it can raise `dagnam.AccountLockedError` (an `APIError`
+  subclass, `.status_code == 423`); it clears itself once the lockout window
+  elapses, so retry after waiting. `dagnam login` takes an existing API key and
+  API-key requests are not subject to the lockout, so they never raise it.

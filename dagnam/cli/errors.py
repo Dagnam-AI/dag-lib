@@ -15,14 +15,21 @@ terminal that advertises support; piped/captured output is always plain text.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
 from functools import cache
 import os
 import sys
 from typing import TYPE_CHECKING, cast
 
 from dagnam.cli.common import DOCS_URL
-from dagnam.cli.presentation import sanitize_terminal_text
+from dagnam.cli.presentation import ErrorReport, sanitize_terminal_text
+from dagnam.cli.refusal_reports import (
+    email_report,
+    pending_deletion_report,
+    permission_report,
+    quota_report,
+    state_report,
+    suspended_report,
+)
 
 if TYPE_CHECKING:
     from dagnam._core.exceptions import APIError, ArchitectureValidationError
@@ -79,17 +86,6 @@ def _style(text: str, role: str, *, color: bool) -> str:
 def _cell(text: str, width: int, role: str, *, color: bool) -> str:
     """Style ``text`` and pad to ``width`` measured on the plain text."""
     return _style(text, role, color=color) + " " * (width - len(text))
-
-
-@dataclass
-class ErrorReport:
-    """One renderable failure: title + optional details, bullets, suggestions."""
-
-    title: str
-    fields: list[tuple[str, str]] = field(default_factory=list)
-    bullets: list[str] = field(default_factory=list)
-    # (command, note) rows; an empty command renders the note as prose.
-    tries: list[tuple[str, str]] = field(default_factory=list)
 
 
 def render_report(report: ErrorReport, *, color: bool) -> str:
@@ -278,17 +274,6 @@ def _auth_report(exc: BaseException) -> ErrorReport:
     )
 
 
-def _quota_report(exc: BaseException) -> ErrorReport:
-    return ErrorReport(
-        title="plan limit reached",
-        fields=[("Detail", str(exc))],
-        tries=[
-            ("dagnam usage", "see your current usage and limits"),
-            ("", "Free up resources or upgrade your plan to raise the limit."),
-        ],
-    )
-
-
 def _not_found_report(list_command: str) -> Callable[[BaseException], ErrorReport]:
     def build(exc: BaseException) -> ErrorReport:
         return ErrorReport(
@@ -313,14 +298,6 @@ def _architecture_report(exc: BaseException) -> ErrorReport:
         title="architecture validation failed",
         bullets=[error.message for error in errors],
         tries=[("", "Fix the listed parameters and retry.")],
-    )
-
-
-def _state_report(exc: BaseException) -> ErrorReport:
-    return ErrorReport(
-        title="action not allowed in the deployment's current state",
-        fields=[("Detail", str(exc))],
-        tries=[("dagnam deployments get <id>", "check the current lifecycle state")],
     )
 
 
@@ -386,11 +363,11 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
 
     return (
         (m.AuthError, _auth_report),
-        (m.QuotaExceededError, _quota_report),
+        (m.QuotaExceededError, quota_report),
         (m.ArchitectureValidationError, _architecture_report),
         (m.DeploymentValidationError, _validation_report),
         (m.CodegenValidationError, _validation_report),
-        (m.DeploymentStateError, _state_report),
+        (m.DeploymentStateError, state_report),
         (m.ProjectNotFoundError, _not_found_report("dagnam projects list")),
         (
             m.ArchitectureVersionNotFoundError,
@@ -407,6 +384,10 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.LROFailedError, _lro_failed_report),
         (m.ChecksumError, _checksum_report),
         (m.UploadError, _upload_report),
+        (m.EmailNotVerifiedError, email_report),
+        (m.AccountSuspendedError, suspended_report),
+        (m.AccountPendingDeletionError, pending_deletion_report),
+        (m.PermissionDeniedError, permission_report),
         (m.APIError, _api_report),
         (m.DagnamError, _plain_report),
     )

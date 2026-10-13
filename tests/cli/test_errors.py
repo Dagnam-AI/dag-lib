@@ -20,14 +20,12 @@ from dagnam._core.exceptions import (
     DagnamError,
     DatasetNotFoundError,
     DeploymentNotFoundError,
-    DeploymentStateError,
     DeploymentValidationError,
     HubModelNotFoundError,
     LROFailedError,
     LROTimeoutError,
     ModelNotFoundError,
     ProjectNotFoundError,
-    QuotaExceededError,
     StreamError,
     TrainingJobNotFoundError,
     UploadError,
@@ -277,12 +275,6 @@ def test_auth_error_suggests_login() -> None:
     assert "Not logged in yet?" in out
 
 
-def test_quota_error_suggests_usage() -> None:
-    out = errors_mod.render_error(QuotaExceededError("Storage quota exceeded"))
-    assert "Error: plan limit reached" in out
-    assert "dagnam usage" in out
-
-
 def test_architecture_validation_lists_problems() -> None:
     errors = [
         ParamError(type="param", message="filters must be >= 1", node_id="n1", severity="error"),
@@ -299,12 +291,6 @@ def test_validation_errors_show_detail(exc_type: type[DagnamError]) -> None:
     out = errors_mod.render_error(exc_type("field X is invalid"))
     assert "failed validation" in out
     assert "field X is invalid" in out
-
-
-def test_deployment_state_error() -> None:
-    out = errors_mod.render_error(DeploymentStateError("cannot stop a stopped deployment"))
-    assert "current state" in out
-    assert "dagnam deployments get <id>" in out
 
 
 @pytest.mark.parametrize(

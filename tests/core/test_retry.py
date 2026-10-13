@@ -9,6 +9,7 @@ import pytest
 from dagnam._core._retry import (
     DEFAULT_BUDGET_MAX,
     DEFAULT_BUDGET_RETRY_COST,
+    IDEMPOTENCY_IN_PROGRESS,
     TRANSIENT_STATUS,
     RetryBudget,
     compute_backoff,
@@ -122,6 +123,11 @@ def _api_error(status: int, retry_after: str | None = None) -> APIError:
     exc = APIError(status, "boom")
     exc.retry_after_header = retry_after
     return exc
+
+
+def _in_progress() -> APIError:
+    """The 409 the server's idempotency layer sends while the first request runs."""
+    return APIError(409, IDEMPOTENCY_IN_PROGRESS)
 
 
 def test_retries_transient_then_succeeds():
@@ -253,7 +259,7 @@ def test_409_with_idempotency_key_retries_then_replays_success():
     def call() -> str:
         calls["n"] += 1
         if calls["n"] == 1:
-            raise _api_error(409)
+            raise _in_progress()
         return "replayed"
 
     result = run_with_retry(
@@ -275,7 +281,7 @@ def test_409_exhaustion_raises():
 
     def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError) as ei:
         run_with_retry(
@@ -297,7 +303,7 @@ def test_409_without_idempotency_key_not_retried():
 
     def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError):
         run_with_retry(
@@ -320,7 +326,7 @@ def test_409_conflict_retry_charges_the_shared_budget():
 
     def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError):
         run_with_retry(
@@ -333,3 +339,25 @@ def test_409_conflict_retry_charges_the_shared_budget():
             idempotency_key="idem-3",
         )
     assert calls["n"] == 1  # budget exhausted before the first conflict-retry
+
+
+def test_409_that_is_not_the_idempotency_conflict_is_final_even_with_a_key():
+    # A state conflict or a capacity cap (409 deployment_limit_reached) will
+    # answer the same way every time: retrying it only delays the error.
+    calls = {"n": 0}
+
+    def call() -> str:
+        calls["n"] += 1
+        raise APIError(409, "Active deployment limit reached")
+
+    with pytest.raises(APIError):
+        run_with_retry(
+            call,
+            retryable=True,
+            budget=RetryBudget(),
+            sleep=lambda _s: None,
+            rng=lambda: 1.0,
+            logger=logging.getLogger("dagnam.http"),
+            idempotency_key="idem-4",
+        )
+    assert calls["n"] == 1

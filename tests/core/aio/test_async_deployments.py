@@ -423,3 +423,22 @@ async def test_async_first_create_with_its_key_does_not_rotate(
 )
 async def test_async_removed_client_methods_are_gone(name: str) -> None:
     assert not hasattr(AsyncDagnamClient, name)
+
+
+async def test_async_create_deployment_idempotency_conflict_retries_into_replay(
+    client: AsyncDagnamClient, mock: RespxMockRouter, monkeypatch: PytestMonkeyPatch
+) -> None:
+    async def _no_sleep(_d: float) -> None: ...
+
+    monkeypatch.setattr(client, "_async_sleep", _no_sleep)
+    client._rng = lambda: 1.0
+    route = mock.post("/api/v1/deployments").mock(
+        side_effect=[
+            httpx.Response(
+                409, json={"detail": "A request with this Idempotency-Key is in progress"}
+            ),
+            httpx.Response(201, json={"id": "dep1", "api_key": "dk_1"}),
+        ]
+    )
+    assert (await client.create_deployment({"project_id": "p1"}))["id"] == "dep1"
+    assert route.call_count == 2

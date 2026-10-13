@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Literal
@@ -19,6 +19,17 @@ class Column:
     key: str
     max_width: int
     align: Literal["left", "right"] = "left"
+
+
+@dataclass
+class ErrorReport:
+    """One renderable failure: title + optional details, bullets, suggestions."""
+
+    title: str
+    fields: list[tuple[str, str]] = field(default_factory=list)
+    bullets: list[str] = field(default_factory=list)
+    # (command, note) rows; an empty command renders the note as prose.
+    tries: list[tuple[str, str]] = field(default_factory=list)
 
 
 def truncate(value: object, width: int) -> str:

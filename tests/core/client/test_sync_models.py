@@ -11,10 +11,12 @@ import requests
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
+    AccountPendingDeletionError,
     APIError,
     AuthError,
     ModelError,
     ModelNotFoundError,
+    PermissionDeniedError,
     ResponseError,
 )
 
@@ -429,4 +431,32 @@ def test_download_model_artifact_stream_other_error(
     url = f"{API}/api/v1/model-versions/v1/artifacts/a1/download"
     rmock.get(url, status_code=500, text="boom")
     with pytest.raises(APIError):
+        client.download_model_artifact_stream("v1", "a1", tmp_path / "x.bin")
+
+
+_DOWNLOAD_REFUSALS = [
+    pytest.param(
+        {"detail": {"error": "account_pending_deletion", "message": "Scheduled."}},
+        AccountPendingDeletionError,
+        id="pending-deletion",
+    ),
+    pytest.param(
+        {"detail": {"error": "insufficient_scope", "message": "Needs read."}},
+        PermissionDeniedError,
+        id="insufficient-scope",
+    ),
+]
+
+
+@pytest.mark.parametrize(("payload", "exc_type"), _DOWNLOAD_REFUSALS)
+def test_download_model_artifact_stream_maps_refusals_like_every_other_route(
+    client: DagnamClient,
+    rmock: RequestsMocker,
+    tmp_path: Path,
+    payload: dict[str, object],
+    exc_type: type[Exception],
+) -> None:
+    url = f"{API}/api/v1/model-versions/v1/artifacts/a1/download"
+    rmock.get(url, status_code=403, json=payload)
+    with pytest.raises(exc_type):
         client.download_model_artifact_stream("v1", "a1", tmp_path / "x.bin")

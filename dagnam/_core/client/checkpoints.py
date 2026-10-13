@@ -6,14 +6,15 @@ from pathlib import Path
 
 from dagnam._core.client.base import (
     ALLOW_REDIRECTS,
-    APIError,
     BaseDagnamClient,
     is_redirect_response,
     is_success_response,
-    safe_error_body_from_response,
 )
-from dagnam._core.client.common import quote_path_segment, raise_for_training_job
-from dagnam._core.exceptions import AuthError, CheckpointNotFoundError
+from dagnam._core.client.common import (
+    quote_path_segment,
+    raise_for_checkpoint,
+    raise_for_training_job,
+)
 from dagnam._types import JsonObject, ensure_json_array
 
 
@@ -65,12 +66,9 @@ class CheckpointsClientMixin(BaseDagnamClient):
             expected_checksum = resp.headers.get("X-Checksum-SHA256") or expected_checksum
 
         if not is_success_response(resp):
-            code = resp.status_code
-            if code == 401:
-                raise AuthError("Authentication failed: invalid or expired API key")
-            if code == 404:
-                raise CheckpointNotFoundError(checkpoint_id)
-            raise APIError(code, safe_error_body_from_response(resp))
+            # Read the (small) error body first so the mapper sees its markers.
+            _ = resp.content
+            raise_for_checkpoint(resp, checkpoint_id)
 
         written = self._stream_response_to_file(resp, Path(dest_path))
         return written, expected_checksum

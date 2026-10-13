@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from dagnam._core._retry import RetryBudget, run_with_retry_async
+from dagnam._core._retry import IDEMPOTENCY_IN_PROGRESS, RetryBudget, run_with_retry_async
 from dagnam._core.exceptions import APIError
 
 pytestmark = pytest.mark.anyio
@@ -21,6 +21,11 @@ def _api_error(status: int, retry_after: str | None = None) -> APIError:
     exc = APIError(status, "boom")
     exc.retry_after_header = retry_after
     return exc
+
+
+def _in_progress() -> APIError:
+    """The 409 the server's idempotency layer sends while the first request runs."""
+    return APIError(409, IDEMPOTENCY_IN_PROGRESS)
 
 
 async def test_async_retries_transient_then_succeeds() -> None:
@@ -168,7 +173,7 @@ async def test_async_409_with_idempotency_key_retries_then_replays_success() -> 
     async def call() -> str:
         calls["n"] += 1
         if calls["n"] == 1:
-            raise _api_error(409)
+            raise _in_progress()
         return "replayed"
 
     result = await run_with_retry_async(
@@ -193,7 +198,7 @@ async def test_async_409_exhaustion_raises() -> None:
 
     async def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError) as ei:
         await run_with_retry_async(
@@ -218,7 +223,7 @@ async def test_async_409_without_idempotency_key_not_retried() -> None:
 
     async def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError):
         await run_with_retry_async(
@@ -242,7 +247,7 @@ async def test_async_409_conflict_retry_charges_the_shared_budget() -> None:
 
     async def call() -> str:
         calls["n"] += 1
-        raise _api_error(409)
+        raise _in_progress()
 
     with pytest.raises(APIError):
         await run_with_retry_async(
@@ -253,5 +258,28 @@ async def test_async_409_conflict_retry_charges_the_shared_budget() -> None:
             rng=lambda: 1.0,
             logger=logging.getLogger("dagnam.http"),
             idempotency_key="idem-3",
+        )
+    assert calls["n"] == 1
+
+
+async def test_async_409_that_is_not_the_idempotency_conflict_is_final_even_with_a_key() -> None:
+    calls = {"n": 0}
+
+    async def _sleep(_d: float) -> None:
+        return None
+
+    async def call() -> str:
+        calls["n"] += 1
+        raise APIError(409, "Active deployment limit reached")
+
+    with pytest.raises(APIError):
+        await run_with_retry_async(
+            call,
+            retryable=True,
+            budget=RetryBudget(),
+            sleep=_sleep,
+            rng=lambda: 1.0,
+            logger=logging.getLogger("dagnam.http"),
+            idempotency_key="idem-4",
         )
     assert calls["n"] == 1
