@@ -25,6 +25,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    HubRuleError,
     InvalidURLError,
     PayloadTooLargeError,
     ProjectNotFoundError,
@@ -564,6 +565,33 @@ def test_raise_for_hub_other_code() -> None:
 def test_raise_for_hub_413_is_payload_too_large() -> None:
     with pytest.raises(PayloadTooLargeError, match="too large"):
         common.raise_for_hub(_resp(413, text="Request body too large"), model_id="m1")
+
+
+def test_raise_for_hub_409_with_a_code_is_a_hub_rule_error() -> None:
+    body = json.dumps(
+        {"detail": {"error": "files_pending", "message": "Still inspecting: w.safetensors"}}
+    )
+    with pytest.raises(HubRuleError) as excinfo:
+        common.raise_for_hub(_resp(409, text=body, content_type="application/json"), "m1")
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.code == "files_pending"
+    assert "Still inspecting: w.safetensors" in excinfo.value.message
+    assert isinstance(excinfo.value, APIError)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "name already exists",
+        json.dumps({"detail": "name already exists"}),
+        json.dumps({"detail": {"message": "x"}}),
+    ],
+)
+def test_raise_for_hub_409_without_a_code_is_a_plain_api_error(body: str) -> None:
+    with pytest.raises(APIError) as excinfo:
+        common.raise_for_hub(_resp(409, text=body, content_type="application/json"), "m1")
+    assert not isinstance(excinfo.value, HubRuleError)
+    assert excinfo.value.status_code == 409
 
 
 # raise_for_project ------------------------------------------------------

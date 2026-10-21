@@ -233,6 +233,23 @@ class HubError(DagnamError):
     """Generic Hub operation failure."""
 
 
+class HubRuleError(APIError):
+    """The Hub refused an action by one of its rules (409 with a code).
+
+    For example publishing a version while a file is still being inspected (``files_pending``) or
+    was refused (``files_rejected``). ``code`` is the machine-readable reason; the message is a
+    sentence.
+    """
+
+    def __init__(self, status_code: int, message: str, *, code: str) -> None:
+        super().__init__(status_code, message)
+        self.code = code
+
+
+class InspectionTimeoutError(HubError):
+    """The platform was still inspecting a file when the wait ran out; the draft is kept."""
+
+
 class HubModelNotFoundError(DagnamError):
     """Hub model ID not found (404)."""
 

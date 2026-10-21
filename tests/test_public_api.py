@@ -39,6 +39,8 @@ EXCEPTION_EXPORTS = [
     "FoundationRunNotFoundError",
     "HubError",
     "HubModelNotFoundError",
+    "HubRuleError",
+    "InspectionTimeoutError",
     "InsufficientCreditsError",
     "InvalidURLError",
     "LROFailedError",

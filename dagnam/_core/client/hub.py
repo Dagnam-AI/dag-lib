@@ -337,6 +337,23 @@ class HubClientMixin(BaseDagnamClient):
             model_id=model_id,
         )
 
+    def delete_hub_model_file(self, model_id: str, file_id: str) -> None:
+        """Remove a file from a draft version, or a refused file from any version. ``DELETE .../files/{file_id}``."""
+        self._hub_request(
+            "DELETE",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/files/{quote_path_segment(file_id)}",
+            model_id=model_id,
+        )
+
+    def link_hub_model_design(self, model_id: str, version_id: str, body: JsonObject) -> JsonObject:
+        """Link a design to a weights-only version. ``PUT .../versions/{version_id}/architecture``."""
+        return self._hub_object(
+            "PUT",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}/architecture",
+            model_id=model_id,
+            json_body=body,
+        )
+
     def delete_hub_model_version(self, model_id: str, version_id: str) -> None:
         """Delete a draft version. ``DELETE /api/v1/hub/models/{model_id}/versions/{version_id}``."""
         self._hub_request(
