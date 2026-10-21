@@ -18,6 +18,7 @@ from dagnam._core.exceptions import (
     HubError,
     HubModelNotFoundError,
     HubRuleError,
+    InspectionTimeoutError,
     PayloadTooLargeError,
     UploadError,
 )
@@ -860,3 +861,80 @@ class TestPublishVersionInspection:
         assert "Remove the refused files (files_rejected)" in message
         assert "hub.finalize_version('m1', 'v1')" in message
         assert "hub.delete_version('m1', 'v1')" in message
+
+
+class TestFailuresKeepTheDraftsId:
+    def test_a_wait_that_runs_out_on_a_version_names_it_and_how_to_finish_it(
+        self, tmp_path: Path
+    ) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files(
+            _entry("f1", "weights.safetensors", "pending")
+        )
+        with pytest.raises(InspectionTimeoutError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files[:1], client=client)
+        message = str(raised.value)
+        assert "version v1 of hub model m1" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        assert "hub.delete_version('m1', 'v1')" in message
+        assert isinstance(raised.value.__cause__, InspectionTimeoutError)
+        client.finalize_hub_model_version.assert_not_called()
+
+    def test_a_wait_that_runs_out_on_a_new_model_names_the_resume(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files(
+            _entry("f1", "weights.safetensors", "pending")
+        )
+        with pytest.raises(InspectionTimeoutError, match=r"hub model m1.*model_id='m1'"):
+            _publish(client, files[:1])
+        client.finalize_hub_model.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "failure", [APIError(500, "boom"), HubModelNotFoundError("m1"), HubError("odd")]
+    )
+    def test_a_list_error_during_the_wait_names_the_draft(
+        self, tmp_path: Path, failure: Exception
+    ) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.side_effect = failure
+        with pytest.raises(UploadError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files[:1], client=client)
+        message = str(raised.value)
+        assert "version v1 of hub model m1" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        assert raised.value.__cause__ is failure
+        client.finalize_hub_model_version.assert_not_called()
+
+    def test_a_delete_error_while_removing_a_refused_file_names_the_draft(
+        self, tmp_path: Path
+    ) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files(
+            _entry("f9", "weights.safetensors", "rejected")
+        )
+        client.delete_hub_model_file.side_effect = APIError(500, "boom")
+        with pytest.raises(UploadError, match=r"hub model m1.*model_id='m1'"):
+            _publish(client, files[:1])
+        client.finalize_hub_model.assert_not_called()
+
+    def test_a_delete_error_in_the_resume_409_handler_names_the_draft(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = APIError(409, "dup")
+        client.list_hub_model_files.return_value = _files(
+            _entry("old", "weights.safetensors", "rejected")
+        )
+        client.delete_hub_model_file.side_effect = APIError(500, "boom")
+        with pytest.raises(UploadError) as raised:
+            _publish(client, files[:1], model_id="draft-1")
+        message = str(raised.value)
+        assert "hub model draft-1" in message
+        assert "weights.safetensors" in message
+        assert "model_id='draft-1'" in message
+        assert isinstance(raised.value.__cause__, APIError)
+
+    def test_a_list_error_in_the_resume_409_handler_names_the_draft(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = APIError(409, "dup")
+        client.list_hub_model_files.side_effect = HubModelNotFoundError("draft-1")
+        with pytest.raises(UploadError, match=r"hub model draft-1.*model_id='draft-1'"):
+            _publish(client, files[:1], model_id="draft-1")

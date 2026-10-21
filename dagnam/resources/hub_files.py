@@ -7,12 +7,20 @@ platform without inspection reports no state, which reads as done.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from pathlib import Path
 import time
 from typing import Optional
 from uuid import UUID
 
 from dagnam._core.client import DagnamClient
-from dagnam._core.exceptions import InspectionTimeoutError
+from dagnam._core.exceptions import (
+    APIError,
+    HubError,
+    HubModelNotFoundError,
+    InspectionTimeoutError,
+    UploadError,
+)
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject
 
@@ -59,6 +67,100 @@ def wait_for_inspection(
         time.sleep(poll)
 
 
+_CONVERTED_SUFFIXES = frozenset({"pt", "pth", "h5"})
+
+
+def stored_name(file_path: str) -> str:
+    """The name the hub stores a local file under.
+
+    A PyTorch ``.pt``/``.pth`` or HDF5 ``.h5`` file is converted by the platform and stored as
+    ``<stem>.safetensors`` (``model.weights.h5`` becomes ``model.weights.safetensors``);
+    every other file keeps its base name. Two local files with the same stored name are one
+    file to the hub, which is why ``publish`` refuses them up front.
+    """
+    name = Path(file_path).name
+    stem, dot, suffix = name.rpartition(".")
+    if dot and suffix.lower() in _CONVERTED_SUFFIXES:
+        return f"{stem}.safetensors"
+    return name
+
+
+def replace_refused_copy(
+    resolved: DagnamClient, model_id: str, version_id: Optional[str], file_path: str
+) -> bool:
+    """Remove the server's refused file of this name, so a resumed upload can try again."""
+    name = stored_name(file_path).casefold()
+    for entry in listed_files(resolved, model_id, version_id):
+        file_name = entry.get("file_name")
+        if (
+            entry.get("scan_status") == "rejected"
+            and isinstance(file_name, str)
+            and file_name.casefold() == name
+        ):
+            resolved.delete_hub_model_file(model_id, str(entry["id"]))
+            return True
+    return False
+
+
+def _refusal(entry: JsonObject) -> str:
+    rejection = entry.get("rejection")
+    reason = rejection if isinstance(rejection, dict) else {}
+    return (
+        f"{entry.get('file_name')} was refused: {reason.get('message', 'no reason given')} "
+        f"({reason.get('code', 'refused')})"
+    )
+
+
+def await_clean_files(
+    resolved: DagnamClient,
+    model_id: str,
+    version_id: Optional[str],
+    files: Sequence[str],
+    on_file_progress: Optional[Callable[[str, int, int, str], object]],
+    advice: str,
+) -> None:
+    """Wait until the platform has inspected every file of the version, then remove the refused ones.
+
+    Every file counts, not only this run's: a resumed publish skips files an earlier run
+    uploaded. Raises ``UploadError`` naming each refused file (they are already removed). A wait
+    that runs out raises ``InspectionTimeoutError`` and a failed list or delete call raises
+    ``UploadError``; both name the draft and say ``advice``, because the draft is kept.
+    """
+    subject = (
+        f"hub model {model_id}"
+        if version_id is None
+        else f"version {version_id} of hub model {model_id}"
+    )
+    refused: list[str] = []
+    local = {stored_name(path).casefold(): (i, path) for i, path in enumerate(files, start=1)}
+    try:
+        for entry in wait_for_inspection(model_id, version_id=version_id, client=resolved):
+            if entry.get("scan_status") != "rejected":
+                continue
+            resolved.delete_hub_model_file(model_id, str(entry["id"]))
+            refused.append(_refusal(entry))
+            if on_file_progress is not None:
+                index, path = local.get(
+                    str(entry.get("file_name")).casefold(), (0, str(entry.get("file_name")))
+                )
+                on_file_progress(path, index, len(files), "refused")
+    except InspectionTimeoutError as exc:
+        raise InspectionTimeoutError(
+            f"Publish of {subject} halted: the files are still being inspected after the wait "
+            f"ran out. The draft is kept: wait, then {advice}."
+        ) from exc
+    except (APIError, HubError, HubModelNotFoundError) as exc:
+        raise UploadError(
+            f"Publish of {subject} halted: could not check or clear the files ({exc}). "
+            f"The draft is kept: {advice}."
+        ) from exc
+    if refused:
+        raise UploadError(
+            f"Publish of {subject} halted: {'; '.join(refused)}. The refused file(s) were removed "
+            f"from the draft; fix them and {advice}."
+        )
+
+
 def delete_file(
     model_id: str | UUID,
     file_id: str | UUID,
@@ -101,4 +203,12 @@ def link_design(
     )
 
 
-__all__ = ["InspectionTimeoutError", "delete_file", "link_design", "wait_for_inspection"]
+__all__ = [
+    "InspectionTimeoutError",
+    "await_clean_files",
+    "delete_file",
+    "link_design",
+    "replace_refused_copy",
+    "stored_name",
+    "wait_for_inspection",
+]

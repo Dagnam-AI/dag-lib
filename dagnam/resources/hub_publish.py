@@ -22,7 +22,7 @@ from dagnam._core.exceptions import (
 )
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject, JsonValue
-from dagnam.resources.hub_files import listed_files, wait_for_inspection
+from dagnam.resources.hub_files import await_clean_files, replace_refused_copy, stored_name
 
 _RETRYABLE_STATUS = frozenset({0, 408, 429})
 
@@ -150,24 +150,6 @@ def finalize(
     return resolved.finalize_hub_model(str(model_id))
 
 
-_CONVERTED_SUFFIXES = frozenset({"pt", "pth", "h5"})
-
-
-def stored_name(file_path: str) -> str:
-    """The name the hub stores a local file under.
-
-    A PyTorch ``.pt``/``.pth`` or HDF5 ``.h5`` file is converted by the platform and stored as
-    ``<stem>.safetensors`` (``model.weights.h5`` becomes ``model.weights.safetensors``);
-    every other file keeps its base name. Two local files with the same stored name are one
-    file to the hub, which is why ``publish`` refuses them up front.
-    """
-    name = Path(file_path).name
-    stem, dot, suffix = name.rpartition(".")
-    if dot and suffix.lower() in _CONVERTED_SUFFIXES:
-        return f"{stem}.safetensors"
-    return name
-
-
 def _check_files(files: Sequence[str]) -> None:
     """``FileNotFoundError`` for a missing file, ``ValueError`` for two with one stored name."""
     for file_path in files:
@@ -184,21 +166,17 @@ def _check_files(files: Sequence[str]) -> None:
         )
 
 
-def _replace_refused_copy(
-    resolved: DagnamClient, model_id: str, version_id: Optional[str], file_path: str
-) -> bool:
-    """Remove the server's refused file of this name, so a resumed upload can try again."""
-    name = stored_name(file_path).casefold()
-    for entry in listed_files(resolved, model_id, version_id):
-        file_name = entry.get("file_name")
-        if (
-            entry.get("scan_status") == "rejected"
-            and isinstance(file_name, str)
-            and file_name.casefold() == name
-        ):
-            resolved.delete_hub_model_file(model_id, str(entry["id"]))
-            return True
-    return False
+def _draft(model_id: str, version_id: Optional[str]) -> tuple[str, str]:
+    """What a halted publish names (the draft) and how to carry on from it."""
+    if version_id is None:
+        return f"hub model {model_id}", f"resume with hub.publish(..., model_id={model_id!r})"
+    return (
+        f"version {version_id} of hub model {model_id}",
+        "the version is still a draft: add the rest with "
+        f"hub.upload_file(..., version_id={version_id!r}) and publish it with "
+        f"hub.finalize_version({model_id!r}, {version_id!r}), or remove it with "
+        f"hub.delete_version({model_id!r}, {version_id!r})",
+    )
 
 
 def _upload_all(
@@ -236,7 +214,16 @@ def _upload_all(
                 ):
                     # A refused copy from an earlier run is not "already there": remove it, retry once.
                     if resume and not replaced:
-                        replaced = _replace_refused_copy(resolved, model_id, version_id, file_path)
+                        try:
+                            replaced = replace_refused_copy(
+                                resolved, model_id, version_id, file_path
+                            )
+                        except (APIError, HubError, HubModelNotFoundError) as cleanup:
+                            subject, advice = _draft(model_id, version_id)
+                            raise UploadError(
+                                f"Publish of {subject} halted: could not remove the refused copy "
+                                f"of {file_path} ({cleanup}). Fix the issue, then {advice}."
+                            ) from cleanup
                         if replaced:
                             continue
                     if on_file_progress is not None:
@@ -247,17 +234,7 @@ def _upload_all(
                     if on_file_progress is not None:
                         on_file_progress(file_path, index, total, "failed")
                     done = ", ".join(str(Path(p).name) for p in files[: index - 1]) or "none"
-                    if version_id is None:
-                        subject = f"hub model {model_id}"
-                        advice = f"resume with hub.publish(..., model_id={model_id!r})"
-                    else:
-                        subject = f"version {version_id} of hub model {model_id}"
-                        advice = (
-                            "the version is still a draft: add the rest with "
-                            f"hub.upload_file(..., version_id={version_id!r}) and publish it with "
-                            f"hub.finalize_version({model_id!r}, {version_id!r}), or remove it with "
-                            f"hub.delete_version({model_id!r}, {version_id!r})"
-                        )
+                    subject, advice = _draft(model_id, version_id)
                     raise UploadError(
                         f"Publish of {subject} halted: {file_path} failed "
                         f"after {attempts} attempt(s) ({exc}). Uploaded so far: {done}. "
@@ -266,52 +243,6 @@ def _upload_all(
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "retrying")
     return uploaded
-
-
-def _refusal(entry: JsonObject) -> str:
-    rejection = entry.get("rejection")
-    reason = rejection if isinstance(rejection, dict) else {}
-    return (
-        f"{entry.get('file_name')} was refused: {reason.get('message', 'no reason given')} "
-        f"({reason.get('code', 'refused')})"
-    )
-
-
-def _await_clean_files(
-    resolved: DagnamClient,
-    model_id: str,
-    version_id: Optional[str],
-    files: Sequence[str],
-    on_file_progress: Optional[Callable[[str, int, int, str], object]],
-    advice: str,
-) -> None:
-    """Wait until the platform has inspected every file of the version, then remove the refused ones.
-
-    Every file counts, not only this run's: a resumed publish skips files an earlier run
-    uploaded. Raises ``UploadError`` naming each refused file (they are already removed).
-    """
-    refused: list[str] = []
-    local = {stored_name(path).casefold(): (i, path) for i, path in enumerate(files, start=1)}
-    for entry in wait_for_inspection(model_id, version_id=version_id, client=resolved):
-        if entry.get("scan_status") != "rejected":
-            continue
-        resolved.delete_hub_model_file(model_id, str(entry["id"]))
-        refused.append(_refusal(entry))
-        if on_file_progress is not None:
-            index, path = local.get(
-                str(entry.get("file_name")).casefold(), (0, str(entry.get("file_name")))
-            )
-            on_file_progress(path, index, len(files), "refused")
-    if refused:
-        subject = (
-            f"hub model {model_id}"
-            if version_id is None
-            else f"version {version_id} of hub model {model_id}"
-        )
-        raise UploadError(
-            f"Publish of {subject} halted: {'; '.join(refused)}. The refused file(s) were removed "
-            f"from the draft; fix them and {advice}."
-        )
 
 
 def publish(
@@ -440,7 +371,7 @@ def publish(
     uploaded = _upload_all(
         resolved, model_id, files, None, on_file_progress, max_retries_per_file, resume
     )
-    _await_clean_files(
+    await_clean_files(
         resolved,
         model_id,
         None,
@@ -509,7 +440,7 @@ def publish_version(
     _upload_all(
         resolved, mid, files, version_id, on_file_progress, max_retries_per_file, resume=False
     )
-    _await_clean_files(
+    await_clean_files(
         resolved,
         mid,
         version_id,
