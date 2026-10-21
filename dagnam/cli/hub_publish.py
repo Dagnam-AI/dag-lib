@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, NoReturn
@@ -26,6 +28,18 @@ def _usage_error(message: str) -> NoReturn:
     """Print ``message`` in the CLI error frame and exit 2, like a bad flag combination."""
     print(render_message(message), file=sys.stderr)
     sys.exit(2)
+
+
+@contextmanager
+def sdk_usage_errors() -> Generator[None]:
+    """Show an SDK pre-check message (``ValueError``, missing file) as a usage error.
+
+    Without this the CLI's catch-all hides the message behind "unexpected error".
+    """
+    try:
+        yield
+    except (ValueError, FileNotFoundError) as exc:
+        _usage_error(str(exc))
 
 
 def _progress(path: str, index: int, total: int, state: str) -> None:
@@ -54,29 +68,30 @@ def cmd_hub_publish(args: argparse.Namespace) -> None:
         _usage_error("a design needs --architecture or --project")
 
     tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else None
-    result = dagnam.hub.publish(
-        name=args.name,
-        description=args.description,
-        task_type=args.task_type,
-        framework=args.framework,
-        files=args.file,
-        stage=stage,
-        base=args.base,
-        architecture=_architecture(args),
-        project_id=args.project_id,
-        architecture_version_id=args.architecture_version_id,
-        registry_version_id=args.registry_version_id,
-        model_id=args.model_id,
-        version=args.version,
-        changelog=args.changelog,
-        license=args.license,
-        license_name=args.license_name,
-        license_url=args.license_url,
-        visibility=args.visibility,
-        tags=tags,
-        metadata=ensure_json_object(load_json_arg(args.metadata)) if args.metadata else None,
-        on_file_progress=_progress,
-    )
+    with sdk_usage_errors():
+        result = dagnam.hub.publish(
+            name=args.name,
+            description=args.description,
+            task_type=args.task_type,
+            framework=args.framework,
+            files=args.file,
+            stage=stage,
+            base=args.base,
+            architecture=_architecture(args),
+            project_id=args.project_id,
+            architecture_version_id=args.architecture_version_id,
+            registry_version_id=args.registry_version_id,
+            model_id=args.model_id,
+            version=args.version,
+            changelog=args.changelog,
+            license=args.license,
+            license_name=args.license_name,
+            license_url=args.license_url,
+            visibility=args.visibility,
+            tags=tags,
+            metadata=ensure_json_object(load_json_arg(args.metadata)) if args.metadata else None,
+            on_file_progress=_progress,
+        )
     print_json(result)
     model = result.get("model")
     model_id = model.get("id") if isinstance(model, dict) else None
@@ -87,16 +102,17 @@ def cmd_hub_version_create(args: argparse.Namespace) -> None:
     import dagnam
 
     _check_design_args(args)
-    result = dagnam.hub.publish_version(
-        args.model_id,
-        args.version,
-        files=args.file,
-        changelog=args.changelog,
-        architecture=_architecture(args),
-        project_id=args.project_id,
-        architecture_version_id=args.architecture_version_id,
-        on_file_progress=_progress,
-    )
+    with sdk_usage_errors():
+        result = dagnam.hub.publish_version(
+            args.model_id,
+            args.version,
+            files=args.file,
+            changelog=args.changelog,
+            architecture=_architecture(args),
+            project_id=args.project_id,
+            architecture_version_id=args.architecture_version_id,
+            on_file_progress=_progress,
+        )
     print_json(result)
 
 
@@ -157,7 +173,10 @@ def register_hub_publish(hub_sub: SubParsersAction) -> None:
         help="One of: " + ", ".join(LICENSES) + " (default: mit).",
     )
     publish.add_argument("--license-name", help="Display name of a custom licence.")
-    publish.add_argument("--license-url", help="https link to a custom licence's text.")
+    publish.add_argument(
+        "--license-url",
+        help="https link to a custom licence's text (needed unless the page is private).",
+    )
     publish.add_argument("--metadata", help="Model card fields as JSON (@path or a literal).")
     publish.add_argument("--version", default="1.0.0", help="The first version (default: 1.0.0).")
     publish.add_argument("--changelog", help="Changelog of the first version.")

@@ -389,7 +389,7 @@ class TestStageAndBase:
     )
     def test_a_stage_is_normalized(self, tmp_path: Path, given: str, sent: str) -> None:
         client, files = _client(tmp_path)
-        _design(client, files=files, stage=given)
+        _design(client, files=[] if sent == "design" else files, stage=given, base="B")
         assert _sent(client)["stage"] == sent
         assert normalize_stage(given) == sent
 
@@ -401,6 +401,23 @@ class TestStageAndBase:
         client, files = _client(tmp_path)
         with pytest.raises(ValueError, match="Unknown stage 'bogus'"):
             _design(client, files=files, stage="bogus")
+        client.create_hub_model.assert_not_called()
+
+    def test_a_post_trained_stage_needs_a_base_before_any_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="needs base"):
+            _design(client, files=files, stage="adapter")
+        client.create_hub_model.assert_not_called()
+
+    def test_resuming_a_draft_needs_no_base(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, stage="adapter", model_id="m1")
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_a_design_with_files_is_refused_before_any_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="design takes no files"):
+            _design(client, files=files, stage="design")
         client.create_hub_model.assert_not_called()
 
     def test_a_plain_name_is_a_base_model_name(self, tmp_path: Path) -> None:
@@ -457,10 +474,11 @@ class TestLicence:
             _design(client, files=files, license="cc-by-2.0")
         client.create_hub_model.assert_not_called()
 
-    def test_a_public_custom_licence_needs_a_url(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("visibility", ["public", "unlisted"])
+    def test_a_listed_custom_licence_needs_a_url(self, tmp_path: Path, visibility: str) -> None:
         client, files = _client(tmp_path)
         with pytest.raises(ValueError, match="license_url"):
-            _design(client, files=files, license="custom")
+            _design(client, files=files, license="custom", visibility=visibility)
         client.create_hub_model.assert_not_called()
 
     def test_a_custom_licence_with_a_url_or_private_passes(self, tmp_path: Path) -> None:
@@ -468,6 +486,33 @@ class TestLicence:
         _design(client, files=files, license="custom", license_url="https://example.com/l")
         assert _sent(client)["license_url"] == "https://example.com/l"
         _design(client, files=files, license="custom", visibility="private")
+
+
+class TestFinalizeRefusal:
+    @pytest.mark.parametrize("status", [409, 500])
+    def test_publish_names_the_draft_when_finalize_is_refused(
+        self, tmp_path: Path, status: int
+    ) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model.side_effect = APIError(status, "base_required")
+        with pytest.raises(HubError) as raised:
+            _publish(client, files)
+        message = str(raised.value)
+        assert "m1" in message
+        assert "base_required" in message
+        assert "hub.finalize('m1')" in message
+        assert isinstance(raised.value.__cause__, APIError)
+
+    def test_publish_version_names_the_draft_when_finalize_is_refused(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model_version.side_effect = APIError(409, "design_has_files")
+        with pytest.raises(HubError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files, client=client)
+        message = str(raised.value)
+        assert "Version v1 of hub model m1" in message
+        assert "design_has_files" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        assert "hub.delete_version('m1', 'v1')" in message
 
 
 class TestPublishVersion:

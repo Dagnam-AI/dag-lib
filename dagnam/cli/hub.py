@@ -11,7 +11,7 @@ from dagnam.cli.common import (
     error,
     print_json,
 )
-from dagnam.cli.hub_publish import register_hub_publish
+from dagnam.cli.hub_publish import register_hub_publish, sdk_usage_errors
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 from dagnam.resources.hub_publish import base_fields
 
@@ -67,15 +67,16 @@ def _emit_collection(args: argparse.Namespace, result: object) -> None:
 def cmd_hub_search(args: argparse.Namespace) -> None:
     import dagnam
 
-    result = dagnam.hub.search(
-        search=args.search,
-        framework=args.framework,
-        task_type=args.task_type,
-        stage=args.stage,
-        sort_by=args.sort_by,
-        page=args.page,
-        limit=args.limit,
-    )
+    with sdk_usage_errors():
+        result = dagnam.hub.search(
+            search=args.search,
+            framework=args.framework,
+            task_type=args.task_type,
+            stage=args.stage,
+            sort_by=args.sort_by,
+            page=args.page,
+            limit=args.limit,
+        )
     _emit_collection(args, result)
 
 
@@ -131,9 +132,10 @@ def cmd_hub_upload_file(args: argparse.Namespace) -> None:
 def cmd_hub_derivatives(args: argparse.Namespace) -> None:
     import dagnam
 
-    result = dagnam.hub.derivatives(
-        args.model_id, stage=args.stage, page=args.page, limit=args.limit
-    )
+    with sdk_usage_errors():
+        result = dagnam.hub.derivatives(
+            args.model_id, stage=args.stage, page=args.page, limit=args.limit
+        )
     _emit_collection(args, result)
 
 

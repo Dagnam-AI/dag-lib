@@ -500,7 +500,7 @@ class TestPublish:
         assert "hub.finalize('m1')" in str(exc_info.value)
         assert isinstance(exc_info.value.__cause__, HubModelNotFoundError)
 
-    def test_publish_finalize_405_raises_hub_error_but_500_propagates(self, tmp_path) -> None:
+    def test_publish_finalize_405_and_500_raise_hub_error(self, tmp_path) -> None:
         from dagnam._core.exceptions import APIError, HubError
 
         client, files = self._client(tmp_path)
@@ -515,7 +515,7 @@ class TestPublish:
                 client=client,
             )
         client.finalize_hub_model.side_effect = APIError(500, "boom")
-        with pytest.raises(APIError):
+        with pytest.raises(HubError, match="HTTP 500"):
             hub.publish(
                 name="n",
                 description="d",

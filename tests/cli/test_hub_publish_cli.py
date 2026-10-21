@@ -221,3 +221,48 @@ def test_derivatives_without_a_stage_filter(run_cli: CliRunner, capsys: StrCaptu
         assert run_cli(["hub", "derivatives", "m1", "--page", "2", "--limit", "5"]) == 0
     fake.derivatives.assert_called_once_with("m1", stage=None, page=2, limit=5)
     assert "No hub models found." in capsys.readouterr().out
+
+
+def _refused(run_cli: CliRunner, capsys: StrCapture, argv: list[str], target: str) -> None:
+    with mock.patch(target, side_effect=ValueError("Unknown stage 'bogus'")) as m:
+        with pytest.raises(SystemExit) as exc_info:
+            run_cli(argv)
+    assert exc_info.value.code == 2
+    assert "Unknown stage 'bogus'" in capsys.readouterr().err
+    m.assert_called_once()
+
+
+def test_publish_shows_the_sdk_pre_check_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    _refused(run_cli, capsys, [*BASE, "--registry-version", "R"], "dagnam.hub.publish")
+
+
+def test_publish_shows_a_missing_file_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    argv = [*BASE, "--stage", "adapter", "--file", "nope.safetensors"]
+    with mock.patch("dagnam.hub.publish", side_effect=FileNotFoundError("No such file: nope")):
+        with pytest.raises(SystemExit) as exc_info:
+            run_cli(argv)
+    assert exc_info.value.code == 2
+    assert "No such file: nope" in capsys.readouterr().err
+
+
+def test_version_create_shows_the_sdk_pre_check_message(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    _refused(
+        run_cli,
+        capsys,
+        ["hub", "version", "create", "m1", "--version", "1.1.0"],
+        "dagnam.hub.publish_version",
+    )
+
+
+def test_search_shows_the_sdk_pre_check_message(run_cli: CliRunner, capsys: StrCapture) -> None:
+    _refused(run_cli, capsys, ["hub", "search", "--stage", "bogus"], "dagnam.hub.search")
+
+
+def test_derivatives_shows_the_sdk_pre_check_message(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    _refused(
+        run_cli, capsys, ["hub", "derivatives", "m1", "--stage", "bogus"], "dagnam.hub.derivatives"
+    )

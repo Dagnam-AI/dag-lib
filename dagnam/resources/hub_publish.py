@@ -293,26 +293,32 @@ def publish(
     stored as ``<stem>.safetensors``; ``.safetensors`` and ``.onnx`` are stored as they are.
 
     Raises ``ValueError`` before any network call for an unknown stage or licence, a custom
-    public licence without ``license_url``, a registry card combined with a stage, design or
-    files, two design sources, or two files that would be stored under one name
-    (``stored_name``); ``FileNotFoundError`` if a local file is missing; ``UploadError`` if a
-    file still fails (the draft and its uploaded files are kept: resume with ``model_id``);
-    ``HubError`` if the platform answers 404 or 405 to finalize (the model is still a draft:
-    ``hub.finalize(model_id)`` retries that step alone). The result is ``{"model", "files",
+    licence without ``license_url`` on a page that is not private, a post-trained stage without
+    ``base`` (unless resuming), the design stage with files, a registry card combined with a
+    stage, design or files, two design sources, or two files that would be stored under one
+    name (``stored_name``); ``FileNotFoundError`` if a local file is missing; ``UploadError`` if
+    a file still fails (the draft and its uploaded files are kept: resume with ``model_id``);
+    ``HubError`` if the platform refuses the finalize call (the model is still a draft and the
+    error names it: ``hub.finalize(model_id)`` retries that step alone). The result is ``{"model", "files",
     "version", "finalized"}``; ``version`` is the published model's ``latest_version`` and
     ``finalized`` is always ``True``, kept for callers that read it.
     """
     _check_files(files)
     if license not in LICENSES:
         raise ValueError(f"Unknown licence {license!r}; use one of {', '.join(LICENSES)}")
-    if license == "custom" and visibility == "public" and not license_url:
-        raise ValueError("A public model with the custom licence needs license_url")
+    if license == "custom" and visibility != "private" and not license_url:
+        raise ValueError("A public or unlisted model with the custom licence needs license_url")
     source = _source_fields(architecture, project_id, architecture_version_id)
     if registry_version_id is not None and (stage or source or files):
         raise ValueError("A registry card takes no stage, design or files")
+    checked = normalize_stage(stage) if stage is not None else None
+    if checked == "design" and files:
+        raise ValueError("A design takes no files")
+    if checked in POST_TRAINED and base is None and model_id is None:
+        raise ValueError(f"A {checked} model needs base (the model it was made from)")
     extra: JsonObject = {**source, "version": version}
-    if stage is not None:
-        extra["stage"] = normalize_stage(stage)
+    if checked is not None:
+        extra["stage"] = checked
     if base is not None:
         extra.update(base_fields(base))
     if registry_version_id is not None:
@@ -350,12 +356,11 @@ def publish(
     try:
         model = finalize(model_id, client=resolved)
     except (HubModelNotFoundError, APIError) as exc:
-        code = exc.status_code if isinstance(exc, APIError) else 404
-        if code not in (404, 405):
-            raise
+        code, detail = (exc.status_code, exc.message) if isinstance(exc, APIError) else (404, exc)
         raise HubError(
             f"Hub model {model_id} has its files but is still a draft: the platform answered "
-            f"HTTP {code} to the finalize call. Retry that step with hub.finalize({model_id!r})."
+            f"HTTP {code} to the finalize call ({detail}). Fix what it names (hub.update can "
+            f"change the base or licence), then retry that step with hub.finalize({model_id!r})."
         ) from exc
 
     return {
@@ -385,8 +390,9 @@ def publish_version(
 
     ``architecture`` or ``project_id`` (with ``architecture_version_id``) attach a design
     snapshot as in :func:`publish`. Returns the published version. A failed upload raises
-    ``UploadError`` and leaves the draft version: it cannot be resumed by this function, so
-    finish it with ``hub.finalize_version`` or remove it with ``hub.delete_version``.
+    ``UploadError`` and a refused finalize raises ``HubError``; both leave the draft version
+    (named in the error): it cannot be resumed by this function, so finish it with
+    ``hub.finalize_version`` or remove it with ``hub.delete_version``.
     """
     _check_files(files)
     payload: JsonObject = {
@@ -402,7 +408,15 @@ def publish_version(
     _upload_all(
         resolved, mid, files, version_id, on_file_progress, max_retries_per_file, resume=False
     )
-    return resolved.finalize_hub_model_version(mid, version_id)
+    try:
+        return resolved.finalize_hub_model_version(mid, version_id)
+    except (HubModelNotFoundError, HubError, APIError) as exc:
+        raise HubError(
+            f"Version {version_id} of hub model {mid} is still a draft: the platform refused to "
+            f"publish it ({exc}). Fix that, then publish it with "
+            f"hub.finalize_version({mid!r}, {version_id!r}), or remove it with "
+            f"hub.delete_version({mid!r}, {version_id!r})."
+        ) from exc
 
 
 __all__ = [

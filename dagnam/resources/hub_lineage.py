@@ -15,7 +15,7 @@ from dagnam._core.client import DagnamClient
 from dagnam._core.client.base import safe_download_basename
 from dagnam._core.client.hub import safe_dest
 from dagnam._core.resolver import resolve_client
-from dagnam._types import JsonObject
+from dagnam._types import JsonObject, ensure_json_object
 from dagnam.resources.hub_publish import normalize_stage
 
 
@@ -136,4 +136,37 @@ def download(
     return saved
 
 
-__all__ = ["delete_version", "derivatives", "download", "finalize_version", "get_architecture"]
+def use_in_studio(
+    model_id: str | UUID,
+    *,
+    visibility: Optional[str] = None,
+    version_id: Optional[str] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Open a hub model's design as a Studio project.
+
+    ``visibility`` (``public`` or ``private``) and ``version_id`` (default: the latest
+    published version) are optional.
+    """
+    resolved = resolve_client(client, api_key, api_url)
+    legacy_use_in_studio = getattr(resolved, "hub_use_in_studio", None)
+    if callable(legacy_use_in_studio):
+        return ensure_json_object(legacy_use_in_studio(str(model_id)))
+    options: JsonObject = {
+        key: value
+        for key, value in (("visibility", visibility), ("version_id", version_id))
+        if value is not None
+    }
+    return resolved.use_hub_model_in_studio(str(model_id), options or None)
+
+
+__all__ = [
+    "delete_version",
+    "derivatives",
+    "download",
+    "finalize_version",
+    "get_architecture",
+    "use_in_studio",
+]

@@ -29,6 +29,7 @@ from dagnam.resources.hub_lineage import (
     download,
     finalize_version,
     get_architecture,
+    use_in_studio,
 )
 from dagnam.resources.hub_publish import (
     create_payload,
@@ -438,37 +439,6 @@ def add_review(
             legacy_add_review(_stringify_id(model_id), rating=rating, review_text=review_text)
         )
     return resolved.add_hub_model_review(_stringify_id(model_id), payload)
-
-
-# ---------------------------------------------------------------------------
-# Studio integration
-# ---------------------------------------------------------------------------
-
-
-def use_in_studio(
-    model_id: str,
-    *,
-    visibility: Optional[str] = None,
-    version_id: Optional[str] = None,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Open a hub model's design as a Studio project.
-
-    ``visibility`` (``public`` or ``private``) and ``version_id`` (default: the latest
-    published version) are optional.
-    """
-    resolved = resolve_client(client, api_key, api_url)
-    legacy_use_in_studio = getattr(resolved, "hub_use_in_studio", None)
-    if callable(legacy_use_in_studio):
-        return ensure_json_object(legacy_use_in_studio(_stringify_id(model_id)))
-    options: JsonObject = {
-        key: value
-        for key, value in (("visibility", visibility), ("version_id", version_id))
-        if value is not None
-    }
-    return resolved.use_hub_model_in_studio(_stringify_id(model_id), options or None)
 
 
 __all__ = [
