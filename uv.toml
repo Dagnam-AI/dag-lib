@@ -11,8 +11,10 @@ native-tls = true
 # and torch all depend on it), so there is no direct requirement to raise.
 # Constraining the RESOLUTION keeps setuptools out of the published package's
 # own metadata while still holding the floor: 83.0.0 fixes PYSEC-2026-3447.
+# certifi is the same case (it arrives through requests): 2026.10.19 fixes
+# PYSEC-2026-4320.
 #
 # This lives here rather than in pyproject's [tool.uv]: when both files exist,
 # uv.toml WINS and silently discards the pyproject section (it warns, then
 # ignores it), so a constraint written there would never be enforced.
-constraint-dependencies = ["setuptools>=83.0.0"]
+constraint-dependencies = ["setuptools>=83.0.0", "certifi>=2026.10.19"]
