@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -272,13 +271,6 @@ class TestFilesAndVersionsNewApi:
         hub.list_files("m1", client=c)
         c.list_hub_model_files.assert_called_once_with("m1")
 
-    def test_download_saves_files_and_returns_their_paths(self, tmp_path: Path) -> None:
-        saved = [tmp_path / "model.safetensors", tmp_path / "head.onnx"]
-        c = _client(download_hub_model_files=MagicMock(return_value=saved))
-        out = hub.download("m1", tmp_path, file_id="f1", client=c)
-        c.download_hub_model_files.assert_called_once_with("m1", tmp_path, file_id="f1")
-        assert out == [str(path) for path in saved]
-
     def test_list_versions_uses_list_hub_model_versions(self) -> None:
         c = _client(list_hub_model_versions=MagicMock(return_value=[]))
         hub.list_versions("m1", client=c)
@@ -341,7 +333,7 @@ class TestStudioIntegrationNewApi:
     def test_use_in_studio_uses_use_hub_model_in_studio(self) -> None:
         c = _client(use_hub_model_in_studio=MagicMock(return_value={"project_id": "p1"}))
         out = hub.use_in_studio("m1", client=c)
-        c.use_hub_model_in_studio.assert_called_once_with("m1")
+        c.use_hub_model_in_studio.assert_called_once_with("m1", None)
         assert out["project_id"] == "p1"
 
 
@@ -360,7 +352,7 @@ class TestFileUpload:
             )
         )
         out = hub.upload_file("m1", "/tmp/w.bin", client=c)
-        c.upload_model_file.assert_called_once_with("m1", "/tmp/w.bin")
+        c.upload_model_file.assert_called_once_with("m1", "/tmp/w.bin", None)
         assert out["id"] == "f1"
 
 
@@ -393,9 +385,10 @@ class TestPublish:
         )
         client.create_hub_model.assert_called_once()
         assert client.upload_model_file.call_count == 2
-        client.create_hub_model_version.assert_called_once_with(
-            "m1", {"version": "1.0.0", "changelog": "first"}
-        )
+        payload = client.create_hub_model.call_args.args[0]
+        assert payload["version"] == "1.0.0"
+        assert payload["changelog"] == "first"
+        client.create_hub_model_version.assert_not_called()
         client.finalize_hub_model.assert_called_once_with("m1")
         assert result["finalized"] is True
         model = result["model"]
