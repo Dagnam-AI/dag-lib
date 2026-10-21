@@ -7,10 +7,38 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-21
+
+### Platform compatibility
+
+- These features need the current platform. Against an older one the new routes answer 404.
+
+### Added
+
+- Stages and bases on publish: `dagnam.hub.publish(..., stage=, base=)` and `dagnam hub publish --stage`
+  with `--base`, `--license`, `--license-name` and `--license-url`.
+- Design publishing, with no weights: `--architecture` (a Studio design or a `dag.json`) and `--project`
+  on `dagnam hub publish`.
+- Versions that own their files: `dagnam hub version create`, `dagnam.hub.publish_version`,
+  `finalize_version` and `delete_version`, and `dagnam hub upload-file --version-id`.
+- Registry cards and derivatives: publish a registry version as a card, and list the models built on a
+  page with `dagnam hub derivatives` (stage filter).
+- The eighteen licences the platform accepts.
+- `dagnam.hub.download` also saves the design file.
+- `dagnam.hub.use_in_studio(visibility=, version_id=)`.
+
+### Changed
+
+- `dagnam.hub.publish(version=...)` names the first version when the model is created. The platform now
+  refuses the old call that set a version after the upload on a draft, so 0.19 gets a 409 there.
+- `dagnam hub publish --file` now requires `--stage`.
+- `dagnam.hub.create_version` returns a draft version that must be finalized.
+
 ### Security
 
 - The `pillow` floor is raised to 13.0.0, the release that fixes the advisories reported against
   12.3.0. The resolved `certifi` is held at 2026.10.19 or newer for the same reason.
+
 
 ## [0.19.0] - 2026-10-12
 
