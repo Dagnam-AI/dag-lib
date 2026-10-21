@@ -7,6 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Platform compatibility
+
+- dagnam 0.20.0 and older finalize right after uploading. A platform that inspects uploads answers 409
+  to that until inspection finishes: upgrade.
+
+### Added
+
+- `dagnam.hub.publish` and `publish_version` wait for the platform to inspect every file of the draft
+  before they finalize, remove a refused file and raise `UploadError` naming it with the platform's
+  reason, and report a refused finalize as a `HubError` that names the rule. A resumed publish also
+  replaces a copy of a file the platform refused earlier. `on_file_progress` gains the states
+  `inspecting` and `refused`. A platform that reports no scan state is not waited for.
+- `.h5` files (stored as `.safetensors`, like `.pt` and `.pth`) and the JSON sidecars (`config.json`,
+  `tokenizer.json`, `tokenizer_config.json`, `generation_config.json`, `special_tokens_map.json`).
+- `dagnam.hub.wait_for_inspection`, `delete_file` and `link_design`, with `dagnam hub files`,
+  `dagnam hub delete-file` and `dagnam hub link-design`.
+- `HubRuleError` (a 409 that carries a code such as `files_pending` or `files_rejected`) and
+  `InspectionTimeoutError`, importable from `dagnam` and `dagnam.exceptions`.
+- `HubModelNotFoundError` suggests `dagnam hub search`.
+
 ## [0.20.0] - 2026-10-21
 
 ### Platform compatibility

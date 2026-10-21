@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -16,10 +17,12 @@ from dagnam._core.exceptions import (
     APIError,
     HubError,
     HubModelNotFoundError,
+    HubRuleError,
     PayloadTooLargeError,
     UploadError,
 )
-from dagnam._types import JsonObject
+from dagnam._types import JsonObject, JsonValue
+from dagnam.resources import hub_files
 from dagnam.resources.hub_publish import (
     base_fields,
     normalize_stage,
@@ -295,6 +298,7 @@ class TestResume:
     [
         ("weights.pt", "weights.safetensors"),
         ("weights.pth", "weights.safetensors"),
+        ("model.weights.h5", "model.weights.safetensors"),
         ("v2.final.PT", "v2.final.safetensors"),
         ("weights.safetensors", "weights.safetensors"),
         ("head.onnx", "head.onnx"),
@@ -580,3 +584,279 @@ class TestPassThrough:
         ):
             assert name in hub.__all__
             assert callable(getattr(hub, name))
+
+
+# ---------------------------------------------------------------- inspection
+
+
+class _Clock:
+    """A fake ``time`` module for the wait: ``sleep`` moves ``monotonic``, nothing really waits."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture(autouse=True)
+def no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _Clock()
+    monkeypatch.setattr(
+        hub_files, "time", SimpleNamespace(sleep=fake.sleep, monotonic=fake.monotonic)
+    )
+
+
+def _entry(file_id: str, name: str, state: str | None, **extra: JsonValue) -> JsonObject:
+    entry: JsonObject = {"id": file_id, "file_name": name, **extra}
+    if state is not None:
+        entry["scan_status"] = state
+    return entry
+
+
+def _files(*entries: JsonObject) -> JsonObject:
+    return {"model_id": "m1", "version_id": "d1", "files": list(entries)}
+
+
+def _inspecting(tmp_path: Path) -> tuple[MagicMock, list[str]]:
+    """A client whose uploads answer ``pending`` (a platform that inspects uploads)."""
+    client, files = _client(tmp_path)
+    client.upload_model_file.return_value = {"id": "f1", "scan_status": "pending"}
+    return client, files
+
+
+class TestWaitBeforeFinalize:
+    def test_finalize_runs_only_after_the_files_are_clean(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.side_effect = [
+            _files(_entry("f1", "weights.safetensors", "pending")),
+            _files(_entry("f1", "weights.safetensors", "clean")),
+        ]
+
+        def finalize(_model_id: str) -> JsonObject:
+            assert client.list_hub_model_files.call_count == 2
+            return {"id": "m1", "status": "published"}
+
+        client.finalize_hub_model.side_effect = finalize
+        assert _publish(client, files)["finalized"] is True
+        client.list_hub_model_files.assert_called_with("m1", version_id=None)
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_the_progress_callback_sees_inspecting_after_uploaded(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files()
+        states: list[str] = []
+        _publish(client, files, on_file_progress=lambda _p, _i, _t, s: states.append(s))
+        assert states == [
+            "uploading",
+            "uploaded",
+            "inspecting",
+            "uploading",
+            "uploaded",
+            "inspecting",
+        ]
+
+    def test_a_server_without_scan_states_publishes_without_waiting(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.list_hub_model_files.return_value = _files(_entry("f1", "weights.safetensors", None))
+        states: list[str] = []
+        _publish(client, files, on_file_progress=lambda _p, _i, _t, s: states.append(s))
+        assert states == ["uploading", "uploaded", "uploading", "uploaded"]
+        client.list_hub_model_files.assert_called_once()
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_a_resumed_file_that_is_still_pending_is_waited_for(self, tmp_path: Path) -> None:
+        """The 409-skipped file was uploaded by an earlier run and may still be pending."""
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(409, "dup"), {"id": "f2"}]
+        client.list_hub_model_files.side_effect = [
+            _files(_entry("f1", "weights.safetensors", "clean")),  # the rejected-copy lookup
+            _files(_entry("f1", "weights.safetensors", "pending")),
+            _files(_entry("f1", "weights.safetensors", "clean")),
+        ]
+        _publish(client, files, model_id="draft-1")
+        assert client.list_hub_model_files.call_count == 3
+        client.finalize_hub_model.assert_called_once_with("draft-1")
+
+
+class TestRefusedFiles:
+    @pytest.mark.parametrize(
+        ("rejection", "expected"),
+        [
+            ({"code": "contains_code", "message": "it runs code"}, "it runs code (contains_code)"),
+            (None, "no reason given (refused)"),
+        ],
+    )
+    def test_a_refused_file_is_removed_and_the_publish_halts(
+        self, tmp_path: Path, rejection: JsonObject | None, expected: str
+    ) -> None:
+        client, files = _inspecting(tmp_path)
+        refused = _entry("f9", "weights.safetensors", "rejected", rejection=rejection)
+        client.list_hub_model_files.return_value = _files(
+            refused, _entry("f2", "head.onnx", "clean")
+        )
+        states: list[tuple[str, str]] = []
+        with pytest.raises(UploadError) as raised:
+            _publish(
+                client,
+                files,
+                on_file_progress=lambda p, _i, _t, s: states.append((Path(p).name, s)),
+            )
+        message = str(raised.value)
+        assert "weights.safetensors was refused: " + expected in message
+        assert "model_id='m1'" in message
+        client.delete_hub_model_file.assert_called_once_with("m1", "f9")
+        client.finalize_hub_model.assert_not_called()
+        assert ("weights.safetensors", "refused") in states
+
+    def test_every_refused_file_is_removed_and_named(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files(
+            _entry("f1", "weights.safetensors", "rejected"),
+            _entry("f2", "earlier-run.pt", "rejected"),
+        )
+        with pytest.raises(UploadError) as raised:
+            _publish(client, files)
+        assert "weights.safetensors was refused" in str(raised.value)
+        assert "earlier-run.pt was refused" in str(raised.value)
+        assert [call.args for call in client.delete_hub_model_file.call_args_list] == [
+            ("m1", "f1"),
+            ("m1", "f2"),
+        ]
+
+    def test_a_finalize_refusal_by_a_rule_names_the_code_and_the_retry(
+        self, tmp_path: Path
+    ) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model.side_effect = HubRuleError(
+            409, "Still inspecting: w.safetensors", code="files_pending"
+        )
+        with pytest.raises(HubError) as raised:
+            _publish(client, files)
+        message = str(raised.value)
+        assert "Hub model m1 is still a draft" in message
+        assert "Still inspecting: w.safetensors (files_pending)" in message
+        assert "hub.finalize('m1')" in message
+        assert isinstance(raised.value.__cause__, HubRuleError)
+
+
+class TestResumeAfterRefusal:
+    def test_a_409_on_a_name_the_server_refused_deletes_it_and_uploads_again(
+        self, tmp_path: Path
+    ) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = [APIError(409, "dup"), {"id": "f2"}]
+        client.list_hub_model_files.side_effect = [
+            _files(_entry("old", "WEIGHTS.safetensors", "rejected")),
+            _files(_entry("f2", "weights.safetensors", "clean")),
+        ]
+        states: list[str] = []
+        _publish(
+            client,
+            files[:1],
+            model_id="draft-1",
+            on_file_progress=lambda _p, _i, _t, s: states.append(s),
+        )
+        client.delete_hub_model_file.assert_called_once_with("draft-1", "old")
+        assert client.upload_model_file.call_count == 2
+        assert states == ["uploading", "uploaded"]
+
+    def test_it_replaces_a_refused_copy_only_once(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = APIError(409, "dup")
+        client.list_hub_model_files.return_value = _files(
+            _entry("old", "weights.safetensors", "rejected")
+        )
+        states: list[str] = []
+        # The listing is static, so the wait that follows still sees the refused copy.
+        with pytest.raises(UploadError):
+            _publish(
+                client,
+                files[:1],
+                model_id="draft-1",
+                on_file_progress=lambda _p, _i, _t, s: states.append(s),
+            )
+        assert client.upload_model_file.call_count == 2
+        assert states[:3] == ["uploading", "skipped", "refused"]
+
+    def test_a_409_on_a_name_that_is_not_refused_is_skipped(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = APIError(409, "dup")
+        clean = _entry("a", "weights.safetensors", "clean")
+        client.list_hub_model_files.side_effect = [
+            _files(clean, _entry("b", "other.onnx", "rejected")),
+            _files(clean),
+        ]
+        states: list[str] = []
+        _publish(
+            client,
+            files[:1],
+            model_id="draft-1",
+            on_file_progress=lambda _p, _i, _t, s: states.append(s),
+        )
+        assert states == ["uploading", "skipped"]
+        client.upload_model_file.assert_called_once()
+        client.delete_hub_model_file.assert_not_called()
+
+    def test_a_409_that_names_a_rule_is_not_a_duplicate(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = HubRuleError(
+            409, "A file of a published version cannot be added", code="version_published"
+        )
+        with pytest.raises(UploadError, match="published version cannot be added"):
+            _publish(client, files, model_id="draft-1")
+        client.finalize_hub_model.assert_not_called()
+
+
+class TestPublishVersionInspection:
+    def test_it_waits_on_the_new_version_before_finalizing(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.side_effect = [
+            _files(_entry("f1", "weights.safetensors", "pending")),
+            _files(_entry("f1", "weights.safetensors", "clean")),
+        ]
+
+        def finalize(_model_id: str, _version_id: str) -> JsonObject:
+            assert client.list_hub_model_files.call_count == 2
+            return {"id": "v1", "status": "published"}
+
+        client.finalize_hub_model_version.side_effect = finalize
+        out = hub.publish_version("m1", "1.1.0", files=files[:1], client=client)
+        assert out == {"id": "v1", "status": "published"}
+        client.list_hub_model_files.assert_called_with("m1", version_id="v1")
+
+    def test_a_refused_file_is_removed_and_the_draft_version_is_left(self, tmp_path: Path) -> None:
+        client, files = _inspecting(tmp_path)
+        client.list_hub_model_files.return_value = _files(
+            _entry(
+                "f9",
+                "weights.safetensors",
+                "rejected",
+                rejection={"code": "legacy_format", "message": "old pickle"},
+            )
+        )
+        with pytest.raises(UploadError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files[:1], client=client)
+        message = str(raised.value)
+        assert "weights.safetensors was refused: old pickle (legacy_format)" in message
+        assert "version v1 of hub model m1" in message
+        assert "hub.upload_file(..., version_id='v1')" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        client.delete_hub_model_file.assert_called_once_with("m1", "f9")
+        client.finalize_hub_model_version.assert_not_called()
+
+    def test_a_finalize_refusal_by_a_rule_names_the_code(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model_version.side_effect = HubRuleError(
+            409, "Remove the refused files", code="files_rejected"
+        )
+        with pytest.raises(HubError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files, client=client)
+        message = str(raised.value)
+        assert "Version v1 of hub model m1 is still a draft" in message
+        assert "Remove the refused files (files_rejected)" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        assert "hub.delete_version('m1', 'v1')" in message

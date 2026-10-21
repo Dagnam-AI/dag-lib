@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
+from dagnam._core.exceptions import HubModelNotFoundError
 from dagnam.cli.common import (
     add_collection_output_args,
     confirm_destructive,
     error,
     print_json,
 )
-from dagnam.cli.hub_publish import register_hub_publish, sdk_usage_errors
+from dagnam.cli.hub_publish import (
+    FILE_KINDS_HELP,
+    add_design_args,
+    design_from_args,
+    register_hub_publish,
+    sdk_usage_errors,
+)
 from dagnam.cli.presentation import Column, emit_result, pagination_footer, render_table
 from dagnam.resources.hub_publish import base_fields
 
@@ -126,6 +134,60 @@ def cmd_hub_upload_file(args: argparse.Namespace) -> None:
     import dagnam
 
     result = dagnam.hub.upload_file(args.model_id, args.file_path, version_id=args.version_id)
+    print_json(result)
+
+
+def _file_line(entry: Mapping[str, object]) -> str:
+    parts = [
+        str(entry.get("id")),
+        str(entry.get("file_name")),
+        str(entry.get("scan_status") or "clean"),
+    ]
+    if entry.get("parameter_count") is not None:
+        parts.append(f"{entry['parameter_count']} parameters")
+    rejection = entry.get("rejection")
+    if isinstance(rejection, dict):
+        parts.append(f"{rejection.get('code')}: {rejection.get('message')}")
+    return "  ".join(parts)
+
+
+def cmd_hub_files(args: argparse.Namespace) -> None:
+    import dagnam
+
+    result = dagnam.hub.list_files(args.model_id)
+    if args.json:
+        print_json(result)
+        return
+    entries = result.get("files")
+    files = (
+        [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+    )
+    print("\n".join(_file_line(entry) for entry in files) if files else "No files.")
+
+
+def cmd_hub_delete_file(args: argparse.Namespace) -> None:
+    import dagnam
+
+    try:
+        dagnam.hub.delete_file(args.model_id, args.file_id)
+    except HubModelNotFoundError:
+        error(
+            f"File or model not found: {args.file_id} in {args.model_id}.",
+            hint=f"dagnam hub files {args.model_id}",
+        )
+
+
+def cmd_hub_link_design(args: argparse.Namespace) -> None:
+    import dagnam
+
+    with sdk_usage_errors():
+        result = dagnam.hub.link_design(
+            args.model_id,
+            args.version_id,
+            project_id=args.project_id,
+            architecture_version_id=args.architecture_version_id,
+            architecture=design_from_args(args),
+        )
     print_json(result)
 
 
@@ -278,10 +340,7 @@ def register_hub(subparsers: SubParsersAction) -> None:
     hub_upload.add_argument("model_id", help="ID of the hub model.")
     hub_upload.add_argument(
         "file_path",
-        help=(
-            "Path to the file to upload (.safetensors, .onnx, or a PyTorch .pt/.pth, which is "
-            "converted to .safetensors). Files above about 500 MB are not supported yet."
-        ),
+        help=f"Path to the file to upload: {FILE_KINDS_HELP}",
     )
     hub_upload.add_argument(
         "--version-id",
@@ -289,6 +348,40 @@ def register_hub(subparsers: SubParsersAction) -> None:
         help="The draft version to add the file to; a published version refuses new files.",
     )
     hub_upload.set_defaults(func=cmd_hub_upload_file)
+    hub_files = hub_sub.add_parser(
+        "files",
+        help="List a model's files and their inspection state.",
+        description=(
+            "List the files of a hub model: pending (still being inspected), clean, or rejected "
+            "with the reason. The default list is the latest published version, or your draft."
+        ),
+    )
+    hub_files.add_argument("model_id", help="ID of the hub model.")
+    hub_files.add_argument("--json", action="store_true", help="Print the full JSON listing.")
+    hub_files.set_defaults(func=cmd_hub_files)
+    hub_delete_file = hub_sub.add_parser(
+        "delete-file",
+        help="Remove a file from a hub model.",
+        description="Remove a refused file, or any file of a draft version, from a hub model you manage.",
+    )
+    hub_delete_file.add_argument("model_id", help="ID of the hub model.")
+    hub_delete_file.add_argument("file_id", help="ID of the file (see hub files).")
+    hub_delete_file.set_defaults(func=cmd_hub_delete_file)
+    hub_link = hub_sub.add_parser(
+        "link-design",
+        help="Give a weights-only version its design.",
+        description=(
+            "Link a design to a version that has weights and none: from one of your projects "
+            "(--project) or a Studio design file (--architecture @file). The design must need "
+            "between half of and all the floating point values the weights hold."
+        ),
+    )
+    hub_link.add_argument("model_id", help="ID of the hub model.")
+    hub_link.add_argument(
+        "--version-id", dest="version_id", required=True, help="The version to link."
+    )
+    add_design_args(hub_link)
+    hub_link.set_defaults(func=cmd_hub_link_design)
     hub_download = hub_sub.add_parser(
         "download",
         help="Download a model's files.",

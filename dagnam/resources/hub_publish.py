@@ -16,11 +16,13 @@ from dagnam._core.exceptions import (
     APIError,
     HubError,
     HubModelNotFoundError,
+    HubRuleError,
     PayloadTooLargeError,
     UploadError,
 )
 from dagnam._core.resolver import resolve_client
 from dagnam._types import JsonObject, JsonValue
+from dagnam.resources.hub_files import listed_files, wait_for_inspection
 
 _RETRYABLE_STATUS = frozenset({0, 408, 429})
 
@@ -148,13 +150,14 @@ def finalize(
     return resolved.finalize_hub_model(str(model_id))
 
 
-_CONVERTED_SUFFIXES = frozenset({"pt", "pth"})
+_CONVERTED_SUFFIXES = frozenset({"pt", "pth", "h5"})
 
 
 def stored_name(file_path: str) -> str:
     """The name the hub stores a local file under.
 
-    A PyTorch ``.pt``/``.pth`` file is converted on upload and stored as ``<stem>.safetensors``;
+    A PyTorch ``.pt``/``.pth`` or HDF5 ``.h5`` file is converted by the platform and stored as
+    ``<stem>.safetensors`` (``model.weights.h5`` becomes ``model.weights.safetensors``);
     every other file keeps its base name. Two local files with the same stored name are one
     file to the hub, which is why ``publish`` refuses them up front.
     """
@@ -177,8 +180,25 @@ def _check_files(files: Sequence[str]) -> None:
     if duplicates:
         raise ValueError(
             "Two files would be stored under one name (the hub keeps one file per name, and a "
-            f"PyTorch .pt/.pth file is stored as <stem>.safetensors): {', '.join(duplicates)}"
+            f"PyTorch .pt/.pth or HDF5 .h5 file is stored as <stem>.safetensors): {', '.join(duplicates)}"
         )
+
+
+def _replace_refused_copy(
+    resolved: DagnamClient, model_id: str, version_id: Optional[str], file_path: str
+) -> bool:
+    """Remove the server's refused file of this name, so a resumed upload can try again."""
+    name = stored_name(file_path).casefold()
+    for entry in listed_files(resolved, model_id, version_id):
+        file_name = entry.get("file_name")
+        if (
+            entry.get("scan_status") == "rejected"
+            and isinstance(file_name, str)
+            and file_name.casefold() == name
+        ):
+            resolved.delete_hub_model_file(model_id, str(entry["id"]))
+            return True
+    return False
 
 
 def _upload_all(
@@ -197,14 +217,28 @@ def _upload_all(
         if on_file_progress is not None:
             on_file_progress(file_path, index, total, "uploading")
         attempts = 0
+        replaced = False
         while True:
             try:
-                uploaded.append(resolved.upload_model_file(model_id, file_path, version_id))
+                record = resolved.upload_model_file(model_id, file_path, version_id)
+                uploaded.append(record)
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "uploaded")
+                    if record.get("scan_status") == "pending":
+                        on_file_progress(file_path, index, total, "inspecting")
                 break
             except (APIError, HubError, UploadError, PayloadTooLargeError, OSError) as exc:
-                if isinstance(exc, APIError) and exc.status_code == 409 and (resume or attempts):
+                if (
+                    isinstance(exc, APIError)
+                    and not isinstance(exc, HubRuleError)
+                    and exc.status_code == 409
+                    and (resume or attempts)
+                ):
+                    # A refused copy from an earlier run is not "already there": remove it, retry once.
+                    if resume and not replaced:
+                        replaced = _replace_refused_copy(resolved, model_id, version_id, file_path)
+                        if replaced:
+                            continue
                     if on_file_progress is not None:
                         on_file_progress(file_path, index, total, "skipped")
                     break
@@ -232,6 +266,52 @@ def _upload_all(
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "retrying")
     return uploaded
+
+
+def _refusal(entry: JsonObject) -> str:
+    rejection = entry.get("rejection")
+    reason = rejection if isinstance(rejection, dict) else {}
+    return (
+        f"{entry.get('file_name')} was refused: {reason.get('message', 'no reason given')} "
+        f"({reason.get('code', 'refused')})"
+    )
+
+
+def _await_clean_files(
+    resolved: DagnamClient,
+    model_id: str,
+    version_id: Optional[str],
+    files: Sequence[str],
+    on_file_progress: Optional[Callable[[str, int, int, str], object]],
+    advice: str,
+) -> None:
+    """Wait until the platform has inspected every file of the version, then remove the refused ones.
+
+    Every file counts, not only this run's: a resumed publish skips files an earlier run
+    uploaded. Raises ``UploadError`` naming each refused file (they are already removed).
+    """
+    refused: list[str] = []
+    local = {stored_name(path).casefold(): (i, path) for i, path in enumerate(files, start=1)}
+    for entry in wait_for_inspection(model_id, version_id=version_id, client=resolved):
+        if entry.get("scan_status") != "rejected":
+            continue
+        resolved.delete_hub_model_file(model_id, str(entry["id"]))
+        refused.append(_refusal(entry))
+        if on_file_progress is not None:
+            index, path = local.get(
+                str(entry.get("file_name")).casefold(), (0, str(entry.get("file_name")))
+            )
+            on_file_progress(path, index, len(files), "refused")
+    if refused:
+        subject = (
+            f"hub model {model_id}"
+            if version_id is None
+            else f"version {version_id} of hub model {model_id}"
+        )
+        raise UploadError(
+            f"Publish of {subject} halted: {'; '.join(refused)}. The refused file(s) were removed "
+            f"from the draft; fix them and {advice}."
+        )
 
 
 def publish(
@@ -281,7 +361,13 @@ def publish(
     resume.
 
     ``on_file_progress(path, index, total, state)`` receives per-file states:
-    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed`` | ``skipped``.
+    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` (then ``inspecting`` when the platform
+    inspects uploads) | ``failed`` | ``skipped``, and ``refused`` for a file the platform refused.
+
+    Before finalizing, ``publish`` waits for the platform to inspect every file of the draft
+    (a platform that reports no scan state is not waited for). A refused file is removed and
+    ``UploadError`` names it with the platform's reason; ``InspectionTimeoutError`` says the
+    wait ran out and the draft is kept.
 
     An upload is retried up to ``max_retries_per_file`` times, and only on a transport
     failure, a timeout (408), a rate limit (429) or a server error; any other 4xx, a file
@@ -289,8 +375,9 @@ def publish(
     such a retry means the first attempt stored the file; it is ``skipped``.
 
     Files above about 500 MB are not supported yet: the platform refuses the request
-    whatever the plan allows. A PyTorch ``.pt``/``.pth`` file is converted on upload and
-    stored as ``<stem>.safetensors``; ``.safetensors`` and ``.onnx`` are stored as they are.
+    whatever the plan allows. PyTorch ``.pt``/``.pth`` and HDF5 ``.h5`` files are converted by the
+    platform and stored as ``<stem>.safetensors``; ``.safetensors``, ``.onnx`` and the JSON
+    sidecars (``config.json``, ``tokenizer.json``, ...) are stored as they are.
 
     Raises ``ValueError`` before any network call for an unknown stage or licence, a custom
     licence without ``license_url`` on a page that is not private, a post-trained stage without
@@ -353,8 +440,21 @@ def publish(
     uploaded = _upload_all(
         resolved, model_id, files, None, on_file_progress, max_retries_per_file, resume
     )
+    _await_clean_files(
+        resolved,
+        model_id,
+        None,
+        files,
+        on_file_progress,
+        f"resume with hub.publish(..., model_id={model_id!r})",
+    )
     try:
         model = finalize(model_id, client=resolved)
+    except HubRuleError as exc:
+        raise HubError(
+            f"Hub model {model_id} is still a draft: {exc.message} ({exc.code}). "
+            f"Retry with hub.finalize({model_id!r}) once that is resolved."
+        ) from exc
     except (HubModelNotFoundError, APIError) as exc:
         code, detail = (exc.status_code, exc.message) if isinstance(exc, APIError) else (404, exc)
         raise HubError(
@@ -389,8 +489,9 @@ def publish_version(
     """Publish a new version of a model you manage: create a draft, upload files, finalize.
 
     ``architecture`` or ``project_id`` (with ``architecture_version_id``) attach a design
-    snapshot as in :func:`publish`. Returns the published version. A failed upload raises
-    ``UploadError`` and a refused finalize raises ``HubError``; both leave the draft version
+    snapshot as in :func:`publish`. Returns the published version. Like :func:`publish` it
+    waits for the platform to inspect the files first and removes a refused one. A failed or
+    refused upload raises ``UploadError`` and a refused finalize raises ``HubError``; both leave the draft version
     (named in the error): it cannot be resumed by this function, so finish it with
     ``hub.finalize_version`` or remove it with ``hub.delete_version``.
     """
@@ -408,8 +509,25 @@ def publish_version(
     _upload_all(
         resolved, mid, files, version_id, on_file_progress, max_retries_per_file, resume=False
     )
+    _await_clean_files(
+        resolved,
+        mid,
+        version_id,
+        files,
+        on_file_progress,
+        f"add replacements with hub.upload_file(..., version_id={version_id!r}) and publish it "
+        f"with hub.finalize_version({mid!r}, {version_id!r}), or remove it with "
+        f"hub.delete_version({mid!r}, {version_id!r})",
+    )
     try:
         return resolved.finalize_hub_model_version(mid, version_id)
+    except HubRuleError as exc:
+        raise HubError(
+            f"Version {version_id} of hub model {mid} is still a draft: {exc.message} "
+            f"({exc.code}). Fix that, then publish it with "
+            f"hub.finalize_version({mid!r}, {version_id!r}), or remove it with "
+            f"hub.delete_version({mid!r}, {version_id!r})."
+        ) from exc
     except (HubModelNotFoundError, HubError, APIError) as exc:
         raise HubError(
             f"Version {version_id} of hub model {mid} is still a draft: the platform refused to "
