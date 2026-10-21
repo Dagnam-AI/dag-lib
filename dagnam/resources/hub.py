@@ -30,7 +30,13 @@ from dagnam.resources.hub_lineage import (
     finalize_version,
     get_architecture,
 )
-from dagnam.resources.hub_publish import create_payload, finalize, publish, publish_version
+from dagnam.resources.hub_publish import (
+    create_payload,
+    finalize,
+    normalize_stage,
+    publish,
+    publish_version,
+)
 
 
 def _stringify_id(value: object) -> str:
@@ -59,6 +65,7 @@ def search(
     tags: Optional[list[str]] = None,
     is_official: Optional[bool] = None,
     is_verified: Optional[bool] = None,
+    stage: Optional[list[str]] = None,
     sort_by: str = "popular",
     page: int = 1,
     limit: int = 20,
@@ -66,11 +73,12 @@ def search(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Search the model hub with optional filters.
+    """Search the model hub with optional filters (``stage`` keeps only those stages).
 
     >>> dagnam.hub.search(task_type="generation", sort_by="popular")["items"]
     """
     resolved = resolve_client(client, api_key, api_url)
+    stages = {"stage": [normalize_stage(item) for item in stage]} if stage else {}
     legacy_search = getattr(resolved, "hub_search", None)
     if callable(legacy_search):
         return ensure_json_object(
@@ -85,6 +93,7 @@ def search(
                 sort_by=sort_by,
                 page=page,
                 limit=limit,
+                **stages,
             )
         )
     return resolved.list_hub_models(
@@ -98,6 +107,7 @@ def search(
         sort_by=sort_by,
         page=page,
         limit=limit,
+        **stages,
     )
 
 

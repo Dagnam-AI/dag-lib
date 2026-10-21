@@ -40,6 +40,7 @@ _COSTLY = re.compile(
     r"|training\s*\.\s*(?:create|delete)"  # SDK: dagnam.training.create(
     r"|projects?\s*\.\s*delete"
     r"|hub\s+publish"  # CLI: dagnam hub publish (public by default)
+    r"|hub\s+version\s+create"  # CLI: dagnam hub version create (publishes a version)
     r"|hub\s*\.\s*(?:create|publish|finalize)"  # SDK: publish to the hub / make a draft live
     r"|(?:resume|restart|restore_checkpoint)\s*\("  # SDK: dagnam.resume(jid), restart(jid), ...
     r"|create_training_job|create_deployment|deploy_model_version"  # client method shapes

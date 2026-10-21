@@ -214,6 +214,14 @@ class TestDiscoveryNewApi:
         )
         assert out["total"] == 3
 
+    def test_search_stage_is_normalized_and_sent_to_either_api(self) -> None:
+        new = _client(list_hub_models=MagicMock(return_value={"items": []}))
+        hub.search(stage=["fine-tuned", "design"], client=new)
+        assert new.list_hub_models.call_args.kwargs["stage"] == ["finetuned", "design"]
+        legacy = _client(hub_search=MagicMock(return_value={"items": []}))
+        hub.search(stage=["adapter"], client=legacy)
+        assert legacy.hub_search.call_args.kwargs["stage"] == ["adapter"]
+
     def test_categories_uses_list_hub_categories(self) -> None:
         c = _client(list_hub_categories=MagicMock(return_value=["nlp", "cv"]))
         assert hub.categories(client=c) == ["nlp", "cv"]
