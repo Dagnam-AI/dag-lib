@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- The `pillow` floor is raised to 13.0.0, the release that fixes the advisories reported against
+  12.3.0. The resolved `certifi` is held at 2026.10.19 or newer for the same reason.
+
 ## [0.19.0] - 2026-10-12
 
 ### Platform compatibility
