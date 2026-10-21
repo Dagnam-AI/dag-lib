@@ -131,7 +131,16 @@ def test_hub_upload_file(run_cli: CliRunner, capsys: StrCapture, tmp_path: Path)
     with mock.patch("dagnam.hub", fake):
         run_cli(["hub", "upload-file", "m1", str(f)])
     assert "f1" in capsys.readouterr().out
-    fake.upload_file.assert_called_once_with("m1", str(f))
+    fake.upload_file.assert_called_once_with("m1", str(f), version_id=None)
+
+
+def test_hub_upload_file_into_a_draft_version(run_cli: CliRunner, tmp_path: Path) -> None:
+    f = tmp_path / "weights.bin"
+    f.write_bytes(b"\x00")
+    fake = SimpleNamespace(upload_file=mock.Mock(return_value={"id": "f1"}))
+    with mock.patch("dagnam.hub", fake):
+        run_cli(["hub", "upload-file", "m1", str(f), "--version-id", "v1"])
+    fake.upload_file.assert_called_once_with("m1", str(f), version_id="v1")
 
 
 def test_hub_download_prints_each_saved_path(
@@ -181,6 +190,8 @@ def test_hub_publish_calls_orchestrator_and_prints_progress(
                     "t",
                     "--framework",
                     "pytorch",
+                    "--stage",
+                    "adapter",
                     "--file",
                     str(weights),
                 ]
@@ -219,6 +230,8 @@ def test_hub_publish_upload_failure_exits_1(
                     "t",
                     "--framework",
                     "pytorch",
+                    "--stage",
+                    "adapter",
                     "--file",
                     str(weights),
                 ]
@@ -250,6 +263,8 @@ def test_hub_publish_model_id_resumes_a_draft(
                     "classification",
                     "--framework",
                     "pytorch",
+                    "--stage",
+                    "adapter",
                     "--file",
                     str(weights),
                 ]
@@ -278,6 +293,8 @@ def test_hub_publish_json_flag_is_accepted_and_prints_the_same_json(
         "classification",
         "--framework",
         "pytorch",
+        "--stage",
+        "adapter",
         "--file",
         str(weights),
     ]
@@ -302,6 +319,43 @@ def test_hub_update_description_and_visibility(run_cli: CliRunner) -> None:
             run_cli(["hub", "update", "m1", "--description", "d2", "--visibility", "private"]) == 0
         )
     m.assert_called_once_with("m1", description="d2", visibility="private")
+
+
+def test_hub_update_lineage_and_licence_fields(run_cli: CliRunner) -> None:
+    uuid = "11111111-2222-3333-4444-555555555555"
+    argv = [
+        "hub",
+        "update",
+        "m1",
+        "--license",
+        "gemma",
+        "--license-name",
+        "N",
+        "--license-url",
+        "U",
+    ]
+    with mock.patch("dagnam.hub.update", return_value={"id": "m1"}) as m:
+        assert run_cli([*argv, "--base", "Qwen/Qwen2.5"]) == 0
+        assert run_cli([*argv, "--base", uuid]) == 0
+    first, second = m.call_args_list
+    assert first.kwargs == {
+        "license": "gemma",
+        "license_name": "N",
+        "license_url": "U",
+        "base_model_name": "Qwen/Qwen2.5",
+    }
+    assert second.kwargs["base_model_id"] == uuid
+    assert "base_model_name" not in second.kwargs
+
+
+def test_hub_search_filters_by_stage(run_cli: CliRunner) -> None:
+    fake = SimpleNamespace(search=mock.Mock(return_value={"items": []}))
+    with mock.patch("dagnam.hub", fake):
+        run_cli(["hub", "search", "--stage", "design", "--stage", "adapter"])
+        run_cli(["hub", "search"])
+    first, second = fake.search.call_args_list
+    assert first.kwargs["stage"] == ["design", "adapter"]
+    assert second.kwargs["stage"] is None
 
 
 def test_hub_update_requires_a_field(run_cli: CliRunner, capsys: StrCapture) -> None:

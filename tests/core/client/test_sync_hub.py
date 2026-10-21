@@ -512,3 +512,111 @@ def test_finalize_hub_model_404(client: DagnamClient, rmock: RequestsMocker) -> 
     rmock.post(f"{API}/api/v1/hub/models/m1/finalize", status_code=404)
     with pytest.raises(HubModelNotFoundError):
         client.finalize_hub_model("m1")
+
+
+# ---------------------------------------------------------------- releases
+
+
+def test_finalize_hub_model_version(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/versions/v1/finalize", json={"status": "published"})
+    assert client.finalize_hub_model_version("m1", "v1") == {"status": "published"}
+
+
+def test_finalize_hub_model_version_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/versions/v1/finalize", status_code=404)
+    with pytest.raises(HubModelNotFoundError):
+        client.finalize_hub_model_version("m1", "v1")
+
+
+def test_delete_hub_model_version(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{API}/api/v1/hub/models/m1/versions/v1", status_code=204, text="")
+    assert client.delete_hub_model_version("m1", "v1") is None
+    assert rmock.last_request.method == "DELETE"
+
+
+def test_get_hub_model_architecture(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/m1/versions/v1/architecture", json={"diagram_state": {}})
+    assert client.get_hub_model_architecture("m1", "v1") == {"diagram_state": {}}
+
+
+def test_list_hub_model_derivatives_repeats_stage(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/m1/derivatives", json={"items": []})
+    assert client.list_hub_model_derivatives("m1", stage=["adapter", "merged"]) == {"items": []}
+    assert rmock.last_request.qs == {"stage": ["adapter", "merged"], "page": ["1"], "limit": ["20"]}
+
+
+def test_list_hub_model_derivatives_without_stage(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/m1/derivatives", json={"items": []})
+    client.list_hub_model_derivatives("m1", page=2, limit=5)
+    assert rmock.last_request.qs == {"page": ["2"], "limit": ["5"]}
+
+
+def test_list_hub_model_files_sends_version_id(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/m1/files", json={"files": []})
+    client.list_hub_model_files("m1", version_id="v1")
+    assert rmock.last_request.qs == {"version_id": ["v1"]}
+
+
+def test_list_hub_model_files_sends_no_parameter_by_default(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.get(f"{API}/api/v1/hub/models/m1/files", json={"files": []})
+    client.list_hub_model_files("m1")
+    assert rmock.last_request.qs == {}
+
+
+def test_download_hub_model_sends_version_id_with_file_id(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(DOWNLOAD, json=_links())
+    client.download_hub_model("m1", file_id="f1", version_id="v1")
+    assert rmock.last_request.qs == {"file_id": ["f1"], "version_id": ["v1"]}
+
+
+def test_download_hub_model_files_names_the_version_on_the_listing_only(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """Each per-file reissue names the file id, so only the first call carries the version."""
+    rmock.post(
+        DOWNLOAD,
+        [
+            {"json": _links(("f1", "w.bin", f"{CONTENT_F1}?token=a"))},
+            {"json": _links(("f1", "w.bin", f"{CONTENT_F1}?token=b"))},
+        ],
+    )
+    rmock.get(CONTENT_F1, content=b"w")
+    client.download_hub_model_files("m1", tmp_path, version_id="v1")
+    assert [r.qs for r in rmock.request_history if r.method == "POST"] == [
+        {"version_id": ["v1"]},
+        {"file_id": ["f1"]},
+    ]
+
+
+def test_upload_model_file_sends_version_id(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    f = tmp_path / "w.bin"
+    f.write_bytes(b"\x00")
+    rmock.post(f"{API}/api/v1/hub/models/m1/files", json={"id": "f1"}, status_code=201)
+    client.upload_model_file("m1", str(f), version_id="v 1")
+    assert rmock.last_request.qs == {"version_id": ["v 1"]}
+
+
+def test_use_hub_model_in_studio_sends_the_body(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/use-in-studio", json={"project_id": "p"})
+    client.use_hub_model_in_studio("m1", {"visibility": "private", "version_id": "v1"})
+    assert rmock.last_request.json() == {"visibility": "private", "version_id": "v1"}
+
+
+def test_use_hub_model_in_studio_sends_no_body_by_default(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.post(f"{API}/api/v1/hub/models/m1/use-in-studio", json={"project_id": "p"})
+    client.use_hub_model_in_studio("m1")
+    assert rmock.last_request.body is None

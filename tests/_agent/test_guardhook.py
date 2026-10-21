@@ -57,6 +57,24 @@ def test_denies_unconfirmed_training_delete(
     assert payload["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "dagnam hub version create m1 --version 1.1.0 --file w.safetensors",
+        "python -c \"import dagnam; dagnam.hub.publish_version('m1', '1.1.0')\"",
+        'python -c "import dagnam; c = dagnam.DagnamClient(u, k); c.finalize_hub_model_version(m, v)"',
+    ],
+)
+def test_denies_unconfirmed_hub_version_publishing(
+    command: str, monkeypatch: PytestMonkeyPatch, capsys: StrCapture
+) -> None:
+    code, payload = _run(
+        {"tool_name": "Bash", "tool_input": {"command": command}}, monkeypatch, capsys
+    )
+    assert code == 0
+    assert payload["permissionDecision"] == "deny"
+
+
 def test_denies_unconfirmed_hub_publish_cli(
     monkeypatch: PytestMonkeyPatch, capsys: StrCapture
 ) -> None:

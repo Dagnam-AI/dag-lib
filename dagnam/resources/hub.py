@@ -10,7 +10,6 @@ the Phase 3 style (``dagnam.inference``, ``dagnam.deployments``).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -24,7 +23,21 @@ from dagnam._types import (
     ensure_json_object,
     is_json_value,
 )
-from dagnam.resources.hub_publish import create_payload, finalize, publish
+from dagnam.resources.hub_lineage import (
+    delete_version,
+    derivatives,
+    download,
+    finalize_version,
+    get_architecture,
+    use_in_studio,
+)
+from dagnam.resources.hub_publish import (
+    create_payload,
+    finalize,
+    normalize_stage,
+    publish,
+    publish_version,
+)
 
 
 def _stringify_id(value: object) -> str:
@@ -53,6 +66,7 @@ def search(
     tags: Optional[list[str]] = None,
     is_official: Optional[bool] = None,
     is_verified: Optional[bool] = None,
+    stage: Optional[list[str]] = None,
     sort_by: str = "popular",
     page: int = 1,
     limit: int = 20,
@@ -60,11 +74,12 @@ def search(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Search the model hub with optional filters.
+    """Search the model hub with optional filters (``stage`` keeps only those stages).
 
     >>> dagnam.hub.search(task_type="generation", sort_by="popular")["items"]
     """
     resolved = resolve_client(client, api_key, api_url)
+    stages = {"stage": [normalize_stage(item) for item in stage]} if stage else {}
     legacy_search = getattr(resolved, "hub_search", None)
     if callable(legacy_search):
         return ensure_json_object(
@@ -79,6 +94,7 @@ def search(
                 sort_by=sort_by,
                 page=page,
                 limit=limit,
+                **stages,
             )
         )
     return resolved.list_hub_models(
@@ -92,6 +108,7 @@ def search(
         sort_by=sort_by,
         page=page,
         limit=limit,
+        **stages,
     )
 
 
@@ -252,11 +269,12 @@ def upload_file(
     model_id: str,
     file_path: str,
     *,
+    version_id: Optional[str] = None,
     client: Optional[DagnamClient] = None,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Upload a file to a hub model you own.
+    """Upload a file to a hub model you own (into the draft ``version_id`` when given).
 
     ``.safetensors`` and ``.onnx`` are stored as they are; a PyTorch ``.pt``/``.pth`` file is
     converted on upload and stored as ``<stem>.safetensors``. Files above about 500 MB are
@@ -267,30 +285,7 @@ def upload_file(
     'weights.safetensors'
     """
     resolved = resolve_client(client, api_key, api_url)
-    return resolved.upload_model_file(_stringify_id(model_id), file_path)
-
-
-def download(
-    model_id: str | UUID,
-    dest_dir: str | Path,
-    file_id: Optional[str] = None,
-    *,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> list[str]:
-    """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns their paths.
-
-    >>> dagnam.hub.download("model_abc", "./weights")
-    ['weights/model.safetensors', 'weights/head.onnx']
-    """
-    resolved = resolve_client(client, api_key, api_url)
-    return [
-        str(path)
-        for path in resolved.download_hub_model_files(
-            _stringify_id(model_id), dest_dir, file_id=file_id
-        )
-    ]
+    return resolved.upload_model_file(_stringify_id(model_id), file_path, version_id)
 
 
 def list_versions(
@@ -317,7 +312,11 @@ def create_version(
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
 ) -> JsonObject:
-    """Create a new version for a model."""
+    """Start a DRAFT version of a model.
+
+    Add files with ``upload_file(..., version_id=...)`` and publish it with
+    ``finalize_version``, or use ``publish_version`` to do all three in one call.
+    """
     resolved = resolve_client(client, api_key, api_url)
     payload: JsonObject = {"version": version}
     if changelog is not None:
@@ -442,41 +441,26 @@ def add_review(
     return resolved.add_hub_model_review(_stringify_id(model_id), payload)
 
 
-# ---------------------------------------------------------------------------
-# Studio integration
-# ---------------------------------------------------------------------------
-
-
-def use_in_studio(
-    model_id: str,
-    *,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Import a hub model into Studio for fine-tuning or inference."""
-    resolved = resolve_client(client, api_key, api_url)
-    legacy_use_in_studio = getattr(resolved, "hub_use_in_studio", None)
-    if callable(legacy_use_in_studio):
-        return ensure_json_object(legacy_use_in_studio(_stringify_id(model_id)))
-    return resolved.use_hub_model_in_studio(_stringify_id(model_id))
-
-
 __all__ = [
     "add_review",
     "categories",
     "create",
     "create_version",
     "delete",
+    "delete_version",
+    "derivatives",
     "download",
     "featured",
     "finalize",
+    "finalize_version",
     "fork",
     "get",
+    "get_architecture",
     "list_files",
     "list_reviews",
     "list_versions",
     "publish",
+    "publish_version",
     "search",
     "star",
     "starred",

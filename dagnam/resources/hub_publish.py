@@ -24,6 +24,75 @@ from dagnam._types import JsonObject, JsonValue
 
 _RETRYABLE_STATUS = frozenset({0, 408, 429})
 
+STAGES = ("design", "pretrained", "finetuned", "adapter", "quantized", "merged", "distilled")
+POST_TRAINED = STAGES[2:]
+STAGE_ALIASES = {"pre-trained": "pretrained", "fine-tuned": "finetuned"}
+LICENSES = (
+    "mit",
+    "apache2",
+    "gpl",
+    "proprietary",
+    "custom",
+    "bsd-3-clause",
+    "gpl-3.0",
+    "agpl-3.0",
+    "lgpl-3.0",
+    "mpl-2.0",
+    "cc0-1.0",
+    "cc-by-4.0",
+    "cc-by-sa-4.0",
+    "cc-by-nc-4.0",
+    "cc-by-nc-sa-4.0",
+    "openrail-m",
+    "llama-community",
+    "gemma",
+)
+
+
+def normalize_stage(value: str) -> str:
+    """A stage name the platform accepts; ``pre-trained`` and ``fine-tuned`` are accepted too."""
+    stage = STAGE_ALIASES.get(value.strip().lower(), value.strip().lower())
+    if stage == "post-trained":
+        raise ValueError(f"Choose the post-trained stage: {', '.join(POST_TRAINED)}")
+    if stage not in STAGES:
+        raise ValueError(f"Unknown stage {value!r}; use one of {', '.join(STAGES)}")
+    return stage
+
+
+def split_architecture(obj: JsonObject) -> tuple[str, JsonObject]:
+    """The request field a design object goes in: Studio state, or a codegen ``dag.json``."""
+    return ("architecture", obj) if "diagram_state" in obj else ("architecture_ir", obj)
+
+
+def base_fields(base: str) -> JsonObject:
+    """``base_model_id`` for a page id (a UUID), else ``base_model_name`` for a plain name."""
+    try:
+        UUID(base)
+    except ValueError:
+        return {"base_model_name": base}
+    return {"base_model_id": base}
+
+
+def _source_fields(
+    architecture: Optional[JsonObject],
+    project_id: Optional[str],
+    architecture_version_id: Optional[str],
+) -> JsonObject:
+    """The architecture source of a create or version request (at most one)."""
+    if architecture is not None and project_id is not None:
+        raise ValueError("Give either architecture or project_id, not both")
+    if architecture_version_id is not None and project_id is None:
+        raise ValueError("architecture_version_id needs project_id")
+    fields: JsonObject = {}
+    if architecture is not None:
+        key, value = split_architecture(architecture)
+        fields[key] = value
+    if project_id is not None:
+        fields["project_id"] = project_id
+    if architecture_version_id is not None:
+        fields["architecture_version_id"] = architecture_version_id
+    return fields
+
 
 def _retryable(exc: Exception) -> bool:
     """Only a transport failure (0), a timeout (408), a rate limit (429) or a 5xx can succeed again.
@@ -96,53 +165,8 @@ def stored_name(file_path: str) -> str:
     return name
 
 
-def publish(
-    *,
-    name: str,
-    description: str,
-    task_type: str,
-    framework: str,
-    files: Sequence[str],
-    model_id: Optional[str] = None,
-    version: Optional[str] = None,
-    changelog: Optional[str] = None,
-    license: str = "mit",
-    visibility: str = "public",
-    tags: Optional[list[str]] = None,
-    metadata: Optional[JsonObject] = None,
-    max_retries_per_file: int = 2,
-    on_file_progress: Optional[Callable[[str, int, int, str], object]] = None,
-    client: Optional[DagnamClient] = None,
-    api_key: Optional[str] = None,
-    api_url: Optional[str] = None,
-) -> JsonObject:
-    """Publish a model to the hub: create -> upload files -> (version) -> finalize.
-
-    With ``model_id`` the create step is skipped and the files go into that draft: a file the
-    draft already holds (the platform answers 409) is reported ``skipped`` and the rest are
-    uploaded, so a halted publish is resumed by calling again with the id from its error.
-    ``name``, ``description``, ``task_type`` and ``framework`` are not sent on a resume.
-
-    ``on_file_progress(path, index, total, state)`` receives per-file states:
-    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed`` | ``skipped``.
-
-    An upload is retried up to ``max_retries_per_file`` times, and only on a transport
-    failure, a timeout (408), a rate limit (429) or a server error; any other 4xx, a file
-    above the size ceiling and a local file that changed mid-send halt at once. A 409 after
-    such a retry means the first attempt stored the file; it is ``skipped``.
-
-    Files above about 500 MB are not supported yet: the platform refuses the request
-    whatever the plan allows. A PyTorch ``.pt``/``.pth`` file is converted on upload and
-    stored as ``<stem>.safetensors``; ``.safetensors`` and ``.onnx`` are stored as they are.
-
-    Raises ``ValueError`` before any network call if two files would be stored under one
-    name (``stored_name``) and ``FileNotFoundError`` if a local file is missing;
-    ``UploadError`` if a file still fails (the draft and its uploaded files are kept: resume
-    with ``model_id``); ``HubError`` if the platform answers 404 or 405 to finalize (the model
-    is still a draft: ``hub.finalize(model_id)`` retries that step alone). The result is
-    ``{"model", "files", "version", "finalized"}``; ``finalized`` is always ``True`` and is
-    kept for callers that read it.
-    """
+def _check_files(files: Sequence[str]) -> None:
+    """``FileNotFoundError`` for a missing file, ``ValueError`` for two with one stored name."""
     for file_path in files:
         if not Path(file_path).is_file():
             raise FileNotFoundError(f"No such file: {file_path}")
@@ -156,23 +180,17 @@ def publish(
             f"PyTorch .pt/.pth file is stored as <stem>.safetensors): {', '.join(duplicates)}"
         )
 
-    resolved = resolve_client(client, api_key, api_url)
-    resume = model_id is not None
-    if model_id is None:
-        created = resolved.create_hub_model(
-            create_payload(
-                name=name,
-                description=description,
-                task_type=task_type,
-                framework=framework,
-                license=license,
-                visibility=visibility,
-                tags=tags,
-                metadata=metadata,
-            )
-        )
-        model_id = str(created["id"])
 
+def _upload_all(
+    resolved: DagnamClient,
+    model_id: str,
+    files: Sequence[str],
+    version_id: Optional[str],
+    on_file_progress: Optional[Callable[[str, int, int, str], object]],
+    max_retries_per_file: int,
+    resume: bool,
+) -> list[JsonValue]:
+    """Upload each file (into ``version_id`` when given), retrying only what can succeed again."""
     total = len(files)
     uploaded: list[JsonValue] = []
     for index, file_path in enumerate(files, start=1):
@@ -181,7 +199,7 @@ def publish(
         attempts = 0
         while True:
             try:
-                uploaded.append(resolved.upload_model_file(model_id, file_path))
+                uploaded.append(resolved.upload_model_file(model_id, file_path, version_id))
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "uploaded")
                 break
@@ -195,33 +213,223 @@ def publish(
                     if on_file_progress is not None:
                         on_file_progress(file_path, index, total, "failed")
                     done = ", ".join(str(Path(p).name) for p in files[: index - 1]) or "none"
+                    if version_id is None:
+                        subject = f"hub model {model_id}"
+                        advice = f"resume with hub.publish(..., model_id={model_id!r})"
+                    else:
+                        subject = f"version {version_id} of hub model {model_id}"
+                        advice = (
+                            "the version is still a draft: add the rest with "
+                            f"hub.upload_file(..., version_id={version_id!r}) and publish it with "
+                            f"hub.finalize_version({model_id!r}, {version_id!r}), or remove it with "
+                            f"hub.delete_version({model_id!r}, {version_id!r})"
+                        )
                     raise UploadError(
-                        f"Publish of hub model {model_id} halted: {file_path} failed "
+                        f"Publish of {subject} halted: {file_path} failed "
                         f"after {attempts} attempt(s) ({exc}). Uploaded so far: {done}. "
-                        f"Fix the issue, then resume with hub.publish(..., model_id={model_id!r})."
+                        f"Fix the issue, then {advice}."
                     ) from exc
                 if on_file_progress is not None:
                     on_file_progress(file_path, index, total, "retrying")
+    return uploaded
 
-    version_record: JsonValue = None
-    if version is not None:
-        version_payload: JsonObject = {"version": version}
-        if changelog is not None:
-            version_payload["changelog"] = changelog
-        version_record = resolved.create_hub_model_version(model_id, version_payload)
 
+def publish(
+    *,
+    name: str,
+    description: str,
+    task_type: str,
+    framework: str,
+    files: Sequence[str] = (),
+    stage: Optional[str] = None,
+    base: Optional[str] = None,
+    architecture: Optional[JsonObject] = None,
+    project_id: Optional[str] = None,
+    architecture_version_id: Optional[str] = None,
+    registry_version_id: Optional[str] = None,
+    version: str = "1.0.0",
+    changelog: Optional[str] = None,
+    license: str = "mit",
+    license_url: Optional[str] = None,
+    license_name: Optional[str] = None,
+    visibility: str = "public",
+    tags: Optional[list[str]] = None,
+    metadata: Optional[JsonObject] = None,
+    model_id: Optional[str] = None,
+    max_retries_per_file: int = 2,
+    on_file_progress: Optional[Callable[[str, int, int, str], object]] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Publish a model to the hub: create -> upload files -> finalize.
+
+    ``architecture`` publishes a design with no weights: a Studio ``{diagram_state,
+    architecture_config}`` object or a codegen ``dag.json`` object. ``project_id`` (with
+    ``architecture_version_id``) takes the design from one of your Studio projects instead.
+    ``stage`` is ``design``, ``pretrained`` or one of the post-trained stages ``finetuned``,
+    ``adapter``, ``quantized``, ``merged``, ``distilled`` (``pre-trained`` and ``fine-tuned``
+    are accepted); leave it out for the platform to decide. ``base`` names the model this one
+    was made from: a Hub page id, or a plain name such as ``Qwen/Qwen2.5-0.5B-Instruct``.
+    ``registry_version_id`` publishes a registry version as a card and takes no stage, design
+    or files. ``version`` and ``changelog`` name the first version.
+
+    With ``model_id`` the create step is skipped and the files go into that draft: a file the
+    draft already holds (the platform answers 409) is reported ``skipped`` and the rest are
+    uploaded, so a halted publish is resumed by calling again with the id from its error.
+    ``name``, ``description``, ``task_type``, ``framework`` and the design are not sent on a
+    resume.
+
+    ``on_file_progress(path, index, total, state)`` receives per-file states:
+    ``uploading`` -> (``retrying`` ...) -> ``uploaded`` | ``failed`` | ``skipped``.
+
+    An upload is retried up to ``max_retries_per_file`` times, and only on a transport
+    failure, a timeout (408), a rate limit (429) or a server error; any other 4xx, a file
+    above the size ceiling and a local file that changed mid-send halt at once. A 409 after
+    such a retry means the first attempt stored the file; it is ``skipped``.
+
+    Files above about 500 MB are not supported yet: the platform refuses the request
+    whatever the plan allows. A PyTorch ``.pt``/``.pth`` file is converted on upload and
+    stored as ``<stem>.safetensors``; ``.safetensors`` and ``.onnx`` are stored as they are.
+
+    Raises ``ValueError`` before any network call for an unknown stage or licence, a custom
+    licence without ``license_url`` on a page that is not private, a post-trained stage without
+    ``base`` (unless resuming), the design stage with files, a registry card combined with a
+    stage, design or files, two design sources, or two files that would be stored under one
+    name (``stored_name``); ``FileNotFoundError`` if a local file is missing; ``UploadError`` if
+    a file still fails (the draft and its uploaded files are kept: resume with ``model_id``);
+    ``HubError`` if the platform refuses the finalize call (the model is still a draft and the
+    error names it: ``hub.finalize(model_id)`` retries that step alone). The result is ``{"model", "files",
+    "version", "finalized"}``; ``version`` is the published model's ``latest_version`` and
+    ``finalized`` is always ``True``, kept for callers that read it.
+    """
+    _check_files(files)
+    if license not in LICENSES:
+        raise ValueError(f"Unknown licence {license!r}; use one of {', '.join(LICENSES)}")
+    if license == "custom" and visibility != "private" and not license_url:
+        raise ValueError("A public or unlisted model with the custom licence needs license_url")
+    source = _source_fields(architecture, project_id, architecture_version_id)
+    if registry_version_id is not None and (stage or source or files):
+        raise ValueError("A registry card takes no stage, design or files")
+    checked = normalize_stage(stage) if stage is not None else None
+    if checked == "design" and files:
+        raise ValueError("A design takes no files")
+    if checked in POST_TRAINED and base is None and model_id is None:
+        raise ValueError(f"A {checked} model needs base (the model it was made from)")
+    extra: JsonObject = {**source, "version": version}
+    if checked is not None:
+        extra["stage"] = checked
+    if base is not None:
+        extra.update(base_fields(base))
+    if registry_version_id is not None:
+        extra["registry_version_id"] = registry_version_id
+    if changelog is not None:
+        extra["changelog"] = changelog
+    if license_url is not None:
+        extra["license_url"] = license_url
+    if license_name is not None:
+        extra["license_name"] = license_name
+
+    resolved = resolve_client(client, api_key, api_url)
+    resume = model_id is not None
+    if model_id is None:
+        created = resolved.create_hub_model(
+            {
+                **create_payload(
+                    name=name,
+                    description=description,
+                    task_type=task_type,
+                    framework=framework,
+                    license=license,
+                    visibility=visibility,
+                    tags=tags,
+                    metadata=metadata,
+                ),
+                **extra,
+            }
+        )
+        model_id = str(created["id"])
+
+    uploaded = _upload_all(
+        resolved, model_id, files, None, on_file_progress, max_retries_per_file, resume
+    )
     try:
         model = finalize(model_id, client=resolved)
     except (HubModelNotFoundError, APIError) as exc:
-        code = exc.status_code if isinstance(exc, APIError) else 404
-        if code not in (404, 405):
-            raise
+        code, detail = (exc.status_code, exc.message) if isinstance(exc, APIError) else (404, exc)
         raise HubError(
             f"Hub model {model_id} has its files but is still a draft: the platform answered "
-            f"HTTP {code} to the finalize call. Retry that step with hub.finalize({model_id!r})."
+            f"HTTP {code} to the finalize call ({detail}). Fix what it names (hub.update can "
+            f"change the base or licence), then retry that step with hub.finalize({model_id!r})."
         ) from exc
 
-    return {"model": model, "files": uploaded, "version": version_record, "finalized": True}
+    return {
+        "model": model,
+        "files": uploaded,
+        "version": model.get("latest_version"),
+        "finalized": True,
+    }
 
 
-__all__ = ["create_payload", "finalize", "publish", "stored_name"]
+def publish_version(
+    model_id: str | UUID,
+    version: str,
+    *,
+    changelog: Optional[str] = None,
+    files: Sequence[str] = (),
+    architecture: Optional[JsonObject] = None,
+    project_id: Optional[str] = None,
+    architecture_version_id: Optional[str] = None,
+    max_retries_per_file: int = 2,
+    on_file_progress: Optional[Callable[[str, int, int, str], object]] = None,
+    client: Optional[DagnamClient] = None,
+    api_key: Optional[str] = None,
+    api_url: Optional[str] = None,
+) -> JsonObject:
+    """Publish a new version of a model you manage: create a draft, upload files, finalize.
+
+    ``architecture`` or ``project_id`` (with ``architecture_version_id``) attach a design
+    snapshot as in :func:`publish`. Returns the published version. A failed upload raises
+    ``UploadError`` and a refused finalize raises ``HubError``; both leave the draft version
+    (named in the error): it cannot be resumed by this function, so finish it with
+    ``hub.finalize_version`` or remove it with ``hub.delete_version``.
+    """
+    _check_files(files)
+    payload: JsonObject = {
+        "version": version,
+        **_source_fields(architecture, project_id, architecture_version_id),
+    }
+    if changelog is not None:
+        payload["changelog"] = changelog
+    resolved = resolve_client(client, api_key, api_url)
+    mid = str(model_id)
+    draft = resolved.create_hub_model_version(mid, payload)
+    version_id = str(draft["id"])
+    _upload_all(
+        resolved, mid, files, version_id, on_file_progress, max_retries_per_file, resume=False
+    )
+    try:
+        return resolved.finalize_hub_model_version(mid, version_id)
+    except (HubModelNotFoundError, HubError, APIError) as exc:
+        raise HubError(
+            f"Version {version_id} of hub model {mid} is still a draft: the platform refused to "
+            f"publish it ({exc}). Fix that, then publish it with "
+            f"hub.finalize_version({mid!r}, {version_id!r}), or remove it with "
+            f"hub.delete_version({mid!r}, {version_id!r})."
+        ) from exc
+
+
+__all__ = [
+    "LICENSES",
+    "POST_TRAINED",
+    "STAGES",
+    "STAGE_ALIASES",
+    "base_fields",
+    "create_payload",
+    "finalize",
+    "normalize_stage",
+    "publish",
+    "publish_version",
+    "split_architecture",
+    "stored_name",
+]

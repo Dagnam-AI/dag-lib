@@ -431,3 +431,117 @@ async def test_async_get_hub_model_404_not_retried(
     with pytest.raises(HubModelNotFoundError):
         await client.get_hub_model("missing")
     assert route.call_count == 1
+
+
+# ---------------------------------------------------------------- releases
+
+
+async def test_async_finalize_hub_model_version(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/hub/models/m1/versions/v1/finalize").mock(
+        return_value=httpx.Response(200, json={"status": "published"})
+    )
+    assert await client.finalize_hub_model_version("m1", "v1") == {"status": "published"}
+
+
+async def test_async_finalize_hub_model_version_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.post("/api/v1/hub/models/m1/versions/v1/finalize").mock(return_value=httpx.Response(404))
+    with pytest.raises(HubModelNotFoundError):
+        await client.finalize_hub_model_version("m1", "v1")
+
+
+async def test_async_delete_hub_model_version(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.delete("/api/v1/hub/models/m1/versions/v1").mock(return_value=httpx.Response(204))
+    assert await client.delete_hub_model_version("m1", "v1") is None
+    assert route.call_count == 1
+
+
+async def test_async_get_hub_model_architecture(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.get("/api/v1/hub/models/m1/versions/v1/architecture").mock(
+        return_value=httpx.Response(200, json={"diagram_state": {}})
+    )
+    assert await client.get_hub_model_architecture("m1", "v1") == {"diagram_state": {}}
+
+
+async def test_async_list_hub_model_derivatives_repeats_stage(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/hub/models/m1/derivatives").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    await client.list_hub_model_derivatives("m1", stage=["adapter", "merged"])
+    assert route.calls[0].request.url.query == b"page=1&limit=20&stage=adapter&stage=merged"
+
+
+async def test_async_list_hub_model_derivatives_without_stage(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/hub/models/m1/derivatives").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    await client.list_hub_model_derivatives("m1", page=2, limit=5)
+    assert route.calls[0].request.url.query == b"page=2&limit=5"
+
+
+async def test_async_list_hub_model_files_version_id(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.get("/api/v1/hub/models/m1/files").mock(
+        return_value=httpx.Response(200, json={"files": []})
+    )
+    await client.list_hub_model_files("m1", version_id="v1")
+    await client.list_hub_model_files("m1")
+    assert [c.request.url.query for c in route.calls] == [b"version_id=v1", b""]
+
+
+async def test_async_download_hub_model_sends_version_id_with_file_id(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post(DOWNLOAD).mock(return_value=httpx.Response(200, json=_links()))
+    await client.download_hub_model("m1", file_id="f1", version_id="v1")
+    assert route.calls[0].request.url.query == b"file_id=f1&version_id=v1"
+
+
+async def test_async_download_hub_model_files_names_the_version_on_the_listing_only(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    links = mock.post(DOWNLOAD).mock(
+        side_effect=[
+            httpx.Response(200, json=_links(("f1", "w.bin", f"{CONTENT_F1}?token=a"))),
+            httpx.Response(200, json=_links(("f1", "w.bin", f"{CONTENT_F1}?token=b"))),
+        ]
+    )
+    mock.get(CONTENT_F1).mock(return_value=httpx.Response(200, content=b"w"))
+    await client.download_hub_model_files("m1", tmp_path, version_id="v1")
+    assert [c.request.url.query for c in links.calls] == [b"version_id=v1", b"file_id=f1"]
+
+
+async def test_async_upload_model_file_sends_version_id(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    f = tmp_path / "w.bin"
+    f.write_bytes(b"\x00")
+    route = mock.post("/api/v1/hub/models/m1/files").mock(
+        return_value=httpx.Response(201, json={"id": "f1"})
+    )
+    await client.upload_model_file("m1", str(f), version_id="v1")
+    assert route.calls[0].request.url.query == b"version_id=v1"
+
+
+async def test_async_use_hub_model_in_studio_sends_the_body(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.post("/api/v1/hub/models/m1/use-in-studio").mock(
+        return_value=httpx.Response(201, json={"project_id": "p"})
+    )
+    await client.use_hub_model_in_studio("m1", {"visibility": "private"})
+    await client.use_hub_model_in_studio("m1")
+    assert route.calls[0].request.content == b'{"visibility":"private"}'
+    assert route.calls[1].request.content == b""

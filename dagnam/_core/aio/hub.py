@@ -99,15 +99,25 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
             )
         )
 
-    async def list_hub_model_files(self, model_id: str) -> JsonObject:
+    async def list_hub_model_files(
+        self, model_id: str, version_id: str | None = None
+    ) -> JsonObject:
+        """List a version's files (the latest published one by default)."""
         return ensure_json_object(
             await self._hub_req(
-                "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/files",
+                model_id=model_id,
+                params={"version_id": version_id} if version_id else None,
             )
         )
 
-    async def upload_model_file(self, model_id: str, file_path: str) -> JsonObject:
-        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files``.
+    async def upload_model_file(
+        self, model_id: str, file_path: str, version_id: str | None = None
+    ) -> JsonObject:
+        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files[?version_id=]``.
+
+        Without ``version_id`` the file goes to the model's draft version.
 
         Sends ``multipart/form-data`` with a single ``file`` part; ``httpx`` sets
         the boundary Content-Type itself, so only the bearer auth header is sent.
@@ -119,28 +129,42 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
             resp = await self._request(
                 "POST",
                 f"/api/v1/hub/models/{quote_path_segment(model_id)}/files",
+                params={"version_id": version_id} if version_id else None,
                 files={"file": (path.name, fh)},
                 timeout=UPLOAD_TIMEOUT,
             )
         raise_for_hub(resp, model_id)
         return ensure_json_object(response_json_value(resp))
 
-    async def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
-        """Issue content links. ``POST /api/v1/hub/models/{model_id}/download[?file_id=]``."""
-        params: QueryParams | None = {"file_id": file_id} if file_id else None
+    async def download_hub_model(
+        self, model_id: str, file_id: str | None = None, version_id: str | None = None
+    ) -> JsonObject:
+        """Issue content links. ``POST /api/v1/hub/models/{model_id}/download[?file_id=&version_id=]``."""
+        params: QueryParams = {}
+        if file_id:
+            params = {**params, "file_id": file_id}
+        if version_id:
+            params = {**params, "version_id": version_id}
         return ensure_json_object(
             await self._hub_req(
                 "POST",
                 f"/api/v1/hub/models/{quote_path_segment(model_id)}/download",
                 model_id=model_id,
-                params=params,
+                params=params or None,
             )
         )
 
     async def download_hub_model_files(
-        self, model_id: str, dest_dir: str | Path, file_id: str | None = None
+        self,
+        model_id: str,
+        dest_dir: str | Path,
+        file_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[Path]:
-        """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns the paths.
+        """Save a version's files (one file with ``file_id``) under ``dest_dir``; returns the paths.
+
+        ``version_id`` picks the version (the latest published one by default); it is sent on
+        the listing call only, since each per-file reissue names the file itself.
 
         Async mirror of the sync ``download_hub_model_files``: each file's link is issued just
         before its fetch (a link lasts minutes) and streamed to disk, bounded by
@@ -149,7 +173,7 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
         its file-id fallback are reduced to a bare basename and the path is checked to lie
         inside ``dest_dir``.
         """
-        links = await self.download_hub_model(model_id, file_id)
+        links = await self.download_hub_model(model_id, file_id, version_id)
         saved: list[Path] = []
         for entry in ensure_json_array(links.get("files")):
             item = ensure_json_object(entry)
@@ -212,6 +236,50 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
             )
         )
 
+    async def finalize_hub_model_version(self, model_id: str, version_id: str) -> JsonObject:
+        """Publish a draft version. ``POST /api/v1/hub/models/{model_id}/versions/{version_id}/finalize``."""
+        return ensure_json_object(
+            await self._hub_req(
+                "POST",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}/finalize",
+                model_id=model_id,
+            )
+        )
+
+    async def delete_hub_model_version(self, model_id: str, version_id: str) -> None:
+        """Delete a draft version. ``DELETE /api/v1/hub/models/{model_id}/versions/{version_id}``."""
+        await self._hub_req(
+            "DELETE",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}",
+            model_id=model_id,
+        )
+
+    async def get_hub_model_architecture(self, model_id: str, version_id: str) -> JsonObject:
+        """A version's design snapshot. ``GET .../versions/{version_id}/architecture``."""
+        return ensure_json_object(
+            await self._hub_req(
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}/architecture",
+                model_id=model_id,
+            )
+        )
+
+    async def list_hub_model_derivatives(
+        self, model_id: str, *, stage: list[str] | None = None, page: int = 1, limit: int = 20
+    ) -> JsonObject:
+        """Public models derived from this one. ``GET /api/v1/hub/models/{model_id}/derivatives``."""
+        params: QueryParams = {"page": page, "limit": limit}
+        if stage:
+            params = {**params, "stage": list(stage)}
+        return ensure_json_object(
+            await self._hub_req(
+                "GET",
+                f"/api/v1/hub/models/{quote_path_segment(model_id)}/derivatives",
+                model_id=model_id,
+                params=params,
+            )
+        )
+
     async def star_hub_model(self, model_id: str) -> JsonObject:
         return ensure_json_object(
             await self._hub_req(
@@ -257,12 +325,16 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
             )
         )
 
-    async def use_hub_model_in_studio(self, model_id: str) -> JsonObject:
+    async def use_hub_model_in_studio(
+        self, model_id: str, payload: JsonObject | None = None
+    ) -> JsonObject:
+        """Open a model's design as a project; ``payload`` is ``{visibility?, version_id?}``."""
         return ensure_json_object(
             await self._hub_req(
                 "POST",
                 f"/api/v1/hub/models/{quote_path_segment(model_id)}/use-in-studio",
                 model_id=model_id,
+                json_body=payload,
             )
         )
 

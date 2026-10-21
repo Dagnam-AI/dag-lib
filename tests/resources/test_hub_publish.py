@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +20,12 @@ from dagnam._core.exceptions import (
     UploadError,
 )
 from dagnam._types import JsonObject
-from dagnam.resources.hub_publish import stored_name
+from dagnam.resources.hub_publish import (
+    base_fields,
+    normalize_stage,
+    split_architecture,
+    stored_name,
+)
 
 Progress = Callable[[str, int, int, str], object]
 
@@ -119,21 +125,15 @@ class TestRetries:
 
 
 class TestVersion:
-    def test_version_without_changelog_sends_the_version_only(self, tmp_path: Path) -> None:
+    def test_the_first_version_is_named_in_the_create_payload(self, tmp_path: Path) -> None:
         client, files = _client(tmp_path)
-        result = hub.publish(
-            name="n",
-            description="d",
-            task_type="classification",
-            framework="pytorch",
-            files=files,
-            version="1.0.0",
-            client=client,
-        )
-        client.create_hub_model_version.assert_called_once_with("m1", {"version": "1.0.0"})
-        assert result["version"] == {"id": "v1", "version": "1.0.0"}
+        result = _publish(client, files)
+        assert client.create_hub_model.call_args.args[0]["version"] == "1.0.0"
+        assert "changelog" not in client.create_hub_model.call_args.args[0]
+        client.create_hub_model_version.assert_not_called()
+        assert result["version"] is None
 
-    def test_version_with_changelog_sends_both(self, tmp_path: Path) -> None:
+    def test_version_and_changelog_are_sent_in_the_create_payload(self, tmp_path: Path) -> None:
         client, files = _client(tmp_path)
         hub.publish(
             name="n",
@@ -141,13 +141,20 @@ class TestVersion:
             task_type="classification",
             framework="pytorch",
             files=files,
-            version="1.0.0",
+            version="2.0.0",
             changelog="first",
             client=client,
         )
-        client.create_hub_model_version.assert_called_once_with(
-            "m1", {"version": "1.0.0", "changelog": "first"}
-        )
+        payload = client.create_hub_model.call_args.args[0]
+        assert (payload["version"], payload["changelog"]) == ("2.0.0", "first")
+
+    def test_the_result_version_is_the_finalized_models_latest_version(
+        self, tmp_path: Path
+    ) -> None:
+        client, files = _client(tmp_path)
+        latest = {"id": "v1", "version": "1.0.0"}
+        client.finalize_hub_model.return_value = {"id": "m1", "latest_version": latest}
+        assert _publish(client, files)["version"] == latest
 
 
 class TestMove:
@@ -305,3 +312,271 @@ def test_docstring_examples_use_task_types_the_platform_accepts() -> None:
         assert "text-generation" not in (fn.__doc__ or "")
     assert "500 MB" in (hub.upload_file.__doc__ or "")
     assert "500 MB" in (hub.publish.__doc__ or "")
+
+
+DESIGN: JsonObject = {"diagram_state": {"nodes": []}, "architecture_config": {"layers": []}}
+IR: JsonObject = {"layers": [], "connections": []}
+BASE_ID = "0d6c7c64-8f1a-4b2b-9a7e-3f2f5a8e1c11"
+
+
+def _design(client: MagicMock, **kwargs: Any) -> JsonObject:
+    return hub.publish(
+        name="n",
+        description="d",
+        task_type="classification",
+        framework="pytorch",
+        client=client,
+        **kwargs,
+    )
+
+
+def _sent(client: MagicMock) -> JsonObject:
+    payload: JsonObject = client.create_hub_model.call_args.args[0]
+    return payload
+
+
+class TestDesign:
+    def test_a_design_publishes_with_no_files_and_no_stage(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        _design(client, architecture=DESIGN)
+        payload = _sent(client)
+        assert payload["architecture"] == DESIGN
+        assert payload["version"] == "1.0.0"
+        assert "stage" not in payload
+        client.upload_model_file.assert_not_called()
+        client.create_hub_model_version.assert_not_called()
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_a_codegen_ir_is_sent_as_architecture_ir(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        _design(client, architecture=IR)
+        payload = _sent(client)
+        assert payload["architecture_ir"] == IR
+        assert "architecture" not in payload
+
+    def test_a_project_design_sends_the_project_and_its_version(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        _design(client, project_id="p1", architecture_version_id="av1")
+        payload = _sent(client)
+        assert (payload["project_id"], payload["architecture_version_id"]) == ("p1", "av1")
+
+    def test_two_design_sources_are_refused_before_any_call(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        with pytest.raises(ValueError, match="not both"):
+            _design(client, architecture=DESIGN, project_id="p1")
+        client.create_hub_model.assert_not_called()
+
+    def test_a_project_version_needs_the_project(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        with pytest.raises(ValueError, match="needs project_id"):
+            _design(client, architecture_version_id="av1")
+        client.create_hub_model.assert_not_called()
+
+    def test_split_architecture_tells_studio_state_from_an_ir(self) -> None:
+        assert split_architecture(DESIGN) == ("architecture", DESIGN)
+        assert split_architecture(IR) == ("architecture_ir", IR)
+
+
+class TestStageAndBase:
+    @pytest.mark.parametrize(
+        ("given", "sent"),
+        [
+            ("pre-trained", "pretrained"),
+            ("Fine-Tuned", "finetuned"),
+            ("adapter", "adapter"),
+            (" design ", "design"),
+        ],
+    )
+    def test_a_stage_is_normalized(self, tmp_path: Path, given: str, sent: str) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=[] if sent == "design" else files, stage=given, base="B")
+        assert _sent(client)["stage"] == sent
+        assert normalize_stage(given) == sent
+
+    def test_post_trained_alone_names_the_five_stages(self) -> None:
+        with pytest.raises(ValueError, match="finetuned, adapter, quantized, merged, distilled"):
+            normalize_stage("post-trained")
+
+    def test_an_unknown_stage_is_refused_before_any_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="Unknown stage 'bogus'"):
+            _design(client, files=files, stage="bogus")
+        client.create_hub_model.assert_not_called()
+
+    def test_a_post_trained_stage_needs_a_base_before_any_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="needs base"):
+            _design(client, files=files, stage="adapter")
+        client.create_hub_model.assert_not_called()
+
+    def test_resuming_a_draft_needs_no_base(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, stage="adapter", model_id="m1")
+        client.finalize_hub_model.assert_called_once_with("m1")
+
+    def test_a_design_with_files_is_refused_before_any_call(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="design takes no files"):
+            _design(client, files=files, stage="design")
+        client.create_hub_model.assert_not_called()
+
+    def test_a_plain_name_is_a_base_model_name(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, base="Qwen/Qwen2.5-0.5B-Instruct")
+        payload = _sent(client)
+        assert payload["base_model_name"] == "Qwen/Qwen2.5-0.5B-Instruct"
+        assert "base_model_id" not in payload
+
+    def test_a_uuid_is_a_base_model_id(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, base=BASE_ID)
+        payload = _sent(client)
+        assert payload["base_model_id"] == BASE_ID
+        assert "base_model_name" not in payload
+        assert base_fields("x") == {"base_model_name": "x"}
+
+
+class TestRegistryCard:
+    def test_a_registry_version_is_sent_alone(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        _design(client, registry_version_id="r1")
+        payload = _sent(client)
+        assert payload["registry_version_id"] == "r1"
+        assert "stage" not in payload
+        client.upload_model_file.assert_not_called()
+
+    @pytest.mark.parametrize("extra", ["stage", "architecture", "files"])
+    def test_a_registry_card_takes_no_stage_design_or_files(
+        self, tmp_path: Path, extra: str
+    ) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="registry card"):
+            _design(
+                client,
+                registry_version_id="r1",
+                stage="design" if extra == "stage" else None,
+                architecture=DESIGN if extra == "architecture" else None,
+                files=files if extra == "files" else (),
+            )
+        client.create_hub_model.assert_not_called()
+
+
+class TestLicence:
+    def test_a_listed_licence_is_sent(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, license="gemma", license_name="Gemma terms")
+        payload = _sent(client)
+        assert (payload["license"], payload["license_name"]) == ("gemma", "Gemma terms")
+
+    def test_an_unknown_licence_is_refused_and_lists_the_known_ones(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match=r"cc-by-2\.0.*mit, apache2"):
+            _design(client, files=files, license="cc-by-2.0")
+        client.create_hub_model.assert_not_called()
+
+    @pytest.mark.parametrize("visibility", ["public", "unlisted"])
+    def test_a_listed_custom_licence_needs_a_url(self, tmp_path: Path, visibility: str) -> None:
+        client, files = _client(tmp_path)
+        with pytest.raises(ValueError, match="license_url"):
+            _design(client, files=files, license="custom", visibility=visibility)
+        client.create_hub_model.assert_not_called()
+
+    def test_a_custom_licence_with_a_url_or_private_passes(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        _design(client, files=files, license="custom", license_url="https://example.com/l")
+        assert _sent(client)["license_url"] == "https://example.com/l"
+        _design(client, files=files, license="custom", visibility="private")
+
+
+class TestFinalizeRefusal:
+    @pytest.mark.parametrize("status", [409, 500])
+    def test_publish_names_the_draft_when_finalize_is_refused(
+        self, tmp_path: Path, status: int
+    ) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model.side_effect = APIError(status, "base_required")
+        with pytest.raises(HubError) as raised:
+            _publish(client, files)
+        message = str(raised.value)
+        assert "m1" in message
+        assert "base_required" in message
+        assert "hub.finalize('m1')" in message
+        assert isinstance(raised.value.__cause__, APIError)
+
+    def test_publish_version_names_the_draft_when_finalize_is_refused(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model_version.side_effect = APIError(409, "design_has_files")
+        with pytest.raises(HubError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files, client=client)
+        message = str(raised.value)
+        assert "Version v1 of hub model m1" in message
+        assert "design_has_files" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        assert "hub.delete_version('m1', 'v1')" in message
+
+
+class TestPublishVersion:
+    def test_it_creates_a_draft_uploads_into_it_and_finalizes(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.finalize_hub_model_version.return_value = {"id": "v1", "status": "published"}
+        out = hub.publish_version("m1", "1.1.0", files=files[:1], changelog="c", client=client)
+        client.create_hub_model_version.assert_called_once_with(
+            "m1", {"version": "1.1.0", "changelog": "c"}
+        )
+        client.upload_model_file.assert_called_once_with("m1", files[0], "v1")
+        client.finalize_hub_model_version.assert_called_once_with("m1", "v1")
+        assert out == {"id": "v1", "status": "published"}
+
+    def test_a_design_version_sends_the_source_and_uploads_nothing(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        hub.publish_version("m1", "1.1.0", architecture=DESIGN, client=client)
+        client.create_hub_model_version.assert_called_once_with(
+            "m1", {"version": "1.1.0", "architecture": DESIGN}
+        )
+        client.upload_model_file.assert_not_called()
+
+    def test_a_failed_upload_says_how_to_finish_or_remove_the_draft(self, tmp_path: Path) -> None:
+        client, files = _client(tmp_path)
+        client.upload_model_file.side_effect = HubError("Unsupported file extension")
+        with pytest.raises(UploadError) as raised:
+            hub.publish_version("m1", "1.1.0", files=files, client=client)
+        message = str(raised.value)
+        assert "version v1 of hub model m1" in message
+        assert "hub.delete_version('m1', 'v1')" in message
+        assert "hub.finalize_version('m1', 'v1')" in message
+        client.finalize_hub_model_version.assert_not_called()
+
+    def test_a_missing_file_is_refused_before_any_call(self, tmp_path: Path) -> None:
+        client, _files = _client(tmp_path)
+        with pytest.raises(FileNotFoundError):
+            hub.publish_version("m1", "1.1.0", files=[str(tmp_path / "gone.onnx")], client=client)
+        client.create_hub_model_version.assert_not_called()
+
+
+class TestPassThrough:
+    def test_upload_file_passes_the_version(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        hub.upload_file("m1", "w.onnx", version_id="v1", client=client)
+        client.upload_model_file.assert_called_once_with("m1", "w.onnx", "v1")
+
+    def test_use_in_studio_sends_the_options_it_was_given(self) -> None:
+        client = MagicMock(spec=DagnamClient)
+        hub.use_in_studio("m1", visibility="private", client=client)
+        client.use_hub_model_in_studio.assert_called_once_with("m1", {"visibility": "private"})
+        client.reset_mock()
+        hub.use_in_studio("m1", version_id="v1", client=client)
+        client.use_hub_model_in_studio.assert_called_once_with("m1", {"version_id": "v1"})
+        client.reset_mock()
+        hub.use_in_studio("m1", client=client)
+        client.use_hub_model_in_studio.assert_called_once_with("m1", None)
+
+    def test_the_new_names_are_exported_from_hub(self) -> None:
+        for name in (
+            "publish_version",
+            "derivatives",
+            "get_architecture",
+            "finalize_version",
+            "delete_version",
+        ):
+            assert name in hub.__all__
+            assert callable(getattr(hub, name))
