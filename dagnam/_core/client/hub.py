@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import os
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 import uuid
 
 from dagnam._core.client.base import (
@@ -204,13 +204,21 @@ class HubClientMixin(BaseDagnamClient):
             model_id=model_id,
         )
 
-    def list_hub_model_files(self, model_id: str) -> JsonObject:
+    def list_hub_model_files(self, model_id: str, version_id: str | None = None) -> JsonObject:
+        """List a version's files (the latest published one by default)."""
         return self._hub_object(
-            "GET", f"/api/v1/hub/models/{quote_path_segment(model_id)}/files", model_id=model_id
+            "GET",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/files",
+            model_id=model_id,
+            params={"version_id": version_id} if version_id else None,
         )
 
-    def upload_model_file(self, model_id: str, file_path: str) -> JsonObject:
-        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files``.
+    def upload_model_file(
+        self, model_id: str, file_path: str, version_id: str | None = None
+    ) -> JsonObject:
+        """Upload a file to a hub model. ``POST /api/v1/hub/models/{model_id}/files[?version_id=]``.
+
+        Without ``version_id`` the file goes to the model's draft version.
 
         Sends ``multipart/form-data`` with a single ``file`` part, streamed from disk with a
         ``Content-Length`` (see :class:`_MultipartFile`); a symlink is followed. The target
@@ -221,6 +229,8 @@ class HubClientMixin(BaseDagnamClient):
         """
         body = _MultipartFile(Path(file_path))
         url = f"{self.api_url}/api/v1/hub/models/{quote_path_segment(model_id)}/files"
+        if version_id:
+            url += "?" + urlencode({"version_id": version_id})
         try:
             resp = requests.post(
                 url,
@@ -239,21 +249,34 @@ class HubClientMixin(BaseDagnamClient):
         raise_for_hub(resp, model_id)
         return response_json_object(resp)
 
-    def download_hub_model(self, model_id: str, file_id: str | None = None) -> JsonObject:
-        """Issue content links. ``POST /api/v1/hub/models/{model_id}/download[?file_id=]``.
+    def download_hub_model(
+        self, model_id: str, file_id: str | None = None, version_id: str | None = None
+    ) -> JsonObject:
+        """Issue content links. ``POST /api/v1/hub/models/{model_id}/download[?file_id=&version_id=]``.
 
         The platform answers ``{"files": [{"file_id", "file_name", "size", "url"}, ...],
         "download_all_url"}``, each ``url`` a short-lived signed link. To save the bytes use
         :meth:`download_hub_model_files`.
         """
         path = f"/api/v1/hub/models/{quote_path_segment(model_id)}/download"
-        params: QueryParams | None = {"file_id": file_id} if file_id else None
-        return self._hub_object("POST", path, model_id=model_id, params=params)
+        params: QueryParams = {}
+        if file_id:
+            params = {**params, "file_id": file_id}
+        if version_id:
+            params = {**params, "version_id": version_id}
+        return self._hub_object("POST", path, model_id=model_id, params=params or None)
 
     def download_hub_model_files(
-        self, model_id: str, dest_dir: str | Path, file_id: str | None = None
+        self,
+        model_id: str,
+        dest_dir: str | Path,
+        file_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[Path]:
-        """Save a model's files (one file with ``file_id``) under ``dest_dir``; returns the paths.
+        """Save a version's files (one file with ``file_id``) under ``dest_dir``; returns the paths.
+
+        ``version_id`` picks the version (the latest published one by default); it is sent on
+        the listing call only, since each per-file reissue names the file itself.
 
         A link lasts minutes and the files are fetched in turn, so each file's link is issued
         just before its fetch (one ``POST`` per file after the listing). Each is streamed to
@@ -264,7 +287,9 @@ class HubClientMixin(BaseDagnamClient):
         to lie inside ``dest_dir``, so a hostile name can never escape it.
         """
         saved: list[Path] = []
-        for entry in ensure_json_array(self.download_hub_model(model_id, file_id).get("files")):
+        for entry in ensure_json_array(
+            self.download_hub_model(model_id, file_id, version_id).get("files")
+        ):
             item = ensure_json_object(entry)
             fid = str(item.get("file_id") or "")
             if file_id is None and fid:
@@ -296,11 +321,50 @@ class HubClientMixin(BaseDagnamClient):
         )
 
     def create_hub_model_version(self, model_id: str, payload: JsonObject) -> JsonObject:
+        """Start a draft version; the payload may carry one architecture source."""
         return self._hub_object(
             "POST",
             f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions",
             model_id=model_id,
             json_body=payload,
+        )
+
+    def finalize_hub_model_version(self, model_id: str, version_id: str) -> JsonObject:
+        """Publish a draft version. ``POST /api/v1/hub/models/{model_id}/versions/{version_id}/finalize``."""
+        return self._hub_object(
+            "POST",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}/finalize",
+            model_id=model_id,
+        )
+
+    def delete_hub_model_version(self, model_id: str, version_id: str) -> None:
+        """Delete a draft version. ``DELETE /api/v1/hub/models/{model_id}/versions/{version_id}``."""
+        self._hub_request(
+            "DELETE",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}",
+            model_id=model_id,
+        )
+
+    def get_hub_model_architecture(self, model_id: str, version_id: str) -> JsonObject:
+        """A version's design snapshot. ``GET .../versions/{version_id}/architecture``."""
+        return self._hub_object(
+            "GET",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/versions/{quote_path_segment(version_id)}/architecture",
+            model_id=model_id,
+        )
+
+    def list_hub_model_derivatives(
+        self, model_id: str, *, stage: list[str] | None = None, page: int = 1, limit: int = 20
+    ) -> JsonObject:
+        """Public models derived from this one. ``GET /api/v1/hub/models/{model_id}/derivatives``."""
+        params: QueryParams = {"page": page, "limit": limit}
+        if stage:
+            params = {**params, "stage": list(stage)}
+        return self._hub_object(
+            "GET",
+            f"/api/v1/hub/models/{quote_path_segment(model_id)}/derivatives",
+            model_id=model_id,
+            params=params,
         )
 
     def star_hub_model(self, model_id: str) -> JsonObject:
@@ -334,11 +398,15 @@ class HubClientMixin(BaseDagnamClient):
             json_body=payload,
         )
 
-    def use_hub_model_in_studio(self, model_id: str) -> JsonObject:
+    def use_hub_model_in_studio(
+        self, model_id: str, payload: JsonObject | None = None
+    ) -> JsonObject:
+        """Open a model's design as a project; ``payload`` is ``{visibility?, version_id?}``."""
         return self._hub_object(
             "POST",
             f"/api/v1/hub/models/{quote_path_segment(model_id)}/use-in-studio",
             model_id=model_id,
+            json_body=payload,
         )
 
     def list_hub_categories(self) -> JsonArray | str | None:
