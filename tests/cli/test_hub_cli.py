@@ -420,3 +420,144 @@ def test_hub_use_in_studio(run_cli: CliRunner, capsys: StrCapture) -> None:
     with mock.patch("dagnam.hub.use_in_studio", return_value={"project_id": "p1"}) as m:
         assert run_cli(["hub", "use-in-studio", "m1"]) == 0
     m.assert_called_once_with("m1")
+
+
+# ------------------------------------------------------- files after upload
+
+
+def test_hub_files_prints_one_line_per_file_with_its_state(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    listing = {
+        "model_id": "m1",
+        "files": [
+            {
+                "id": "f1",
+                "file_name": "w.safetensors",
+                "scan_status": "clean",
+                "parameter_count": 7,
+            },
+            {"id": "f2", "file_name": "x.pt", "scan_status": "pending"},
+            {
+                "id": "f3",
+                "file_name": "y.pt",
+                "scan_status": "rejected",
+                "rejection": {"code": "contains_code", "message": "it runs code"},
+            },
+            {"id": "f4", "file_name": "old.onnx"},
+            "not a file",
+        ],
+    }
+    fake = SimpleNamespace(list_files=mock.Mock(return_value=listing))
+    with mock.patch("dagnam.hub", fake):
+        assert run_cli(["hub", "files", "m1"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == [
+        "f1  w.safetensors  clean  7 parameters",
+        "f2  x.pt  pending",
+        "f3  y.pt  rejected  contains_code: it runs code",
+        "f4  old.onnx  clean",
+    ]
+    fake.list_files.assert_called_once_with("m1")
+
+
+def test_hub_files_with_no_files_says_so(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(list_files=mock.Mock(return_value={"files": "nope"}))
+    with mock.patch("dagnam.hub", fake):
+        assert run_cli(["hub", "files", "m1"]) == 0
+    assert capsys.readouterr().out.strip() == "No files."
+
+
+def test_hub_files_json_prints_the_listing(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(list_files=mock.Mock(return_value={"files": [{"id": "f1"}]}))
+    with mock.patch("dagnam.hub", fake):
+        assert run_cli(["hub", "files", "m1", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"files": [{"id": "f1"}]}
+
+
+def test_hub_delete_file_succeeds_silently(run_cli: CliRunner, capsys: StrCapture) -> None:
+    fake = SimpleNamespace(delete_file=mock.Mock(return_value=None))
+    with mock.patch("dagnam.hub", fake):
+        assert run_cli(["hub", "delete-file", "m1", "f1"]) == 0
+    assert capsys.readouterr().out == ""
+    fake.delete_file.assert_called_once_with("m1", "f1")
+
+
+def test_hub_delete_file_not_found_says_file_or_model(
+    run_cli: CliRunner, capsys: StrCapture
+) -> None:
+    from dagnam._core.exceptions import HubModelNotFoundError
+
+    fake = SimpleNamespace(delete_file=mock.Mock(side_effect=HubModelNotFoundError("m1")))
+    with mock.patch("dagnam.hub", fake), pytest.raises(SystemExit) as raised:
+        run_cli(["hub", "delete-file", "m1", "f1"])
+    assert raised.value.code == 1
+    err = capsys.readouterr().err
+    assert "File or model not found" in err
+    assert "dagnam hub files m1" in err
+
+
+def test_hub_link_design_sends_a_design_file(
+    run_cli: CliRunner, capsys: StrCapture, tmp_path: Path
+) -> None:
+    design = {"diagram_state": {"nodes": []}, "architecture_config": {"layers": []}}
+    path = tmp_path / "design.json"
+    path.write_text(json.dumps(design), encoding="utf-8")
+    fake = SimpleNamespace(link_design=mock.Mock(return_value={"id": "v1"}))
+    with mock.patch("dagnam.hub", fake):
+        assert (
+            run_cli(
+                ["hub", "link-design", "m1", "--version-id", "v1", "--architecture", f"@{path}"]
+            )
+            == 0
+        )
+    fake.link_design.assert_called_once_with(
+        "m1", "v1", project_id=None, architecture_version_id=None, architecture=design
+    )
+    assert json.loads(capsys.readouterr().out) == {"id": "v1"}
+
+
+def test_hub_link_design_sends_a_project(run_cli: CliRunner) -> None:
+    fake = SimpleNamespace(link_design=mock.Mock(return_value={"id": "v1"}))
+    argv = ["hub", "link-design", "m1", "--version-id", "v1", "--project", "p1"]
+    with mock.patch("dagnam.hub", fake):
+        assert run_cli([*argv, "--architecture-version", "a1"]) == 0
+    fake.link_design.assert_called_once_with(
+        "m1", "v1", project_id="p1", architecture_version_id="a1", architecture=None
+    )
+
+
+def test_hub_link_design_needs_exactly_one_source(run_cli: CliRunner, capsys: StrCapture) -> None:
+    from dagnam.resources import hub_files
+
+    fake = SimpleNamespace(link_design=hub_files.link_design)
+    with mock.patch("dagnam.hub", fake), pytest.raises(SystemExit) as raised:
+        run_cli(["hub", "link-design", "m1", "--version-id", "v1"])
+    assert raised.value.code == 2
+    assert "exactly one of project_id or architecture" in capsys.readouterr().err
+
+
+def test_hub_link_design_needs_a_version(run_cli: CliRunner) -> None:
+    with pytest.raises(SystemExit) as raised:
+        run_cli(["hub", "link-design", "m1", "--project", "p1"])
+    assert raised.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["hub", "publish", "--help"],
+        ["hub", "version", "create", "--help"],
+        ["hub", "upload-file", "--help"],
+    ],
+)
+def test_the_file_help_lists_every_accepted_kind(
+    run_cli: CliRunner, capsys: StrCapture, argv: list[str]
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        run_cli(argv)
+    assert raised.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert ".safetensors, .onnx, .pt, .pth, .h5" in out
+    assert "config.json, tokenizer.json, tokenizer_config.json" in out
+    assert "generation_config.json, special_tokens_map.json" in out

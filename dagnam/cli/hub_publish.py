@@ -18,10 +18,13 @@ if TYPE_CHECKING:
     from dagnam._types import JsonObject
     from dagnam.cli.common import SubParsersAction
 
-_FILE_HELP = (
-    "A file (repeat for several): .safetensors, .onnx, or a PyTorch .pt/.pth, which is "
-    "converted to .safetensors. Files above about 500 MB are not supported yet."
+FILE_KINDS_HELP = (
+    ".safetensors, .onnx, .pt, .pth, .h5, or one of config.json, tokenizer.json, "
+    "tokenizer_config.json, generation_config.json, special_tokens_map.json. PyTorch (.pt, .pth) "
+    "and HDF5 (.h5) weights are converted to .safetensors, and the platform inspects every file "
+    "before it is published. Files above about 500 MB are not supported yet."
 )
+_FILE_HELP = f"A file (repeat for several): {FILE_KINDS_HELP}"
 
 
 def _usage_error(message: str) -> NoReturn:
@@ -51,7 +54,7 @@ def _check_design_args(args: argparse.Namespace) -> None:
         _usage_error("--architecture-version needs --project")
 
 
-def _architecture(args: argparse.Namespace) -> JsonObject | None:
+def design_from_args(args: argparse.Namespace) -> JsonObject | None:
     return ensure_json_object(load_json_arg(args.architecture)) if args.architecture else None
 
 
@@ -77,7 +80,7 @@ def cmd_hub_publish(args: argparse.Namespace) -> None:
             files=args.file,
             stage=stage,
             base=args.base,
-            architecture=_architecture(args),
+            architecture=design_from_args(args),
             project_id=args.project_id,
             architecture_version_id=args.architecture_version_id,
             registry_version_id=args.registry_version_id,
@@ -108,7 +111,7 @@ def cmd_hub_version_create(args: argparse.Namespace) -> None:
             args.version,
             files=args.file,
             changelog=args.changelog,
-            architecture=_architecture(args),
+            architecture=design_from_args(args),
             project_id=args.project_id,
             architecture_version_id=args.architecture_version_id,
             on_file_progress=_progress,
@@ -116,7 +119,7 @@ def cmd_hub_version_create(args: argparse.Namespace) -> None:
     print_json(result)
 
 
-def _add_design_args(parser: argparse.ArgumentParser) -> None:
+def add_design_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--architecture", help="A design file (@path): a Studio design or a dag.json."
     )
@@ -158,7 +161,7 @@ def register_hub_publish(hub_sub: SubParsersAction) -> None:
             "design when no --file and no --registry-version is given; required with --file."
         ),
     )
-    _add_design_args(publish)
+    add_design_args(publish)
     publish.add_argument(
         "--base", help="The model this one derives from: a Hub model id or a name."
     )
@@ -210,5 +213,5 @@ def register_hub_publish(hub_sub: SubParsersAction) -> None:
     create.add_argument("--version", required=True, help="Version string (e.g. 1.1.0).")
     create.add_argument("--changelog", help="Changelog of this version.")
     create.add_argument("--file", action="append", default=[], help=_FILE_HELP)
-    _add_design_args(create)
+    add_design_args(create)
     create.set_defaults(func=cmd_hub_version_create)

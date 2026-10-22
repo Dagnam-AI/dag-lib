@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,8 +13,10 @@ from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
     APIError,
     HubModelNotFoundError,
+    HubRuleError,
     ResponseError,
 )
+from dagnam._types import JsonObject
 
 if TYPE_CHECKING:
     from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
@@ -459,6 +462,70 @@ async def test_async_delete_hub_model_version(
     route = mock.delete("/api/v1/hub/models/m1/versions/v1").mock(return_value=httpx.Response(204))
     assert await client.delete_hub_model_version("m1", "v1") is None
     assert route.call_count == 1
+
+
+async def test_async_delete_hub_model_file(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.delete("/api/v1/hub/models/m1/files/f1").mock(return_value=httpx.Response(204))
+    assert await client.delete_hub_model_file("m1", "f1") is None
+    assert route.call_count == 1
+
+
+async def test_async_delete_hub_model_file_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.delete("/api/v1/hub/models/m1/files/f1").mock(return_value=httpx.Response(404))
+    with pytest.raises(HubModelNotFoundError):
+        await client.delete_hub_model_file("m1", "f1")
+
+
+async def test_async_delete_hub_model_file_of_a_published_version_is_a_rule_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    detail = {
+        "error": "version_published",
+        "message": "A file of a published version cannot be removed",
+    }
+    mock.delete("/api/v1/hub/models/m1/files/f1").mock(
+        return_value=httpx.Response(409, json={"detail": detail})
+    )
+    with pytest.raises(HubRuleError) as excinfo:
+        await client.delete_hub_model_file("m1", "f1")
+    assert excinfo.value.code == "version_published"
+
+
+async def test_async_link_hub_model_design(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    route = mock.put("/api/v1/hub/models/m1/versions/v1/architecture").mock(
+        return_value=httpx.Response(200, json={"id": "v1"})
+    )
+    body: JsonObject = {"project_id": "p1"}
+    assert await client.link_hub_model_design("m1", "v1", body) == {"id": "v1"}
+    assert json.loads(route.calls[-1].request.content) == body
+
+
+async def test_async_link_hub_model_design_404(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    mock.put("/api/v1/hub/models/m1/versions/v1/architecture").mock(
+        return_value=httpx.Response(404)
+    )
+    with pytest.raises(HubModelNotFoundError):
+        await client.link_hub_model_design("m1", "v1", {"project_id": "p1"})
+
+
+async def test_async_link_hub_model_design_already_linked_is_a_rule_error(
+    client: AsyncDagnamClient, mock: RespxMockRouter
+) -> None:
+    detail = {"error": "design_already_linked", "message": "This version already has a design"}
+    mock.put("/api/v1/hub/models/m1/versions/v1/architecture").mock(
+        return_value=httpx.Response(409, json={"detail": detail})
+    )
+    with pytest.raises(HubRuleError) as excinfo:
+        await client.link_hub_model_design("m1", "v1", {"project_id": "p1"})
+    assert excinfo.value.code == "design_already_linked"
 
 
 async def test_async_get_hub_model_architecture(

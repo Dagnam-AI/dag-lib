@@ -23,6 +23,7 @@ from dagnam._types import (
     ensure_json_object,
     is_json_value,
 )
+from dagnam.resources.hub_files import delete_file, link_design, wait_for_inspection
 from dagnam.resources.hub_lineage import (
     delete_version,
     derivatives,
@@ -447,6 +448,7 @@ __all__ = [
     "create",
     "create_version",
     "delete",
+    "delete_file",
     "delete_version",
     "derivatives",
     "download",
@@ -456,6 +458,7 @@ __all__ = [
     "fork",
     "get",
     "get_architecture",
+    "link_design",
     "list_files",
     "list_reviews",
     "list_versions",
@@ -469,4 +472,5 @@ __all__ = [
     "update",
     "upload_file",
     "use_in_studio",
+    "wait_for_inspection",
 ]

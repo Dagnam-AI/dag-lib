@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from dagnam._core.exceptions import (
         APIError,
         ArchitectureValidationError,
+        HubRuleError,
         InsufficientCreditsError,
         TrainingStateError,
     )
@@ -265,6 +266,14 @@ def _http_report(exc: BaseException) -> ErrorReport:
     return ErrorReport(title=f"the API returned an error (HTTP {code})", fields=fields)
 
 
+def _hub_rule_report(exc: BaseException) -> ErrorReport:
+    rule = cast("HubRuleError", exc)
+    return ErrorReport(
+        title="the Hub refused this action",
+        fields=[("Detail", f"{rule.message} (code: {rule.code})")],
+    )
+
+
 def _api_report(exc: BaseException) -> ErrorReport:
     if cast("APIError", exc).status_code == 0:
         return _transport_report(exc)
@@ -462,7 +471,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.DatasetNotFoundError, _not_found_report("dagnam dataset list")),
         (m.TrainingJobNotFoundError, _not_found_report("dagnam training list")),
         (m.DeploymentNotFoundError, _not_found_report("dagnam deployments list")),
-        (m.HubModelNotFoundError, _not_found_report("dagnam hub list")),
+        (m.HubModelNotFoundError, _not_found_report("dagnam hub search")),
         (m.CheckpointNotFoundError, _not_found_report("dagnam checkpoint list <job-id>")),
         (m.ModelNotFoundError, _not_found_report("dagnam models list")),
         (m.StreamError, _stream_report),
@@ -470,6 +479,7 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.LROFailedError, _lro_failed_report),
         (m.ChecksumError, _checksum_report),
         (m.UploadError, _upload_report),
+        (m.HubRuleError, _hub_rule_report),
         (m.APIError, _api_report),
         (m.DagnamError, _plain_report),
     )

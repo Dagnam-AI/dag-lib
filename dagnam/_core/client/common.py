@@ -28,6 +28,7 @@ from dagnam._core.exceptions import (
     EmailNotVerifiedError,
     HubError,
     HubModelNotFoundError,
+    HubRuleError,
     InvalidURLError,
     ModelError,
     ModelNotFoundError,
@@ -511,6 +512,8 @@ def raise_for_hub(resp: ResponseLike, model_id: str | None = None) -> None:
         raise PayloadTooLargeError(_text(resp) or "Upload exceeds the maximum allowed size")
     if code in (400, 422):
         raise HubError(_text(resp))
+    if code == 409 and (rule := _error_marker(_error_detail_source(resp))) is not None:
+        raise HubRuleError(409, _text(resp), code=rule)
     raise APIError(code, _text(resp))
 
 

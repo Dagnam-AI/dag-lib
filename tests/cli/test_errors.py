@@ -23,6 +23,7 @@ from dagnam._core.exceptions import (
     DeploymentStateError,
     DeploymentValidationError,
     HubModelNotFoundError,
+    HubRuleError,
     InsufficientCreditsError,
     LROFailedError,
     LROTimeoutError,
@@ -361,7 +362,7 @@ def test_deployment_state_error() -> None:
         (DatasetNotFoundError("d1"), "dagnam dataset list"),
         (TrainingJobNotFoundError("t1"), "dagnam training list"),
         (DeploymentNotFoundError("dep1"), "dagnam deployments list"),
-        (HubModelNotFoundError("h1"), "dagnam hub list"),
+        (HubModelNotFoundError("h1"), "dagnam hub search"),
         (CheckpointNotFoundError("c1"), "dagnam checkpoint list <job-id>"),
         (ModelNotFoundError("md1"), "dagnam models list"),
     ],
@@ -370,6 +371,14 @@ def test_not_found_errors_suggest_list_command(exc: DagnamError, list_command: s
     out = errors_mod.render_error(exc)
     assert "not found" in out
     assert list_command in out
+
+
+def test_hub_rule_error_prints_the_message_and_its_code() -> None:
+    out = errors_mod.render_error(
+        HubRuleError(409, "Still inspecting: w.safetensors", code="files_pending")
+    )
+    assert "Still inspecting: w.safetensors" in out
+    assert "(code: files_pending)" in out
 
 
 def test_stream_error() -> None:

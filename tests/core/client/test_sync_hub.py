@@ -14,8 +14,10 @@ from dagnam._core.exceptions import (
     APIError,
     HubError,
     HubModelNotFoundError,
+    HubRuleError,
     ResponseError,
 )
+from dagnam._types import JsonObject
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -512,6 +514,71 @@ def test_finalize_hub_model_404(client: DagnamClient, rmock: RequestsMocker) -> 
     rmock.post(f"{API}/api/v1/hub/models/m1/finalize", status_code=404)
     with pytest.raises(HubModelNotFoundError):
         client.finalize_hub_model("m1")
+
+
+# ---------------------------------------------------------------- delete a file, link a design
+
+
+def test_delete_hub_model_file(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{API}/api/v1/hub/models/m1/files/f1", status_code=204, text="")
+    assert client.delete_hub_model_file("m1", "f1") is None
+    assert rmock.last_request.method == "DELETE"
+
+
+def test_delete_hub_model_file_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.delete(f"{API}/api/v1/hub/models/m1/files/f1", status_code=404)
+    with pytest.raises(HubModelNotFoundError):
+        client.delete_hub_model_file("m1", "f1")
+
+
+def test_delete_hub_model_file_of_a_published_version_is_a_rule_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.delete(
+        f"{API}/api/v1/hub/models/m1/files/f1",
+        status_code=409,
+        json={
+            "detail": {
+                "error": "version_published",
+                "message": "A file of a published version cannot be removed",
+            }
+        },
+    )
+    with pytest.raises(HubRuleError) as excinfo:
+        client.delete_hub_model_file("m1", "f1")
+    assert excinfo.value.code == "version_published"
+
+
+def test_link_hub_model_design(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.put(f"{API}/api/v1/hub/models/m1/versions/v1/architecture", json={"id": "v1"})
+    body: JsonObject = {"project_id": "p1"}
+    assert client.link_hub_model_design("m1", "v1", body) == {"id": "v1"}
+    assert rmock.last_request.method == "PUT"
+    assert rmock.last_request.json() == body
+
+
+def test_link_hub_model_design_404(client: DagnamClient, rmock: RequestsMocker) -> None:
+    rmock.put(f"{API}/api/v1/hub/models/m1/versions/v1/architecture", status_code=404)
+    with pytest.raises(HubModelNotFoundError):
+        client.link_hub_model_design("m1", "v1", {"project_id": "p1"})
+
+
+def test_link_hub_model_design_already_linked_is_a_rule_error(
+    client: DagnamClient, rmock: RequestsMocker
+) -> None:
+    rmock.put(
+        f"{API}/api/v1/hub/models/m1/versions/v1/architecture",
+        status_code=409,
+        json={
+            "detail": {
+                "error": "design_already_linked",
+                "message": "This version already has a design",
+            }
+        },
+    )
+    with pytest.raises(HubRuleError) as excinfo:
+        client.link_hub_model_design("m1", "v1", {"project_id": "p1"})
+    assert excinfo.value.code == "design_already_linked"
 
 
 # ---------------------------------------------------------------- releases
