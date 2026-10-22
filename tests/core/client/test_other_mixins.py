@@ -11,12 +11,14 @@ from tests.typing_helpers import PytestMonkeyPatch, RequestsMocker
 
 from dagnam._core.client import DagnamClient
 from dagnam._core.exceptions import (
+    AccountPendingDeletionError,
     APIError,
     AuthError,
     CheckpointNotFoundError,
     CodegenError,
     CodegenValidationError,
     DeploymentNotFoundError,
+    PermissionDeniedError,
     TrainingJobNotFoundError,
 )
 
@@ -519,4 +521,34 @@ def test_download_checkpoint_stream_500(
     url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
     rmock.get(url, status_code=500, text="boom")
     with pytest.raises(APIError):
+        client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")
+
+
+_DOWNLOAD_REFUSALS = [
+    pytest.param(
+        {"detail": {"error": "account_pending_deletion", "message": "Scheduled."}},
+        AccountPendingDeletionError,
+        id="pending-deletion",
+    ),
+    pytest.param(
+        {"detail": {"error": "insufficient_scope", "message": "Needs read."}},
+        PermissionDeniedError,
+        id="insufficient-scope",
+    ),
+]
+
+
+@pytest.mark.parametrize(("payload", "exc_type"), _DOWNLOAD_REFUSALS)
+def test_download_checkpoint_stream_maps_refusals_like_every_other_route(
+    client: DagnamClient,
+    rmock: RequestsMocker,
+    tmp_path: Path,
+    payload: dict[str, object],
+    exc_type: type[Exception],
+) -> None:
+    """The download reads its error body before mapping, so the account and
+    permission markers become the same typed errors as on any other route."""
+    url = f"{API}/api/v1/training/jobs/job1/checkpoints/ckpt1/download"
+    rmock.get(url, status_code=403, json=payload)
+    with pytest.raises(exc_type):
         client.download_checkpoint_stream("job1", "ckpt1", tmp_path / "x")

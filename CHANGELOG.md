@@ -7,6 +7,67 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-22
+
+### Added
+
+- **`dagnam.PermissionDeniedError`** for a 403 from a caller the server knows.
+  Its `.reason` is the server's marker and says what would help:
+  `insufficient_scope` (use a key that has the scope), `api_key_not_allowed`
+  (the route accepts only a web-app session), or the plan gates
+  `feature_gated`, `remote_gpu_not_entitled` and `compute_strategy_not_in_tier`.
+  For `insufficient_scope`, `.required_scopes` lists the scopes the route
+  accepts when the server names them. These arrived as a plain `APIError(403)`
+  before, some with the raw JSON body as the message; the class subclasses
+  `APIError`, so existing handlers still catch it.
+- **`dagnam.AccountPendingDeletionError`** (an `APIError`, `.status_code ==
+  403`) for an account scheduled for deletion. The owner can cancel the
+  deletion in the web app. The server used to report this state as a
+  suspension, so it arrived as `AccountSuspendedError`; the new class
+  subclasses `AccountSuspendedError`, so existing `except AccountSuspendedError`
+  handlers keep catching it, and the CLI still gives it its own report. Catch
+  `AccountPendingDeletionError` first to tell the two apart.
+- **`DeploymentStateError.reason`** carries the server's marker when it sends
+  one, for example `deployment_limit_reached`.
+
+### Changed
+
+- **The CLI names the reason for a refusal.** An unverified email, a suspended
+  account, an account pending deletion, a key without the scope (naming the
+  scopes the action accepts), a key on a web-session-only action, a plan gate
+  and the active-deployment limit each get their own message
+  and next step, instead of "Your plan or role may not allow this action" or
+  "plan limit reached".
+- **Reaching the active-deployment limit is final.** When the server answers
+  with 409 `deployment_limit_reached`, the SDK raises `DeploymentStateError` at
+  once rather than retrying it as it did the rate limit (429) it replaces.
+- **A 409 is retried only when it is the idempotency conflict**: the body
+  carries `"error": "idempotency_in_progress"` or the text "A request with this
+  Idempotency-Key is in progress", so both newer and older servers are
+  recognized. Other 409s on a create with an `Idempotency-Key` used to be
+  retried too; they now raise at once.
+
+### Fixed
+
+- **A deployment create that raced its own retry failed instead of
+  replaying.** `create_deployment` and `deploy_model_version` mapped the
+  idempotency conflict to `DeploymentStateError`, which the retry never sees,
+  so a slow first attempt surfaced as an error. It now resolves into the
+  replayed deployment, as training job creation already did.
+- **Checkpoint and model-artifact downloads map refusals like every other
+  call.** A 403 or 402 on `download_checkpoint_stream`,
+  `download_model_artifact_stream` and their async twins now raises the same
+  typed error (for example `AccountPendingDeletionError` or
+  `PermissionDeniedError`) as any other route, instead of a plain `APIError`
+  with no server message. **Behaviour change:** a 402 there now raises
+  `QuotaExceededError` (or `InsufficientCreditsError`), which is not an
+  `APIError`, so code that caught `APIError` around these downloads to handle a
+  402 must catch `QuotaExceededError` as well.
+- **Corrected the exception docs.** `PayloadTooLargeError` and
+  `InvalidURLError` are not `APIError` subclasses, and neither is `AuthError`
+  for a blocked IP; `dagnam register`, not `dagnam login`, is the command that
+  can meet the login lockout.
+
 ## [0.20.0] - 2026-10-21
 
 ### Platform compatibility
@@ -1633,9 +1694,11 @@ delete as "deleted elsewhere" (exit 0, no receipt available).
   undifferentiated.** `EmailNotVerifiedError`, `AccountSuspendedError`,
   `AccountLockedError`, `PayloadTooLargeError` and `InvalidURLError` are
   exported at package top level and raised from the corresponding backend
-  markers. Each subclasses `APIError`, so existing `except APIError:` handlers
-  keep working unchanged — this widens what callers *can* catch without
-  narrowing what they already do. Every response mapper was updated, not only
+  markers. The first three subclass `APIError`, so existing `except APIError:`
+  handlers keep working unchanged; `PayloadTooLargeError` subclasses
+  `QuotaExceededError` and `InvalidURLError` subclasses `UploadError`, the
+  types those rejections raised before. This widens what callers *can* catch
+  without narrowing what they already do. Every response mapper was updated, not only
   the one that surfaced the problem: a partial fix would have left the same
   rejection raising different types depending on which call path reached it.
   A caller can now, for example, distinguish "verify your email" from "your

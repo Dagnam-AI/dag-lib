@@ -11,6 +11,7 @@ import requests
 from dagnam._core.client import DagnamClient
 from dagnam._core.client.hub import safe_dest
 from dagnam._core.exceptions import (
+    AccountPendingDeletionError,
     APIError,
     HubError,
     HubModelNotFoundError,
@@ -247,6 +248,20 @@ def test_download_hub_model_files_content_404_raises_not_found(
     with pytest.raises(HubModelNotFoundError):
         client.download_hub_model_files("m1", tmp_path)
     assert not (tmp_path / "model.safetensors").exists()
+
+
+def test_download_hub_model_files_content_refusal_keeps_its_marker(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """The streamed error body is read first, so a 403 marker maps to its typed error."""
+    rmock.post(DOWNLOAD, json=_links(("f1", "model.safetensors", f"{CONTENT_F1}?token=t1")))
+    rmock.get(
+        CONTENT_F1,
+        status_code=403,
+        json={"detail": {"error": "account_pending_deletion", "message": "Scheduled."}},
+    )
+    with pytest.raises(AccountPendingDeletionError, match="Scheduled"):
+        client.download_hub_model_files("m1", tmp_path)
 
 
 def test_download_hub_model_files_redirect_without_location_raises(

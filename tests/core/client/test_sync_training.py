@@ -415,7 +415,13 @@ def test_create_job_409_retries_into_replay(client: DagnamClient, rmock: Request
     flight — the client-side conflict-retry resolves it into the replayed 201."""
     rmock.post(
         f"{API}/api/v1/training/jobs",
-        [{"status_code": 409}, {"status_code": 201, "json": {"id": "j1"}}],
+        [
+            {
+                "status_code": 409,
+                "json": {"detail": "A request with this Idempotency-Key is in progress"},
+            },
+            {"status_code": 201, "json": {"id": "j1"}},
+        ],
     )
     client._sleep = lambda _s: None
     client._rng = lambda: 1.0

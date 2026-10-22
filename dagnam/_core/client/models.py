@@ -13,16 +13,16 @@ from dagnam._core.client.base import (
     is_redirect_response,
     is_success_response,
     requests,
-    safe_error_body_from_response,
 )
 from dagnam._core.client.common import (
     quote_path_segment,
+    raise_for_generic,
     raise_for_model,
     raise_for_purge,
     requests_query_params,
     response_json_value,
 )
-from dagnam._core.exceptions import AuthError, ModelNotFoundError, ResponseError
+from dagnam._core.exceptions import ModelNotFoundError, ResponseError
 from dagnam._types import JsonArray, JsonObject, JsonValue, QueryParams, QueryValue
 
 
@@ -260,12 +260,9 @@ class ModelsClientMixin(BaseDagnamClient):
             expected_checksum = expected_checksum or resp.headers.get("X-Checksum-SHA256")
 
         if not is_success_response(resp):
-            code = resp.status_code
-            if code == 401:
-                raise AuthError("Authentication failed: invalid or expired API key")
-            if code == 404:
-                raise ModelNotFoundError(artifact_id)
-            raise APIError(code, safe_error_body_from_response(resp))
+            # Read the (small) error body first so the mapper sees its markers.
+            _ = resp.content
+            raise_for_generic(resp, ModelNotFoundError, artifact_id)
 
         written = self._stream_response_to_file(resp, Path(dest_path))
         return written, expected_checksum
