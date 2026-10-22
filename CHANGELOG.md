@@ -7,9 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-22
+
 ### Platform compatibility
 
-- dagnam 0.20.0 and older finalize right after uploading. A platform that inspects uploads answers 409
+- dagnam 0.21.0 and older finalize right after uploading. A platform that inspects uploads answers 409
   to that until inspection finishes: upgrade.
 
 ### Added
