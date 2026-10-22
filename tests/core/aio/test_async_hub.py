@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import httpx
 import pytest
@@ -19,6 +19,8 @@ from dagnam._core.exceptions import (
 from dagnam._types import JsonObject
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from tests.typing_helpers import PytestMonkeyPatch, RespxMockRouter
 
 API = "https://api.test"
@@ -295,6 +297,58 @@ async def test_async_download_hub_model_files_content_404_raises_not_found(
     mock.get(CONTENT_F1).mock(return_value=httpx.Response(404, json={"detail": "File not found"}))
     with pytest.raises(HubModelNotFoundError):
         await client.download_hub_model_files("m1", tmp_path)
+
+
+class _CountingStream(httpx.AsyncByteStream):
+    """An endless error body that counts the bytes the client actually pulled."""
+
+    def __init__(self) -> None:
+        self.served = 0
+
+    @override
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for _ in range(4096):  # 32 MiB, far past the cap
+            self.served += 8192
+            yield b"x" * 8192
+
+
+async def test_async_download_hub_model_files_error_body_read_is_capped(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    """A hostile or proxy error page is read for a bounded prefix, not drained."""
+    cap = 64 * 1024
+    body = _CountingStream()
+    mock.post(DOWNLOAD).mock(
+        return_value=httpx.Response(
+            200, json=_links(("f1", "model.safetensors", f"{CONTENT_F1}?token=t1"))
+        )
+    )
+    mock.get(CONTENT_F1).mock(return_value=httpx.Response(502, stream=body))
+    with pytest.raises(APIError) as caught:
+        await client.download_hub_model_files("m1", tmp_path)
+    assert caught.value.status_code == 502
+    assert cap <= body.served <= cap + 16 * 1024
+    assert not (tmp_path / "model.safetensors").exists()
+
+
+async def test_async_download_hub_model_files_redirect_target_error_body_read_is_capped(
+    client: AsyncDagnamClient, mock: RespxMockRouter, tmp_path: Path
+) -> None:
+    cap = 64 * 1024
+    body = _CountingStream()
+    mock.post(DOWNLOAD).mock(
+        return_value=httpx.Response(
+            200, json=_links(("f1", "model.safetensors", f"{CONTENT_F1}?token=t1"))
+        )
+    )
+    mock.get(CONTENT_F1).mock(
+        return_value=httpx.Response(302, headers={"Location": "https://store.test/blob"})
+    )
+    mock.get("https://store.test/blob").mock(return_value=httpx.Response(502, stream=body))
+    with pytest.raises(APIError) as caught:
+        await client.download_hub_model_files("m1", tmp_path)
+    assert caught.value.status_code == 502
+    assert cap <= body.served <= cap + 16 * 1024
 
 
 async def test_async_download_hub_model_files_redirect_target_404_raises(

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 import pytest
 import requests
@@ -264,6 +265,35 @@ def test_download_hub_model_files_content_refusal_keeps_its_marker(
     )
     with pytest.raises(AccountPendingDeletionError, match="Scheduled"):
         client.download_hub_model_files("m1", tmp_path)
+
+
+class _CountingBody(io.BytesIO):
+    """A response body that counts the bytes the client actually pulled from it."""
+
+    def __init__(self, size: int) -> None:
+        super().__init__(b"x" * size)
+        self.served = 0
+
+    @override
+    def read(self, size: int | None = -1) -> bytes:
+        chunk = super().read(size)
+        self.served += len(chunk)
+        return chunk
+
+
+def test_download_hub_model_files_error_body_read_is_capped(
+    client: DagnamClient, rmock: RequestsMocker, tmp_path: Path
+) -> None:
+    """A hostile or proxy error page is read for a bounded prefix, not drained."""
+    cap = 64 * 1024
+    body = _CountingBody(32 * 1024 * 1024)
+    rmock.post(DOWNLOAD, json=_links(("f1", "model.safetensors", f"{CONTENT_F1}?token=t1")))
+    rmock.get(CONTENT_F1, status_code=502, body=body)
+    with pytest.raises(APIError) as caught:
+        client.download_hub_model_files("m1", tmp_path)
+    assert caught.value.status_code == 502
+    assert cap <= body.served <= cap + 16 * 1024
+    assert not (tmp_path / "model.safetensors").exists()
 
 
 def test_download_hub_model_files_redirect_without_location_raises(

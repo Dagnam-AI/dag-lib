@@ -10,8 +10,11 @@ The rejections any route can return are decoded in
 from __future__ import annotations
 
 from collections.abc import Mapping
+import io
 import json
 from urllib.parse import quote, urlparse
+
+import requests
 
 from dagnam._core.client.rejections import (
     MAX_ERROR_BODY as _MAX_ERROR_BODY,
@@ -167,6 +170,33 @@ def short_error_text(text: str) -> str:
     if len(text) > _MAX_ERROR_BODY:
         return text[:_MAX_ERROR_BODY] + f"... [truncated, {len(text)} chars total]"
     return text
+
+
+MAX_ERROR_READ = 64 * 1024
+"""Most bytes read from a streamed error body: the mapper needs a marker and a message, not a page."""
+ERROR_READ_CHUNK = 8192
+
+
+def read_error_prefix(resp: requests.Response) -> requests.Response:
+    """A copy of a streamed error response holding at most ``MAX_ERROR_READ`` bytes of its body.
+
+    A hostile server or a proxy error page can stream a body without end, so ``resp.content``
+    must not be what drains it. ``resp`` is closed; use the copy.
+    """
+    body = bytearray()
+    for chunk in resp.iter_content(chunk_size=ERROR_READ_CHUNK):
+        body += chunk
+        if len(body) >= MAX_ERROR_READ:
+            break
+    capped = requests.Response()
+    capped.status_code = resp.status_code
+    capped.headers = resp.headers
+    capped.encoding = resp.encoding
+    capped.url = resp.url
+    capped.raw = io.BytesIO(bytes(body[:MAX_ERROR_READ]))
+    _ = capped.content  # marks the copy as read: the mappers skip an unread stream
+    resp.close()
+    return capped
 
 
 def _format_fastapi_detail(text: str) -> str:
