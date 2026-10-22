@@ -26,6 +26,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - `HubRuleError` (a 409 that carries a code such as `files_pending` or `files_rejected`) and
   `InspectionTimeoutError`, importable from `dagnam` and `dagnam.exceptions`.
 - `HubModelNotFoundError` suggests `dagnam hub search`.
+
+## [0.21.0] - 2026-10-22
+
+### Added
+
 - **`dagnam.PermissionDeniedError`** for a 403 from a caller the server knows.
   Its `.reason` is the server's marker and says what would help:
   `insufficient_scope` (use a key that has the scope), `api_key_not_allowed`
