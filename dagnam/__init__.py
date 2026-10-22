@@ -130,7 +130,7 @@ from dagnam.training import (
     write_training_state,
 )
 
-__version__ = "0.20.0"
+__version__ = "0.21.0"
 
 if TYPE_CHECKING:
     # Declared for type checkers and ``__all__``; loaded lazily at runtime via
