@@ -200,6 +200,44 @@ class AccountSuspendedError(APIError):
         super().__init__(403, message)
 
 
+class AccountPendingDeletionError(AccountSuspendedError):
+    """The API key's owning account is scheduled for deletion (403).
+
+    Raised on any authenticated call while the deletion grace period runs. The
+    owner can still cancel the deletion by signing in to the web app; after
+    that the same call succeeds. A subclass of :class:`AccountSuspendedError`
+    because the server used to report this state as a suspension, so existing
+    ``except AccountSuspendedError`` handlers keep catching it; catch this class
+    first to tell the two apart.
+    """
+
+
+class PermissionDeniedError(APIError):
+    """The server knows who is calling and refused this action (403).
+
+    ``reason`` is the server's marker, and it says what would help:
+
+    - ``insufficient_scope``: the API key lacks the scope; use a key that has it.
+    - ``api_key_not_allowed``: the route accepts only a web-app session.
+    - ``feature_gated``, ``remote_gpu_not_entitled``,
+      ``compute_strategy_not_in_tier``: the plan does not include it.
+
+    For ``insufficient_scope``, ``required_scopes`` lists the scopes the
+    route accepts (any one of them is enough) when the server names them.
+
+    A fresh key or a retry does not change the answer. A subclass of
+    :class:`APIError` (these arrived as a plain ``APIError(403)`` before) so
+    existing ``except APIError`` handlers still catch it.
+    """
+
+    def __init__(
+        self, message: str, *, reason: str, required_scopes: list[str] | None = None
+    ) -> None:
+        self.reason = reason
+        self.required_scopes = required_scopes
+        super().__init__(403, message)
+
+
 class AccountLockedError(APIError):
     """The API key's owning account is temporarily locked out (423).
 
@@ -303,7 +341,16 @@ class DeploymentValidationError(DagnamError):
 
 
 class DeploymentStateError(DagnamError):
-    """Action not permitted for deployment's current lifecycle state (409)."""
+    """Action not permitted for deployment's current lifecycle state (409).
+
+    ``reason`` is the server's marker when it sent one, for example
+    ``deployment_limit_reached`` when the account already runs as many active
+    deployments as the platform allows.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        self.reason = reason
+        super().__init__(message)
 
 
 class CodegenError(DagnamError):

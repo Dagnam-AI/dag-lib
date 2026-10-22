@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dagnam._core.exceptions import (
     AccountLockedError,
+    AccountPendingDeletionError,
     AccountSuspendedError,
     APIError,
     ArchitectureValidationError,
@@ -40,6 +41,7 @@ from dagnam._core.exceptions import (
     ModelError,
     ModelNotFoundError,
     PayloadTooLargeError,
+    PermissionDeniedError,
     ProjectNotFoundError,
     QuotaExceededError,
     ResponseError,
@@ -54,6 +56,7 @@ from dagnam._core.exceptions import (
 __all__ = [
     "APIError",
     "AccountLockedError",
+    "AccountPendingDeletionError",
     "AccountSuspendedError",
     "ArchitectureValidationError",
     "ArchitectureVersionNotFoundError",
@@ -82,6 +85,7 @@ __all__ = [
     "ModelError",
     "ModelNotFoundError",
     "PayloadTooLargeError",
+    "PermissionDeniedError",
     "ProjectNotFoundError",
     "QuotaExceededError",
     "ResponseError",

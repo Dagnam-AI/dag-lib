@@ -15,21 +15,28 @@ terminal that advertises support; piped/captured output is always plain text.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
 from functools import cache
 import os
 import sys
 from typing import TYPE_CHECKING, cast
 
 from dagnam.cli.common import DOCS_URL
-from dagnam.cli.presentation import sanitize_terminal_text
+from dagnam.cli.presentation import ErrorReport, sanitize_terminal_text
+from dagnam.cli.refusal_reports import (
+    credits_report,
+    email_report,
+    pending_deletion_report,
+    permission_report,
+    quota_report,
+    state_report,
+    suspended_report,
+)
 
 if TYPE_CHECKING:
     from dagnam._core.exceptions import (
         APIError,
         ArchitectureValidationError,
         HubRuleError,
-        InsufficientCreditsError,
         TrainingStateError,
     )
 
@@ -87,21 +94,10 @@ def _cell(text: str, width: int, role: str, *, color: bool) -> str:
     return _style(text, role, color=color) + " " * (width - len(text))
 
 
-@dataclass
-class ErrorReport:
-    """One renderable failure: title + optional details, bullets, suggestions."""
-
-    title: str
-    fields: list[tuple[str, str]] = field(default_factory=list)
-    bullets: list[str] = field(default_factory=list)
-    # (command, note) rows; an empty command renders the note as prose.
-    tries: list[tuple[str, str]] = field(default_factory=list)
-
-
 def render_report(report: ErrorReport, *, color: bool) -> str:
     """Render a report into the unified error block.
 
-    Title, field values, and bullets can carry server-supplied text (e.g. the
+    Title, field values, bullets, and the ``Try:`` rows can carry server-supplied text (e.g. the
     ``Detail`` field is the backend's error message), so they are sanitised of
     terminal control/escape sequences before reaching the TTY.
     """
@@ -119,8 +115,12 @@ def render_report(report: ErrorReport, *, color: bool) -> str:
     if report.tries:
         lines.append("")
         lines.append(_style("Try:", "bold", color=color))
-        width = max((len(cmd) for cmd, _ in report.tries if cmd), default=0) + _GAP
-        for cmd, note in report.tries:
+        tries = [
+            (sanitize_terminal_text(cmd), sanitize_terminal_text(note))
+            for cmd, note in report.tries
+        ]
+        width = max((len(cmd) for cmd, _ in tries if cmd), default=0) + _GAP
+        for cmd, note in tries:
             if cmd:
                 lines.append(f"{_INDENT}{_cell(cmd, width, 'command', color=color)}{note}")
             else:
@@ -292,52 +292,6 @@ def _auth_report(exc: BaseException) -> ErrorReport:
     )
 
 
-def _quota_report(exc: BaseException) -> ErrorReport:
-    return ErrorReport(
-        title="plan limit reached",
-        fields=[("Detail", str(exc))],
-        tries=[
-            ("dagnam usage", "see your current usage and limits"),
-            ("", "Free up resources or upgrade your plan to raise the limit."),
-        ],
-    )
-
-
-SUPPORT_URL = "https://dagnam.ai/support"
-_REQUEST_HINT = f"Ask for more credits at {SUPPORT_URL}"
-_SMALLER_HINT = "Or make the run smaller and try again"
-
-
-def _credit_hints(exc: InsufficientCreditsError) -> list[str]:
-    """Hints for the platform's ``next_steps`` that its message does not already give.
-
-    Only steps whose destination exists are translated: the support page for ``request_credits``
-    (not for a caller who is not the account's owner, whose refusal carries no balance and says
-    the owner must act), and the smaller-run sentence for ``reduce_job_size``. Any other token,
-    and any advice the message already contains, is skipped.
-    """
-    said = exc.message.lower()
-    hints: list[str] = []
-    if (
-        "request_credits" in exc.next_steps
-        and exc.available_credits is not None
-        and SUPPORT_URL not in said
-    ):
-        hints.append(_REQUEST_HINT)
-    if "reduce_job_size" in exc.next_steps and "smaller" not in said:
-        hints.append(_SMALLER_HINT)
-    return hints
-
-
-def _credits_report(exc: BaseException) -> ErrorReport:
-    credits = cast("InsufficientCreditsError", exc)
-    return ErrorReport(
-        title="not enough credits",
-        fields=[("Detail", str(exc))],
-        tries=[("", hint) for hint in _credit_hints(credits)],
-    )
-
-
 def _not_found_report(list_command: str) -> Callable[[BaseException], ErrorReport]:
     def build(exc: BaseException) -> ErrorReport:
         return ErrorReport(
@@ -362,14 +316,6 @@ def _architecture_report(exc: BaseException) -> ErrorReport:
         title="architecture validation failed",
         bullets=[error.message for error in errors],
         tries=[("", "Fix the listed parameters and retry.")],
-    )
-
-
-def _state_report(exc: BaseException) -> ErrorReport:
-    return ErrorReport(
-        title="action not allowed in the deployment's current state",
-        fields=[("Detail", str(exc))],
-        tries=[("dagnam deployments get <id>", "check the current lifecycle state")],
     )
 
 
@@ -456,12 +402,12 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
 
     return (
         (m.AuthError, _auth_report),
-        (m.InsufficientCreditsError, _credits_report),
-        (m.QuotaExceededError, _quota_report),
+        (m.InsufficientCreditsError, credits_report),
+        (m.QuotaExceededError, quota_report),
         (m.ArchitectureValidationError, _architecture_report),
         (m.DeploymentValidationError, _validation_report),
         (m.CodegenValidationError, _validation_report),
-        (m.DeploymentStateError, _state_report),
+        (m.DeploymentStateError, state_report),
         (m.TrainingStateError, _training_state_report),
         (m.ProjectNotFoundError, _not_found_report("dagnam projects list")),
         (
@@ -480,6 +426,11 @@ def _registry() -> tuple[tuple[type[BaseException], Callable[[BaseException], Er
         (m.ChecksumError, _checksum_report),
         (m.UploadError, _upload_report),
         (m.HubRuleError, _hub_rule_report),
+        (m.EmailNotVerifiedError, email_report),
+        # The subclass first: a pending deletion is also an AccountSuspendedError.
+        (m.AccountPendingDeletionError, pending_deletion_report),
+        (m.AccountSuspendedError, suspended_report),
+        (m.PermissionDeniedError, permission_report),
         (m.APIError, _api_report),
         (m.DagnamError, _plain_report),
     )

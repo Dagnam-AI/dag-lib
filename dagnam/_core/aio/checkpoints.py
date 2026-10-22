@@ -10,10 +10,10 @@ from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.base import scrub_secret_params
 from dagnam._core.client.common import (
     quote_path_segment,
+    raise_for_checkpoint,
     raise_for_training_job,
-    safe_response_text,
 )
-from dagnam._core.exceptions import APIError, AuthError, CheckpointNotFoundError
+from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject, ensure_json_array, ensure_json_object
 
 
@@ -29,13 +29,8 @@ class AsyncCheckpointsMixin(BaseAsyncDagnamClient):
         return [ensure_json_object(item) for item in ensure_json_array(resp.json())]
 
     async def _raise_for_checkpoint(self, resp: httpx.Response, checkpoint_id: str) -> None:
-        await resp.aread()  # populate the body for the error message
-        code = resp.status_code
-        if code == 401:
-            raise AuthError("Authentication failed: invalid or expired API key")
-        if code == 404:
-            raise CheckpointNotFoundError(checkpoint_id)
-        raise APIError(code, safe_response_text(resp))
+        await resp.aread()  # read the body so the mapper sees its markers
+        raise_for_checkpoint(resp, checkpoint_id)
 
     async def download_checkpoint(
         self, job_id: str, checkpoint_id: str, dest_path: Path

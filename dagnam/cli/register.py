@@ -52,11 +52,9 @@ def cmd_register(
     try:
         key_obj = dagnam.account.register(email, pw, api_url=api_url)
     except APIError as exc:
-        # Forward-compat hook: once the backend gains an email-verification
-        # step, a fresh account's first request returns 403 with a body that
-        # names verification. Only THEN show the inbox guidance - a plain 403
-        # today means "account suspended/deleted" (from the login step), whose
-        # real server reason must be surfaced verbatim, not masked by a
+        # A 403 whose body names verification (the email gate) gets the inbox
+        # guidance. Any other 403, such as a suspended account or one pending
+        # deletion, keeps the server's own reason verbatim, never masked by a
         # misleading "check your inbox" message.
         if exc.status_code == 403 and "verif" in exc.message.lower():
             error(

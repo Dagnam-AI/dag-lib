@@ -10,9 +10,11 @@ import pytest
 
 from dagnam._core.aio import AsyncDagnamClient
 from dagnam._core.exceptions import (
+    AccountPendingDeletionError,
     APIError,
     AuthError,
     CheckpointNotFoundError,
+    PermissionDeniedError,
     TrainingJobNotFoundError,
 )
 
@@ -254,3 +256,31 @@ async def test_async_list_checkpoints_404_not_retried(
     with pytest.raises(TrainingJobNotFoundError):
         await client.list_checkpoints("job1")
     assert route.call_count == 1
+
+
+_DOWNLOAD_REFUSALS = [
+    pytest.param(
+        {"detail": {"error": "account_pending_deletion", "message": "Scheduled."}},
+        AccountPendingDeletionError,
+        id="pending-deletion",
+    ),
+    pytest.param(
+        {"detail": {"error": "insufficient_scope", "message": "Needs read."}},
+        PermissionDeniedError,
+        id="insufficient-scope",
+    ),
+]
+
+
+@pytest.mark.parametrize(("payload", "exc_type"), _DOWNLOAD_REFUSALS)
+async def test_async_download_checkpoint_maps_refusals_like_every_other_route(
+    client: AsyncDagnamClient,
+    mock: RespxMockRouter,
+    tmp_path: Path,
+    payload: dict[str, object],
+    exc_type: type[Exception],
+) -> None:
+    url = "/api/v1/training/jobs/job1/checkpoints/ck1/download"
+    mock.get(url).mock(return_value=httpx.Response(403, json=payload))
+    with pytest.raises(exc_type):
+        await client.download_checkpoint("job1", "ck1", tmp_path / "x")

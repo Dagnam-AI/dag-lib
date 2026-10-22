@@ -256,7 +256,7 @@ class TestInProgress:
 
         assert IN_PROGRESS_POLL not in sleeps
 
-    def test_a_deployment_create_waits_too_although_its_409_is_not_an_api_error(
+    def test_a_deployment_create_waits_too_and_its_409_is_not_a_state_error(
         self, requests_mock: RequestsMocker
     ) -> None:
         deployments = mount(requests_mock, f"{API}/api/v1/deployments", Replays("id"))
@@ -279,9 +279,11 @@ class TestInProgress:
         sleeps: list[float] = []
         client._sleep = sleeps.append
 
-        with pytest.raises(DeploymentStateError):
+        with pytest.raises(APIError) as excinfo:
             client.create_deployment({"training_job_id": "job-1"})
 
+        assert excinfo.value.status_code == 409
+        assert not isinstance(excinfo.value, DeploymentStateError)
         assert sum(sleeps) >= IN_PROGRESS_SECONDS
         assert len(deployments.created) == 0
 
