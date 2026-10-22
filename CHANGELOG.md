@@ -32,7 +32,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - **A Hub download that failed read the whole error body.** `download_hub_model_files` and its async
   twin now read at most 64 KiB of an error response (including one after a redirect to object
   storage) before mapping it, so a broken server or a proxy error page that streams without end can
-  no longer exhaust memory or hang the call.
+  no longer exhaust memory.
 
 ## [0.21.0] - 2026-10-22
 
