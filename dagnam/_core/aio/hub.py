@@ -9,6 +9,8 @@ import httpx
 from dagnam._core.aio.base import BaseAsyncDagnamClient
 from dagnam._core.client.base import safe_download_basename, scrub_secret_params
 from dagnam._core.client.common import (
+    ERROR_READ_CHUNK,
+    MAX_ERROR_READ,
     build_url,
     quote_path_segment,
     raise_for_hub,
@@ -29,6 +31,27 @@ from dagnam._types import (
 
 UPLOAD_TIMEOUT = httpx.Timeout(900.0, connect=10.0)
 """The platform answers an upload only after it has stored the bytes; see the sync client."""
+
+
+async def _aread_error_prefix(resp: httpx.Response) -> httpx.Response:
+    """Async twin of :func:`read_error_prefix` for an open ``httpx`` stream."""
+    body = bytearray()
+    async for chunk in resp.aiter_bytes(ERROR_READ_CHUNK):
+        body += chunk
+        if len(body) >= MAX_ERROR_READ:
+            break
+    # The prefix is already decoded, so the copy must not claim an encoding or a length.
+    headers = {
+        name: value
+        for name, value in resp.headers.items()
+        if name.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+    }
+    return httpx.Response(
+        resp.status_code,
+        headers=headers,
+        content=bytes(body[:MAX_ERROR_READ]),
+        request=resp.request,
+    )
 
 
 class AsyncHubMixin(BaseAsyncDagnamClient):
@@ -201,15 +224,13 @@ class AsyncHubMixin(BaseAsyncDagnamClient):
                 location = resp.headers.get("location") if resp.is_redirect else None
                 if location is None:
                     if not resp.is_success:
-                        await resp.aread()
-                        raise_for_hub(resp, model_id)
+                        raise_for_hub(await _aread_error_prefix(resp), model_id)
                     await self._stream_response_to_file(resp, dest)
                     return dest
                 location = str(resp.url.join(location))  # a relative Location is joined
             async with self._client.stream("GET", location) as resp:
                 if not resp.is_success:
-                    await resp.aread()
-                    raise_for_hub(resp, model_id)
+                    raise_for_hub(await _aread_error_prefix(resp), model_id)
                 await self._stream_response_to_file(resp, dest)
         except httpx.ConnectError as exc:
             raise APIError(0, f"Connection failed: {scrub_secret_params(str(exc))}") from exc

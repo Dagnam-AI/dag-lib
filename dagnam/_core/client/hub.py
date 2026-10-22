@@ -22,6 +22,7 @@ from dagnam._core.client.common import (
     build_url,
     quote_path_segment,
     raise_for_hub,
+    read_error_prefix,
     requests_query_params,
     response_json_object,
     response_json_value,
@@ -313,8 +314,8 @@ class HubClientMixin(BaseDagnamClient):
                 resp.close()
                 resp = self._get_stream_no_auth(location)
             if not is_success_response(resp):
-                # Read the (small) error body first so the mapper sees its markers.
-                _ = resp.content
+                # Read a bounded prefix of the error body so the mapper sees its markers.
+                resp = read_error_prefix(resp)
                 raise_for_hub(resp, model_id)
             saved.append(self._stream_response_to_file(resp, safe_dest(dest_dir, name)))
         return saved
