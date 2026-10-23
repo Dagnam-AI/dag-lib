@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from dagnam.audit.state import AuditState, StepState
     from dagnam.cli.common import SubParsersAction
 
-SOURCES = ("langfuse", "langsmith", "openai", "jsonl", "csv")
+SOURCES = ("langfuse", "langsmith", "openai", "dagnam", "jsonl", "csv")
 DEFAULT_OUT = "./audit"
 RETIRED = "retired"
 """The status of a candidate a forced rescan took out of the audit; its artifacts may live on."""

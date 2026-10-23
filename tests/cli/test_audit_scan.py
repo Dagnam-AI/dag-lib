@@ -489,3 +489,11 @@ def test_sample_rate_parser() -> None:
     for bad in ("0", "1.5", "-0.2", "most", "nan", "0%"):
         with pytest.raises(argparse.ArgumentTypeError, match="--sample-rate expects"):
             parse_sample_rate(bad)
+
+
+def test_scan_accepts_the_dagnam_source(run_cli: CliRunner, tmp_path: Path) -> None:
+    recorded = Path(__file__).parents[1] / "audit" / "fixtures" / "recorder_openai_chat.jsonl"
+    out = tmp_path / "audit"
+    assert run_cli(["audit", "scan", str(recorded), "--source", "dagnam", "--out", str(out)]) == 0
+    report = json.loads((out / "scan-report.json").read_text(encoding="utf-8"))
+    assert report["source"] == "dagnam"

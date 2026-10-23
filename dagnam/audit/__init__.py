@@ -1,9 +1,9 @@
 """Workload audit: read LLM traces from the tools that already hold them.
 
 Everything the audit consumes is a :class:`TraceRecord`; :func:`read_traces`
-produces them from a Langfuse, LangSmith or OpenAI export, or from any
-JSONL/CSV file through a column map. :func:`discover_workloads` groups the
-records by system-prompt template and output structure into :class:`Workload`
+produces them from a Langfuse, LangSmith or OpenAI export, from the local
+recorder's trace file, or from any JSONL/CSV file through a column map.
+:func:`discover_workloads` groups the records by system-prompt template and output structure into :class:`Workload`
 summaries, most monthly spend first. :func:`build_dataset` turns one
 workload's records into redacted, deduplicated, time-split training rows and
 :func:`write_workload` puts them on disk. :func:`run_audit` then drives the
