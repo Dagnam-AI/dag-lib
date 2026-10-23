@@ -17,7 +17,31 @@ RECORD = ROOT / "record"
 PACKAGE = RECORD / "dagnam_record"
 
 # Anything that can open a connection. Banned in every scope, lazy imports included.
-NETWORK_MODULES = frozenset({"requests", "urllib", "http", "socket", "ssl", "ftplib", "smtplib"})
+NETWORK_MODULES = frozenset(
+    {
+        "requests",
+        "urllib",
+        "urllib3",
+        "http",
+        "httpx",
+        "aiohttp",
+        "socket",
+        "socketserver",
+        "ssl",
+        "asyncio",
+        "ftplib",
+        "smtplib",
+        "imaplib",
+        "poplib",
+        "telnetlib",
+        "xmlrpc",
+        "webbrowser",
+    }
+)
+# ``importlib`` and ``__import__`` could load any of the above by a string the AST walk
+# cannot read, so the package may not use them at all.
+DYNAMIC_IMPORT_MODULES = frozenset({"importlib"})
+DYNAMIC_IMPORT_CALLS = frozenset({"__import__", "import_module"})
 # The SDK and its contract: banned at module level, so ``import dagnam_record`` never pulls
 # them in. A lazy (function-level) import is allowed only where listed here, with its reason.
 SDK_MODULES = frozenset({"dagnam", "dagnam_contracts"})
@@ -49,16 +73,29 @@ def _walk(node: ast.AST, lazy: bool) -> list[tuple[str, bool]]:
     return found
 
 
+def _called_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
+
+
 def violations(source: str, relative: str) -> list[str]:
     """What in ``source`` (a module at ``relative`` in the package) breaks the import rules."""
     found: list[str] = []
     for root, lazy in _walk(ast.parse(source), False):
         if root in NETWORK_MODULES:
             found.append(f"{relative}: imports network module {root!r}")
+        elif root in DYNAMIC_IMPORT_MODULES:
+            found.append(f"{relative}: imports {root!r}, which allows dynamic imports")
         elif root in SDK_MODULES and not lazy:
             found.append(f"{relative}: imports {root!r} at module level")
         elif root in SDK_MODULES and (relative, root) not in LAZY_ALLOWLIST:
             found.append(f"{relative}: lazily imports {root!r} without an allowlist entry")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and _called_name(node) in DYNAMIC_IMPORT_CALLS:
+            found.append(f"{relative}: calls {_called_name(node)!r}, a dynamic import")
     return found
 
 
@@ -108,6 +145,32 @@ def test_the_import_walk_flags_each_kind_of_violation() -> None:
     ]
 
 
+def test_the_import_walk_flags_every_added_network_module() -> None:
+    for module in sorted(NETWORK_MODULES):
+        assert violations(f"import {module}\n", "a.py") == [
+            f"a.py: imports network module {module!r}"
+        ]
+
+
+def test_the_import_walk_flags_dynamic_imports() -> None:
+    assert violations("import importlib\n", "a.py") == [
+        "a.py: imports 'importlib', which allows dynamic imports"
+    ]
+    assert violations("from importlib import import_module\n", "a.py") == [
+        "a.py: imports 'importlib', which allows dynamic imports"
+    ]
+    assert violations("__import__('socket')\n", "a.py") == [
+        "a.py: calls '__import__', a dynamic import"
+    ]
+    assert violations("def f(n):\n    return import_module(n)\n", "a.py") == [
+        "a.py: calls 'import_module', a dynamic import"
+    ]
+    assert violations("x = importlib.import_module('ssl')\n", "a.py") == [
+        "a.py: calls 'import_module', a dynamic import"
+    ]
+    assert violations("x = len('a')\nfoo.bar()\n(lambda: 1)()\n", "a.py") == []
+
+
 def test_the_import_walk_allows_listed_lazy_imports_and_plain_ones() -> None:
     lazy = "def load():\n    import dagnam_contracts\n"
     assert violations(lazy, "dagnam_record/redact.py") == []
@@ -127,6 +190,7 @@ def test_pyright_checks_the_package_against_its_oldest_python() -> None:
 def test_ruff_pytest_and_coverage_see_the_package() -> None:
     tool = _toml(ROOT / "pyproject.toml")["tool"]
     assert "dagnam_record" in tool["ruff"]["src"]
+    assert tool["ruff"]["per-file-target-version"] == {"record/**": "py39"}
     assert "dagnam_record" in tool["ruff"]["lint"]["isort"]["known-first-party"]
     assert "record/tests" in tool["pytest"]["ini_options"]["testpaths"]
     assert "dagnam_record" in tool["coverage"]["run"]["source"]
@@ -149,3 +213,11 @@ def test_dependabot_and_code_owners_cover_the_package() -> None:
     assert 'directory: "/record"' in dependabot
     owners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
     assert "/record/pyproject.toml" in owners
+
+
+def test_ci_runs_the_package_tests_coverage_and_import_contract() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "dag-lib-ci.yml").read_text(encoding="utf-8")
+    assert "uv run poe lint-imports" in workflow
+    assert "uv run pytest tests record/tests -q" in workflow
+    assert "uv run pytest tests record/tests \\\n" in workflow
+    assert "--cov=dagnam_record" in workflow

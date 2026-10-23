@@ -292,6 +292,9 @@ reportMissingTypeStubs = "none"
 line-length = 100
 target-version = "py312"
 src = ["dagnam", "dagnam_record", "tests"]
+# record/ ships as its own distribution for Python 3.9 and newer: lint it for 3.9 so a rule
+# such as UP017 never asks for ``datetime.UTC`` (3.11+), which pyright (py39) would reject.
+per-file-target-version = { "record/**" = "py39" }
 
 [tool.ruff.lint]
 select = [
