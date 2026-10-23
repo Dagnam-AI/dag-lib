@@ -198,11 +198,13 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "record/tests"]
+# ``record/`` is a separate stdlib-only distribution; its tests import it from there.
+pythonpath = ["record"]
 
 [tool.coverage.run]
 branch = true
-source = ["dagnam"]
+source = ["dagnam", "dagnam_record"]
 
 [tool.coverage.report]
 show_missing = true
@@ -240,7 +242,7 @@ exclude_also = [
 ]
 
 [tool.pyright]
-include = ["dagnam", "tests"]
+include = ["dagnam", "tests", "record"]
 exclude = ["**/__pycache__", ".venv"]
 pythonVersion = "3.12"
 venvPath = "."
@@ -268,6 +270,12 @@ reportUnknownLambdaType = "none"
 reportMissingParameterType = "none"
 reportMissingTypeArgument = "none"
 
+# ``record/`` ships as its own distribution that supports Python 3.9 and newer, so it is
+# checked against 3.9: syntax or stdlib API newer than that fails here, not on a user's machine.
+[[tool.pyright.executionEnvironments]]
+root = "record"
+pythonVersion = "3.9"
+
 # Tests additionally reach into private (`_`-prefixed) attributes to assert on
 # internal state; that is expected of unit tests, not a design smell.
 [[tool.pyright.executionEnvironments]]
@@ -283,7 +291,7 @@ reportMissingTypeStubs = "none"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["dagnam", "tests"]
+src = ["dagnam", "dagnam_record", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -393,7 +401,7 @@ ignore = [
 "dagnam/aio.py" = ["F401"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["dagnam"]
+known-first-party = ["dagnam", "dagnam_record"]
 combine-as-imports = true
 force-sort-within-sections = true
 
@@ -436,9 +444,9 @@ docstring-code-format = true
 lint = { cmd = "ruff check", help = "Lint with ruff" }
 format-check = { cmd = "ruff format --check", help = "Verify formatting" }
 typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
-lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
-test = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
-test-cov = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
+lint-imports = { cmd = "lint-imports", env = { PYTHONPATH = "record" }, help = "Verify the layer-first import contract and that dagnam_record imports no SDK" }
+test = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
+test-cov = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
 audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\"", help = "Audit Python dependencies for known vulnerabilities" }
 build = { cmd = "uv build", help = "Build the source distribution and wheel" }
 check = { sequence = [
@@ -454,7 +462,9 @@ release-check = { sequence = ["check", "audit", "build"], help = "Run quality ga
 # layout by design: cli -> resources -> audit -> data -> _core, where a layer may import
 # only the layers below it. Enforced (blocking) in CI via `uv run lint-imports`.
 [tool.importlinter]
-root_package = "dagnam"
+root_packages = ["dagnam", "dagnam_record"]
+# Needed so the forbidden contract below can name ``dagnam_contracts``, an external package.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "layered SDK: _core <- data <- audit <- resources/cli"
@@ -466,3 +476,13 @@ type = "layers"
 # and only `cli` reaches down into it.
 layers = ["cli", "resources", "audit", "data", "_core"]
 containers = ["dagnam"]
+
+# ``dagnam_record`` is a stdlib-only distribution that runs next to a customer's training
+# code: importing it must never pull in the SDK or its contract. (import-linter sees every
+# import, lazy ones included; a deliberate lazy import is added to ``ignore_imports`` here
+# with its reason, and tests/structure/test_record_package.py checks the same rule by AST.)
+[[tool.importlinter.contracts]]
+name = "dagnam_record imports neither dagnam nor dagnam_contracts"
+type = "forbidden"
+source_modules = ["dagnam_record"]
+forbidden_modules = ["dagnam", "dagnam_contracts"]

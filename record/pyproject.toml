@@ -1,0 +1,46 @@
+[project]
+name = "dagnam-record"
+dynamic = ["version"]
+description = "Local, stdlib-only recorder of a training run's workload for Dagnam.AI audits."
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.9"
+authors = [{ name = "Dagnam.AI", email = "dagnam@dagnam.ai" }]
+maintainers = [{ name = "Dagnam.AI", email = "sdk@dagnam.ai" }]
+keywords = ["dagnam", "machine-learning", "training", "audit", "recorder"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+# The package's promise: nothing is installed alongside it.
+dependencies = []
+
+[project.urls]
+Homepage = "https://dagnam.ai"
+Repository = "https://github.com/Dagnam-AI/dag-lib"
+Changelog = "https://github.com/Dagnam-AI/dag-lib/blob/main/record/CHANGELOG.md"
+Issues = "https://github.com/Dagnam-AI/dag-lib/issues"
+Security = "https://github.com/Dagnam-AI/dag-lib/blob/main/SECURITY.md"
+
+[build-system]
+requires = ["hatchling>=1.27,<1.32"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "dagnam_record/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dagnam_record"]
+include = ["dagnam_record/py.typed"]
+
+[tool.hatch.build.targets.sdist]
+include = ["dagnam_record", "tests", "README.md", "LICENSE", "NOTICE", "CHANGELOG.md", "pyproject.toml"]
