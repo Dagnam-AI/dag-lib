@@ -43,6 +43,7 @@ from dagnam.audit.readers.base import (
     completion_tokens,
     parse_ts,
     prompt_tokens,
+    require,
     text,
 )
 from dagnam.audit.readers.calls import tool_calls
@@ -70,7 +71,16 @@ def _omitted(value: object) -> bool:
 def _from_openai(
     env: TraceEnvelope, request: dict[str, Any], response: dict[str, Any]
 ) -> TraceRecord | None:
-    record = openai_record({"request": request, "response": response, "latency_ms": env.latency_ms})
+    # The shared parser wants the completion's own id and creation time, which the envelope
+    # replaces below; a body without them (a proxy's, a trimmed one) is still a whole call.
+    completion = {
+        **response,
+        "id": response.get("id") or env.trace_id,
+        "created": response.get("created") or response.get("created_at") or env.ts,
+    }
+    record = openai_record(
+        {"request": request, "response": completion, "latency_ms": env.latency_ms}
+    )
     if record is None:
         return None
     return replace(
@@ -85,6 +95,10 @@ def _from_openai(
 def _from_anthropic(
     env: TraceEnvelope, request: dict[str, Any], response: dict[str, Any]
 ) -> TraceRecord:
+    # As the OpenAI parser: split_prompt alone would read a request with no ``messages`` whole as
+    # the prompt, and a response with no ``content`` would be an empty answer for 0 tokens.
+    require(request, "messages")
+    require(response, "content")
     system, messages = split_prompt(request)
     answer = final_reply(response)
     return TraceRecord(
@@ -135,6 +149,8 @@ def _from_norm(env: TraceEnvelope, norm: Norm) -> TraceRecord:
 
 def to_record(row: Row) -> TraceRecord | None:
     """Convert one line; ``None`` for a call that did not return 200."""
+    # ``row`` is already parsed JSON, so the contract's 1 MB line cap is not applied here, as for
+    # the other readers; the recorder drops an oversize line before it is written.
     try:
         env = parse_envelope(row)
     except UnsupportedEnvelopeVersion as exc:

@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from dagnam_contracts.trace import parse_envelope
 import pytest
 
 from dagnam.audit.readers.base import (
@@ -191,33 +190,105 @@ def test_anthropic_falls_back_to_the_request_model(fixtures_dir: Path) -> None:
     assert record.model == "claude-sonnet-4-5"
 
 
+AGREEING_FIELDS = (
+    "model",
+    "system",
+    "messages",
+    "response",
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_prompt_tokens",
+    "has_media",
+    "trace_id",
+    "ts",
+    "latency_ms",
+)
+
+
+def assert_raw_and_norm_agree(row: dict[str, Any]) -> None:
+    trace_id = row["trace_id"]
+    from_raw = to_record(row)
+    from_norm = to_record(row | {"request": None, "response": None})
+    assert from_raw is not None
+    assert from_norm is not None
+    for f in AGREEING_FIELDS:
+        assert getattr(from_raw, f) == getattr(from_norm, f), (trace_id, f)
+    # Raw keeps each vendor's call object (an id, Anthropic's tool_use block); the norm is the
+    # OpenAI shape without ids. Both are judged and trained as the one canonical JSON.
+    assert effective_response(
+        from_raw.response, from_raw.response_tool_calls
+    ) == effective_response(from_norm.response, from_norm.response_tool_calls), trace_id
+
+
 @pytest.mark.parametrize("name", AGREEING)
 def test_raw_and_norm_agree(fixtures_dir: Path, name: str) -> None:
     for row in lines(fixtures_dir / name):
-        env = parse_envelope(row)
-        from_raw = to_record(row)
-        from_norm = to_record(row | {"request": None, "response": None})
-        assert from_raw is not None
-        assert from_norm is not None
-        for f in (
-            "model",
-            "system",
-            "messages",
-            "response",
-            "prompt_tokens",
-            "completion_tokens",
-            "cached_prompt_tokens",
-            "has_media",
-            "trace_id",
-            "ts",
-            "latency_ms",
-        ):
-            assert getattr(from_raw, f) == getattr(from_norm, f), (env.trace_id, f)
-        # Raw keeps each vendor's call object (an id, Anthropic's tool_use block); the norm is the
-        # OpenAI shape without ids. Both are judged and trained as the one canonical JSON.
-        assert effective_response(
-            from_raw.response, from_raw.response_tool_calls
-        ) == effective_response(from_norm.response, from_norm.response_tool_calls), env.trace_id
+        assert_raw_and_norm_agree(row)
+
+
+@pytest.mark.parametrize("name", AGREEING[:2])
+def test_an_openai_body_without_an_id_or_creation_time_still_reads(
+    fixtures_dir: Path, name: str
+) -> None:
+    # The envelope has both; the completion's own are never used, so their absence is no fault.
+    for row in lines(fixtures_dir / name):
+        for key in ("id", "created", "created_at"):
+            row["response"].pop(key, None)
+        assert_raw_and_norm_agree(row)
+        record = to_record(row)
+        assert record is not None
+        assert record.trace_id == row["trace_id"]
+
+
+def test_a_null_openai_id_falls_back_to_the_envelopes(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_openai_chat.jsonl")[0]
+    row["response"]["id"] = None
+    assert_raw_and_norm_agree(row)
+
+
+def test_the_completions_creation_time_is_read_but_never_wins(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_openai_responses.jsonl")[0]
+    assert "created_at" in row["response"]
+    record = to_record(row)
+    assert record is not None
+    assert record.ts == datetime(2026, 10, 12, 0, 1, 41, tzinfo=UTC)
+
+
+def test_raw_wins_over_a_norm_that_differs(fixtures_dir: Path) -> None:
+    for name in AGREEING:
+        for row in lines(fixtures_dir / name):
+            truth = to_record(row)
+            row["norm"] |= {
+                "model": "norm-model",
+                "system": "norm system",
+                "messages": [{"role": "user", "content": "norm prompt"}],
+                "response": "norm reply",
+                "tool_calls": [],
+                "prompt_tokens": 999,
+            }
+            assert to_record(row) == truth
+
+
+def test_anthropic_without_messages_is_malformed(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_anthropic.jsonl")[0]
+    del row["request"]["messages"]
+    with pytest.raises(MalformedRowError, match="missing messages"):
+        to_record(row)
+
+
+def test_anthropic_without_content_is_malformed(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_anthropic.jsonl")[0]
+    del row["response"]["content"]
+    with pytest.raises(MalformedRowError, match="missing content"):
+        to_record(row)
+
+
+def test_anthropic_with_empty_content_is_still_a_record(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_anthropic.jsonl")[0]
+    row["response"]["content"] = []
+    record = to_record(row)
+    assert record is not None
+    assert record.response == ""
 
 
 def test_a_newer_envelope_version_counts_as_malformed() -> None:
