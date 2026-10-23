@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from importlib.metadata import version
 import json
 from pathlib import Path
 from typing import Any
@@ -54,8 +55,11 @@ class FakePlatform:
         self.call_log: list[str] = []
         self.resume_creates = False
         """Set by the run, as the real client's is."""
-        self.contracts: JsonValue = "0.4.0"
-        """What ``/health/build`` reports as ``contracts``; a string, or a non-string the platform got wrong."""
+        self.contracts: JsonValue = version("dagnam-contracts")
+        """What ``/health/build`` reports as ``contracts``; a string, or a non-string the platform got wrong.
+
+        The installed distribution's, so the platform is never "too old" by default; a test of
+        the old-platform refusal sets an explicit older version."""
         self.build_error: BaseException | None = None
         self.project_nonces: list[str | None] = []
         self.audit_nonces: list[str | None] = []

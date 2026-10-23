@@ -242,10 +242,43 @@ def test_a_few_newer_lines_are_counted_and_the_rest_read(
     assert (stats.rows_kept, stats.rows_malformed, stats.first_malformed) == (25, 1, (25,))
 
 
-def test_a_file_of_only_newer_lines_is_a_malformed_export(tmp_path: Path) -> None:
+NEWER = json.dumps({"v": 2, "trace_id": "x", "ts": "2026-10-12T00:00:00Z"})
+
+
+def test_a_file_of_only_newer_lines_is_an_unsupported_export(tmp_path: Path) -> None:
     path = tmp_path / "newer.jsonl"
+    path.write_text(NEWER + "\n" + NEWER + "\n", encoding="utf-8")
+    with pytest.raises(UnsupportedExportError, match=r"newer recorder.*v=2"):
+        read(path)
+
+
+def test_a_file_whose_first_data_line_is_newer_is_an_unsupported_export(
+    fixtures_dir: Path, tmp_path: Path
+) -> None:
+    good = (fixtures_dir / "recorder_openai_chat.jsonl").read_text(encoding="utf-8")
+    path = tmp_path / "first-newer.jsonl"
+    path.write_text("\n" + NEWER + "\n" + good, encoding="utf-8")  # a blank line is no row
+    with pytest.raises(UnsupportedExportError, match="newer recorder"):
+        read(path)
+
+
+def test_a_newer_norm_version_on_the_first_line_is_an_unsupported_export(
+    fixtures_dir: Path, tmp_path: Path
+) -> None:
+    row = lines(fixtures_dir / "recorder_norm_only.jsonl")[0]
+    row["norm_v"] = 2
+    path = tmp_path / "norm-newer.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(UnsupportedExportError, match="norm_v=2"):
+        read(path)
+
+
+def test_a_first_line_that_is_only_invalid_leaves_the_judgement_to_the_malformed_share(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "invalid.jsonl"
     path.write_text(
-        json.dumps({"v": 2, "trace_id": "x", "ts": "2026-10-12T00:00:00Z"}) + "\n", encoding="utf-8"
+        json.dumps({"v": 1, "trace_id": "x", "ts": "2026-10-12T00:00:00Z"}) + "\n", encoding="utf-8"
     )
     with pytest.raises(MalformedExportError):
         read(path)

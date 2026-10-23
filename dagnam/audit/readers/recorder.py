@@ -14,7 +14,7 @@ have no shape this reader knows.
 | Anthropic raw | ``system`` + ``messages`` in, ``content`` blocks and ``usage`` out |
 | ``norm`` | the same fields as the recorder derived them, tool calls OpenAI-shaped |
 | ``has_media`` | the prompt's media parts, or a ``media_omitted`` marker the recorder left in their place |
-| newer ``v`` / ``norm_v`` | one malformed row, so it counts toward the export's 5% |
+| newer ``v`` / ``norm_v`` | one malformed row, so it counts toward the export's 5%; on the first row, an unsupported export |
 
 ``session_id``, ``outcome`` and ``workload_hint`` come from OpenAI request ``metadata`` only;
 ``cost_usd`` is never present. ``signature`` needs the request, so a norm-only row has none.
@@ -26,7 +26,13 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from dagnam_contracts.trace import Norm, TraceEnvelope, UnsupportedEnvelopeVersion, parse_envelope
+from dagnam_contracts.trace import (
+    EnvelopeError,
+    Norm,
+    TraceEnvelope,
+    UnsupportedEnvelopeVersion,
+    parse_envelope,
+)
 
 from dagnam.audit.readers.base import (
     UNKNOWN_MODEL,
@@ -146,4 +152,23 @@ def to_record(row: Row) -> TraceRecord | None:
     return _from_norm(env, env.norm)
 
 
-READER = Reader(REQUIRED_FIELDS, to_record)
+def first_row_problem(row: Row) -> str | None:
+    """Why an export whose first line is a newer envelope cannot be read, else ``None``.
+
+    The header fields a newer line shares with v1 pass the field check, so without this a file
+    written by a newer recorder would read as all malformed. Any other fault in the first line
+    is left to the malformed share, like every later line's.
+    """
+    try:
+        parse_envelope(row)
+    except UnsupportedEnvelopeVersion:
+        return (
+            f"written by a newer recorder (v={row.get('v')}, norm_v={row.get('norm_v')}); "
+            "upgrade dagnam to read it"
+        )
+    except EnvelopeError:
+        pass
+    return None
+
+
+READER = Reader(REQUIRED_FIELDS, to_record, first_row_problem)

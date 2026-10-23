@@ -17,6 +17,21 @@ four records. There is no PII: the tickets, order ids and replies are invented.
 The tests keep the row counts as module constants so the real exports from
 the dogfood agent can replace these files without rewriting the assertions.
 
+## Local-recorder fixtures
+
+Trace-envelope v1 lines (`dagnam_contracts.trace`), written with the recorder's own line builder
+over documented provider response shapes and a fixed clock, so the ids are `rec_*` and the times
+are 2026-10-12. Read by `tests/audit/readers/test_recorder.py`; regenerate them with the recorder
+once it can record real calls.
+
+| file | shape | lines |
+|---|---|---|
+| `recorder_openai_chat.jsonl` | OpenAI Chat Completions: plain, cached tokens, a tool call, an omitted image (`media_omitted`), a developer message with assistant history | 5 |
+| `recorder_openai_responses.jsonl` | OpenAI Responses: a message, a `function_call`, an omitted `input_image` | 3 |
+| `recorder_anthropic.jsonl` | Anthropic Messages: system blocks, cache usage, a thinking block, a `tool_use`, an omitted document | 5 |
+| `recorder_norm_only.jsonl` | `norm` without raw (`--no-raw`) for OpenAI and Anthropic, plus a `provider: "other"` line | 3 |
+| `recorder_mixed_bad.jsonl` | three 200 lines among a 429 and a 500, which the reader skips without counting them malformed | 5 |
+
 ## Token-estimate fixtures
 
 Written for the student token estimate's tests, not trace exports. The real counts are

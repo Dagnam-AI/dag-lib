@@ -57,11 +57,13 @@ Row = dict[str, Any]
 class UnsupportedExportError(DagnamError):
     """The export's first row lacks fields the chosen source reader requires."""
 
-    def __init__(self, source: str, missing: tuple[str, ...]) -> None:
+    def __init__(self, source: str, missing: tuple[str, ...], reason: str | None = None) -> None:
         self.source = source
         self.missing = missing
         super().__init__(
-            f"{source} export is missing required field(s) {', '.join(missing)}; "
+            f"{source} export: {reason}"
+            if reason is not None
+            else f"{source} export is missing required field(s) {', '.join(missing)}; "
             "describe the columns with --source jsonl --map target=column"
         )
 
@@ -105,6 +107,8 @@ class Reader:
 
     required_fields: tuple[str, ...]
     to_record: Callable[[Row], TraceRecord | None]
+    first_row_problem: Callable[[Row], str | None] | None = None
+    """Judges the first row of an export beyond its fields: why no row of it can be read, if so."""
 
 
 # ---- streaming rows ------------------------------------------------------------
@@ -216,6 +220,9 @@ def _records(path: Path, source: str, reader: Reader, stats: ReadStats) -> Itera
             missing = tuple(name for name in reader.required_fields if field(row, name) is None)
             if missing:
                 raise UnsupportedExportError(source, missing)
+            problem = None if reader.first_row_problem is None else reader.first_row_problem(row)
+            if problem is not None:
+                raise UnsupportedExportError(source, (), problem)
             shape_checked = True
         try:
             record = reader.to_record(row)
