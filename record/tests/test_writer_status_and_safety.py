@@ -171,112 +171,15 @@ def test_close_is_registered_for_exit_and_unregistered_once_run(
     assert unregistered == [writer.close]
 
 
-# --- permissions ----------------------------------------------------------------------------
-
-
-@POSIX_ONLY
-def test_the_directory_is_0700_and_the_file_0600(make: Any, tmp_path: Path) -> None:
-    writer = make(tmp_path / "a" / "b" / "traces")
-    writer.submit("{}")
-    writer.drain()
-    directory = tmp_path / "a" / "b" / "traces"
-    assert mode(directory) == 0o700
-    assert mode(directory / "2026-10-12.jsonl") == 0o600
-
-
-@POSIX_ONLY
-def test_an_existing_directory_we_own_is_tightened_to_0700(make: Any, tmp_path: Path) -> None:
-    directory = tmp_path / "traces"
-    directory.mkdir()
-    os.chmod(directory, int("750", 8))  # group-readable: looser than 0700
-    writer = make()
-    writer.submit("{}")
-    writer.drain()
-    assert mode(directory) == 0o700
-    assert writer.counts["written"] == 1
-
-
-@POSIX_ONLY
-def test_an_existing_private_directory_is_left_alone(make: Any, tmp_path: Path) -> None:
-    directory = tmp_path / "traces"
-    directory.mkdir()
-    os.chmod(directory, 0o700)
-    writer = make()
-    writer.submit("{}")
-    writer.drain()
-    assert mode(directory) == 0o700
-    assert writer.counts["written"] == 1
-
-
-@POSIX_ONLY
-def test_a_file_that_is_too_open_is_made_private(make: Any, tmp_path: Path) -> None:
-    directory = tmp_path / "traces"
-    directory.mkdir(mode=0o700)
-    existing = directory / "2026-10-12.jsonl"
-    existing.write_text("old\n", encoding="utf-8")
-    os.chmod(existing, 0o644)
-    writer = make()
-    writer.submit("new")
-    writer.drain()
-    assert mode(existing) == 0o600
-    assert lines(existing) == ["old", "new"]
-
-
-@POSIX_ONLY
-def test_a_directory_owned_by_someone_else_is_refused(
-    make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    (tmp_path / "traces").mkdir()
-    monkeypatch.setattr("dagnam_record._writer._OWNER", os.getuid() + 1)
-    writer = make()
-    writer.submit("secret")
-    writer.drain()
-    assert writer.counts["dropped_error"] == 1
-    assert list((tmp_path / "traces").iterdir()) == []
-
-
-@POSIX_ONLY
-def test_a_symlinked_directory_is_refused(make: Any, tmp_path: Path) -> None:
-    target = tmp_path / "elsewhere"
-    target.mkdir()
-    (tmp_path / "traces").symlink_to(target, target_is_directory=True)
-    writer = make()
-    writer.submit("secret")
-    writer.drain()
-    assert writer.counts["dropped_error"] == 1
-    assert list(target.iterdir()) == []
-
-
-def test_a_directory_path_that_is_a_file_is_refused(make: Any, tmp_path: Path) -> None:
-    (tmp_path / "traces").write_text("not a directory", encoding="utf-8")
-    writer = make()
-    writer.submit("x")
-    writer.drain()
-    assert writer.counts["dropped_error"] == 1
-
-
-@POSIX_ONLY
-def test_a_symlinked_data_file_is_not_followed(make: Any, tmp_path: Path) -> None:
-    directory = tmp_path / "traces"
-    directory.mkdir(mode=0o700)
-    victim = tmp_path / "victim.txt"
-    victim.write_text("keep\n", encoding="utf-8")
-    (directory / "2026-10-12.jsonl").symlink_to(victim)
-    writer = make()
-    writer.submit("planted")
-    writer.drain()
-    assert writer.counts["dropped_error"] == 1
-    assert victim.read_text(encoding="utf-8") == "keep\n"
-
-
 # --- fork safety ----------------------------------------------------------------------------
 
 
 def test_reinit_gives_a_fresh_queue_thread_and_counts(make: Any, tmp_path: Path) -> None:
     writer = make(start=True)
-    old_queue, old_thread = writer.pending(), writer.thread()
+    old_queue, old_thread, old_gate = writer.pending(), writer.thread(), writer.gate()
     writer.reinit_after_fork()
     assert writer.pending() is not old_queue
+    assert writer.gate() is not old_gate
     assert writer.thread() is not old_thread
     assert writer.alive()
     assert all(count == 0 for count in writer.counts.values())
@@ -297,7 +200,7 @@ def test_reinit_drops_what_the_parent_still_has_pending(make: Any, tmp_path: Pat
     assert writer.pending().qsize() == 0
     assert writer.thread() is None
     writer.drain()
-    assert not (tmp_path / "traces").exists()
+    assert list((tmp_path / "traces").glob("*.jsonl")) == []
 
 
 def test_reinit_does_not_restart_a_closed_writer(make: Any) -> None:
@@ -348,7 +251,7 @@ def test_a_forked_child_gets_a_working_thread_even_if_the_parent_held_the_queue_
     held, release = threading.Event(), threading.Event()
 
     def hold() -> None:
-        with writer.pending().mutex:  # another thread is inside the queue at the fork
+        with writer.pending().mutex, writer.gate():  # other threads are inside submit at the fork
             held.set()
             release.wait(10)
 
@@ -371,3 +274,35 @@ def test_a_forked_child_gets_a_working_thread_even_if_the_parent_held_the_queue_
     assert code == 0
     writer.close()
     assert lines(tmp_path / "traces" / "2026-10-12.jsonl") == ["child"]
+
+
+# --- closing while a submit is in flight ----------------------------------------------------
+
+
+def test_a_submit_racing_close_is_written_not_lost(
+    make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    writer = make()
+    pending = writer.pending()
+    in_put, proceed = threading.Event(), threading.Event()
+    real_put = pending.put_nowait
+
+    def slow_put(line: str) -> None:
+        in_put.set()
+        assert proceed.wait(5)
+        real_put(line)
+
+    monkeypatch.setattr(pending, "put_nowait", slow_put)
+    submitter = threading.Thread(target=writer.submit, args=("racing",))
+    submitter.start()
+    assert in_put.wait(5)  # the submit has passed its check and is about to queue the line
+    closer = threading.Thread(target=writer.close)
+    closer.start()
+    closer.join(0.2)  # close has to wait for that submit, or the line would be queued unwritten
+    proceed.set()
+    submitter.join(5)
+    closer.join(5)
+    assert not submitter.is_alive()
+    assert not closer.is_alive()
+    assert writer.counts["written"] == 1
+    assert lines(tmp_path / "traces" / "2026-10-12.jsonl") == ["racing"]

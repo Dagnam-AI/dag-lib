@@ -24,7 +24,12 @@ MAX_LINE_BYTES = 1_000_000
 JS_SAFE = 2**53 - 1
 """The largest integer a JavaScript reader holds exactly: latency and token counts stop here."""
 NO_RESPONSE_STATUS = 599
-"""What a call that got no HTTP response (a connection error) is recorded as."""
+"""The status of a call that got no HTTP response at all (a connection error or a timeout).
+
+A line must carry an HTTP status from 100 to 599, so ``build_line(status=None)`` writes this
+one: 599 is the top of that range and no ordinary response uses it. A reader treats it as "no
+response", and skips it like any other status that is not 200.
+"""
 _MAX_INT_BITS = 4096
 
 _OMITTED = "media_omitted"

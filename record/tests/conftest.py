@@ -16,7 +16,7 @@ from pathlib import Path
 import queue
 import re
 import threading
-from typing import Any, Callable, Iterator, List, NoReturn, Optional
+from typing import Any, Callable, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 import pytest
 
@@ -26,6 +26,51 @@ T0 = 1_791_797_400.0  # 2026-10-12T09:30:00Z
 JS_SAFE = 2**53 - 1
 MAX_LINE_BYTES = 1_000_000
 _TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z")
+
+
+CHAT_REQUEST: Dict[str, Any] = {
+    "model": "gpt-4o-mini",
+    "messages": [
+        {"role": "system", "content": "Be brief."},
+        {"role": "developer", "content": [{"type": "text", "text": "No jokes."}]},
+        {"role": "user", "content": "Hi"},
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Hel"}, {"type": "text", "text": "lo"}],
+        },
+        {"role": "user", "content": None},
+        "not a message",
+        {"content": "no role"},
+    ],
+}
+CHAT_RESPONSE: Dict[str, Any] = {
+    "id": "chatcmpl-1",
+    "model": "gpt-4o-mini-2024",
+    "choices": [
+        {
+            "message": {
+                "role": "assistant",
+                "content": "Hello",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": '{"q": 1}'},
+                    },
+                    {"type": "function", "function": {"name": "other", "arguments": {"a": 1}}},
+                    {"type": "function", "function": {"arguments": "{}"}},
+                    {"type": "function", "function": "bad"},
+                    "bad",
+                ],
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 9,
+        "completion_tokens": 2,
+        "prompt_tokens_details": {"cached_tokens": 4},
+    },
+}
 
 
 class Clock:
@@ -65,6 +110,10 @@ class Probe(Writer):
     def pending(self) -> Any:
         """The queue the writer reads."""
         return self._queue
+
+    def gate(self) -> Any:
+        """The lock that submit and close take around the closed flag."""
+        return self._gate
 
     def swap_queue(self, replacement: Any) -> None:
         """Use another queue."""
@@ -123,6 +172,12 @@ def scripted_queue() -> Any:
 
 
 @pytest.fixture
+def chat_bodies() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """A Chat Completions request and response with a system turn, text parts and tool calls."""
+    return CHAT_REQUEST, CHAT_RESPONSE
+
+
+@pytest.fixture
 def validate_line() -> Callable[[str], None]:
     """``strict_validate``."""
     return strict_validate
@@ -155,6 +210,11 @@ def _check_json(root: object) -> None:
             stack.extend(value)
         elif value is not None and not isinstance(value, int):
             _reject("values must be JSON values")
+
+
+def _is_one(value: object) -> bool:
+    """The integer 1: not 1.0, not True (the real parser checks ``int`` and not ``bool``)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value == 1
 
 
 def _natural(obj: Any, key: str) -> int:
@@ -209,8 +269,8 @@ def strict_validate(line: str) -> None:
     if not isinstance(obj, dict):
         _reject("an envelope is an object")
     _check_json(obj)
-    if obj.get("v") != 1 or isinstance(obj.get("v"), bool):
-        _reject("v must be 1")
+    if not _is_one(obj.get("v")):
+        _reject("v must be the integer 1")
     _text(obj, "trace_id")
     if not _TS.fullmatch(_text(obj, "ts")):
         _reject("ts must be UTC RFC 3339 ending in Z")
@@ -234,8 +294,8 @@ def strict_validate(line: str) -> None:
     if request is not None and not (isinstance(request, dict) and isinstance(response, dict)):
         _reject("request and response must be objects")
     if obj.get("norm") is not None:
-        if obj.get("norm_v") != 1:
-            _reject("norm_v must be 1")
+        if not _is_one(obj.get("norm_v")):
+            _reject("norm_v must be the integer 1")
         _check_norm(obj["norm"])
     elif request is None:
         _reject("a line needs request and response, or norm")

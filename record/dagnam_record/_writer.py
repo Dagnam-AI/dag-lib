@@ -10,7 +10,11 @@ counted from), ``updated``, ``expired`` and ``counts``: one number per key of ``
 
 Permissions: the directory is created ``0700`` (its parents get the process defaults). An
 existing directory must be a real directory (not a symlink) owned by this user, and is tightened
-to ``0700`` if it is looser. Files are opened with ``O_NOFOLLOW`` and set to ``0600``.
+to ``0700`` if it is looser; it is opened with ``O_DIRECTORY|O_NOFOLLOW`` and checked and changed
+through that descriptor, so it cannot be swapped between the check and the change. Files are
+opened with ``O_NOFOLLOW|O_NONBLOCK``, must be regular files (a FIFO is refused, never waited
+on) and are set to ``0600``. Where ``O_DIRECTORY`` does not exist (Windows) a directory is only
+required to be a real one.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ COUNT_KEYS = ("written", "dropped_full", "dropped_large", "dropped_error", "drop
 _SAVE_EVERY = 30.0
 _DAY = 86400
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _fchmod: Callable[[int, int], None] = getattr(os, "fchmod", lambda descriptor, mode: None)
 _OWNER = os.getuid() if hasattr(os, "getuid") else None
 _WRITERS: weakref.WeakSet[Writer] = weakref.WeakSet()
@@ -47,23 +53,41 @@ def _ensure_dir(directory: str) -> None:
         return
     except FileExistsError:
         pass
-    info = os.lstat(directory)
-    if not stat.S_ISDIR(info.st_mode):  # lstat: a symlink to a directory is not one either
-        raise NotADirectoryError(
-            errno.ENOTDIR, "the trace directory is not a real directory", directory
-        )
-    if _OWNER is not None and info.st_uid != _OWNER:
-        raise PermissionError(errno.EPERM, "the trace directory belongs to someone else", directory)
-    if info.st_mode & 0o077:
-        os.chmod(directory, 0o700)
+    if not _DIRECTORY:  # no way to open a directory: all that can be asked is that it is one
+        if os.path.islink(directory) or not os.path.isdir(directory):
+            raise NotADirectoryError(errno.ENOTDIR, "not a real directory", directory)
+        return
+    # A symlink or a file fails the open; the owner and mode are read from the open descriptor,
+    # and changed through it, so the path cannot be swapped for another in between.
+    descriptor = os.open(directory, os.O_RDONLY | _DIRECTORY | _NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if _OWNER is not None and info.st_uid != _OWNER:
+            raise PermissionError(errno.EPERM, "the trace directory belongs to someone else")
+        if info.st_mode & 0o077:
+            _fchmod(descriptor, 0o700)
+    finally:
+        os.close(descriptor)
 
 
 def _read_status(directory: str) -> Dict[str, Any]:
+    """The saved status, or ``{}`` for anything but a readable regular file holding an object.
+
+    The open cannot wait (a FIFO would never deliver a writer) and does not follow a symlink.
+    """
     try:
-        with open(os.path.join(directory, STATUS_FILE), encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError):
+        descriptor = os.open(
+            os.path.join(directory, STATUS_FILE), os.O_RDONLY | _NOFOLLOW | _NONBLOCK
+        )
+    except OSError:
         return {}
+    with os.fdopen(descriptor, encoding="utf-8") as handle:
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return {}
+            data = json.load(handle)
+        except (OSError, ValueError):
+            return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -98,12 +122,19 @@ class Writer:
         self._clock = clock
         self._queue: queue.Queue[Optional[str]] = queue.Queue(maxsize=max_queue)
         self._lock = threading.Lock()
-        previous = _read_status(self._dir)
+        self._gate = threading.Lock()
+        try:
+            _ensure_dir(self._dir)
+            previous = _read_status(self._dir)
+            refused = False
+        except OSError:
+            previous, refused = {}, True
         saved = previous.get("counts")
         saved = saved if isinstance(saved, dict) else {}
         # ponytail: counts carry over one process at a time; several processes sharing a
         # directory overwrite each other's file. Add per-process files if that matters.
         self.counts: Dict[str, int] = {key: _count(saved.get(key)) for key in COUNT_KEYS}
+        self.counts["dropped_error"] += refused  # the directory is not one we may write to
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save
         self._started = clock()
@@ -123,13 +154,14 @@ class Writer:
     def submit(self, line: str) -> None:
         """Queue one line. Never blocks, never raises: what cannot be kept is counted."""
         try:
-            if self._closed:
-                key = "dropped_error"
-            elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
-                key = "dropped_large"
-            else:
-                self._queue.put_nowait(line)
-                return
+            with self._gate:  # close() takes it to stop intake, so no line lands after the stop
+                if self._closed:
+                    key = "dropped_error"
+                elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
+                    key = "dropped_large"
+                else:
+                    self._queue.put_nowait(line)
+                    return
         except queue.Full:
             key = "dropped_full"
         except Exception:  # not a string, or anything else: the caller is never told
@@ -138,7 +170,8 @@ class Writer:
 
     def close(self, timeout: float = 2.0) -> None:
         """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
-        self._closed = True
+        with self._gate:
+            self._closed = True
         atexit.unregister(self.close)
         thread = self._thread
         if thread is not None:
@@ -162,6 +195,7 @@ class Writer:
         """
         self._queue = queue.Queue(maxsize=self._max_queue)
         self._lock = threading.Lock()
+        self._gate = threading.Lock()
         self.counts = dict.fromkeys(COUNT_KEYS, 0)
         self._dirty = False
         self._saved_at = self._clock()
@@ -238,7 +272,11 @@ class Writer:
             self._drop_fd()
             _ensure_dir(self._dir)
             path = os.path.join(self._dir, day + ".jsonl")
-            self._fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
+            # O_NONBLOCK: a FIFO here fails (ENXIO) or is refused below, and never stalls the thread.
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW | _NONBLOCK
+            self._fd = os.open(path, flags, 0o600)
+            if not stat.S_ISREG(os.fstat(self._fd).st_mode):
+                raise OSError(errno.EINVAL, "the trace file is not a regular file", path)
             _fchmod(self._fd, 0o600)  # a file made earlier, or under another umask, is tightened
             self._day = day
         return self._fd

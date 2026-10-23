@@ -302,7 +302,7 @@ def test_an_unwritable_directory_counts_errors_and_never_raises(make: Any, tmp_p
     writer.submit("b")
     writer.drain()
     writer.close()
-    assert writer.counts["dropped_error"] == 2
+    assert writer.counts["dropped_error"] == 3  # the writer's own check, then each line
     assert writer.counts["written"] == 0
 
 
