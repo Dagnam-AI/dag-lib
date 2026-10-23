@@ -3,6 +3,8 @@
 Everything the audit consumes is a :class:`TraceRecord`; :func:`read_traces`
 produces them from a Langfuse, LangSmith or OpenAI export, from the local
 recorder's trace file, or from any JSONL/CSV file through a column map.
+:func:`scan_export` reads an export and returns its priced workloads and the rows derived
+for the ones worth auditing as a :class:`ScanResult`, writing nothing.
 :func:`discover_workloads` groups the records by system-prompt template and output structure into :class:`Workload`
 summaries, most monthly spend first. :func:`build_dataset` turns one
 workload's records into redacted, deduplicated, time-split training rows and
@@ -58,6 +60,7 @@ from dagnam.audit.readers import (
 from dagnam.audit.record import Message, TraceRecord
 from dagnam.audit.redact import PII_POLICY, RedactStats, redact_rows
 from dagnam.audit.report import build_audit_report, render_switch_snippet, write_audit_report
+from dagnam.audit.scan import NoTracesError, ScanResult, scan_export
 from dagnam.audit.scan_report import ScanReport, Window, build_scan_report, write_scan_report
 from dagnam.audit.scoring import Agreement, score_json, score_labels
 from dagnam.audit.secrets import SecretStore
@@ -85,11 +88,13 @@ __all__ = [
     "Latency",
     "MalformedExportError",
     "Message",
+    "NoTracesError",
     "PriceTable",
     "PriceTableError",
     "ReadStats",
     "RedactStats",
     "ScanReport",
+    "ScanResult",
     "SecretStore",
     "StepState",
     "StructureClass",
@@ -119,6 +124,7 @@ __all__ = [
     "replay_holdout",
     "run_audit",
     "save_state",
+    "scan_export",
     "score_json",
     "score_labels",
     "split_boundary",

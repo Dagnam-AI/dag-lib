@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Any
@@ -21,7 +21,6 @@ from dagnam.cli.common import print_next_step
 from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
-    from dagnam.audit.record import TraceRecord
     from dagnam.audit.state import AuditState
 
 
@@ -125,15 +124,9 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     command that stops it. A scan never opens a socket, so it cannot stop them
     itself.
     """
-    from dagnam.audit import discover_workloads, read_traces, replaceability
-    from dagnam.audit.derive import derive_workloads
-    from dagnam.audit.discover import by_spend
-    from dagnam.audit.economics import price_workload
-    from dagnam.audit.orchestrate import AUDITED_VERDICTS
-    from dagnam.audit.prices import PriceTable
-    from dagnam.audit.scan_report import SupersededRunError, scan_window, write_scan
+    from dagnam.audit import NoTracesError, scan_export
+    from dagnam.audit.scan_report import SupersededRunError, write_scan
     from dagnam.audit.state import AuditBusyError, load_state, lock_audit
-    from dagnam.audit.thresholds import MAX_SEQ_LENGTH
     from dagnam.audit.workspace import UnsafeWorkloadsError
 
     # An audit directory named through a link (a temp or home directory often is one) is the
@@ -141,16 +134,17 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     # a link INSIDE it (in a workload folder, at a file a scan writes) is still refused.
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
 
-    def records() -> Iterator[TraceRecord]:
-        return read_traces(export, source=args.source, column_map=column_map)[0]
-
-    found = discover_workloads(records(), window_days=args.window, sample_rate=args.sample_rate)
-    if not found:
+    try:
+        scan = scan_export(
+            export,
+            source=args.source,
+            column_map=column_map,
+            window_days=args.window,
+            sample_rate=args.sample_rate,
+            price_table=Path(args.price_table) if args.price_table else None,
+        )
+    except NoTracesError:
         fail(args, f"{args.export}: no traces to audit")
-    table = PriceTable.load(Path(args.price_table) if args.price_table else None)
-    workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
-    audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
-    datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
     out.mkdir(parents=True, exist_ok=True)
     try:
         # Not under a live run: a workload it has not reached yet is in no
@@ -158,13 +152,11 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
         with lock_audit(out):
             report = write_scan(
                 out,
-                workloads,
-                datasets,
-                source=args.source,
-                window=scan_window(
-                    workloads, window_days=args.window, sample_rate=args.sample_rate
-                ),
-                price_table=table,
+                scan.workloads,
+                scan.datasets,
+                source=scan.source,
+                window=scan.window,
+                price_table=scan.table,
                 force=args.force,
             )
     except (AuditBusyError, SupersededRunError, UnsafeWorkloadsError) as exc:
@@ -172,7 +164,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     emit_result(report.to_json(), output=None, json_stdout=args.json, render_human=_render_scan)
     for line in retired_notice(retired_live(load_state(out)), out):
         print(line, file=sys.stderr)
-    if datasets:
+    if scan.datasets:
         print_next_step(f"dagnam audit run {out}")
 
 
