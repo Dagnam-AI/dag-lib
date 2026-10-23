@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import math
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
@@ -19,6 +20,12 @@ ENVELOPE_VERSION = 1
 NORM_VERSION = 1
 PROVIDERS = ("openai", "anthropic", "other")
 ENDPOINTS = ("chat.completions", "responses", "messages", "custom")
+MAX_LINE_BYTES = 1_000_000
+JS_SAFE = 2**53 - 1
+"""The largest integer a JavaScript reader holds exactly: latency and token counts stop here."""
+NO_RESPONSE_STATUS = 599
+"""What a call that got no HTTP response (a connection error) is recorded as."""
+_MAX_INT_BITS = 4096
 
 _OMITTED = "media_omitted"
 _MEDIA_TYPES = frozenset(
@@ -31,12 +38,17 @@ _MEDIA_TYPES = frozenset(
         "file",
         "input_file",
         "document",
+        "video",
     }
 )
 _SYSTEM_ROLES = frozenset({"system", "developer"})
 
 Body = Dict[str, Any]
 Norm = Dict[str, Any]
+
+
+class LineTooLargeError(ValueError):
+    """The finished line is longer than the envelope contract allows."""
 
 
 def _dict(value: object) -> Body:
@@ -48,7 +60,10 @@ def _list(value: object) -> List[Any]:
 
 
 def _count(value: object) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+    """A token count: a non-negative integer, at most ``JS_SAFE``; anything else is 0."""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return min(value, JS_SAFE)
+    return 0
 
 
 def _text(content: object) -> str:
@@ -68,24 +83,29 @@ def _is_media(part: object) -> bool:
     return isinstance(part, dict) and part.get("type") in _MEDIA_TYPES
 
 
-def _omit_media(value: Any) -> Any:
-    """A copy of ``value`` with each media part (a list item) replaced by its size."""
+def _scrub(value: Any, omit: bool) -> Any:
+    """Copy ``value`` (tuples become lists), refusing absurd integers.
+
+    When ``omit`` is set each media part (a list item) is replaced by its size.
+    """
     if isinstance(value, dict):
-        return {key: _omit_media(item) for key, item in value.items()}
-    if isinstance(value, list):
+        return {key: _scrub(item, omit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
         return [
             {"type": _OMITTED, "bytes": len(json.dumps(item, ensure_ascii=False).encode("utf-8"))}
-            if _is_media(item)
-            else _omit_media(item)
+            if omit and _is_media(item)
+            else _scrub(item, omit)
             for item in value
         ]
+    if isinstance(value, int) and value.bit_length() > _MAX_INT_BITS:
+        raise ValueError("an integer in the body is too large for a JSON reader")
     return value
 
 
 def _has_media(value: object) -> bool:
     if isinstance(value, dict):
         return any(_has_media(item) for item in value.values())
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return any(
             _is_media(item)
             or (isinstance(item, dict) and item.get("type") == _OMITTED)
@@ -245,7 +265,7 @@ def norm_anthropic(request: Body, response: Body) -> Norm:
             ]
         ),
         tokens=(
-            _count(usage.get("input_tokens")) + read + created,
+            min(_count(usage.get("input_tokens")) + read + created, JS_SAFE),
             _count(usage.get("output_tokens")),
             read,
         ),
@@ -259,9 +279,72 @@ _NORMS: Dict[Tuple[str, str], Callable[[Body, Body], Norm]] = {
 }
 
 
-def _timestamp(now: float) -> str:
+def _timestamp(now: object) -> str:
+    if now is None:
+        now = time.time()
+    if isinstance(now, bool) or not isinstance(now, (int, float)):
+        raise ValueError("now must be a number of seconds")
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="milliseconds")
     return stamp.replace("+00:00", "Z")
+
+
+def _latency(value: object) -> float:
+    """Milliseconds as a finite float in ``[0, JS_SAFE]``; a negative value is clamped to 0.0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("latency_ms must be a number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("latency_ms must be finite")
+    return float(min(value, JS_SAFE)) if value > 0 else 0.0
+
+
+def _status(value: object) -> int:
+    """An HTTP status; ``None`` (no response at all) is recorded as ``NO_RESPONSE_STATUS``."""
+    if value is None:
+        return NO_RESPONSE_STATUS
+    if isinstance(value, bool) or not isinstance(value, int) or not 100 <= value <= 599:
+        raise ValueError("status must be an HTTP status from 100 to 599, or None")
+    return value
+
+
+def _build(
+    provider: Any,
+    endpoint: Any,
+    request: Any,
+    response: Any,
+    latency_ms: Any,
+    status: Any,
+    trace_id: Any,
+    no_raw: bool,
+    now: Any,
+) -> str:
+    if provider not in PROVIDERS or endpoint not in ENDPOINTS:
+        raise ValueError(f"unknown provider or endpoint: {provider!r}, {endpoint!r}")
+    if not isinstance(request, dict) or not isinstance(response, dict):
+        raise ValueError("request and response must be objects")
+    norm = _NORMS.get((provider, endpoint))
+    if no_raw and norm is None:
+        raise ValueError("no_raw needs a provider and endpoint with a known norm")
+    trace = uuid.uuid4().hex if trace_id is None else trace_id
+    if not isinstance(trace, str) or not trace:
+        raise ValueError("trace_id must be a non-empty string")
+    body: Body = {
+        "v": ENVELOPE_VERSION,
+        "trace_id": trace,
+        "ts": _timestamp(now),
+        "provider": provider,
+        "endpoint": endpoint,
+        "latency_ms": _latency(latency_ms),
+        "status": _status(status),
+    }
+    request, response = _scrub(request, omit=True), _scrub(response, omit=False)
+    if not no_raw:
+        body["request"], body["response"] = request, response
+    if norm is not None:
+        body["norm"], body["norm_v"] = norm(request, response), NORM_VERSION
+    line = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    if len(line.encode("utf-8")) > MAX_LINE_BYTES:  # a lone surrogate also raises here
+        raise LineTooLargeError(f"line exceeds {MAX_LINE_BYTES} bytes")
+    return line
 
 
 def build_line(
@@ -271,35 +354,30 @@ def build_line(
     request: Body,
     response: Body,
     latency_ms: float,
-    status: int = 200,
+    status: Optional[int] = 200,
     trace_id: Optional[str] = None,
     no_raw: bool = False,
     now: Optional[float] = None,
 ) -> str:
-    """One envelope v1 JSON line (no newline). Raises ``ValueError`` when it cannot be built.
+    """One envelope v1 JSON line (no newline) that the contract's validator accepts.
 
-    ``norm`` is added for the provider shapes this module knows. ``no_raw`` drops the bodies
-    and so needs one of them.
+    ``norm`` is added for the provider shapes this module knows; ``no_raw`` drops the bodies and
+    so needs one of them. Media parts of the request are replaced by their size. ``latency_ms``
+    is clamped to ``[0, JS_SAFE]``, token counts are capped at ``JS_SAFE``, and ``status=None``
+    (no HTTP response) is recorded as ``NO_RESPONSE_STATUS``.
+
+    Raises ``ValueError`` and nothing else, whatever the input: bad provider, endpoint, status,
+    latency, trace id or time; a body that is not a dict or holds something JSON cannot carry (a
+    datetime, bytes, an SDK object, a cycle, NaN, a lone surrogate, a huge integer); and
+    ``LineTooLargeError`` (a subclass) over 1 MB. Nothing is converted on the caller's behalf: a body
+    must already be plain JSON data. A call site must still catch ``Exception``, to be fail-open
+    against its own bugs.
     """
-    if provider not in PROVIDERS or endpoint not in ENDPOINTS:
-        raise ValueError(f"unknown provider or endpoint: {provider!r}, {endpoint!r}")
-    norm = _NORMS.get((provider, endpoint))
-    if no_raw and norm is None:
-        raise ValueError("no_raw needs a provider and endpoint with a known norm")
-    request = _omit_media(request)
-    body: Body = {
-        "v": ENVELOPE_VERSION,
-        "trace_id": trace_id or uuid.uuid4().hex,
-        "ts": _timestamp(time.time() if now is None else now),
-        "provider": provider,
-        "endpoint": endpoint,
-        "latency_ms": latency_ms,
-        "status": status,
-    }
-    if not no_raw:
-        body["request"], body["response"] = request, response
-    if norm is not None:
-        body["norm"], body["norm_v"] = norm(request, response), NORM_VERSION
-    line = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    line.encode("utf-8")  # a lone surrogate raises here, not in the writer thread
-    return line
+    try:
+        return _build(
+            provider, endpoint, request, response, latency_ms, status, trace_id, no_raw, now
+        )
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"cannot build a line: {type(exc).__name__}: {exc}") from exc

@@ -3,6 +3,14 @@
 ``submit`` never blocks and never raises: a line that cannot be kept is counted and dropped, so
 the live call it describes is never touched. Counts are saved to ``.status.json`` in the
 directory so that ``python -m dagnam_record status`` can read them without the process.
+
+``.status.json`` holds ``directory``, ``started`` (the first run, which the recording window is
+counted from), ``updated``, ``expired`` and ``counts``: one number per key of ``COUNT_KEYS``.
+``dropped_error`` also counts a line submitted after ``close()``.
+
+Permissions: the directory is created ``0700`` (its parents get the process defaults). An
+existing directory must be a real directory (not a symlink) owned by this user, and is tightened
+to ``0700`` if it is looser. Files are opened with ``O_NOFOLLOW`` and set to ``0600``.
 """
 
 from __future__ import annotations
@@ -14,24 +22,40 @@ import json
 import logging
 import os
 import queue
+import stat
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
+import weakref
 
 LOGGER = logging.getLogger("dagnam_record")
 STATUS_FILE = ".status.json"
 COUNT_KEYS = ("written", "dropped_full", "dropped_large", "dropped_error", "dropped_expired")
 _SAVE_EVERY = 30.0
 _DAY = 86400
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_fchmod: Callable[[int, int], None] = getattr(os, "fchmod", lambda descriptor, mode: None)
+_OWNER = os.getuid() if hasattr(os, "getuid") else None
+_WRITERS: weakref.WeakSet[Writer] = weakref.WeakSet()
 
 
 def _ensure_dir(directory: str) -> None:
-    """Create the directory ``0700`` (only a directory this call makes is changed)."""
+    """Make sure ``directory`` is a private directory of ours, or raise ``OSError``."""
     os.makedirs(os.path.dirname(directory) or ".", exist_ok=True)
     try:
         os.mkdir(directory, 0o700)
+        return
     except FileExistsError:
         pass
+    info = os.lstat(directory)
+    if not stat.S_ISDIR(info.st_mode):  # lstat: a symlink to a directory is not one either
+        raise NotADirectoryError(
+            errno.ENOTDIR, "the trace directory is not a real directory", directory
+        )
+    if _OWNER is not None and info.st_uid != _OWNER:
+        raise PermissionError(errno.EPERM, "the trace directory belongs to someone else", directory)
+    if info.st_mode & 0o077:
+        os.chmod(directory, 0o700)
 
 
 def _read_status(directory: str) -> Dict[str, Any]:
@@ -45,6 +69,12 @@ def _read_status(directory: str) -> Dict[str, Any]:
 
 def _count(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def reinit_all_after_fork() -> None:
+    """Reset every live writer in a forked child (registered with ``os.register_at_fork``)."""
+    for writer in list(_WRITERS):
+        writer.reinit_after_fork()
 
 
 class Writer:
@@ -64,6 +94,7 @@ class Writer:
         self._dir = os.path.abspath(os.path.expanduser(directory))
         self._window = window_days * _DAY
         self._max_line_bytes = max_line_bytes
+        self._max_queue = max_queue
         self._clock = clock
         self._queue: queue.Queue[Optional[str]] = queue.Queue(maxsize=max_queue)
         self._lock = threading.Lock()
@@ -82,21 +113,32 @@ class Writer:
         self._saved_at = clock()
         self._fd: Optional[int] = None
         self._day = ""
+        self._closed = False
         self._thread: Optional[threading.Thread] = None
+        _WRITERS.add(self)
         atexit.register(self.close)
         if start:
-            self._thread = threading.Thread(target=self._run, name="dagnam-record", daemon=True)
-            self._thread.start()
+            self._spawn()
 
     def submit(self, line: str) -> None:
-        """Queue one line. Never blocks, never raises: a full queue drops and counts it."""
+        """Queue one line. Never blocks, never raises: what cannot be kept is counted."""
         try:
-            self._queue.put_nowait(line)
+            if self._closed:
+                key = "dropped_error"
+            elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
+                key = "dropped_large"
+            else:
+                self._queue.put_nowait(line)
+                return
         except queue.Full:
-            self._bump("dropped_full")
+            key = "dropped_full"
+        except Exception:  # not a string, or anything else: the caller is never told
+            key = "dropped_error"
+        self._bump(key)
 
     def close(self, timeout: float = 2.0) -> None:
         """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
+        self._closed = True
         atexit.unregister(self.close)
         thread = self._thread
         if thread is not None:
@@ -106,11 +148,36 @@ class Writer:
                 pass
             thread.join(timeout)
         if thread is None or not thread.is_alive():
-            self._drain_for_test()
+            self._drain()
             self._drop_fd()
         self._persist()
 
-    def _drain_for_test(self) -> None:
+    def reinit_after_fork(self) -> None:
+        """Start over in a forked child.
+
+        The child has none of the parent's threads, and a lock another thread held at the fork
+        would stay locked for good, so the queue, lock, thread and counts are made anew. The
+        parent's pending lines stay the parent's (it writes them), and its counts are not the
+        child's. The window start is kept.
+        """
+        self._queue = queue.Queue(maxsize=self._max_queue)
+        self._lock = threading.Lock()
+        self.counts = dict.fromkeys(COUNT_KEYS, 0)
+        self._dirty = False
+        self._saved_at = self._clock()
+        self._drop_fd()  # closes this process's copy only
+        restart = self._thread is not None and not self._closed
+        self._thread = None
+        if restart:
+            self._spawn()
+
+    def _spawn(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run, args=(self._queue,), name="dagnam-record", daemon=True
+        )
+        self._thread.start()
+
+    def _drain(self) -> None:
         """Run the loop body for everything queued, in the calling thread."""
         while True:
             try:
@@ -121,10 +188,10 @@ class Writer:
                 self._write(line)
                 self._persist_if_due()
 
-    def _run(self) -> None:
+    def _run(self, source: queue.Queue[Optional[str]]) -> None:
         while True:
             try:
-                line = self._queue.get(timeout=_SAVE_EVERY)
+                line = source.get(timeout=_SAVE_EVERY)
             except queue.Empty:
                 self._persist_if_due()
                 continue
@@ -171,7 +238,8 @@ class Writer:
             self._drop_fd()
             _ensure_dir(self._dir)
             path = os.path.join(self._dir, day + ".jsonl")
-            self._fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            self._fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
+            _fchmod(self._fd, 0o600)  # a file made earlier, or under another umask, is tightened
             self._day = day
         return self._fd
 
@@ -205,9 +273,17 @@ class Writer:
         temp = f"{path}.{os.getpid()}.tmp"
         try:
             _ensure_dir(self._dir)
-            descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW
+            with os.fdopen(os.open(temp, flags, 0o600), "w", encoding="utf-8") as handle:
                 json.dump(payload, handle)
             os.replace(temp, path)
         except OSError:
             self._dirty = True
+            try:
+                os.unlink(temp)
+            except OSError:
+                pass
+
+
+# Several threads cannot be trusted across a fork, so each child rebuilds its writers.
+getattr(os, "register_at_fork", lambda **hooks: None)(after_in_child=reinit_all_after_fork)
