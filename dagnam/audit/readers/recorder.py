@@ -60,6 +60,7 @@ from dagnam.audit.record import Message, TraceRecord
 
 REQUIRED_FIELDS = ("v", "trace_id", "ts")
 _OMITTED = "media_omitted"
+_VENDOR_RESULT = "_tool_result"
 
 
 def _omitted(value: object) -> bool:
@@ -67,6 +68,49 @@ def _omitted(value: object) -> bool:
     if isinstance(value, Mapping):
         return value.get("type") == _OMITTED or any(_omitted(item) for item in value.values())
     return isinstance(value, list) and any(_omitted(item) for item in value)
+
+
+def _vendor_result(part: object) -> bool:
+    """A block that is the result of a tool the vendor ran (web search, code execution, MCP)."""
+    kind = part.get("type") if isinstance(part, Mapping) else None
+    return isinstance(kind, str) and kind.endswith(_VENDOR_RESULT) and kind != "tool_result"
+
+
+def _said(value: Any) -> Any:
+    """``value`` without the vendor-run tool results among its content blocks, at any depth.
+
+    What the assistant said is its text and its calls; the payload of a search it ran is not,
+    and the shared parsers would print it as JSON into the reply. Applied to the assistant's side
+    of a call only, so every other source and the user's turns read as before.
+    """
+    if isinstance(value, list):
+        return [_said(part) for part in value if not _vendor_result(part)]
+    if isinstance(value, Mapping):
+        return {key: _said(part) for key, part in value.items()}
+    return value
+
+
+def _assistant_side(
+    request: dict[str, Any], response: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The call's bodies with the vendor-run tool results removed from what the assistant said."""
+    for key in ("messages", "input"):
+        turns = request.get(key)
+        if isinstance(turns, list):
+            turns = [
+                _said(turn)
+                if isinstance(turn, Mapping) and turn.get("role") == "assistant"
+                else turn
+                for turn in turns
+            ]
+            request = {**request, key: turns}
+    return request, _said(response)
+
+
+def _parse_schema(request: Mapping[str, Any]) -> str | None:
+    """The schema a Responses ``parse()`` call asked for: the recorder keeps its ``text_format``."""
+    schema = request.get("text_format")
+    return task_signature({"text": {"format": schema}}) if isinstance(schema, Mapping) else None
 
 
 def _from_openai(
@@ -79,6 +123,7 @@ def _from_openai(
         "id": response.get("id") or env.trace_id,
         "created": response.get("created") or response.get("created_at") or env.ts,
     }
+    request, completion = _assistant_side(request, completion)
     record = openai_record(
         {"request": request, "response": completion, "latency_ms": env.latency_ms}
     )
@@ -86,6 +131,7 @@ def _from_openai(
         return None
     return replace(
         record,
+        signature=record.signature or _parse_schema(request),
         trace_id=env.trace_id,
         ts=parse_ts(env.ts),
         latency_ms=env.latency_ms,
@@ -100,6 +146,7 @@ def _from_anthropic(
     # the prompt, and a response with no ``content`` would be an empty answer for 0 tokens.
     require(request, "messages")
     require(response, "content")
+    request, response = _assistant_side(request, response)
     system, messages = split_prompt(request)
     answer = final_reply(response)
     return TraceRecord(

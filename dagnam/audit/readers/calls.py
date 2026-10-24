@@ -90,7 +90,7 @@ def _parsed(arguments: Any) -> Any:
     if isinstance(arguments, str):
         try:
             return json.loads(arguments)
-        except ValueError:
+        except (ValueError, RecursionError):  # not JSON, or nested too deep to read as JSON
             return arguments
     return arguments
 

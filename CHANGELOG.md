@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dagnam audit scan --source dagnam` (and `read_traces(..., source="dagnam")`) reads the trace files
+  the `dagnam-record` local recorder writes. A line holds the call's request and response, a
+  provider-neutral normalized form of it, or both. The request and response are read when present;
+  a line recorded without them (`no_raw=True`, or an SDK version the recorder was not tested with)
+  is read from the normalized form, which keeps the system text, the earlier turns including the
+  tool calls an assistant turn made, the answer, its tool calls, the token counts and whether the
+  prompt carried media. Calls that did not return 200 are skipped, and a file written by a newer
+  recorder is refused with a message that says so.
+- `dagnam.audit.scan_export()` reads an export and returns its priced workloads and the rows derived
+  for the ones worth auditing, without writing a file or printing. `dagnam audit scan` now uses it,
+  with the same output as before.
+
+### Fixed
+
+- A tool call whose arguments are nested too deep to parse as JSON (tens of thousands of brackets)
+  no longer raises `RecursionError` while a trace export is read: the arguments stay the text they are.
+
 ## [0.22.1] - 2026-10-23
 
 ### Fixed
