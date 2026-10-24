@@ -24,6 +24,10 @@ classifiers = [
 # The package's promise: nothing is installed alongside it.
 dependencies = []
 
+[project.optional-dependencies]
+# Only for ``install(redact="auto")``, which loads the PII redactor of ``dagnam-contracts`` lazily.
+redact = ["dagnam-contracts>=0.4.1,<0.5"]
+
 [project.urls]
 Homepage = "https://dagnam.ai"
 Repository = "https://github.com/Dagnam-AI/dag-lib"

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
+import hashlib
 import os
 import time
 from typing import Any, Callable, Dict, Optional, Set
+import uuid
 
 from dagnam_record._envelope import LineTooLargeError, build_line
+from dagnam_record._redact import apply
 from dagnam_record._writer import Writer
 
 KILL_SWITCH = "DAGNAM_RECORD"
@@ -25,8 +28,23 @@ _UNSET_NAMES = frozenset({"NotGiven", "Omit"})  # the SDKs' "argument not passed
 
 
 def recording_disabled() -> bool:
-    """``DAGNAM_RECORD=0`` switches the recorder off."""
+    """The kill switch: ``DAGNAM_RECORD`` set to exactly ``0`` switches the recorder off.
+
+    Nothing else does: not unset, empty, ``1``, ``00``, ``false`` or ``off`` (``install()`` warns
+    about the last ones, which look like "off" but are not).
+    """
     return os.environ.get(KILL_SWITCH) == "0"
+
+
+def sampled(trace_id: str, rate: float) -> bool:
+    """Whether the call with this trace id is kept at this ``rate`` in ``(0, 1]``.
+
+    A hash of the id decides, not a random draw, so the same id always gets the same answer
+    (a call that is seen twice is kept twice or dropped twice, never half-recorded), and a
+    larger rate keeps every call a smaller one kept.
+    """
+    digest = hashlib.sha256(trace_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / 2**64 < rate
 
 
 def media_omitted(payload: str) -> Dict[str, Any]:
@@ -130,11 +148,24 @@ def to_plain(value: Any) -> Any:
 
 
 class Recorder:
-    """Builds lines from plain bodies and hands them to the writer, counting what it drops."""
+    """Builds lines from plain bodies and hands them to the writer, counting what it drops.
 
-    def __init__(self, writer: Writer, *, no_raw: bool = False) -> None:
+    ``sample`` keeps that share of calls (see ``sampled``); ``redact`` is applied to the request
+    and to the response text before the line is built (see ``_redact``).
+    """
+
+    def __init__(
+        self,
+        writer: Writer,
+        *,
+        no_raw: bool = False,
+        sample: float = 1.0,
+        redact: Optional[Callable[[str], str]] = None,
+    ) -> None:
         self.writer = writer
         self.no_raw = no_raw
+        self.sample = sample
+        self.redact = redact
 
     def fail_open(self, step: Callable[..., None], *arguments: Any) -> bool:
         """Run ``step``; any error is counted, never raised. True when the step ran cleanly."""
@@ -158,14 +189,43 @@ class Recorder:
         started: float,
     ) -> None:
         """Build one line for a finished call and queue it. ``started`` is a ``perf_counter``."""
+        self.record(
+            provider,
+            endpoint,
+            request,
+            response,
+            status=status,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+        )
+
+    def record(
+        self,
+        provider: str,
+        endpoint: str,
+        request: Dict[str, Any],
+        response: Dict[str, Any],
+        *,
+        status: Optional[int],
+        latency_ms: float,
+    ) -> None:
+        """Build one line for a finished call with a known latency and queue it (or skip it).
+
+        Raises ``ValueError`` for a call that cannot be recorded; callers go through ``fail_open``.
+        """
+        trace_id = str(uuid.uuid4())
+        if not sampled(trace_id, self.sample):
+            return
+        if self.redact is not None:
+            request, response = apply(self.redact, request), apply(self.redact, response)
         self.writer.submit(
             build_line(
                 provider=provider,
                 endpoint=endpoint,
                 request=request,
                 response=response,
-                latency_ms=(time.perf_counter() - started) * 1000.0,
+                latency_ms=latency_ms,
                 status=status,
+                trace_id=trace_id,
                 no_raw=self.no_raw,
             )
         )

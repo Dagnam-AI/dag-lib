@@ -491,3 +491,6 @@ name = "dagnam_record imports neither dagnam nor dagnam_contracts"
 type = "forbidden"
 source_modules = ["dagnam_record"]
 forbidden_modules = ["dagnam", "dagnam_contracts"]
+# The one deliberate lazy import: ``redact="auto"`` loads the PII redactor of the optional
+# ``dagnam-record[redact]`` extra inside a function, and only when asked for.
+ignore_imports = ["dagnam_record._redact -> dagnam_contracts"]

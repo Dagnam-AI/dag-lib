@@ -9,3 +9,7 @@ All notable changes to `dagnam-record` are listed here, newest first. The format
 
 - The package scaffold: a stdlib-only distribution with no dependencies, supporting Python 3.9
   and newer.
+- `install()`, `record_call()` and `uninstall()`, the options `window_days`, `dir`, `sample`,
+  `no_raw` and `redact` (a function, or `"auto"` with the optional `dagnam-record[redact]` extra),
+  the kill switch `DAGNAM_RECORD=0`, pruning of daily files older than the window, and the
+  commands `python -m dagnam_record status` and `python -m dagnam_record purge`.

@@ -25,7 +25,8 @@ import httpx
 import openai
 import pytest
 
-from dagnam_record import _anthropic, _openai
+import dagnam_record
+from dagnam_record import _anthropic, _openai, _state
 from dagnam_record._recorder import Recorder
 from dagnam_record._writer import Writer
 
@@ -408,3 +409,13 @@ def arig(
     assert _anthropic.install(recorder)
     yield AnthropicRig(mock_server, writer, recorder, tmp_path / "traces")
     _anthropic.uninstall()
+
+
+@pytest.fixture
+def fresh_state() -> Iterator[None]:
+    """``dagnam_record`` as if never installed, before and after the test."""
+    dagnam_record.uninstall()
+    _state.STATE.warned = False
+    yield
+    dagnam_record.uninstall()
+    _state.STATE.warned = False

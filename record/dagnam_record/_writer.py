@@ -81,7 +81,7 @@ def _ensure_dir(directory: str) -> None:
         os.close(descriptor)
 
 
-def _read_status(directory: str) -> Dict[str, Any]:
+def read_status(directory: str) -> Dict[str, Any]:
     """The saved status, or ``{}`` for anything but a readable regular file holding an object.
 
     The open cannot wait (a FIFO would never deliver a writer) and does not follow a symlink.
@@ -102,7 +102,7 @@ def _read_status(directory: str) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _count(value: object) -> int:
+def as_count(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
@@ -136,7 +136,7 @@ class Writer:
         self._gate = threading.Lock()
         try:
             _ensure_dir(self._dir)
-            previous = _read_status(self._dir)
+            previous = read_status(self._dir)
             refused = False
         except OSError:
             previous, refused = {}, True
@@ -144,7 +144,7 @@ class Writer:
         saved = saved if isinstance(saved, dict) else {}
         # ponytail: counts carry over one process at a time; several processes sharing a
         # directory overwrite each other's file. Add per-process files if that matters.
-        self.counts: Dict[str, int] = {key: _count(saved.get(key)) for key in COUNT_KEYS}
+        self.counts: Dict[str, int] = {key: as_count(saved.get(key)) for key in COUNT_KEYS}
         self.counts["dropped_error"] += refused  # the directory is not one we may write to
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save

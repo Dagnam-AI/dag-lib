@@ -49,8 +49,9 @@ SDK_MODULES = frozenset({"dagnam", "dagnam_contracts"})
 # them, so they may only be imported inside a function (where ``install`` looks for them).
 PATCHED_SDKS = frozenset({"openai", "anthropic"})
 LAZY_ALLOWLIST: dict[tuple[str, str], str] = {
-    ("dagnam_record/redact.py", "dagnam_contracts"): (
-        "the redactor may load the optional PII class list lazily, only when it is installed"
+    ("dagnam_record/_redact.py", "dagnam_contracts"): (
+        'redact="auto" loads the optional PII redactor lazily, only when it is asked for and the '
+        "dagnam-record[redact] extra is installed"
     ),
 }
 
@@ -108,6 +109,30 @@ def test_the_package_metadata_promises_no_dependencies_and_python_39() -> None:
     assert project["dependencies"] == []
     assert project["requires-python"] == ">=3.9"
     assert project["license"] == "Apache-2.0"
+
+
+def test_the_only_optional_extra_is_the_redactor_and_it_needs_only_the_contract() -> None:
+    extras = _toml(RECORD / "pyproject.toml")["project"]["optional-dependencies"]
+    assert list(extras) == ["redact"]
+    assert [requirement.split(">")[0] for requirement in extras["redact"]] == ["dagnam-contracts"]
+
+
+def test_the_lazy_contract_import_is_declared_once_in_both_checkers_and_really_exists() -> None:
+    contracts = _toml(ROOT / "pyproject.toml")["tool"]["importlinter"]["contracts"]
+    (forbidden,) = [c for c in contracts if c["name"].startswith("dagnam_record imports")]
+    allowed = {f"{path[:-3].replace('/', '.')} -> {root}" for path, root in LAZY_ALLOWLIST}
+    assert set(forbidden["ignore_imports"]) == allowed
+    for (relative, root), reason in LAZY_ALLOWLIST.items():
+        assert reason
+        tree = ast.parse((RECORD / relative).read_text(encoding="utf-8"))
+        lazy = [
+            node
+            for function in ast.walk(tree)
+            if isinstance(function, ast.FunctionDef)
+            for node in ast.walk(function)
+            if isinstance(node, (ast.Import, ast.ImportFrom)) and root in _imported_roots(node)
+        ]
+        assert lazy, f"{relative} no longer imports {root} lazily: drop its allowlist entry"
 
 
 def test_the_package_ships_typed_with_its_licence_files() -> None:
@@ -187,7 +212,7 @@ def test_the_import_walk_flags_dynamic_imports() -> None:
 
 def test_the_import_walk_allows_listed_lazy_imports_and_plain_ones() -> None:
     lazy = "def load():\n    import dagnam_contracts\n"
-    assert violations(lazy, "dagnam_record/redact.py") == []
+    assert violations(lazy, "dagnam_record/_redact.py") == []
     assert violations(lazy, "dagnam_record/other.py") == [
         "dagnam_record/other.py: lazily imports 'dagnam_contracts' without an allowlist entry"
     ]
