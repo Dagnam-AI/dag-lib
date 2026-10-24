@@ -12,6 +12,7 @@ Standard library only.
 
 Usage:
     python scripts/check_changelog.py
+    python scripts/check_changelog.py --changelog record/CHANGELOG.md --init record/dagnam_record/__init__.py
 """
 
 from __future__ import annotations

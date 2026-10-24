@@ -14,6 +14,15 @@ updates:
           - "minor"
           - "patch"
 
+  # The stdlib-only dagnam-record package has no dependencies of its own; this
+  # keeps its build backend pin fresh.
+  - package-ecosystem: "pip"
+    directory: "/record"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 2
+
   # Keep action pins (SHA-pinned in workflows) up to date.
   - package-ecosystem: "github-actions"
     directory: "/"

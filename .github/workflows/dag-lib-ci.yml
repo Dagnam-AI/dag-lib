@@ -43,8 +43,10 @@ jobs:
           python3 -B .github/scripts/test_check_fix_applied.py
       - name: Type check
         run: uv run --with "pyright>=1.1.380" pyright
-      - name: Import layering contract (cli -> resources -> data -> _core)
-        run: uv run lint-imports
+      # The poe task puts record/ on PYTHONPATH, so it also checks that dagnam_record
+      # imports neither dagnam nor dagnam_contracts; a bare lint-imports cannot find it.
+      - name: Import layering contract (cli -> resources -> data -> _core; dagnam_record is SDK-free)
+        run: uv run poe lint-imports
       - name: Build
         run: uv build
       - name: Check distribution metadata
@@ -102,7 +104,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
       - name: Tests
-        run: uv run pytest tests -q
+        run: uv run pytest tests record/tests -q
 
   coverage:
     # Single-version coverage gate. Keeps the matrix job fast while still
@@ -125,8 +127,9 @@ jobs:
         run: uv sync --locked --all-extras --dev
       - name: Run tests with coverage
         run: |
-          uv run pytest tests \
+          uv run pytest tests record/tests \
             --cov=dagnam \
+            --cov=dagnam_record \
             --cov-branch \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
