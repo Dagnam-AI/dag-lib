@@ -156,7 +156,7 @@ def chat_file(env: Env) -> None:
     earlier = {
         "role": "assistant",
         "content": None,
-        "tool_calls": [tool_call(7, "lookup_order", '{"order_id": "W-1001"}')],
+        "tool_calls": [tool_call(7, "lookup_order", '{"order_id": "W-1001", "express": true}')],
     }
     env.chat(
         "It shipped on Monday.",
@@ -318,6 +318,14 @@ def responses_file(env: Env) -> None:
         "status": "completed",
     }
     env.respond([custom], {"input": "List the files."})
+    earlier = [
+        {"type": "custom_tool_call", "call_id": "call_8", "name": "run_shell", "input": "ls"},
+        {"type": "custom_tool_call_output", "call_id": "call_8", "output": "a b"},
+    ]
+    env.respond(
+        [message_item(8, "Two files.")],
+        {"input": [{"role": "developer", "content": "Rules."}, user("List."), *earlier, user("?")]},
+    )
 
 
 def anthropic_file(env: Env) -> None:
@@ -367,7 +375,7 @@ def anthropic_file(env: Env) -> None:
         "role": "assistant",
         "content": [
             text_block("Let me look."),
-            tool_block(8, "lookup_order", {"order_id": "W-1001"}),
+            tool_block(8, "lookup_order", {"order_id": "W-1001", "express": True}),
         ],
     }
     answer = {

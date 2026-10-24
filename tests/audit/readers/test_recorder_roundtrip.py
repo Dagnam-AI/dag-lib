@@ -117,6 +117,16 @@ def test_the_contract_validator_accepts_every_recorded_line(name: str) -> None:
         parse_envelope(line)
 
 
+def check_line(
+    name: str,
+    number: int,
+    row: dict[str, Any],
+    table: dict[tuple[str, int], dict[str, str]] = EXPECTED_DIFFERENCES,
+) -> None:
+    """Fail unless the line differs on exactly the fields the table pins for it."""
+    assert differing_fields(row) == set(table.get((name, number), {})), (name, number)
+
+
 @pytest.mark.parametrize(
     ("name", "number", "row"),
     [pytest.param(*case, id=f"{case[0]}:{case[1]}") for case in both_forms()],
@@ -124,8 +134,50 @@ def test_the_contract_validator_accepts_every_recorded_line(name: str) -> None:
 def test_raw_and_norm_agree_except_for_the_pinned_differences(
     name: str, number: int, row: dict[str, Any]
 ) -> None:
-    pinned = set(EXPECTED_DIFFERENCES.get((name, number), {}))
-    assert differing_fields(row) == pinned
+    check_line(name, number, row)
+
+
+NORM_CHANGES: dict[str, Any] = {  # what to put in the norm so that this field no longer agrees
+    "model": "other-model",
+    "system": "another system",
+    "messages": [{"role": "user", "content": "another prompt"}],
+    "response": "another answer",
+    "prompt_tokens": 1,
+    "completion_tokens": 1,
+    "cached_prompt_tokens": 1,
+    "has_media": True,
+}
+
+
+@pytest.mark.parametrize(
+    "field", [*(f for f in COMPARED if f != "reasoning_only"), "response_tool_calls"]
+)
+def test_a_difference_in_any_compared_field_is_noticed(field: str) -> None:
+    row = load(CHAT)[0]
+    norm = row["norm"]
+    if field == "response_tool_calls":
+        norm["tool_calls"] = [{"type": "function", "function": {"name": "x", "arguments": "{}"}}]
+    else:
+        norm[field] = NORM_CHANGES[field]
+    assert differing_fields(row) == {field}
+
+
+def test_the_table_fails_a_line_it_does_not_pin_and_one_it_pins_in_vain() -> None:
+    thinking_only = load("recorder_anthropic.jsonl")[6]
+    agreeing = load(CHAT)[0]
+    check_line("recorder_anthropic.jsonl", 7, thinking_only)
+    pin = {("recorder_anthropic.jsonl", 7): {"reasoning_only": "x"}}
+    with pytest.raises(AssertionError):  # a difference nobody pinned
+        check_line("recorder_anthropic.jsonl", 7, thinking_only, {})
+    with pytest.raises(AssertionError):  # a pinned difference that is gone
+        check_line("recorder_anthropic.jsonl", 7, agreeing, pin)
+    with pytest.raises(AssertionError):  # pinned, but a different field differs
+        check_line(
+            "recorder_anthropic.jsonl",
+            7,
+            thinking_only,
+            {("recorder_anthropic.jsonl", 7): {"model": "x"}},
+        )
 
 
 def test_every_pinned_difference_is_a_line_with_both_forms_and_has_a_reason() -> None:
