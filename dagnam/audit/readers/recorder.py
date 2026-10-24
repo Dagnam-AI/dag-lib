@@ -124,7 +124,12 @@ def _from_anthropic(
 
 
 def _from_norm(env: TraceEnvelope, norm: Norm) -> TraceRecord:
-    messages = tuple(Message(m.role, text(m.content)) for m in norm.messages)
+    # An assistant turn is read as the raw parsers read one (reasoning the model wrote before its
+    # answer is not part of it); the recorder already put a turn's tool calls in its text.
+    messages = tuple(
+        Message(m.role, reply_text(m.content) if m.role == "assistant" else text(m.content))
+        for m in norm.messages
+    )
     if all(m.role == "assistant" for m in messages):  # as the raw parsers: nothing to answer
         raise MalformedRowError("prompt has no user turn")
     return TraceRecord(

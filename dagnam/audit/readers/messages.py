@@ -86,6 +86,8 @@ def _part_text(part: object) -> str:
         return ""
     if kind in _TOOL_RESULT_TYPES or kind in CALL_OUTPUT_TYPES:
         return content_text(get(part, "content", "output", "result", "response"))
+    if isinstance(kind, str) and kind.endswith("_tool_result"):
+        return ""  # a vendor-run tool's result (web search, code execution) is not what was said
     if kind == "message":  # a Responses output item wrapping its own parts
         return content_text(part.get("content"))
     response = get(part, "functionResponse.response", "function_response.response")
@@ -429,6 +431,7 @@ def task_signature(request: object) -> str | None:
         "response_format.json_schema.name",
         "response_format.name",
         "text.format.name",
+        "text_format.name",
         "tool_choice.function.name",
         "tool_choice.name",
         "function_call.name",

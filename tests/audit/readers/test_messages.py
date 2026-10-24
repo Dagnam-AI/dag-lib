@@ -400,6 +400,10 @@ def test_task_signature_names_the_schema_and_never_the_tool_set() -> None:
     assert task_signature({"text": {"format": {"type": "json_schema", "name": "resume"}}}) == (
         "schema=resume"
     )
+    # The Responses ``parse()`` argument, which the local recorder keeps under its own name.
+    assert task_signature({"text_format": {"type": "json_schema", "name": "resume"}}) == (
+        "schema=resume"
+    )
     # The tools a request OFFERS change per call (a deploy adds one, permissions
     # or retrieval pick them), so they never split a workload.
     tools = [{"type": "function", "function": {"name": "b"}}, {"type": "function", "name": "a"}]

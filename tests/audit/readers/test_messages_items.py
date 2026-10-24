@@ -213,3 +213,27 @@ def test_each_envelope_is_read_through_the_field_that_holds_its_answer() -> None
     ):
         assert is_reply(envelope)
         assert response_of(envelope) == Reply("a", ())
+
+
+SEARCH = [
+    {"type": "server_tool_use", "id": "s1", "name": "web_search", "input": {"query": "q"}},
+    {
+        "type": "web_search_tool_result",
+        "tool_use_id": "s1",
+        "content": [{"type": "web_search_result", "title": "T", "url": "https://example.com"}],
+    },
+    {"type": "text", "text": "It shipped."},
+]
+
+
+@pytest.mark.parametrize("kind", ["web_search_tool_result", "code_execution_tool_result"])
+def test_a_vendor_run_tools_result_is_never_part_of_what_the_assistant_said(kind: str) -> None:
+    content = [{**SEARCH[1], "type": kind}, SEARCH[2]]
+    assert reply_of({"content": content}) == ("It shipped.", ())
+    prompt = split_prompt([USER, {"role": "assistant", "content": [SEARCH[0], *content]}, USER])
+    assert prompt[1][1] == Message("assistant", "It shipped.")
+
+
+def test_the_users_own_tool_result_is_still_conversation() -> None:
+    prompt = [{"role": "user", "content": [{"type": "tool_result", "content": "shipped"}]}]
+    assert split_prompt(prompt)[1] == (Message("user", "shipped"),)
