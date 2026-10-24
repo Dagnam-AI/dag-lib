@@ -107,17 +107,44 @@ def test_citations_are_appended_to_what_the_block_started_with() -> None:
     assert assembler.result()["content"][0]["citations"] == [first, second]
 
 
-def test_tool_input_pieces_that_are_not_an_object_become_an_empty_input() -> None:
-    def tool(pieces: List[str]) -> Any:
-        events = [opened(0, {"type": "tool_use", "id": "t", "name": "n", "input": {"a": 1}})]
-        events += [delta(0, type="input_json_delta", partial_json=piece) for piece in pieces]
-        return fold(START, *events, STOP).result()["content"][0]["input"]
+def tool_input(pieces: List[str], stop_reason: str = "tool_use", kind: str = "tool_use") -> Any:
+    """The assembled ``input`` of one tool block that started with ``{"a": 1}``."""
+    events = [opened(0, {"type": kind, "id": "t", "name": "n", "input": {"a": 1}})]
+    events += [delta(0, type="input_json_delta", partial_json=piece) for piece in pieces]
+    stop = {"type": "message_delta", "delta": {"stop_reason": stop_reason}}
+    return fold(START, *events, stop, STOP).result()["content"][0]["input"]
 
-    assert tool(['{"a":', "2}"]) == {"a": 2}
-    assert tool([""]) == {}
-    assert tool(["[1, 2]"]) == {}
-    assert tool(['{"a": ']) == {}
-    assert tool([]) == {"a": 1}  # no pieces at all: what the block started with
+
+def test_tool_input_pieces_are_parsed_when_they_make_an_object() -> None:
+    assert tool_input(['{"a":', "2}"]) == {"a": 2}
+    assert tool_input([""]) == {}  # a tool with no parameters
+    assert tool_input(["  "]) == {}
+    assert tool_input([]) == {"a": 1}  # no pieces at all: what the block started with
+
+
+def test_tool_input_that_is_not_an_object_or_is_cut_short_stays_the_verbatim_text() -> None:
+    assert tool_input(['{"a": ', "1"], "max_tokens") == '{"a": 1'
+    assert tool_input(["[1, 2]"]) == "[1, 2]"
+    assert tool_input(['{"a'], "tool_use") == '{"a'  # invalid even though the stop looks normal
+
+
+def test_a_tool_call_with_nothing_in_it_when_max_tokens_stopped_it_has_empty_arguments() -> None:
+    assert tool_input([""], "max_tokens") == ""
+    assert tool_input([], "max_tokens", kind="server_tool_use") == {"a": 1}  # it started complete
+    events = [opened(0, {"type": "tool_use", "id": "t", "name": "n", "input": {}})]
+    stop = {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}
+    assert fold(START, *events, stop, STOP).result()["content"][0]["input"] == ""
+
+
+def test_only_the_last_block_can_have_been_cut_short() -> None:
+    first = opened(0, {"type": "tool_use", "id": "a", "name": "n", "input": {}})
+    second = opened(1, {"type": "tool_use", "id": "b", "name": "n", "input": {"k": 1}})
+    stop = {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}
+    content = fold(
+        START, first, delta(0, type="input_json_delta", partial_json=""), second, stop, STOP
+    ).result()["content"]
+    assert content[0]["input"] == {}  # finished before the last block began
+    assert content[1]["input"] == {"k": 1}
 
 
 def test_an_error_event_makes_a_failed_call_whatever_came_before() -> None:

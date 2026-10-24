@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, List, Tuple
+from typing import Any, List, Tuple
 
 from _anthropic_bodies import PATH, message_body, text_events
 from _anthropic_calls import ARGS, run
@@ -18,11 +19,9 @@ import anthropic.lib.vertex._beta_messages as vertex_beta
 import anthropic.resources.beta.messages as beta_messages
 import anthropic.resources.messages as messages_module
 import httpx
+import pytest
 
 from dagnam_record import _anthropic
-
-if TYPE_CHECKING:
-    import pytest
 
 VERTEX_CREDENTIAL = "vertex-must-not-be-recorded"
 ABSENT = (
@@ -237,15 +236,75 @@ def test_a_vertex_client_is_recorded_through_its_real_request_path(arig: Any) ->
     assert arig.server.seen[0].headers["authorization"] == "Bearer " + VERTEX_CREDENTIAL
 
 
-def test_a_message_stream_without_the_expected_attribute_is_counted_and_unharmed(
-    arig: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A future SDK may build its message stream differently: the call must still work."""
+class OddRaw:
+    """An event stream that is not built the way the SDKs build theirs: no ``_iterator``."""
+
+
+class ReadOnlyRaw:
+    """An event stream whose ``_iterator`` cannot be replaced."""
+
+    @property
+    def _iterator(self) -> Any:
+        return iter([])
+
+    def close(self) -> None:
+        """Close."""
+
+
+class NotCallableClose:
+    """An event stream whose ``close`` is not a method."""
+
+    close = 5
+
+    def __init__(self) -> None:
+        self._iterator = iter([])
+
+
+class HeldRaw:
+    """A message stream that only lets ``_raw_stream`` be read: it is never assigned."""
+
+    def __init__(self, raw: Any) -> None:
+        self.__raw = raw
+
+    @property
+    def _raw_stream(self) -> Any:
+        return self.__raw
+
+
+class FakeEvents:
+    """Built like the SDK's event streams: a generator in ``_iterator``."""
+
+    def __init__(self) -> None:
+        events = [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hi"},
+            },
+            {"type": "message_stop"},
+        ]
+        self._iterator = iter(events)
+
+    def __iter__(self) -> Any:
+        yield from self._iterator
+
+    def close(self) -> None:
+        """Close."""
+
+
+def enter_fake_manager(arig: Any, monkeypatch: pytest.MonkeyPatch, stream: Any) -> Any:
+    """Enter a manager that hands out ``stream`` through the patched ``__enter__``."""
     _anthropic.uninstall()
 
     class Manager:
         def __enter__(self) -> Any:
-            return SimpleNamespace(opened=True)
+            return stream
 
         def __exit__(self, *exc: Any) -> None:
             return None
@@ -254,11 +313,43 @@ def test_a_message_stream_without_the_expected_attribute_is_counted_and_unharmed
     assert _anthropic.install(arig.recorder)
     manager = Manager()
     setattr(manager, _anthropic.CALL, ("messages", {"model": "m"}))
-    with manager as stream:
-        assert stream.opened is True
-    assert not hasattr(stream, "_raw_stream")  # nothing was put in its place
+    with manager as entered:
+        return entered
+
+
+@pytest.mark.parametrize("raw", [None, OddRaw(), ReadOnlyRaw(), NotCallableClose()])
+def test_a_message_stream_that_is_not_built_as_expected_costs_one_drop_and_is_unharmed(
+    arig: Any, monkeypatch: pytest.MonkeyPatch, raw: Any
+) -> None:
+    """A future SDK may build its message stream differently: the call must still work."""
+    stream = SimpleNamespace(opened=True)
+    if raw is not None:
+        stream._raw_stream = raw
+    entered = enter_fake_manager(arig, monkeypatch, stream)
+    assert entered is stream
+    assert getattr(stream, "_raw_stream", raw) is raw  # nothing was put in its place
+    del entered, stream, raw
+    gc.collect()
     assert arig.writer.counts["dropped_error"] == 1
+    assert arig.writer.counts["dropped_partial"] == 0
     assert arig.raw() == []
+
+
+def test_a_read_only_raw_stream_is_watched_in_place_without_assigning_it(
+    arig: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = FakeEvents()
+    stream = enter_fake_manager(arig, monkeypatch, HeldRaw(raw))
+    assert [event["type"] for event in stream._raw_stream] == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "message_stop",
+    ]
+    assert stream._raw_stream is raw
+    (line,) = arig.lines()
+    assert line["norm"]["response"] == "Hi"
+    assert arig.writer.counts["dropped_error"] == 0
 
 
 def test_a_manager_that_cannot_carry_the_request_is_counted_and_returned_as_it_is(

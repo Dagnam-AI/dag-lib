@@ -9,6 +9,7 @@ from _anthropic_bodies import MODEL, PATH, error_body, message_body, text_events
 from _anthropic_calls import ARGS, run
 from _mock_server import Reply
 import anthropic
+from anthropic.lib.streaming import MessageStream, MessageStreamManager
 import pytest
 
 from dagnam_record import _anthropic
@@ -62,6 +63,21 @@ def test_leaving_the_with_block_after_message_stop_records_it_once(arig: Any) ->
                 break  # the iteration itself was never asked to end
     assert len(arig.lines()) == 1
     assert arig.writer.counts["dropped_partial"] == 0
+
+
+def test_the_manager_and_the_message_stream_keep_their_sdk_types(arig: Any) -> None:
+    arig.server.on(PATH, Reply(events=text_events()))
+    with arig.anthropic() as client:
+        manager = client.messages.stream(**ARGS)
+        assert isinstance(manager, MessageStreamManager)
+        with manager as stream:
+            assert isinstance(stream, MessageStream)
+            inside: Any = stream
+            assert type(inside._raw_stream) is anthropic.Stream  # the SDK's own, watched in place
+            assert isinstance(inside._raw_stream, anthropic.Stream)
+            assert stream.response.status_code == 200
+            stream.get_final_message()
+    assert len(arig.lines()) == 1
 
 
 def test_the_manager_is_the_sdks_own_object_and_a_second_entry_records_again(arig: Any) -> None:

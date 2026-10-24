@@ -169,14 +169,14 @@ def test_an_interrupt_after_message_stop_records_the_complete_answer(arig: Any) 
     arig.server.on(PATH, Reply(events=THROUGH_STOP))
     with arig.anthropic() as client:
         stream = open_stream(client)
-        original = stream._stream._iterator
+        original = stream._iterator._iterator  # the SDK's generator, inside the watcher
 
         def interrupted_after_the_stop() -> Any:
             for _ in range(READS_TO_STOP):
                 yield next(original)
             raise KeyboardInterrupt
 
-        stream._stream._iterator = interrupted_after_the_stop()
+        stream._iterator._iterator = interrupted_after_the_stop()
         iterator = iter(stream)
         for _ in range(READS_TO_STOP):
             next(iterator)
@@ -190,13 +190,13 @@ def test_an_interrupt_before_message_stop_records_nothing_and_counts(arig: Any) 
     arig.server.on(PATH, Reply(events=THROUGH_STOP))
     with arig.anthropic() as client:
         stream = open_stream(client)
-        original = stream._stream._iterator
+        original = stream._iterator._iterator
 
         def interrupted_early() -> Any:
             yield next(original)
             raise KeyboardInterrupt
 
-        stream._stream._iterator = interrupted_early()
+        stream._iterator._iterator = interrupted_early()
         iterator = iter(stream)
         next(iterator)
         with pytest.raises(KeyboardInterrupt):

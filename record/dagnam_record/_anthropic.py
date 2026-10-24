@@ -1,20 +1,24 @@
 """Record ``anthropic`` Messages calls (sync, async, streaming and the ``stream()`` helper).
 
 ``install`` wraps ``create``, ``parse`` and ``stream`` on the SDK's ``Messages`` and
-``AsyncMessages`` classes, in the main namespace and in ``beta`` (the Bedrock and Vertex clients
-use the same classes, so they are covered). It imports ``anthropic`` lazily and only there (a
-missing SDK, or a version without one of the resources, is simply not patched), so ``import
-dagnam_record`` never needs the SDK. The wrapper records the call's JSON body parameters (taken
-before the call) and the response body, and nothing else: no header or key is read, and the
-tokens a request body can carry (an MCP server's ``authorization_token``) are replaced.
+``AsyncMessages`` classes, in the main namespace and in ``beta``. The Bedrock and Vertex clients
+use those same classes for ``messages``, but their ``beta`` resources are separate classes that
+copy the first-party functions when the SDK is imported, so those two are patched explicitly.
+It imports ``anthropic`` lazily and only there (a missing SDK, or a version without one of the
+resources, is simply not patched), so ``import dagnam_record`` never needs the SDK. The wrapper
+records the call's JSON body parameters (taken before the call) and the response body, and
+nothing else: no header or key is read, and the tokens a request body can carry (an MCP
+server's ``authorization_token``) are replaced.
 
-``stream()`` does not go through ``create``: it returns a manager whose ``__enter__`` opens the
-request. The ``stream`` wrapper only attaches the request snapshot to the manager; the manager
-classes' ``__enter__`` (``__aenter__``) is patched to tee the raw event stream that the SDK's
-``MessageStream`` then reads, so the helper is recorded once, however it is left (exhausted,
-``get_final_message()``, ``close()``, leaving the ``with`` block). Not recorded in v1 (the call
-itself is unaffected): ``with_raw_response`` and ``with_streaming_response`` (their result is not
-a model; counted as ``dropped_error``).
+A streaming call returns the SDK's OWN stream object (the SDK checks the exact type of its
+streams, so a proxy would fail ``isinstance``): the stream is watched in place, see
+``_stream.instrument``. ``stream()`` does not go through ``create``: it returns a manager whose
+``__enter__`` opens the request. The ``stream`` wrapper only attaches the request snapshot to the
+manager; the manager classes' ``__enter__`` (``__aenter__``) is patched to watch the raw event
+stream that the SDK's ``MessageStream`` then reads, so the helper is recorded once, however it is
+left (exhausted, ``get_final_message()``, ``close()``, leaving the ``with`` block). Not recorded
+in v1 (the call itself is unaffected): ``with_raw_response`` and ``with_streaming_response``
+(their result is not a model; counted as ``dropped_error``).
 
 Streams follow the shared policy in ``_stream``: a finished answer (``message_stop`` seen) is
 recorded once however the stream ends, a cut one is counted as ``dropped_partial``.
@@ -48,7 +52,9 @@ def _status(exc: BaseException) -> Optional[int]:
     return status
 
 
-_PATCHER = Patcher(PROVIDER, request_body, response_body, lambda _: MessageAssembler(), _status)
+_PATCHER = Patcher(
+    PROVIDER, request_body, response_body, lambda _: MessageAssembler(), _status, in_place=True
+)
 
 
 def _wrap_stream(original: Callable[..., Any]) -> Callable[..., Any]:
@@ -69,15 +75,11 @@ def _wrap_stream(original: Callable[..., Any]) -> Callable[..., Any]:
 def _tee(
     recorder: Recorder, call: Tuple[str, Body], stream: Any, started: float, *, sync: bool
 ) -> Any:
-    """Watch the event stream inside the SDK's message stream; the message stream is the result."""
-    raw = getattr(stream, RAW, None)
-    if raw is None:  # an SDK whose message stream is built differently: not recorded, and counted
-        recorder.writer.count("dropped_error")
-        return stream
+    """Watch the SDK's event stream inside its message stream, in place; the message stream is the result."""
     endpoint, request = call
-    recorder.fail_open(
-        setattr, stream, RAW, _PATCHER.tee(recorder, endpoint, request, raw, started, sync=sync)
-    )
+    # an SDK whose message stream is built differently has no such attribute (or an event stream
+    # that cannot be watched): ``tee`` counts that once as a drop and the call runs untouched
+    _PATCHER.tee(recorder, endpoint, request, getattr(stream, RAW, None), started, sync=sync)
     return stream
 
 

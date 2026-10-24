@@ -41,13 +41,24 @@ def _index(event: Any) -> Optional[int]:
     return index if isinstance(index, int) and not isinstance(index, bool) else None
 
 
-def _tool_input(pieces: List[str]) -> Body:
-    """The JSON object the pieces make; ``{}`` when there are none, or they are cut short."""
+_TOOL_BLOCKS = frozenset({"tool_use", "server_tool_use", "mcp_tool_use"})
+
+
+def _tool_input(text: str, *, cut: bool) -> Any:
+    """The input a tool block's JSON pieces make.
+
+    The JSON object when they make one; ``{}`` for a tool without parameters (no text at all);
+    otherwise the text itself, verbatim: a call that ``max_tokens`` cut short is not an object,
+    and an empty object made up for it would read as a call with no arguments. A block that was
+    cut with nothing in it has empty text.
+    """
+    if not text.strip():
+        return "" if cut else {}
     try:
-        parsed = json.loads("".join(pieces) or "{}")
-    except ValueError:  # e.g. the answer stopped at max_tokens in the middle of a tool call
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        parsed = json.loads(text)
+    except ValueError:
+        return text
+    return parsed if isinstance(parsed, dict) else text
 
 
 class MessageAssembler:
@@ -140,6 +151,10 @@ class MessageAssembler:
         for field in ("text", "thinking"):
             if field in pieces:
                 block[field] = str(block.get(field) or "") + "".join(pieces[field])
+        # only the last block can have been cut off by the output limit
+        cut = (self._head or {}).get("stop_reason") == "max_tokens" and index == max(self._blocks)
         if "partial_json" in pieces:
-            block["input"] = _tool_input(pieces["partial_json"])
+            block["input"] = _tool_input("".join(pieces["partial_json"]), cut=cut)
+        elif cut and block.get("type") in _TOOL_BLOCKS and not block.get("input"):
+            block["input"] = ""
         return block

@@ -17,15 +17,19 @@ failing watcher never reaches the caller:
 * a watcher that fails stops watching: the failure is counted through ``guard``, ``done`` is not
   called and the stream is simply not recorded.
 
-The proxy forwards every other attribute to the stream it wraps, reports the wrapped stream's
-class for ``isinstance`` checks and returns itself from ``with``, so a caller cannot tell it from
-the SDK's own stream.
+Two ways to watch a stream. ``TeeStream`` / ``AsyncTeeStream`` are proxies: they forward every
+other attribute to the stream they wrap, report the wrapped stream's class for ``isinstance``
+checks and return themselves from ``with``. A proxy cannot satisfy an SDK that checks the exact
+type of the object (the Anthropic ``Stream`` does), so ``instrument`` watches an SDK stream
+IN PLACE instead: the caller keeps the SDK's own object, whose iterator and ``close`` are
+replaced on the instance. Both report through the same ``_Watch``.
 """
 
 from __future__ import annotations
 
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator, Optional, Type
+import weakref
 
 Guard = Callable[..., bool]
 """``Recorder.fail_open``: runs a step, counts an error, and says whether the step ran cleanly."""
@@ -38,39 +42,83 @@ def get(obj: Any, name: str) -> Any:
     return getattr(obj, name, None)
 
 
-class _Tap:
-    """The bookkeeping both proxies share: what to call, and that it is called only once."""
+class _Watch:
+    """What to call, and that it is called only once (state only: it never holds a stream)."""
 
-    def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
-        self._stream = stream
+    def __init__(self, guard: Guard, watcher: Any) -> None:
         self._guard = guard
         self._watcher = watcher
         self._over = False  # reported already: nothing more is recorded
         self._broken = False  # a watcher call failed: this stream is not recorded
 
-    def _seen(self, value: Any) -> None:
+    def watch_item(self, value: Any) -> None:
+        """One item went by."""
         if not self._over and not self._broken:
             self._broken = not self._guard(self._watcher.item, value)
 
-    def _finish(self) -> None:
+    def watch_end(self) -> None:
+        """The recorder is done with the stream (it ended, was closed or let go)."""
         if not self._over:
             self._over = True
             if not self._broken:
                 self._guard(self._watcher.done)
 
-    def _fail(self, exc: BaseException) -> None:
+    def watch_error(self, exc: BaseException) -> None:
+        """The stream raised an ``Exception``."""
         if not self._over:
             self._over = True
             self._guard(self._watcher.error, exc)
 
-    def _cancel(self) -> None:
+    def watch_cancel(self) -> None:
+        """The stream was interrupted or cancelled."""
         if not self._over:
             self._over = True
             self._guard(self._watcher.cancelled)
 
+    def watch_next(self, iterator: Iterator[Any]) -> Any:
+        """The next item of ``iterator``, reported."""
+        try:
+            value = next(iterator)
+        except StopIteration:
+            self.watch_end()
+            raise
+        except Exception as exc:
+            self.watch_error(exc)
+            raise
+        except BaseException:
+            self.watch_cancel()
+            raise
+        self.watch_item(value)
+        return value
+
+    async def watch_anext(self, iterator: AsyncIterator[Any]) -> Any:
+        """The next item of ``iterator``, reported."""
+        try:
+            value = await iterator.__anext__()
+        except StopAsyncIteration:
+            self.watch_end()
+            raise
+        except Exception as exc:
+            self.watch_error(exc)
+            raise
+        except BaseException:
+            self.watch_cancel()
+            raise
+        self.watch_item(value)
+        return value
+
+
+class _Tap(_Watch):
+    """The proxies' base: a ``_Watch`` over the stream they wrap."""
+
+    def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
+        super().__init__(guard, watcher)
+        self._stream = stream
+        self._armed = False  # set last: a proxy that failed to build reports nothing
+
     def __del__(self) -> None:
-        if "_over" in self.__dict__:  # a proxy that was never built has nothing to report
-            self._finish()
+        if self.__dict__.get("_armed"):
+            self.watch_end()
 
     def __getattr__(self, name: str) -> Any:
         if name == "_stream":  # not built yet (a copy, say): do not look for it forever
@@ -98,31 +146,20 @@ class TeeStream(_Tap):
     def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
         super().__init__(stream, guard, watcher)
         self._iterator: Iterator[Any] = iter(stream)
+        self._armed = True
 
     def __iter__(self) -> TeeStream:
         return self
 
     def __next__(self) -> Any:
-        try:
-            value = next(self._iterator)
-        except StopIteration:
-            self._finish()
-            raise
-        except Exception as exc:
-            self._fail(exc)
-            raise
-        except BaseException:
-            self._cancel()
-            raise
-        self._seen(value)
-        return value
+        return self.watch_next(self._iterator)
 
     def close(self) -> Any:
         """Close the stream; what the recorder saw so far is reported either way."""
         try:
             return self._stream.close()
         finally:
-            self._finish()
+            self.watch_end()
 
     def __enter__(self) -> TeeStream:
         self._stream.__enter__()
@@ -137,7 +174,7 @@ class TeeStream(_Tap):
         try:
             return self._stream.__exit__(exc_type, exc, traceback)
         finally:
-            self._finish()
+            self.watch_end()
 
 
 class AsyncTeeStream(_Tap):
@@ -146,31 +183,20 @@ class AsyncTeeStream(_Tap):
     def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
         super().__init__(stream, guard, watcher)
         self._iterator: AsyncIterator[Any] = stream.__aiter__()
+        self._armed = True
 
     def __aiter__(self) -> AsyncTeeStream:
         return self
 
     async def __anext__(self) -> Any:
-        try:
-            value = await self._iterator.__anext__()
-        except StopAsyncIteration:
-            self._finish()
-            raise
-        except Exception as exc:
-            self._fail(exc)
-            raise
-        except BaseException:
-            self._cancel()
-            raise
-        self._seen(value)
-        return value
+        return await self.watch_anext(self._iterator)
 
     async def close(self) -> Any:
         """Close the stream; what the recorder saw so far is reported either way."""
         try:
             return await self._stream.close()
         finally:
-            self._finish()
+            self.watch_end()
 
     async def __aenter__(self) -> AsyncTeeStream:
         await self._stream.__aenter__()
@@ -185,4 +211,85 @@ class AsyncTeeStream(_Tap):
         try:
             return await self._stream.__aexit__(exc_type, exc, traceback)
         finally:
-            self._finish()
+            self.watch_end()
+
+
+class _Source:
+    """Stands where the SDK keeps its iterator (``stream._iterator``): reads it, reports what it sees."""
+
+    def __init__(self, watch: _Watch, iterator: Iterator[Any]) -> None:
+        self._watch = watch
+        self._iterator = iterator
+
+    def __iter__(self) -> _Source:
+        return self
+
+    def __next__(self) -> Any:
+        return self._watch.watch_next(self._iterator)
+
+
+class _AsyncSource:
+    """The async twin of ``_Source``."""
+
+    def __init__(self, watch: _Watch, iterator: AsyncIterator[Any]) -> None:
+        self._watch = watch
+        self._iterator = iterator
+
+    def __aiter__(self) -> _AsyncSource:
+        return self
+
+    async def __anext__(self) -> Any:
+        return await self._watch.watch_anext(self._iterator)
+
+
+def _closer(close: Callable[..., Any], watch: _Watch, *, sync: bool) -> Callable[..., Any]:
+    """``close`` that also reports what was seen, whatever ``close`` does."""
+    if sync:
+
+        def closer(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return close(*args, **kwargs)
+            finally:
+                watch.watch_end()
+
+        return closer
+
+    async def aclose(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await close(*args, **kwargs)
+        finally:
+            watch.watch_end()
+
+    return aclose
+
+
+def instrument(stream: Any, guard: Guard, watcher: Any, *, sync: bool) -> Any:
+    """Watch an SDK stream in place and return that same object.
+
+    Reads of its iterator go through ``_Source`` (so ``next()``, ``iter()``, ``with`` and the
+    async forms all behave natively), ``close`` is wrapped on the instance (the SDKs' ``__exit__``
+    calls ``self.close()``), and letting go of the stream reports it through a ``weakref.finalize``
+    hook that holds the watch state and never the stream. Raises ``AttributeError`` or
+    ``TypeError``, with the stream left exactly as it was, when it is not built the way the SDKs
+    build theirs (no ``_iterator`` or no ``close``, a read-only ``_iterator``, no instance
+    ``close`` slot, no weak references).
+    """
+    iterator = stream._iterator
+    if not callable(getattr(iterator, "__next__" if sync else "__anext__", None)):
+        raise TypeError("the stream's iterator is not of the expected kind")
+    close = stream.close
+    if not callable(close):
+        raise TypeError("the stream has no close()")
+    watch = _Watch(guard, watcher)
+    stream._iterator = (_Source if sync else _AsyncSource)(watch, iterator)
+    try:
+        stream.close = _closer(close, watch, sync=sync)
+        weakref.finalize(stream, watch.watch_end).atexit = False
+    except Exception:
+        stream._iterator = iterator
+        try:
+            del stream.close
+        except AttributeError:  # it was never set
+            pass
+        raise
+    return stream

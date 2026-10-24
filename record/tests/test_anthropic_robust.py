@@ -81,8 +81,7 @@ def test_a_stream_that_cannot_be_watched_is_handed_back_untouched_and_counted(
         raise TypeError("cannot tee")
 
     arig.server.on(PATH, Reply(events=text_events()))
-    monkeypatch.setattr(_patch, "TeeStream", refuse)
-    monkeypatch.setattr(_patch, "AsyncTeeStream", refuse)
+    monkeypatch.setattr(_patch, "instrument", refuse)
     with arig.anthropic() as client:
         stream = client.messages.create(stream=True, **ARGS)
         assert type(stream) is anthropic.Stream

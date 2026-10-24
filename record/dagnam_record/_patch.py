@@ -19,7 +19,7 @@ import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from dagnam_record._recorder import Recorder, recording_disabled
-from dagnam_record._stream import AsyncTeeStream, TeeStream
+from dagnam_record._stream import AsyncTeeStream, TeeStream, instrument
 
 Body = Dict[str, Any]
 Build = Callable[[Callable[..., Any]], Callable[..., Any]]
@@ -98,12 +98,15 @@ class Patcher:
         response_body: Callable[[Any], Body],
         assembler: Callable[[str], Any],
         status_of: Callable[[BaseException], Optional[int]] = error_status,
+        *,
+        in_place: bool = False,
     ) -> None:
         self.provider = provider
         self.request_body = request_body
         self.response_body = response_body
         self.assembler = assembler
         self.status_of = status_of
+        self.in_place = in_place  # watch the SDK's own stream object, not a proxy of it
         self.recorder: Optional[Recorder] = None  # None: the wrappers pass straight through
         self._patched: List[Tuple[Any, str, Any]] = []  # (class, method name, the SDK's function)
 
@@ -163,9 +166,16 @@ class Patcher:
         *,
         sync: bool,
     ) -> Any:
-        """``stream`` watched by the recorder; ``stream`` itself if it cannot be watched."""
+        """``stream`` watched by the recorder; ``stream`` itself if it cannot be watched.
+
+        A provider whose SDK checks the exact type of its streams is watched in place (the same
+        object comes back); the others get a proxy. A stream that cannot be watched is counted
+        once as ``dropped_error`` and handed back untouched.
+        """
         try:
             watcher = Watcher(self, recorder, endpoint, request, started)
+            if self.in_place:
+                return instrument(stream, recorder.fail_open, watcher, sync=sync)
             return (TeeStream if sync else AsyncTeeStream)(stream, recorder.fail_open, watcher)
         except Exception:  # a result that cannot be teed is handed back as it is
             recorder.writer.count("dropped_error")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from typing import Any, Dict, List
 
 from _anthropic_bodies import (
@@ -26,6 +27,20 @@ from anthropic.resources import Messages
 import pytest
 
 from dagnam_record import _anthropic
+
+
+class SdkStyleStream:
+    """Built like the SDK's streams: a generator in ``_iterator``, read by ``__iter__``."""
+
+    def __init__(self, events: List[Any]) -> None:
+        self._iterator = iter(events)
+
+    def __iter__(self) -> Any:
+        for item in self._iterator:
+            yield item
+
+    def close(self) -> None:
+        """Nothing to close."""
 
 
 def read(arig: Any, events: List[Event], **kwargs: Any) -> List[Any]:
@@ -69,17 +84,35 @@ def test_the_caller_sees_the_same_events_as_without_the_recorder(arig: Any) -> N
     assert len(arig.lines()) == 1  # only the recorded call left a line
 
 
-def test_the_stream_object_reports_the_sdk_class_and_forwards_what_it_does_not_know(
-    arig: Any,
-) -> None:
+def test_the_result_is_the_sdks_own_stream_object_unchanged_in_type(arig: Any) -> None:
     arig.server.on(PATH, Reply(events=text_events()))
     with arig.anthropic() as client:
         stream = client.messages.create(stream=True, **ARGS)
-        assert stream.__class__ is anthropic.Stream  # the SDK's own isinstance() is False for all
+        # the SDK's isinstance() only accepts its own type, so a proxy of any kind would fail
+        assert type(stream) is anthropic.Stream
+        assert isinstance(stream, anthropic.Stream)
         assert stream.response.status_code == 200
+        assert stream.__class__ is anthropic.Stream
         with stream as same:
             assert same is stream
             assert len(list(same)) == 7
+    (line,) = arig.lines()
+    assert line["norm"]["response"] == "Hello"
+
+
+def test_next_iter_and_a_second_iter_share_one_position_and_record_once(arig: Any) -> None:
+    arig.server.on(PATH, Reply(events=text_events()), Reply(events=text_events()))
+    with arig.anthropic() as client:
+        stream = client.messages.create(stream=True, **ARGS)
+        assert next(stream).type == "message_start"
+        assert next(iter(stream)).type == "content_block_start"
+        assert [event.type for event in stream][
+            -1
+        ] == "message_stop"  # the rest of the same iterator
+        assert len(arig.lines()) == 1
+        second = client.messages.create(stream=True, **ARGS)
+        assert {event.type for event in second} >= {"message_stop"}
+    assert len(arig.lines()) == 2
 
 
 def test_an_async_stream_is_recorded(arig: Any) -> None:
@@ -87,8 +120,11 @@ def test_an_async_stream_is_recorded(arig: Any) -> None:
 
     async def call(client: anthropic.AsyncAnthropic) -> List[Any]:
         stream = await client.messages.create(stream=True, **ARGS)
-        assert stream.__class__ is anthropic.AsyncStream
-        return [event async for event in stream]
+        assert type(stream) is anthropic.AsyncStream
+        assert isinstance(stream, anthropic.AsyncStream)
+        async with stream as same:
+            assert same is stream
+            return [event async for event in same]
 
     assert len(run(call, arig)) == 18
     (line,) = arig.lines()
@@ -132,14 +168,25 @@ def test_a_tool_without_any_json_piece_keeps_the_input_it_started_with(arig: Any
     assert line["response"]["content"] == [started]
 
 
-def test_a_tool_call_cut_short_by_max_tokens_has_an_empty_input(arig: Any) -> None:
+def test_a_tool_call_cut_short_by_max_tokens_keeps_what_arrived_verbatim(arig: Any) -> None:
     started = {"type": "tool_use", "id": "toolu_01", "name": "weather", "input": {}}
     stream = [*head(), block_start(0, started), block_delta(0, json_delta('{"city": "Pa'))]
     read(arig, [*stream, block_stop(0), *tail("max_tokens")])
     (line,) = arig.lines()
-    assert line["response"]["content"][0]["input"] == {}
+    assert line["response"]["content"][0]["input"] == '{"city": "Pa'  # not a made-up {}
     assert line["response"]["stop_reason"] == "max_tokens"
-    assert line["norm"]["tool_calls"][0]["function"]["arguments"] == "{}"
+    assert line["norm"]["tool_calls"][0]["function"]["arguments"] == '{"city": "Pa'
+
+
+def test_a_tool_call_cut_before_any_json_arrived_has_empty_arguments(arig: Any) -> None:
+    started = {"type": "tool_use", "id": "toolu_01", "name": "weather", "input": {}}
+    cut = [*head(), block_start(0, started), block_delta(0, json_delta("")), block_stop(0)]
+    read(arig, [*cut, *tail("max_tokens")])
+    nothing = [*head(), block_start(0, started), block_stop(0), *tail("max_tokens")]
+    read(arig, nothing)
+    for line in arig.lines():
+        assert line["response"]["content"][0]["input"] == ""
+        assert line["norm"]["tool_calls"][0]["function"]["arguments"] == ""
 
 
 def test_thinking_signature_citations_and_server_tool_blocks(arig: Any) -> None:
@@ -313,11 +360,24 @@ def test_an_error_event_that_reaches_the_recorder_as_an_item_is_a_failed_row(
         {"type": "error", "error": {"type": "overloaded_error", "message": "busy"}},
     ]
     _anthropic.uninstall()
-    monkeypatch.setattr(Messages, "create", lambda self, **kwargs: iter(events))
+    monkeypatch.setattr(Messages, "create", lambda self, **kwargs: SdkStyleStream(events))
     assert _anthropic.install(arig.recorder)
     with arig.anthropic() as client:
-        assert list(client.messages.create(stream=True, **ARGS)) == events
+        assert list(client.messages.create(stream=True, **ARGS)) == events  # the fake's own object
     _anthropic.uninstall()  # before monkeypatch puts the SDK's function back
     (line,) = arig.lines()
     assert (line["status"], line["response"]) == (529, {"error": {"type": "overloaded_error"}})
+    assert arig.writer.counts["dropped_partial"] == 0
+
+
+def test_a_raw_response_stream_is_counted_once_as_an_error_not_as_a_partial(arig: Any) -> None:
+    arig.server.on(PATH, Reply(events=text_events()))
+    with arig.anthropic() as client:
+        raw = client.messages.with_raw_response.create(stream=True, **ARGS)
+        assert raw.status_code == 200
+        assert len(list(raw.parse())) == 7  # the call itself is unaffected
+        del raw
+        gc.collect()
+    assert arig.raw() == []
+    assert arig.writer.counts["dropped_error"] == 1
     assert arig.writer.counts["dropped_partial"] == 0
