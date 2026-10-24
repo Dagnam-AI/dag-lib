@@ -7,6 +7,7 @@ the recorder still records those SDKs the way the fixtures say.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,24 +16,22 @@ import gen_fixtures
 import openai
 import pytest
 
-LOCKED = {"openai": openai.__version__, "anthropic": anthropic.__version__} == (
-    gen_fixtures.SDK_VERSIONS
-)
+MATRIX = "DAGNAM_RECORD_SDK_MATRIX"
+"""Set to 1 by a job that runs the suite against other SDK versions on purpose (it opts out)."""
 
 
 def lines(directory: Path, name: str) -> list[str]:
     return (directory / name).read_text(encoding="utf-8").splitlines()
 
 
-@pytest.mark.skipif(
-    not LOCKED, reason="the fixtures are generated with the locked SDK versions (SDK_VERSIONS)"
-)
-@pytest.mark.skipif(
-    not gen_fixtures.FIXTURES.is_dir(), reason="only a dag-lib checkout holds the fixtures"
-)
 def test_the_committed_fixtures_are_what_the_generator_writes_and_it_is_deterministic(
     fresh_state: None, tmp_path: Path
 ) -> None:
+    if os.environ.get(MATRIX) == "1":
+        pytest.skip(
+            f"{MATRIX}=1: this job runs other SDK versions than the fixtures were made with"
+        )
+    gen_fixtures.check_environment()
     first = gen_fixtures.generate(tmp_path / "first")
     again = gen_fixtures.generate(tmp_path / "again")
     assert first == again
@@ -44,6 +43,38 @@ def test_the_committed_fixtures_are_what_the_generator_writes_and_it_is_determin
     }
     for name, expected in first.items():
         assert lines(gen_fixtures.FIXTURES, name) == expected, name
+
+
+def test_the_environment_check_passes_for_the_locked_sdks_and_a_checkout() -> None:
+    if os.environ.get(MATRIX) == "1":
+        pytest.skip(f"{MATRIX}=1")
+    gen_fixtures.check_environment()
+    assert gen_fixtures.installed_versions() == {
+        "openai": openai.__version__,
+        "anthropic": anthropic.__version__,
+    }
+
+
+def test_other_sdk_versions_fail_the_check_with_the_versions_and_the_way_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gen_fixtures, "SDK_VERSIONS", {"openai": "0.0.1", "anthropic": "0.0.2"})
+    with pytest.raises(RuntimeError) as caught:
+        gen_fixtures.check_environment()
+    message = str(caught.value)
+    assert "openai 0.0.1" in message
+    assert f"openai {openai.__version__}" in message
+    assert "anthropic 0.0.2" in message
+    assert "SDK_VERSIONS" in message
+    assert "DAGNAM_RECORD_SDK_MATRIX=1" in message
+
+
+def test_a_missing_fixture_directory_fails_the_check_with_where_it_looked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(gen_fixtures, "FIXTURES", tmp_path / "absent")
+    with pytest.raises(RuntimeError, match=r"absent.*DAGNAM_RECORD_SDK_MATRIX=1"):
+        gen_fixtures.check_environment()
 
 
 def test_main_writes_every_file_to_the_directory_it_is_given(

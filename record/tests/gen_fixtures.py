@@ -68,6 +68,30 @@ SPECS = (
 )
 
 
+def installed_versions() -> Dict[str, str]:
+    """The versions of the ``openai`` and ``anthropic`` this run would record calls with."""
+    return {"openai": openai.__version__, "anthropic": anthropic.__version__}
+
+
+def check_environment() -> None:
+    """Raise ``RuntimeError`` unless the committed fixtures can be compared with a fresh run.
+
+    That needs the locked SDK versions (the fixtures' bytes depend on them) and a checkout that
+    holds the fixture directory. A job that runs other versions on purpose, such as an SDK
+    matrix, sets ``DAGNAM_RECORD_SDK_MATRIX=1``, which the test that calls this honours.
+    """
+    way_out = "a job that runs other versions on purpose sets DAGNAM_RECORD_SDK_MATRIX=1"
+    if installed_versions() != SDK_VERSIONS:
+        found = ", ".join(f"{name} {version}" for name, version in installed_versions().items())
+        wanted = ", ".join(f"{name} {version}" for name, version in SDK_VERSIONS.items())
+        raise RuntimeError(
+            f"the fixtures were made with {wanted} (SDK_VERSIONS) but {found} is installed:"
+            f" regenerate them and update SDK_VERSIONS if the lock moved; {way_out}"
+        )
+    if not FIXTURES.is_dir():
+        raise RuntimeError(f"the fixture directory {FIXTURES} does not exist; {way_out}")
+
+
 def stamp(seconds: int) -> str:
     """The recorder's own timestamp format for a whole second."""
     text = datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="milliseconds")
