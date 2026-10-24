@@ -14,6 +14,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
   Stdout holds only the key (`--json` adds the workload, deployment id and key reference); exit
   status 2 means the workload is unknown, has no winner yet, or its key is not stored on this
   machine (rotate it in the Studio, which invalidates any stored copy).
+- Every `dagnam audit` subcommand's `--help` now ends with a link to its own section of the
+  workload audit docs page (`Docs: https://dagnam.ai/docs/dag-lib/workload-audit#<section>`), and
+  every optional flag's help states its default (`--window`, `--sample-rate`, `--out`,
+  `--price-table`, `--map`, `--workloads`, `--floor`, `--max-credits`). A test over the parser keeps
+  new flags and subcommands from skipping either.
 
 ## [0.22.1] - 2026-10-23
 

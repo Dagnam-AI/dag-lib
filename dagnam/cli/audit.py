@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dagnam_contracts.audit.verdict import FLOOR_JSON, FLOOR_LABEL
+
 from dagnam._core.exceptions import APIError, DeploymentNotFoundError
 from dagnam.cli.audit_cleanup import cmd_audit_cancel, cmd_audit_delete
 from dagnam.cli.audit_key import cmd_audit_key
@@ -25,6 +27,7 @@ from dagnam.cli.audit_scan import (
     retired_live,
     retired_notice,
 )
+from dagnam.cli.common import DOCS_URL
 from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
@@ -36,8 +39,15 @@ SOURCES = ("langfuse", "langsmith", "openai", "jsonl", "csv")
 DEFAULT_OUT = "./audit"
 RETIRED = "retired"
 """The status of a candidate a forced rescan took out of the audit; its artifacts may live on."""
+AUDIT_DOCS = f"{DOCS_URL}/dag-lib/workload-audit"
+"""The public docs page every ``dagnam audit`` command links its section of."""
 METRICS_RANGE = "7d"
 """The longest range the metrics endpoint serves; a 30-day view waits on the backend."""
+
+
+def _docs(anchor: str) -> str:
+    """The docs section a command's ``--help`` ends with."""
+    return f"{AUDIT_DOCS}#{anchor}"
 
 
 def parse_floor(value: str) -> float:
@@ -202,6 +212,7 @@ def register_audit(subparsers: SubParsersAction) -> None:
 
     scan = sub.add_parser(
         "scan",
+        docs_url=_docs("dagnam-audit-scan"),
         help="Discover and price workloads from a trace export (no network).",
         description="Read a trace export, discover workloads, price them, derive redacted rows.",
     )
@@ -211,32 +222,38 @@ def register_audit(subparsers: SubParsersAction) -> None:
         "--map",
         action="append",
         metavar="FIELD=COLUMN",
-        help="Map a trace field to one of your columns (jsonl/csv sources); repeatable.",
+        help="Map a trace field to one of your columns (jsonl/csv sources); repeatable"
+        " (default: none, the source's own field names are used).",
     )
     scan.add_argument(
         "--window",
         type=parse_window,
         default=30,
         metavar="30d",
-        help="Export window the per-day rates assume when the timestamps span less.",
+        help="Export window the per-day rates assume when the timestamps span less (default 30d).",
     )
     scan.add_argument(
         "--sample-rate",
         type=parse_sample_rate,
         default=1.0,
         metavar="0.1",
-        help="The share of traffic a sampled export holds; volume and spend are scaled up.",
+        help="The share of traffic a sampled export holds; volume and spend are scaled up"
+        " (default 1.0, the export is all of it).",
     )
     scan.add_argument(
-        "--out", default=DEFAULT_OUT, help=f"Audit directory (default {DEFAULT_OUT})."
+        "--out", default=DEFAULT_OUT, help=f"Audit directory (default: {DEFAULT_OUT})."
     )
-    scan.add_argument("--price-table", help="Override the bundled vendor price table (JSON).")
+    scan.add_argument(
+        "--price-table",
+        help="Override the bundled vendor price table (JSON) (default: the bundled table).",
+    )
     scan.add_argument("--json", action="store_true", help="Print scan-report.json to stdout.")
     scan.add_argument("--force", action="store_true", help="Rewrite rows a run in --out used.")
     scan.set_defaults(func=cmd_audit_scan)
 
     run = sub.add_parser(
         "run",
+        docs_url=_docs("dagnam-audit-run"),
         help="Train, deploy and score candidates for the workloads worth auditing.",
         description="Upload the derived rows (after confirmation), then run the candidate frontier.",
     )
@@ -245,7 +262,10 @@ def register_audit(subparsers: SubParsersAction) -> None:
         "--workloads", help="Comma-separated workload ids to run (default: all audited)."
     )
     run.add_argument(
-        "--floor", type=parse_floor, help="Quality floor on the agreement lower bound (0 < f <= 1)."
+        "--floor",
+        type=parse_floor,
+        help="Quality floor on the agreement lower bound (0 < f <= 1) (default: per workload,"
+        f" {FLOOR_LABEL} for labels and short spans, {FLOOR_JSON} for JSON objects).",
     )
     run.add_argument(
         "--max-credits",
@@ -267,13 +287,18 @@ def register_audit(subparsers: SubParsersAction) -> None:
     run.add_argument("--json", action="store_true", help="Print audit-report.json to stdout.")
     run.set_defaults(func=cmd_audit_run)
 
-    status = sub.add_parser("status", help="Show every job and endpoint the run created.")
+    status = sub.add_parser(
+        "status",
+        docs_url=_docs("dagnam-audit-status"),
+        help="Show every job and endpoint the run created.",
+    )
     status.add_argument("audit_dir", help="The audit directory.")
     status.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     status.set_defaults(func=cmd_audit_status)
 
     key = sub.add_parser(
         "key",
+        docs_url=_docs("switching-a-workload"),
         help="Print a workload's winning deployment key (stdout is the key only).",
         description="Print the deployment key stored for a workload's winner, so"
         " `export DEPLOYMENT_KEY=$(dagnam audit key ./audit <workload>)` works."
@@ -286,13 +311,19 @@ def register_audit(subparsers: SubParsersAction) -> None:
     )
     key.set_defaults(func=cmd_audit_key)
 
-    cancel = sub.add_parser("cancel", help="Cancel running jobs and pause deployments.")
+    cancel = sub.add_parser(
+        "cancel",
+        docs_url=_docs("dagnam-audit-cancel"),
+        help="Cancel running jobs and pause deployments.",
+    )
     cancel.add_argument("audit_dir", help="The audit directory.")
     cancel.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     cancel.set_defaults(func=cmd_audit_cancel)
 
     delete = sub.add_parser(
-        "delete", help="Delete every artifact the run created; write a receipt."
+        "delete",
+        docs_url=_docs("dagnam-audit-delete"),
+        help="Delete every artifact the run created; write a receipt.",
     )
     delete.add_argument("audit_dir", help="The audit directory.")
     delete.add_argument("--yes", action="store_true", help="Skip the typed confirmation.")
