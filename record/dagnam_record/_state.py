@@ -11,9 +11,10 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 from dagnam_record import _anthropic, _openai
+from dagnam_record._compat import RANGES, in_range, version_of
 from dagnam_record._files import DEFAULT_DIR, prune, resolve
 from dagnam_record._recorder import Recorder, recording_disabled, to_plain
 from dagnam_record._redact import Option, check, resolve as resolve_redact
@@ -50,6 +51,7 @@ class State:
         self.lock = threading.Lock()
         self.installed: Optional[Installed] = None
         self.warned = False  # ``record_call`` said once that nothing is installed
+        self.warned_sdks: Set[Tuple[str, str]] = set()  # (SDK, version) said to be untested
 
 
 STATE = State()
@@ -140,6 +142,10 @@ def install(
     ``install`` do nothing, validate nothing, write nothing and return ``False``. Any other value,
     including unset, empty, ``1``, ``00`` and ``true``, leaves the recorder on.
 
+    An SDK outside the range the recorder was tested with (see ``_compat``) is still recorded, but
+    as the provider-neutral ``norm`` only, with one warning; the versions seen are saved in
+    ``.status.json``. An SDK that cannot be imported, for any reason, is skipped.
+
     A missing SDK is never an error: ``False`` means no SDK (``openai``, ``anthropic``) was
     patched, or the kill switch is on. The recorder is set up anyway, so ``record_call`` works for
     frameworks that bypass the SDKs. Calling ``install`` again is safe, from any thread: with the
@@ -158,12 +164,38 @@ def install(
             installed = previous
         else:
             installed = STATE.installed = _adopt(_build(config), previous)
-        patched = [_openai.install(installed.recorder), _anthropic.install(installed.recorder)]
+        patched = {
+            "openai": _openai.install(installed.recorder),
+            "anthropic": _anthropic.install(installed.recorder),
+        }
+        _note_sdks(installed, patched)
         if previous is not None and previous is not installed:
             # Only now, with every new call going to the new recorder: the old writer writes what
             # it holds and passes on whatever still reaches it, so nothing is lost on the way.
             previous.writer.hand_over(installed.writer)
-    return any(patched)
+    return any(patched.values())
+
+
+def _note_sdks(installed: Installed, patched: Dict[str, bool]) -> None:
+    """Save the version of each patched SDK; an untested one is recorded as ``norm`` only, said once."""
+    versions = {}
+    for name, was_patched in patched.items():
+        version = version_of(name) if was_patched else None
+        if version is not None:
+            versions[name] = version
+    installed.writer.set_sdk_versions(versions)
+    untested = {name for name, found in versions.items() if not in_range(found, RANGES[name])}
+    installed.recorder.untested = frozenset(untested)
+    for name in sorted(untested):
+        if (name, versions[name]) not in STATE.warned_sdks:
+            STATE.warned_sdks.add((name, versions[name]))
+            LOGGER.warning(
+                "dagnam_record: %s %s is outside the tested range %s; only the normalized form"
+                " of its calls is recorded",
+                name,
+                versions[name],
+                ",".join(RANGES[name]),
+            )
 
 
 def _record(

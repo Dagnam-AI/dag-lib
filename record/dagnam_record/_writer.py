@@ -5,7 +5,8 @@ the live call it describes is never touched. Counts are saved to ``.status.json`
 directory so that ``python -m dagnam_record status`` can read them without the process.
 
 ``.status.json`` holds ``directory``, ``started`` (the first run, which the recording window is
-counted from), ``updated``, ``expired`` and ``counts``: one number per key of ``COUNT_KEYS``.
+counted from), ``updated``, ``expired``, ``sdk_versions`` (the version of each SDK that was
+patched, see ``_compat``) and ``counts``: one number per key of ``COUNT_KEYS``.
 ``dropped_error`` also counts a line submitted after ``close()``. ``dropped_partial`` counts a
 call the recorder saw only part of (a stream abandoned or cut off before its end, a call
 cancelled or interrupted): it is never written, because a partial answer is no training row.
@@ -157,6 +158,7 @@ class Writer:
         self._moved: Optional[Writer] = None  # takes counts that arrive after hand_over()
         self._retired = False  # handed over and saved for good: the successor owns the file now
         self.usable = not refused  # False: the directory was refused, every line will be dropped
+        self.sdk_versions: Dict[str, str] = {}
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save
         self._started = clock()
@@ -218,6 +220,12 @@ class Writer:
             target = target._moved
         self._moved = target
         return target
+
+    def set_sdk_versions(self, versions: Dict[str, str]) -> None:
+        """Note the version of each patched SDK; it is saved with the counts."""
+        if versions != self.sdk_versions:
+            self.sdk_versions = dict(versions)
+            self._dirty = True
 
     def count(self, key: str) -> None:
         """Count a line that was dropped before it reached ``submit`` (a key of ``COUNT_KEYS``)."""
@@ -406,6 +414,7 @@ class Writer:
                 "started": self._started,
                 "updated": self._saved_at,
                 "expired": self.expired,
+                "sdk_versions": self.sdk_versions,
                 "counts": dict(self.counts),
             }
         path = os.path.join(self._dir, STATUS_FILE)

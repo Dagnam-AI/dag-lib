@@ -432,6 +432,8 @@ def fresh_state() -> Iterator[None]:
     """``dagnam_record`` as if never installed, before and after the test."""
     dagnam_record.uninstall()
     _state.STATE.warned = False
+    _state.STATE.warned_sdks.clear()
     yield
     dagnam_record.uninstall()
     _state.STATE.warned = False
+    _state.STATE.warned_sdks.clear()

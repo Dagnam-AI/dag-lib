@@ -20,7 +20,7 @@ from typing import Any, Callable, List, Tuple, Union
 
 from dagnam_record._openai_assemble import ChatAssembler, ResponsesAssembler
 from dagnam_record._openai_body import request_body, response_body
-from dagnam_record._patch import Patcher, Plan
+from dagnam_record._patch import Patcher, Plan, import_failed
 from dagnam_record._recorder import Recorder
 
 PROVIDER = "openai"
@@ -40,8 +40,8 @@ def _targets() -> List[Tuple[Any, str, bool]]:
     # Lazy, runtime-optional imports: ``import dagnam_record`` must not need the SDK.
     try:
         import openai.resources.chat.completions as chat
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("openai.resources.chat.completions", exc)
     else:
         found += [
             (getattr(chat, "Completions", None), "chat.completions", False),
@@ -49,8 +49,8 @@ def _targets() -> List[Tuple[Any, str, bool]]:
         ]
     try:
         import openai.resources.beta as beta
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("openai.resources.beta", exc)
     else:  # older SDKs kept ``parse`` in a separate beta class; newer ones have no such module
         legacy = getattr(getattr(beta, "chat", None), "completions", None)
         found += [
@@ -59,8 +59,8 @@ def _targets() -> List[Tuple[Any, str, bool]]:
         ]
     try:
         import openai.resources.responses as responses
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("openai.resources.responses", exc)
     else:
         found += [
             (getattr(responses, "Responses", None), "responses", False),

@@ -32,7 +32,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from dagnam_record._anthropic_assemble import ERROR_STATUS, MessageAssembler
 from dagnam_record._anthropic_body import Body, request_body, response_body
-from dagnam_record._patch import Patcher, Plan, error_status
+from dagnam_record._patch import Patcher, Plan, error_status, import_failed
 from dagnam_record._recorder import Recorder
 from dagnam_record._stream import deliver_pending
 
@@ -142,8 +142,8 @@ def _resources() -> List[Tuple[Any, bool]]:
     # Lazy, runtime-optional imports: ``import dagnam_record`` must not need the SDK.
     try:
         import anthropic.resources.messages as plain
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("anthropic.resources.messages", exc)
     else:
         found += [
             (getattr(plain, "Messages", None), False),
@@ -151,8 +151,8 @@ def _resources() -> List[Tuple[Any, bool]]:
         ]
     try:
         import anthropic.resources.beta.messages as beta
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("anthropic.resources.beta.messages", exc)
     else:
         found += [
             (getattr(beta, "Messages", None), False),
@@ -170,8 +170,8 @@ def _cloud_resources() -> List[Tuple[Any, bool]]:
     found: List[Tuple[Any, bool]] = []
     try:
         import anthropic.lib.bedrock._beta_messages as bedrock
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("anthropic.lib.bedrock._beta_messages", exc)
     else:
         found += [
             (getattr(bedrock, "Messages", None), False),
@@ -179,8 +179,8 @@ def _cloud_resources() -> List[Tuple[Any, bool]]:
         ]
     try:
         import anthropic.lib.vertex._beta_messages as vertex
-    except ImportError:
-        pass
+    except Exception as exc:  # absent, or a broken install
+        import_failed("anthropic.lib.vertex._beta_messages", exc)
     else:
         found += [
             (getattr(vertex, "Messages", None), False),
@@ -194,7 +194,8 @@ def _managers() -> List[Tuple[Any, str, bool]]:
     found: List[Tuple[Any, str, bool]] = []
     try:
         import anthropic.lib.streaming as streaming
-    except ImportError:
+    except Exception as exc:  # absent, or a broken install
+        import_failed("anthropic.lib.streaming", exc)
         return found
     for name, is_async in (
         ("MessageStreamManager", False),

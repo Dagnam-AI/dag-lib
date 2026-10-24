@@ -15,6 +15,7 @@ and nothing is written.
 from __future__ import annotations
 
 import functools
+import logging
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -27,11 +28,25 @@ from dagnam_record._stream import (
     register_exit,
 )
 
+LOGGER = logging.getLogger("dagnam_record")
 Body = Dict[str, Any]
 Build = Callable[[Callable[..., Any]], Callable[..., Any]]
 Plan = Tuple[Any, str, Build]
 """``(class, method name, build)``: ``build(the SDK's function)`` makes the wrapper."""
 MARKER = "__dagnam_record__"
+
+
+def import_failed(name: str, exc: Exception) -> None:
+    """Note that the SDK module ``name`` could not be imported, so what it holds is not patched.
+
+    A missing module (``ImportError``) is the usual case and is silent. A half-installed or broken
+    package fails with any exception (``AttributeError``, ``RuntimeError``, ...): that must not
+    escape from ``install``, but it is logged, since the program's calls are then not recorded.
+    """
+    if not isinstance(exc, ImportError):
+        LOGGER.warning(
+            "dagnam_record: cannot import %s (%s); it is not recorded", name, type(exc).__name__
+        )
 
 
 def error_status(exc: BaseException) -> Optional[int]:
