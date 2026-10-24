@@ -1,15 +1,21 @@
 """Tee proxies: hand a stream to the caller untouched while a recorder watches it go by.
 
-Policy (one place, shared by every provider patch):
+Policy (one place, shared by every provider patch). A *watcher* is told about the stream with
+four calls (``item``, ``done``, ``error``, ``cancelled``), each run through ``guard`` so that a
+failing watcher never reaches the caller:
 
 * every item is passed on, in order, exactly as the SDK produced it;
-* a stream read to its end is recorded once, from what the watcher assembled;
-* a stream that raises is recorded once as a failed call and the error propagates unchanged;
-* a stream the caller abandons (``close()``, leaving a ``with`` block, ``break``, or just letting
-  go of it) records nothing: a partial answer is no training row, and an abandoned stream is not
-  counted as a drop either;
-* a watcher that fails never reaches the caller: the failure is counted through ``guard`` and
-  that stream is simply not recorded.
+* ``done()`` is called exactly once when the recorder has seen all it will see of a stream:
+  the stream ran out, the caller closed it (``close()``, leaving a ``with`` block, ``aclose``),
+  or the caller let go of it. The watcher decides whether what it saw was a complete answer
+  (record it) or a partial one (count it, write nothing);
+* an exception raised by the stream is passed on unchanged and ``error(exc)`` is called once;
+* an interrupt or cancellation (``KeyboardInterrupt``, ``asyncio.CancelledError``, anything that
+  is not an ``Exception``) is passed on unchanged and ``cancelled()`` is called once: it is not a
+  failed call;
+* once any of these has happened nothing more is reported for that stream;
+* a watcher that fails stops watching: the failure is counted through ``guard``, ``done`` is not
+  called and the stream is simply not recorded.
 
 The proxy forwards every other attribute to the stream it wraps, reports the wrapped stream's
 class for ``isinstance`` checks and returns itself from ``with``, so a caller cannot tell it from
@@ -35,36 +41,36 @@ def get(obj: Any, name: str) -> Any:
 class _Tap:
     """The bookkeeping both proxies share: what to call, and that it is called only once."""
 
-    def __init__(
-        self,
-        stream: Any,
-        guard: Guard,
-        item: Callable[[Any], None],
-        done: Callable[[], None],
-        error: Callable[[BaseException], None],
-    ) -> None:
+    def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
         self._stream = stream
         self._guard = guard
-        self._item = item
-        self._done = done
-        self._error = error
-        self._over = False  # finished or failed: nothing more is recorded
-        self._broken = False  # a watcher failed: this stream is not recorded
+        self._watcher = watcher
+        self._over = False  # reported already: nothing more is recorded
+        self._broken = False  # a watcher call failed: this stream is not recorded
 
     def _seen(self, value: Any) -> None:
         if not self._over and not self._broken:
-            self._broken = not self._guard(self._item, value)
+            self._broken = not self._guard(self._watcher.item, value)
 
     def _finish(self) -> None:
         if not self._over:
             self._over = True
             if not self._broken:
-                self._guard(self._done)
+                self._guard(self._watcher.done)
 
     def _fail(self, exc: BaseException) -> None:
         if not self._over:
             self._over = True
-            self._guard(self._error, exc)
+            self._guard(self._watcher.error, exc)
+
+    def _cancel(self) -> None:
+        if not self._over:
+            self._over = True
+            self._guard(self._watcher.cancelled)
+
+    def __del__(self) -> None:
+        if "_over" in self.__dict__:  # a proxy that was never built has nothing to report
+            self._finish()
 
     def __getattr__(self, name: str) -> Any:
         if name == "_stream":  # not built yet (a copy, say): do not look for it forever
@@ -89,15 +95,8 @@ class _Tap:
 class TeeStream(_Tap):
     """A synchronous stream, watched."""
 
-    def __init__(
-        self,
-        stream: Any,
-        guard: Guard,
-        item: Callable[[Any], None],
-        done: Callable[[], None],
-        error: Callable[[BaseException], None],
-    ) -> None:
-        super().__init__(stream, guard, item, done, error)
+    def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
+        super().__init__(stream, guard, watcher)
         self._iterator: Iterator[Any] = iter(stream)
 
     def __iter__(self) -> TeeStream:
@@ -109,11 +108,21 @@ class TeeStream(_Tap):
         except StopIteration:
             self._finish()
             raise
-        except BaseException as exc:
+        except Exception as exc:
             self._fail(exc)
+            raise
+        except BaseException:
+            self._cancel()
             raise
         self._seen(value)
         return value
+
+    def close(self) -> Any:
+        """Close the stream; what the recorder saw so far is reported either way."""
+        try:
+            return self._stream.close()
+        finally:
+            self._finish()
 
     def __enter__(self) -> TeeStream:
         self._stream.__enter__()
@@ -125,21 +134,17 @@ class TeeStream(_Tap):
         exc: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Any:
-        return self._stream.__exit__(exc_type, exc, traceback)
+        try:
+            return self._stream.__exit__(exc_type, exc, traceback)
+        finally:
+            self._finish()
 
 
 class AsyncTeeStream(_Tap):
     """An asynchronous stream, watched."""
 
-    def __init__(
-        self,
-        stream: Any,
-        guard: Guard,
-        item: Callable[[Any], None],
-        done: Callable[[], None],
-        error: Callable[[BaseException], None],
-    ) -> None:
-        super().__init__(stream, guard, item, done, error)
+    def __init__(self, stream: Any, guard: Guard, watcher: Any) -> None:
+        super().__init__(stream, guard, watcher)
         self._iterator: AsyncIterator[Any] = stream.__aiter__()
 
     def __aiter__(self) -> AsyncTeeStream:
@@ -151,11 +156,21 @@ class AsyncTeeStream(_Tap):
         except StopAsyncIteration:
             self._finish()
             raise
-        except BaseException as exc:
+        except Exception as exc:
             self._fail(exc)
+            raise
+        except BaseException:
+            self._cancel()
             raise
         self._seen(value)
         return value
+
+    async def close(self) -> Any:
+        """Close the stream; what the recorder saw so far is reported either way."""
+        try:
+            return await self._stream.close()
+        finally:
+            self._finish()
 
     async def __aenter__(self) -> AsyncTeeStream:
         await self._stream.__aenter__()
@@ -167,4 +182,7 @@ class AsyncTeeStream(_Tap):
         exc: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Any:
-        return await self._stream.__aexit__(exc_type, exc, traceback)
+        try:
+            return await self._stream.__aexit__(exc_type, exc, traceback)
+        finally:
+            self._finish()

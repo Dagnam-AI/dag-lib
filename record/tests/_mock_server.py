@@ -10,6 +10,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 from typing_extensions import override
@@ -27,10 +28,12 @@ class Reply:
         body: Any = None,
         events: Optional[List[Event]] = None,
         cut: bool = False,
+        delay: float = 0.0,
     ) -> None:
         self.status = status
         self.body = body
         self.events = events
+        self.delay = delay  # seconds the server waits before answering (a call that is in flight)
         self.cut = cut  # promise more bytes than are sent, then hang up (a dropped connection)
 
     def payload(self) -> Tuple[str, bytes]:
@@ -68,6 +71,7 @@ class _Handler(BaseHTTPRequestHandler):
         state.seen.append(Seen(path, body, {k.lower(): v for k, v in self.headers.items()}))
         reply = state.next_reply(path)
         kind, data = reply.payload()
+        time.sleep(reply.delay)
         self.send_response(reply.status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data) + (1000 if reply.cut else 0)))
@@ -85,6 +89,10 @@ class _Server(ThreadingHTTPServer):
         self.seen: List[Seen] = []
         self.script: Dict[str, List[Reply]] = {}
         self.lock = threading.Lock()
+
+    @override
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """A client that hangs up mid-reply (a cancelled call) is not worth a traceback."""
 
     def next_reply(self, path: str) -> Reply:
         with self.lock:

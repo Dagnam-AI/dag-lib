@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from typing import Any, List
 
 from _mock_server import Reply
@@ -12,7 +13,7 @@ from _openai_calls import run
 import openai
 import pytest
 
-from dagnam_record import _openai
+from dagnam_record import _openai, _openai_body
 from dagnam_record._recorder import Recorder
 
 MESSAGES: List[Any] = [{"role": "user", "content": "Hi"}]
@@ -24,7 +25,7 @@ def boom(*args: Any, **kwargs: Any) -> None:
 
 def test_a_recorder_bug_never_changes_a_result(rig: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.server.on(CHAT_PATH, Reply(body=chat_body()))
-    monkeypatch.setattr(_openai, "to_plain", boom)
+    monkeypatch.setattr(_openai_body, "to_plain", boom)
     with rig.client() as client:
         result = client.chat.completions.create(model=MODEL, messages=MESSAGES)
     assert result.choices[0].message.content == "Hello there"
@@ -36,7 +37,7 @@ def test_a_recorder_bug_never_masks_the_sdks_own_exception(
     rig: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig.server.on(CHAT_PATH, Reply(429, {"error": {"message": "slow"}}))
-    monkeypatch.setattr(_openai, "to_plain", boom)
+    monkeypatch.setattr(_openai_body, "to_plain", boom)
     with rig.client() as client, pytest.raises(openai.RateLimitError):
         client.chat.completions.create(model=MODEL, messages=MESSAGES)
     assert rig.writer.counts["dropped_error"] == 1
@@ -46,11 +47,25 @@ def test_a_recorder_bug_never_changes_a_stream(rig: Any, monkeypatch: pytest.Mon
     rig.server.on(CHAT_PATH, Reply(events=chat_text_events()))
     with rig.client() as client:
         plain = list(client.chat.completions.create(model=MODEL, messages=MESSAGES, stream=True))
-        monkeypatch.setattr(_openai, "to_plain", boom)
+        monkeypatch.setattr(_openai_body, "to_plain", boom)
         again = list(client.chat.completions.create(model=MODEL, messages=MESSAGES, stream=True))
     assert again == plain
     assert len(rig.lines()) == 1  # only the first stream, recorded before the bug
     assert rig.writer.counts["dropped_error"] == 1
+
+
+def test_cyclic_arguments_are_refused_in_a_blink_and_the_sdks_own_error_is_raised(
+    rig: Any,
+) -> None:
+    loop: Any = {"role": "user"}
+    loop["content"] = loop
+    loop["again"] = loop  # two ways back: a depth cap alone would take 2**64 steps
+    started = time.perf_counter()
+    with rig.client() as client, pytest.raises((ValueError, RecursionError, TypeError)):
+        client.chat.completions.create(model=MODEL, messages=[loop])
+    assert time.perf_counter() - started < 10
+    assert rig.raw() == []
+    assert rig.writer.counts["dropped_error"] == 1  # counted once, at the snapshot
 
 
 def test_an_oversized_response_is_dropped_and_counted_not_truncated(rig: Any) -> None:

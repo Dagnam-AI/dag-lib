@@ -81,6 +81,16 @@ def test_streamed_audio_is_assembled_as_a_transcript_and_a_size(rig: Any) -> Non
         ),
         chunk({"audio": {"data": "BBBBBB", "transcript": "lo"}}),
         chunk({"audio": {"expires_at": 5}}),
+        (
+            None,
+            {
+                "id": "c",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": MODEL,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+        ),
         (None, "[DONE]"),
     ]
     rig.server.on(CHAT_PATH, Reply(events=events))

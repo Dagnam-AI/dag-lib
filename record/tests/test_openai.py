@@ -277,6 +277,7 @@ def test_an_absent_sdk_is_not_an_error(rig: Any, monkeypatch: pytest.MonkeyPatch
     for name in (
         "openai",
         "openai.resources",
+        "openai.resources.beta",
         "openai.resources.chat",
         "openai.resources.chat.completions",
         "openai.resources.responses",
@@ -303,9 +304,9 @@ def test_an_sdk_with_no_known_resource_is_not_patched(
 ) -> None:
     _openai.uninstall()
     monkeypatch.delattr(responses_module, "AsyncResponses")
-    monkeypatch.delattr(responses_module.Responses, "create")
-    monkeypatch.delattr(Completions, "create")
-    monkeypatch.delattr(AsyncCompletions, "create")
+    for owner in (Completions, AsyncCompletions, responses_module.Responses):
+        monkeypatch.delattr(owner, "create")
+        monkeypatch.delattr(owner, "parse")
     assert _openai.install(rig.recorder) is False
 
 

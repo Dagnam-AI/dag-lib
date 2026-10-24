@@ -11,7 +11,7 @@ from datetime import date
 from enum import Enum
 import os
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Set
 
 from dagnam_record._envelope import LineTooLargeError, build_line
 from dagnam_record._writer import Writer
@@ -19,6 +19,8 @@ from dagnam_record._writer import Writer
 KILL_SWITCH = "DAGNAM_RECORD"
 MEDIA_OMITTED = "media_omitted"
 _MAX_DEPTH = 64
+MAX_NODES = 250_000
+"""Parts one body may have: a 1 MB line cannot hold many more than this."""
 _UNSET_NAMES = frozenset({"NotGiven", "Omit"})  # the SDKs' "argument not passed" sentinels
 
 
@@ -56,33 +58,71 @@ def _dump(value: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def to_plain(value: Any, depth: int = 0) -> Any:
-    """A copy of ``value`` made only of JSON types; it never raises.
+class _Walk:
+    """The state of one conversion: how many nodes were visited and which containers are open."""
 
-    SDK objects become dicts (what the server sent, unset fields left out), ``bytes`` become a
-    size marker, dates become ISO text, "not given" sentinels are dropped and anything else is
-    named by its class, never printed (so no secret in an object's repr can leak).
-    """
+    def __init__(self) -> None:
+        self.nodes = 0
+        self.open: Set[int] = set()
+
+
+def _class_schema(value: type) -> Any:
+    """A pydantic model class as the JSON schema it stands for; any other class by name."""
+    method = getattr(value, "model_json_schema", None)
+    schema = _attempt(method, {}) if callable(method) else None
+    if isinstance(schema, dict):
+        return {"type": "json_schema", "name": value.__name__, "schema": _plain(schema, _Walk(), 0)}
+    return f"<class {value.__name__}>"
+
+
+def _plain(value: Any, walk: _Walk, depth: int) -> Any:
+    walk.nodes += 1
+    if walk.nodes > MAX_NODES:
+        raise LineTooLargeError("the body has too many parts to record")
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if depth >= _MAX_DEPTH:
         return "<too deep>"
-    if isinstance(value, dict):
-        return {
-            str(key): to_plain(item, depth + 1)
-            for key, item in value.items()
-            if type(item).__name__ not in _UNSET_NAMES
-        }
-    if isinstance(value, (list, tuple)):
-        return [to_plain(item, depth + 1) for item in value]
+    if isinstance(value, (dict, list, tuple)):
+        if id(value) in walk.open:
+            raise ValueError("circular reference in the body")
+        walk.open.add(id(value))
+        try:
+            if isinstance(value, dict):
+                return {
+                    str(key): _plain(item, walk, depth + 1)
+                    for key, item in value.items()
+                    if type(item).__name__ not in _UNSET_NAMES
+                }
+            return [_plain(item, walk, depth + 1) for item in value]
+        finally:
+            walk.open.discard(id(value))
     if isinstance(value, (bytes, bytearray, memoryview)):
         return {"type": MEDIA_OMITTED, "bytes": len(value)}
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, Enum):
-        return to_plain(value.value, depth + 1)
+        return _plain(value.value, walk, depth + 1)
+    if isinstance(value, type):
+        return _class_schema(value)
     dumped = _dump(value)
-    return to_plain(dumped, depth + 1) if dumped is not None else f"<{type(value).__name__}>"
+    return _plain(dumped, walk, depth + 1) if dumped is not None else f"<{type(value).__name__}>"
+
+
+def to_plain(value: Any) -> Any:
+    """A copy of ``value`` made only of JSON types; it raises only ``ValueError``.
+
+    SDK objects become dicts (what the server sent, unset fields left out), ``bytes`` become a
+    size marker, dates become ISO text, a pydantic model class becomes its JSON schema, "not
+    given" sentinels are dropped and anything else is named by its class, never printed (so no
+    secret in an object's repr can leak).
+
+    The walk is bounded: a container that contains itself raises ``ValueError``, and a body with
+    more than ``MAX_NODES`` parts (a shared object expanded at every place it appears can make
+    a small structure enormous) raises ``LineTooLargeError``, so no input costs more than a
+    constant number of steps.
+    """
+    return _plain(value, _Walk(), 0)
 
 
 class Recorder:

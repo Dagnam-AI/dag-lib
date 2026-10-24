@@ -53,6 +53,7 @@ def test_lines_are_appended_whole_to_a_file_named_for_the_utc_date(
         "dropped_large": 0,
         "dropped_error": 0,
         "dropped_expired": 0,
+        "dropped_partial": 0,
     }
 
 
@@ -354,3 +355,14 @@ def test_a_line_that_cannot_be_encoded_is_an_error_not_a_crash(make: Any, tmp_pa
     writer.drain()
     assert writer.counts["dropped_error"] == 1
     assert lines(tmp_path / "traces" / "2026-10-12.jsonl") == ["ok"]
+
+
+def test_a_partial_call_is_counted_and_saved_with_the_other_counts(
+    make: Any, tmp_path: Path
+) -> None:
+    writer = make()
+    writer.count("dropped_partial")
+    writer.count("dropped_partial")
+    writer.close()
+    saved = json.loads((tmp_path / "traces" / ".status.json").read_text(encoding="utf-8"))
+    assert saved["counts"]["dropped_partial"] == 2

@@ -144,9 +144,63 @@ def test_absurdly_deep_data_is_cut_off_instead_of_recursing_forever() -> None:
         depth += 1
     assert plain == "<too deep>"
     assert depth < 100
-    cycle: List[Any] = []
-    cycle.append(cycle)
-    assert "<too deep>" in json.dumps(to_plain(cycle))
+
+
+def test_a_pydantic_class_is_recorded_as_its_json_schema_by_name() -> None:
+    class Answer:
+        """Stands in for a pydantic model class."""
+
+        @classmethod
+        def model_json_schema(cls) -> Dict[str, Any]:
+            """The schema."""
+            return {"type": "object", "properties": {"x": {"type": "integer"}}}
+
+    assert to_plain({"response_format": Answer}) == {
+        "response_format": {
+            "type": "json_schema",
+            "name": "Answer",
+            "schema": {"type": "object", "properties": {"x": {"type": "integer"}}},
+        }
+    }
+    assert to_plain(int) == "<class int>"
+    assert to_plain(Unreadable) == "<class Unreadable>"
+
+
+def test_a_dict_that_contains_itself_is_refused_in_a_blink() -> None:
+    loop: Dict[str, Any] = {}
+    loop["a"] = loop
+    loop["b"] = loop  # two ways back to the start: the walk used to take 2**64 steps
+    with pytest.raises(ValueError, match="circular"):
+        to_plain(loop)
+
+
+def test_a_list_that_contains_itself_is_refused_in_a_blink() -> None:
+    loop: List[Any] = []
+    loop.extend([loop, loop])
+    with pytest.raises(ValueError, match="circular"):
+        to_plain(loop)
+    pair: Dict[str, Any] = {"deep": [{"back": None}]}
+    pair["deep"][0]["back"] = pair
+    with pytest.raises(ValueError, match="circular"):
+        to_plain((pair, 1))
+
+
+def test_a_shared_object_that_is_not_a_cycle_is_expanded_each_time_it_appears() -> None:
+    shared = {"k": [1, 2]}
+    assert to_plain({"a": shared, "b": shared, "c": [shared, shared]}) == {
+        "a": {"k": [1, 2]},
+        "b": {"k": [1, 2]},
+        "c": [{"k": [1, 2]}, {"k": [1, 2]}],
+    }
+
+
+def test_a_wide_and_deep_shared_structure_trips_the_node_budget() -> None:
+    blowup: Any = []
+    for _ in range(40):  # 2**40 paths to the leaf, no cycle anywhere
+        blowup = [blowup, blowup]
+    with pytest.raises(LineTooLargeError):
+        to_plain(blowup)
+    assert len(to_plain(["x"] * 1000)) == 1000  # an ordinary body is far under the budget
 
 
 def test_media_omitted_counts_utf8_bytes() -> None:

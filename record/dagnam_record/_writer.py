@@ -6,7 +6,9 @@ directory so that ``python -m dagnam_record status`` can read them without the p
 
 ``.status.json`` holds ``directory``, ``started`` (the first run, which the recording window is
 counted from), ``updated``, ``expired`` and ``counts``: one number per key of ``COUNT_KEYS``.
-``dropped_error`` also counts a line submitted after ``close()``.
+``dropped_error`` also counts a line submitted after ``close()``. ``dropped_partial`` counts a
+call the recorder saw only part of (a stream abandoned or cut off before its end, a call
+cancelled or interrupted): it is never written, because a partial answer is no training row.
 
 Permissions: the directory is created ``0700`` (its parents get the process defaults). An
 existing directory must be a real directory (not a symlink) owned by this user, and is tightened
@@ -34,7 +36,14 @@ import weakref
 
 LOGGER = logging.getLogger("dagnam_record")
 STATUS_FILE = ".status.json"
-COUNT_KEYS = ("written", "dropped_full", "dropped_large", "dropped_error", "dropped_expired")
+COUNT_KEYS = (
+    "written",
+    "dropped_full",
+    "dropped_large",
+    "dropped_error",
+    "dropped_expired",
+    "dropped_partial",
+)
 _SAVE_EVERY = 30.0
 _DAY = 86400
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)

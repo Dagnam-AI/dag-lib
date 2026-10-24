@@ -120,20 +120,6 @@ def test_choices_refusals_and_legacy_function_calls_are_assembled(rig: Any) -> N
     assert (first["index"], second["index"]) == (0, 1)
 
 
-def test_a_stream_closed_early_writes_nothing(rig: Any) -> None:
-    rig.server.on(CHAT_PATH, Reply(events=chat_text_events()))
-    with rig.client() as client:
-        stream = open_chat(client)
-        next(iter(stream))
-        stream.close()
-        with open_chat(client) as other:
-            for _chunk in other:
-                break  # leaving the with-block early closes the stream
-    assert rig.raw() == []
-    assert rig.writer.counts["written"] == 0
-    assert rig.writer.counts["dropped_error"] == 0
-
-
 def test_the_stream_object_keeps_its_type_attributes_and_context_manager(rig: Any) -> None:
     rig.server.on(CHAT_PATH, Reply(events=chat_text_events()))
     with rig.client() as client, open_chat(client) as stream:
@@ -211,31 +197,6 @@ def test_an_async_stream_is_teed_and_recorded_when_exhausted(rig: Any) -> None:
     assert line["norm"]["prompt_tokens"] == 11
 
 
-def test_an_async_stream_closed_early_writes_nothing_and_an_error_is_recorded(rig: Any) -> None:
-    rig.server.on(CHAT_PATH, Reply(events=chat_text_events()))
-
-    async def early(client: openai.AsyncOpenAI) -> None:
-        async with await open_chat(client) as stream:
-            async for _chunk in stream:
-                break
-
-    run(early, rig)
-    assert rig.raw() == []
-    rig.server.on(CHAT_PATH, Reply(events=[(None, {"error": {"message": "bad"}})]))
-
-    async def failing(client: openai.AsyncOpenAI) -> None:
-        stream = await open_chat(client)
-        with pytest.raises(openai.APIError):
-            async for _chunk in stream:
-                pass
-        with pytest.raises(StopAsyncIteration):
-            await stream.__anext__()
-
-    run(failing, rig)
-    (line,) = rig.lines()
-    assert line["response"] == {"error": {"type": "APIError"}}
-
-
 def test_a_responses_stream_is_recorded_from_its_completed_event(rig: Any) -> None:
     rig.server.on(RESPONSES_PATH, Reply(events=response_events()))
     with rig.client() as client:
@@ -283,14 +244,6 @@ def test_a_failed_responses_stream_is_recorded_as_a_failed_call(rig: Any) -> Non
         list(client.responses.create(model=MODEL, input="Hi", stream=True))
     (line,) = rig.lines()
     assert (line["status"], line["response"]) == (599, {"error": {"type": "response.failed"}})
-
-
-def test_a_responses_stream_that_never_finishes_is_counted_not_recorded(rig: Any) -> None:
-    rig.server.on(RESPONSES_PATH, Reply(events=response_events()[:2]))
-    with rig.client() as client:
-        assert len(list(client.responses.create(model=MODEL, input="Hi", stream=True))) == 2
-    assert rig.raw() == []
-    assert rig.writer.counts["dropped_error"] == 1
 
 
 def test_a_stream_that_cannot_be_watched_is_handed_back_untouched_and_counted(
