@@ -196,7 +196,16 @@ def live_count() -> int:
 
 
 def forget_live() -> None:
-    """Drop every registered watch (a forked child must not report its parent's streams)."""
+    """Drop every registered watch (a forked child must not report its parent's streams).
+
+    The child holds copies of those streams, and may drop them or collect them (their finalizers
+    would queue the watch), so each inherited watch is first claimed without reporting: the
+    parent reports its own streams, the child only its own. A watch that waits in the inherited
+    queue is registered too, so claiming the registered ones covers it; both containers are then
+    replaced, the queue because another thread may have been inside it at the fork.
+    """
+    for watch in list(_REGISTRY.live):
+        watch.disarm()
     _REGISTRY.live = set()
     _REGISTRY.pending = SimpleQueue()
 

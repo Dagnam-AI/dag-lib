@@ -10,7 +10,9 @@ later from a place that holds no writer lock: the next wrapped call, the writer'
 from __future__ import annotations
 
 import gc
+import os
 import queue
+import signal
 import threading
 from typing import Any, Callable, Iterator, List
 
@@ -414,3 +416,34 @@ def test_a_proxy_whose_watch_cannot_be_queued_at_shutdown_is_silent() -> None:
     proxy._watch = Gone()
     del proxy  # would print "Exception ignored in __del__" if it raised
     gc.collect()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+def test_a_forked_child_neither_reports_nor_collects_into_a_report_of_an_inherited_stream() -> None:
+    told = Told()
+    own = Told()
+    held = [instrument(Fake(), guard, told, sync=True)]
+    next(held[0])
+    pid = os.fork()
+    if pid == 0:
+        code = 1
+        try:
+            signal.alarm(10)  # a child that hangs is ended by the alarm
+            held.clear()  # the child lets go of the parent's stream and collects it
+            gc.collect()
+            deliver_pending()
+            finish_live()
+            mine = instrument(Fake(), guard, own, sync=True)
+            list(mine)
+            finish_live()
+            code = 0 if (told.events == ["item"] and own.events == ["item", "item", "done"]) else 2
+        finally:
+            os._exit(code)
+    _, wait_status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(wait_status) == 0
+    assert told.events == ["item"]  # the parent has not let go yet
+    held.clear()
+    gc.collect()
+    deliver_pending()
+    finish_live()
+    assert told.events == ["item", "done"]  # the parent reports it, once

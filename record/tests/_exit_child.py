@@ -8,6 +8,7 @@ closes the writer by hand: the exit hooks have to do all of it.
 from __future__ import annotations
 
 import gc
+import os
 import queue
 import sys
 from typing import Any, Optional
@@ -116,6 +117,16 @@ def main(scenario: str, directory: str) -> None:
     elif scenario == "openai_unfinished":
         stream = openai_open(openai_client(server))
         next(iter(stream))
+    elif scenario == "fork_child_drops_inherited":
+        HELD.append(client.messages.create(stream=True, **ARGS))
+        read_until(HELD[0], "message_stop")  # finished, never closed, held by the parent
+        pid = os.fork()
+        if pid == 0:
+            HELD.clear()  # the child lets go of the parent's stream ...
+            gc.collect()
+            anthropic_local(anthropic_client(server), "message_stop")  # ... and makes its own call
+            sys.exit(0)
+        os.waitpid(pid, 0)
     elif scenario == "gc_in_submit":
         anthropic_local(client, "message_stop")
         Hooked(

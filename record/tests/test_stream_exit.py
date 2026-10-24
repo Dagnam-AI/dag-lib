@@ -9,6 +9,7 @@ closes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -100,3 +101,12 @@ def test_a_collection_inside_submit_cannot_deadlock_on_the_writers_lock(tmp_path
     assert counts["dropped_error"] == 0
     hooked = (tmp_path / "traces-hooked").glob("*.jsonl")
     assert [path.read_text(encoding="utf-8") for path in hooked] == ["{}\n"]
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+def test_a_forked_child_does_not_report_a_stream_it_inherited(tmp_path: Path) -> None:
+    """The parent still holds a finished stream; the child drops its copy and makes one call."""
+    run_child("fork_child_drops_inherited", tmp_path / "traces")
+    lines, counts = outcome(tmp_path / "traces")
+    assert len(lines) == 2  # the parent's held stream once, the child's own call once
+    assert counts["dropped_partial"] == 0
