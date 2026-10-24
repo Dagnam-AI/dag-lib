@@ -67,7 +67,9 @@ jobs:
           if "$RUNNER_TEMP/env/bin/python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
             spec="record[redact]"
           fi
-          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest "$OPENAI" "$ANTHROPIC" -e "$spec"
+          # poethepoet goes into the throwaway environment too: the test step below runs the
+          # repo's `test-record` task in it, not a hand-written pytest command.
+          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest poethepoet "$OPENAI" "$ANTHROPIC" -e "$spec"
           "$RUNNER_TEMP/env/bin/python" -c "import anthropic, openai, sys; print(sys.version.split()[0], 'openai', openai.__version__, 'anthropic', anthropic.__version__)"
       - name: Recorder tests
         env:
@@ -75,8 +77,12 @@ jobs:
           # uv.lock pins, and the test that compares them with a fresh run refuses any others
           # unless told this row runs other versions on purpose.
           DAGNAM_RECORD_SDK_MATRIX: "1"
-        run: |
-          "$RUNNER_TEMP/env/bin/python" -m pytest record/tests -q -p no:cacheprovider
+          # Only a "lowest" row may skip test_sdk_features.py: in a "highest" row a feature the
+          # newest in-range SDK dropped fails it instead of silently skipping the tests that need it.
+          DAGNAM_RECORD_SDK_ROW: ${{ matrix.sdk.name }}
+        # The task's executor is "simple" (it runs in the active environment); this puts the
+        # throwaway environment first on PATH so `poe` and its `python` are the matrix row's.
+        run: PATH="$RUNNER_TEMP/env/bin:$PATH" poe test-record
 
   sdist:
     # `record/` ships its tests in the sdist (so a packager can run them). Prove they run from
@@ -105,4 +111,6 @@ jobs:
           uv venv --python 3.12 "$RUNNER_TEMP/env"
           cd "$RUNNER_TEMP"/unpacked/dagnam_record-*
           uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest "openai<3" "anthropic<1" ".[redact]"
+          # Bare pytest on purpose, the one place: an unpacked sdist has no repository
+          # pyproject.toml, so there is no poe task to call (the same command is `test-record`).
           "$RUNNER_TEMP/env/bin/python" -m pytest tests -q -p no:cacheprovider

@@ -2,14 +2,14 @@
 
 The CI matrix runs the lowest and the highest ``openai`` and ``anthropic`` the recorder declares
 (see ``dagnam_record._compat``). A test of something the lower version does not have is skipped
-there, with the reason; ``test_sdk_features.py`` fails if the versions the repo locks lack any of
-them, so a skip cannot hide a test in the main gate.
+there, with the reason; ``test_sdk_features.py`` fails if the SDKs of the main gate, of a
+"highest" row or of a source-distribution run lack any of them, so a skip cannot hide a test there.
 """
 
 from __future__ import annotations
 
 import inspect
-from typing import Dict
+from typing import Dict, List
 
 import anthropic
 import anthropic.lib.streaming as anthropic_streaming
@@ -30,6 +30,11 @@ FEATURES: Dict[str, bool] = {
     "anthropic mcp_servers": "mcp_servers"
     in inspect.signature(anthropic_beta.Messages.create).parameters,
 }
+
+
+def lost_features(features: Dict[str, bool]) -> List[str]:
+    """The names in ``features`` that the installed SDKs do not have."""
+    return [name for name, present in features.items() if not present]
 
 
 def needs(feature: str) -> pytest.MarkDecorator:

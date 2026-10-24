@@ -1,4 +1,4 @@
-"""dagnam-record: a local, stdlib-only recorder of a training run's workload.
+"""dagnam-record: a local, stdlib-only recorder of the LLM calls a program makes.
 
 It has no dependencies and opens no network connection. Nothing leaves the machine
 until the owner uploads the file it writes.

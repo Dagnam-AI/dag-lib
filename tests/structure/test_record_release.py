@@ -237,7 +237,15 @@ def test_the_matrix_runs_the_ends_of_the_ranges_the_recorder_declares() -> None:
         assert f'{sdk}: "{sdk}{high}"' in matrix, f"highest {sdk} is not the declared ceiling"
     assert matrix.count("name: lowest") == matrix.count("name: highest") == 1
     assert 'DAGNAM_RECORD_SDK_MATRIX: "1"' in matrix  # the fixtures are for the locked SDKs only
-    assert "pytest record/tests" in matrix
+    # The guard that fails when the newest SDK drops a feature runs in "highest" rows only if the
+    # row says which it is; it may skip in "lowest" rows.
+    assert "DAGNAM_RECORD_SDK_ROW: ${{ matrix.sdk.name }}" in matrix
+    # Through the repo's poe task, in the throwaway environment (poe is installed there).
+    assert "poethepoet" in matrix
+    assert 'PATH="$RUNNER_TEMP/env/bin:$PATH" poe test-record' in matrix
+    assert (
+        "pytest" not in matrix.split("- name: Recorder tests\n", 1)[1]
+    )  # no bare pytest in the step
     assert "--cov" not in matrix  # the 100% floor is the coverage job's, in dag-lib-ci.yml
     assert "fail-fast: false" in matrix
 
@@ -264,7 +272,32 @@ def test_the_sdist_carries_tests_that_run_from_the_unpacked_archive() -> None:
     sdist = _jobs(CI)["sdist"]
     assert "uv build --sdist" in sdist
     assert 'DAGNAM_RECORD_SDK_MATRIX: "1"' in sdist  # no tests/audit/fixtures in an archive
-    assert "pytest tests -q" in sdist
+    # The one bare pytest: an unpacked archive has no repository pyproject, so no poe task.
+    assert "-m pytest tests -q" in sdist
+    assert "has no repository" in sdist
+    assert "poe test-record" not in sdist
     pyproject = (ROOT / "record" / "pyproject.toml").read_text(encoding="utf-8")
     assert 'include = ["dagnam_record", "tests", ' in pyproject
     assert 'packages = ["dagnam_record"]' in pyproject  # the wheel is the package alone
+
+
+def test_the_poe_task_the_matrix_calls_runs_only_the_recorders_tests_without_coverage() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    task = re.search(r"^test-record = (\{.*\})$", pyproject, re.M)
+    assert task is not None
+    assert '"python -m pytest record/tests -q -p no:cacheprovider"' in task[1]
+    assert (
+        'executor = { type = "simple" }' in task[1]
+    )  # the active environment, not the repo's .venv
+    assert "--cov" not in task[1]
+
+
+def test_every_ci_call_of_the_recorders_tests_goes_through_poe_except_the_sdist() -> None:
+    bare = [
+        (name, line.strip())
+        for name, job in _jobs(CI).items()
+        for line in job.splitlines()
+        if re.search(r"-m pytest|\bpytest (record/)?tests", line)
+        and not line.strip().startswith("#")
+    ]
+    assert [name for name, _ in bare] == ["sdist"], bare

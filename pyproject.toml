@@ -450,6 +450,7 @@ lint = { cmd = "ruff check", help = "Lint with ruff" }
 format-check = { cmd = "ruff format --check", help = "Verify formatting" }
 typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
 lint-imports = { cmd = "lint-imports", env = { PYTHONPATH = "record" }, help = "Verify the layer-first import contract and that dagnam_record imports no SDK" }
+test-record = { cmd = "python -m pytest record/tests -q -p no:cacheprovider", executor = { type = "simple" }, help = "Run only the recorder's tests in the active environment, no coverage (the CI SDK matrix runs it in throwaway environments)" }
 test = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
 test-cov = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
 audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\"", help = "Audit Python dependencies for known vulnerabilities" }
