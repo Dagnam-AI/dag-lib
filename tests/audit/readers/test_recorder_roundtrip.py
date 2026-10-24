@@ -60,6 +60,22 @@ beyond the plan's nine fields, because a call that is only reasoning must not re
 answer on one path and not the other."""
 
 EXPECTED_DIFFERENCES: dict[tuple[str, int], dict[str, str]] = {
+    ("recorder_anthropic.jsonl", 13): {
+        "response": (
+            "A <think> block that opens a later text part of a reply is stripped from raw, which"
+            " the reader cleans part by part; norm holds the parts joined, so the block is not at"
+            " the start and stays. Cleaning it in the recorder would copy the reader's whole"
+            " reasoning table into a stdlib-only package."
+        ),
+    },
+    ("recorder_anthropic.jsonl", 14): {
+        "response": (
+            "A reply whose one text part is JSON of a message (a type beside a content) reads as"
+            " that JSON from raw, where the reader decodes a list part as it is, but as its content"
+            " alone from norm, where the same text is a plain string and the reader decodes those."
+            " Norm cannot say which one the text came from."
+        ),
+    },
     ("recorder_anthropic.jsonl", 7): {
         "reasoning_only": (
             "A reply made only of thinking blocks is reasoning_only when read from raw; the norm"
@@ -102,6 +118,20 @@ def differing_fields(row: dict[str, Any]) -> set[str]:
     ):
         found.add("response_tool_calls")
     return found
+
+
+def test_the_compared_fields_are_exactly_these() -> None:
+    assert COMPARED == (
+        "model",
+        "system",
+        "messages",
+        "response",
+        "prompt_tokens",
+        "completion_tokens",
+        "cached_prompt_tokens",
+        "has_media",
+        "reasoning_only",
+    )
 
 
 def test_the_fixture_files_are_the_ones_the_generator_writes() -> None:

@@ -29,11 +29,11 @@ Read by `tests/audit/readers/test_recorder.py` and `test_recorder_roundtrip.py`.
 
 | file | shape | lines |
 |---|---|---|
-| `recorder_openai_chat.jsonl` | Chat Completions: plain, cached tokens, a tool call, an omitted image, a developer message with assistant history, parallel tool calls, a history with a tool call and its result, the old `function_call` (answer and history), an empty system message, control characters, a `custom` tool call, JSON text as a system and a user prompt, an assistant turn with `<think>` | 14 |
+| `recorder_openai_chat.jsonl` | Chat Completions: plain, cached tokens, a tool call, an omitted image, a developer message with assistant history, parallel tool calls, a history with a tool call and its result (arguments with non-ASCII text), the old `function_call` (answer and history), an empty system message, control characters, a `custom` tool call, JSON text as a system and a user prompt, an assistant turn with `<think>` | 14 |
 | `recorder_openai_stream.jsonl` | `stream=True`: Chat text with usage, Chat with two tool calls, a Responses stream | 3 |
 | `recorder_openai_parse.jsonl` | `parse()` with a pydantic model: the recorded schema (`response_format`, `text_format`) and the `parsed` fields | 2 |
 | `recorder_openai_responses.jsonl` | Responses: a message, a `function_call`, an omitted `input_image`, a history with a `function_call` and its output, an empty `instructions` beside a developer message, a reasoning item, a `custom_tool_call`, a history with a custom tool call and its output and no `instructions` | 8 |
-| `recorder_anthropic.jsonl` | Messages: system string and blocks, all three cache counters, thinking, `tool_use`, an omitted document, parallel tool use, a thinking-only answer, a tool-use history, a web-search answer, an empty system, control characters, a thinking history | 12 |
+| `recorder_anthropic.jsonl` | Messages: system string and blocks, all three cache counters, thinking, `tool_use`, an omitted document, parallel tool use, a thinking-only answer, a tool-use history, a web-search answer, an empty system, control characters, a thinking history, a reply of two text parts the second opening with `<think>`, a reply that is JSON of a message | 14 |
 | `recorder_anthropic_stream.jsonl` | `stream=True`: text, parallel tool use, thinking then text, a tool call cut at `max_tokens` | 4 |
 | `recorder_media.jsonl` | prompts with media of each kind (`media_omitted` markers in place of the payloads) | 5 |
 | `recorder_norm_only.jsonl` | `no_raw=True`: `norm` without the bodies, for OpenAI chat, Anthropic and Responses, and a chat history with a tool call | 4 |

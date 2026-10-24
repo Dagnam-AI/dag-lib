@@ -215,7 +215,6 @@ def test_each_envelope_is_read_through_the_field_that_holds_its_answer() -> None
         assert response_of(envelope) == Reply("a", ())
 
 
-
 @pytest.mark.parametrize("depth", [100_000, 1_000_000])
 def test_arguments_nested_too_deep_to_parse_stay_the_text_they_are(depth: int) -> None:
     deep = "[" * depth

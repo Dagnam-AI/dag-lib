@@ -61,7 +61,11 @@ def chat_file(env: Env) -> None:
     earlier = {
         "role": "assistant",
         "content": None,
-        "tool_calls": [tool_call(7, "lookup_order", '{"order_id": "W-1001", "express": true}')],
+        "tool_calls": [
+            tool_call(
+                7, "lookup_order", '{"order_id": "W-1001", "express": true, "note": "café 東京"}'
+            )
+        ],
     }
     env.chat(
         "It shipped on Monday.",

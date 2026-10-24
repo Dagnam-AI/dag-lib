@@ -71,9 +71,12 @@ def _omitted(value: object) -> bool:
 
 
 def _vendor_result(part: object) -> bool:
-    """A block that is the result of a tool the vendor ran (web search, code execution, MCP)."""
+    """A block that is the result of a tool the vendor ran (web search, code execution, MCP).
+
+    The user's own ``tool_result`` does not end in ``_tool_result`` and is never one.
+    """
     kind = part.get("type") if isinstance(part, Mapping) else None
-    return isinstance(kind, str) and kind.endswith(_VENDOR_RESULT) and kind != "tool_result"
+    return isinstance(kind, str) and kind.endswith(_VENDOR_RESULT)
 
 
 def _said(value: Any) -> Any:

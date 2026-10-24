@@ -87,7 +87,9 @@ def anthropic_file(env: Env) -> None:
         "role": "assistant",
         "content": [
             text_block("Let me look."),
-            tool_block(8, "lookup_order", {"order_id": "W-1001", "express": True}),
+            tool_block(
+                8, "lookup_order", {"order_id": "W-1001", "express": True, "note": "café 東京"}
+            ),
         ],
     }
     answer = {
@@ -130,6 +132,14 @@ def anthropic_file(env: Env) -> None:
     env.claude(
         [text_block("It shipped.")], {"messages": [user("Where is it?"), earlier, user("Well?")]}
     )
+    # Two gaps norm cannot close, pinned in EXPECTED_DIFFERENCES: the reader strips a leading
+    # <think> block from each text part of a reply on its own, but norm has the parts joined; and
+    # it reads a string that is JSON of a message as its content only for a plain-string reply.
+    env.claude(
+        [text_block("Hello "), text_block("<think>hmm</think>world")],
+        {"messages": [user("Say hello.")]},
+    )
+    env.claude([text_block('{"type": "t", "content": "z"}')], {"messages": [user("Answer.")]})
 
 
 def anthropic_stream_file(env: Env) -> None:

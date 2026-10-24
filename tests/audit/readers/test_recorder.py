@@ -233,10 +233,8 @@ def assert_raw_and_norm_agree(row: dict[str, Any]) -> None:
     ) == effective_response(from_norm.response, from_norm.response_tool_calls), trace_id
 
 
-@pytest.mark.parametrize("name", AGREEING)
-def test_raw_and_norm_agree(fixtures_dir: Path, name: str) -> None:
-    for row in lines(fixtures_dir / name):
-        assert_raw_and_norm_agree(row)
+# Every fixture line's raw and norm reading is compared, with the differences that stay pinned,
+# by test_recorder_roundtrip.py; the helper above checks the lines this file edits.
 
 
 @pytest.mark.parametrize("name", AGREEING[:2])

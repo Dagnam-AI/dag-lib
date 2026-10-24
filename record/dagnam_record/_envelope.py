@@ -6,7 +6,10 @@ multimodal. ``norm`` is the provider-neutral fallback a reader uses when raw is 
 rules must equal what the reader derives from raw: system segments (empty ones too) joined with a
 newline, text parts joined with nothing, OpenAI-shaped tool calls for every provider, and an
 assistant turn of the prompt that made tool calls is the JSON of those calls (``_render_calls``),
-not its text. The one thing norm cannot say is that a reply was only reasoning.
+not its text. Three things norm cannot say, pinned as EXPECTED_DIFFERENCES in the audit tests:
+that a reply was only reasoning, that a ``<think>`` block opened a later text part (the reader
+cleans a reply part by part, and norm holds the parts joined), and whether a reply that is JSON of
+a message came from one plain string (the reader reads that as its content) or from a list part.
 """
 
 from __future__ import annotations
