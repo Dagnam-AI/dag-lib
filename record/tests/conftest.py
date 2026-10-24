@@ -18,8 +18,14 @@ import re
 import threading
 from typing import Any, Callable, Dict, Iterator, List, NoReturn, Optional, Tuple
 
+from _mock_server import MockServer
+from _openai_calls import API_KEY, ORGANIZATION
+import httpx
+import openai
 import pytest
 
+from dagnam_record import _openai
+from dagnam_record._recorder import Recorder
 from dagnam_record._writer import Writer
 
 T0 = 1_791_797_400.0  # 2026-10-12T09:30:00Z
@@ -299,3 +305,69 @@ def strict_validate(line: str) -> None:
         _check_norm(obj["norm"])
     elif request is None:
         _reject("a line needs request and response, or norm")
+
+
+class Rig:
+    """The OpenAI patch installed over a writer, plus real clients aimed at the mock server."""
+
+    def __init__(
+        self, server: MockServer, writer: Probe, recorder: Recorder, directory: Path
+    ) -> None:
+        self.server = server
+        self.writer = writer
+        self.recorder = recorder
+        self.directory = directory
+
+    def client(self, **kwargs: Any) -> openai.OpenAI:
+        """A real client that talks to the mock server (no retries, no proxy from the env)."""
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("base_url", self.server.url)
+        return openai.OpenAI(
+            api_key=API_KEY,
+            organization=ORGANIZATION,
+            http_client=httpx.Client(trust_env=False),
+            **kwargs,
+        )
+
+    def aclient(self, **kwargs: Any) -> openai.AsyncOpenAI:
+        """The async twin of ``client``."""
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("base_url", self.server.url)
+        return openai.AsyncOpenAI(
+            api_key=API_KEY,
+            organization=ORGANIZATION,
+            http_client=httpx.AsyncClient(trust_env=False),
+            **kwargs,
+        )
+
+    def raw(self) -> List[str]:
+        """Every recorded line (each checked against the strict contract), after a drain."""
+        self.writer.drain()
+        found: List[str] = []
+        for path in sorted(self.directory.glob("*.jsonl")):
+            found.extend(path.read_text(encoding="utf-8").splitlines())
+        for line in found:
+            strict_validate(line)
+        return found
+
+    def lines(self) -> List[Dict[str, Any]]:
+        """Every recorded line, parsed."""
+        return [json.loads(line) for line in self.raw()]
+
+
+@pytest.fixture
+def mock_server() -> Iterator[MockServer]:
+    """A running mock OpenAI server, stopped afterwards."""
+    server = MockServer()
+    yield server
+    server.close()
+
+
+@pytest.fixture
+def rig(make: Callable[..., Probe], mock_server: MockServer, tmp_path: Path) -> Iterator[Rig]:
+    """The OpenAI patch installed over an unstarted writer; removed afterwards."""
+    writer = make()
+    recorder = Recorder(writer)
+    assert _openai.install(recorder)
+    yield Rig(mock_server, writer, recorder, tmp_path / "traces")
+    _openai.uninstall()

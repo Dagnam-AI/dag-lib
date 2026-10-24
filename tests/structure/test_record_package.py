@@ -45,6 +45,9 @@ DYNAMIC_IMPORT_CALLS = frozenset({"__import__", "import_module"})
 # The SDK and its contract: banned at module level, so ``import dagnam_record`` never pulls
 # them in. A lazy (function-level) import is allowed only where listed here, with its reason.
 SDK_MODULES = frozenset({"dagnam", "dagnam_contracts"})
+# The SDKs the recorder patches are not dependencies: ``import dagnam_record`` must work without
+# them, so they may only be imported inside a function (where ``install`` looks for them).
+PATCHED_SDKS = frozenset({"openai", "anthropic"})
 LAZY_ALLOWLIST: dict[tuple[str, str], str] = {
     ("dagnam_record/redact.py", "dagnam_contracts"): (
         "the redactor may load the optional PII class list lazily, only when it is installed"
@@ -89,7 +92,7 @@ def violations(source: str, relative: str) -> list[str]:
             found.append(f"{relative}: imports network module {root!r}")
         elif root in DYNAMIC_IMPORT_MODULES:
             found.append(f"{relative}: imports {root!r}, which allows dynamic imports")
-        elif root in SDK_MODULES and not lazy:
+        elif (root in SDK_MODULES or root in PATCHED_SDKS) and not lazy:
             found.append(f"{relative}: imports {root!r} at module level")
         elif root in SDK_MODULES and (relative, root) not in LAZY_ALLOWLIST:
             found.append(f"{relative}: lazily imports {root!r} without an allowlist entry")
@@ -143,6 +146,17 @@ def test_the_import_walk_flags_each_kind_of_violation() -> None:
     assert violations("async def f():\n    import dagnam\n", "a.py") == [
         "a.py: lazily imports 'dagnam' without an allowlist entry"
     ]
+    assert violations("import openai\n", "a.py") == ["a.py: imports 'openai' at module level"]
+    assert violations("from anthropic import Anthropic\n", "a.py") == [
+        "a.py: imports 'anthropic' at module level"
+    ]
+    assert (
+        violations(
+            "def install():\n    try:\n        import openai\n    except ImportError:\n        pass\n",
+            "a.py",
+        )
+        == []
+    )
 
 
 def test_the_import_walk_flags_every_added_network_module() -> None:

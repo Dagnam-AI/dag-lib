@@ -168,6 +168,10 @@ class Writer:
             key = "dropped_error"
         self._bump(key)
 
+    def count(self, key: str) -> None:
+        """Count a line that was dropped before it reached ``submit`` (a key of ``COUNT_KEYS``)."""
+        self._bump(key)
+
     def close(self, timeout: float = 2.0) -> None:
         """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
         with self._gate:

@@ -107,6 +107,11 @@ def _scrub(value: Any, omit: bool) -> Any:
     return value
 
 
+def omit_media(value: Any) -> Any:
+    """A copy of ``value`` with each media part (a list item) replaced by its size."""
+    return _scrub(value, omit=True)
+
+
 def _has_media(value: object) -> bool:
     if isinstance(value, dict):
         return any(_has_media(item) for item in value.values())
