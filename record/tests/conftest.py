@@ -20,11 +20,12 @@ from typing import Any, Callable, Dict, Iterator, List, NoReturn, Optional, Tupl
 
 from _mock_server import MockServer
 from _openai_calls import API_KEY, ORGANIZATION
+import anthropic
 import httpx
 import openai
 import pytest
 
-from dagnam_record import _openai
+from dagnam_record import _anthropic, _openai
 from dagnam_record._recorder import Recorder
 from dagnam_record._writer import Writer
 
@@ -371,3 +372,39 @@ def rig(make: Callable[..., Probe], mock_server: MockServer, tmp_path: Path) -> 
     assert _openai.install(recorder)
     yield Rig(mock_server, writer, recorder, tmp_path / "traces")
     _openai.uninstall()
+
+
+class AnthropicRig(Rig):
+    """The Anthropic patch installed over a writer, plus real clients aimed at the mock server."""
+
+    def anthropic(self, **kwargs: Any) -> anthropic.Anthropic:
+        """A real client that talks to the mock server (no retries, no proxy from the env)."""
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("base_url", self.server.root)
+        return anthropic.Anthropic(
+            api_key=API_KEY,
+            http_client=httpx.Client(trust_env=False),
+            **kwargs,
+        )
+
+    def aanthropic(self, **kwargs: Any) -> anthropic.AsyncAnthropic:
+        """The async twin of ``anthropic``."""
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("base_url", self.server.root)
+        return anthropic.AsyncAnthropic(
+            api_key=API_KEY,
+            http_client=httpx.AsyncClient(trust_env=False),
+            **kwargs,
+        )
+
+
+@pytest.fixture
+def arig(
+    make: Callable[..., Probe], mock_server: MockServer, tmp_path: Path
+) -> Iterator[AnthropicRig]:
+    """The Anthropic patch installed over an unstarted writer; removed afterwards."""
+    writer = make()
+    recorder = Recorder(writer)
+    assert _anthropic.install(recorder)
+    yield AnthropicRig(mock_server, writer, recorder, tmp_path / "traces")
+    _anthropic.uninstall()

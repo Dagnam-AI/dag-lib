@@ -1,6 +1,6 @@
-"""A local HTTP server that plays canned OpenAI-shaped replies (JSON or server-sent events).
+"""A local HTTP server that plays canned OpenAI- or Anthropic-shaped replies (JSON or server-sent events).
 
-The recorder tests drive the real ``openai`` client against it, so the patch is checked against
+The recorder tests drive the real ``openai`` and ``anthropic`` clients against it, so the patch is checked against
 the SDK's own request building, response parsing and streaming, never against hand-built objects.
 It lives in the tests only: the recorder package opens no socket.
 """
@@ -119,6 +119,11 @@ class MockServer:
     def url(self) -> str:
         """The OpenAI-style base URL (ends in ``/v1``)."""
         return f"http://127.0.0.1:{self._server.server_address[1]}/v1"
+
+    @property
+    def root(self) -> str:
+        """The Anthropic-style base URL (no ``/v1``: the SDK adds it)."""
+        return f"http://127.0.0.1:{self._server.server_address[1]}"
 
     @property
     def seen(self) -> List[Seen]:

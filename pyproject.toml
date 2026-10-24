@@ -139,6 +139,7 @@ Security = "https://github.com/Dagnam-AI/dag-lib/blob/main/SECURITY.md"
 
 [dependency-groups]
 dev = [
+    "anthropic>=0.40,<1",
     "hypothesis",
     "import-linter>=2.11",
     "openai>=1.66,<3",

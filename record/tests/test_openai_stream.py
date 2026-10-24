@@ -21,7 +21,7 @@ from openai.resources.chat.completions import AsyncCompletions, Completions
 import openai.resources.responses as responses_module
 import pytest
 
-from dagnam_record import _openai
+from dagnam_record import _patch
 
 MESSAGES: List[Any] = [{"role": "user", "content": "Hi"}]
 USAGE = {"include_usage": True}
@@ -252,8 +252,8 @@ def test_a_stream_that_cannot_be_watched_is_handed_back_untouched_and_counted(
     def refuse(*args: Any) -> None:
         raise RuntimeError("cannot tee")
 
-    monkeypatch.setattr(_openai, "TeeStream", refuse)
-    monkeypatch.setattr(_openai, "AsyncTeeStream", refuse)
+    monkeypatch.setattr(_patch, "TeeStream", refuse)
+    monkeypatch.setattr(_patch, "AsyncTeeStream", refuse)
     rig.server.on(CHAT_PATH, Reply(events=chat_text_events()))
     with rig.client() as client:
         stream = open_chat(client)
