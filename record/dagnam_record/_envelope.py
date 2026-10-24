@@ -3,8 +3,10 @@
 Headers and keys never appear because callers pass only request and response bodies. Media
 parts are replaced by their size, so a line stays valid JSON and the call still reads as
 multimodal. ``norm`` is the provider-neutral fallback a reader uses when raw is absent; its
-rules (system joined with a newline, text parts joined with nothing, OpenAI-shaped tool calls
-for every provider) must equal what the reader derives from raw.
+rules must equal what the reader derives from raw: system segments (empty ones too) joined with a
+newline, text parts joined with nothing, OpenAI-shaped tool calls for every provider, and an
+assistant turn of the prompt that made tool calls is the JSON of those calls (``_render_calls``),
+not its text. The one thing norm cannot say is that a reply was only reasoning.
 """
 
 from __future__ import annotations
@@ -47,6 +49,11 @@ _MEDIA_TYPES = frozenset(
     }
 )
 _SYSTEM_ROLES = frozenset({"system", "developer"})
+_CALL_ITEMS = frozenset({"function_call", "custom_tool_call"})
+_OUTPUT_ITEMS = frozenset({"function_call_output", "custom_tool_call_output"})
+_NAME_PATHS = ("function.name", "custom.name", "name")
+_ARGUMENT_PATHS = ("function.arguments", "custom.input", "args", "arguments", "input")
+_RESULT_PATHS = ("content", "output", "result", "response")
 
 Body = Dict[str, Any]
 Norm = Dict[str, Any]
@@ -140,6 +147,62 @@ def _calls(candidates: List[Optional[Body]]) -> List[Body]:
     return [call for call in candidates if call is not None]
 
 
+def _first(value: object, *paths: str) -> object:
+    """The first value that is not ``None`` at any dotted path (a missing step is ``None``)."""
+    for path in paths:
+        found: object = value
+        for key in path.split("."):
+            found = found.get(key) if isinstance(found, dict) else None
+        if found is not None:
+            return found
+    return None
+
+
+def _render_calls(calls: List[Body]) -> str:
+    """Tool calls in a prompt as one text, the way the audit's reader reads an assistant turn.
+
+    One call is ``{"arguments": ..., "name": ...}`` with sorted keys; several are the list of
+    them. Arguments that are JSON text of an object become that object; any other value, text
+    that is not an object included, is kept as it is, and none at all is ``{}``.
+    """
+    objects: List[Body] = []
+    for call in calls:
+        arguments = _first(call, *_ARGUMENT_PATHS)
+        parsed = arguments
+        if isinstance(arguments, str):
+            try:
+                parsed = json.loads(arguments)
+            except (ValueError, RecursionError):
+                pass
+        if isinstance(parsed, dict):
+            arguments = parsed
+        objects.append(
+            {
+                "arguments": {} if arguments is None else arguments,
+                "name": _first(call, *_NAME_PATHS),
+            }
+        )
+    return json.dumps(objects[0] if len(objects) == 1 else objects, sort_keys=True)
+
+
+def _given(value: object) -> List[str]:
+    """A system text the request gave, as the one segment it is; none given is no segment."""
+    return [] if value is None else [_text(value)]
+
+
+def _assistant_text(turn: Body) -> str:
+    """What an assistant turn of a prompt says: the calls it made, else its text."""
+    calls = [item for item in _list(turn.get("tool_calls")) if isinstance(item, dict)]
+    if isinstance(turn.get("function_call"), dict):
+        calls.append(turn["function_call"])
+    calls += [
+        part
+        for part in _list(turn.get("content"))
+        if isinstance(part, dict) and part.get("type") == "tool_use"
+    ]
+    return _render_calls(calls) if calls else _text(turn.get("content"))
+
+
 def _model(request: Body, response: Body) -> str:
     for source in (response, request):
         model = source.get("model")
@@ -160,7 +223,7 @@ def _norm(
 ) -> Norm:
     return {
         "model": _model(request, response),
-        "system": "\n".join(text for text in system if text) or None,
+        "system": "\n".join(system) or None,
         "messages": messages,
         "response": reply,
         "tool_calls": tool_calls,
@@ -179,10 +242,10 @@ def _split(turns: List[Any]) -> Tuple[List[str], List[Body]]:
         role = _dict(turn).get("role")
         if not isinstance(role, str):
             continue
-        content = _text(turn.get("content"))
         if role in _SYSTEM_ROLES:
-            system.append(content)
+            system.append(_text(turn.get("content")))
         else:
+            content = _assistant_text(turn) if role == "assistant" else _text(turn.get("content"))
             messages.append({"role": role, "content": content})
     return system, messages
 
@@ -192,15 +255,11 @@ def norm_openai_chat(request: Body, response: Body) -> Norm:
     system, messages = _split(_list(request.get("messages")))
     choices = _list(response.get("choices"))
     message = _dict(_dict(choices[0] if choices else None).get("message"))
+    declared = [item for item in _list(message.get("tool_calls")) if isinstance(item, dict)]
+    if isinstance(message.get("function_call"), dict):  # the call API before ``tool_calls``
+        declared.append(message["function_call"])
     calls = _calls(
-        [
-            _call(
-                _dict(item.get("function")).get("name"),
-                _dict(item.get("function")).get("arguments"),
-            )
-            for item in _list(message.get("tool_calls"))
-            if isinstance(item, dict)
-        ]
+        [_call(_first(item, *_NAME_PATHS), _first(item, *_ARGUMENT_PATHS)) for item in declared]
     )
     usage = _dict(response.get("usage"))
     cached = _dict(usage.get("prompt_tokens_details")).get("cached_tokens")
@@ -224,8 +283,11 @@ def norm_openai_responses(request: Body, response: Body) -> Norm:
     items = request.get("input")
     turns: List[Any] = [{"role": "user", "content": items}] if isinstance(items, str) else []
     for item in _list(items):
-        if _dict(item).get("type") == "function_call_output":
-            turns.append({"role": "tool", "content": _text(item.get("output"))})
+        kind = _dict(item).get("type")
+        if kind in _OUTPUT_ITEMS:
+            turns.append({"role": "tool", "content": _text(_first(item, *_RESULT_PATHS))})
+        elif kind in _CALL_ITEMS and "role" not in item:  # a call the assistant made earlier
+            turns.append({"role": "assistant", "tool_calls": [item]})
         else:
             turns.append(item)
     extra, messages = _split(turns)
@@ -234,16 +296,16 @@ def norm_openai_responses(request: Body, response: Body) -> Norm:
     return _norm(
         request,
         response,
-        system=[_text(request.get("instructions")), *extra],
+        system=[*_given(request.get("instructions")), *extra],
         messages=messages,
         reply="".join(
             _text(item.get("content")) for item in output if item.get("type") == "message"
         ),
         tool_calls=_calls(
             [
-                _call(item.get("name"), item.get("arguments"))
+                _call(item.get("name"), _first(item, "arguments", "input"))
                 for item in output
-                if item.get("type") == "function_call"
+                if item.get("type") in _CALL_ITEMS
             ]
         ),
         tokens=(
@@ -264,7 +326,7 @@ def norm_anthropic(request: Body, response: Body) -> Norm:
     return _norm(
         request,
         response,
-        system=[_text(request.get("system"))],
+        system=_given(request.get("system")),
         messages=messages,
         reply="".join(_text([block]) for block in blocks if block.get("type") == "text"),
         tool_calls=_calls(

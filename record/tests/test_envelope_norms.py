@@ -105,6 +105,7 @@ def test_responses_norm() -> None:
         "system": "Be brief.\nAlso kind.",
         "messages": [
             {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": '{"arguments": {}, "name": "lookup"}'},
             {"role": "tool", "content": "42"},
             {"role": "tool", "content": ""},
         ],
@@ -181,7 +182,7 @@ def test_anthropic_norm() -> None:
         "system": "Be brief.",
         "messages": [
             {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Calling"},
+            {"role": "assistant", "content": '{"arguments": {"q": 1}, "name": "lookup"}'},
             {"role": "user", "content": "42ok"},
         ],
         "response": "Hello",
@@ -233,3 +234,164 @@ def test_the_norm_is_chosen_by_provider_and_endpoint(
         "cached_prompt_tokens",
         "has_media",
     }
+
+
+def test_a_system_segment_that_is_empty_still_counts_but_one_not_given_does_not() -> None:
+    chat = norm_openai_chat(
+        {
+            "messages": [
+                {"role": "system", "content": ""},
+                {"role": "developer", "content": "Rules."},
+            ]
+        },
+        {},
+    )
+    assert chat["system"] == "\nRules."
+    assert (
+        norm_openai_chat({"messages": [{"role": "system", "content": None}]}, {})["system"] is None
+    )
+    given = norm_openai_responses(
+        {"instructions": "", "input": [{"role": "developer", "content": "Rules."}]}, {}
+    )
+    assert given["system"] == "\nRules."
+    assert (
+        norm_openai_responses({"input": [{"role": "developer", "content": "Rules."}]}, {})["system"]
+        == "Rules."
+    )
+    assert norm_anthropic({"system": ""}, {})["system"] is None
+    assert norm_anthropic({"system": "", "messages": []}, {})["system"] is None
+
+
+def history(*turns: dict[str, Any]) -> list[str]:
+    """The text of each assistant turn of a chat prompt, as the norm keeps it."""
+    messages = norm_openai_chat({"messages": list(turns)}, {})["messages"]
+    return [m["content"] for m in messages if m["role"] == "assistant"]
+
+
+def call(name: Any, arguments: Any = None, **extra: Any) -> dict[str, Any]:
+    function: dict[str, Any] = {"name": name}
+    if arguments is not None:
+        function["arguments"] = arguments
+    return {"type": "function", "function": function, **extra}
+
+
+@pytest.mark.parametrize(
+    ("turn", "expected"),
+    [
+        pytest.param({"content": "Hi"}, "Hi", id="text only"),
+        pytest.param({"content": None}, "", id="nothing"),
+        pytest.param(
+            {"content": "Looking.", "tool_calls": [call("f", '{"b": 1, "a": [2]}')]},
+            '{"arguments": {"a": [2], "b": 1}, "name": "f"}',
+            id="arguments are the parsed object with sorted keys, the text is dropped",
+        ),
+        pytest.param(
+            {"tool_calls": [call("f", '{"a": 1}'), call("g", {"x": 2})]},
+            '[{"arguments": {"a": 1}, "name": "f"}, {"arguments": {"x": 2}, "name": "g"}]',
+            id="several calls are a list, in order",
+        ),
+        pytest.param(
+            {"tool_calls": [call("f", "[1, 2]")]},
+            '{"arguments": "[1, 2]", "name": "f"}',
+            id="arguments that are not an object stay the text",
+        ),
+        pytest.param(
+            {"tool_calls": [call("f", '{"cut": "ab')]},
+            '{"arguments": "{\\"cut\\": \\"ab", "name": "f"}',
+            id="cut-off arguments stay the text",
+        ),
+        pytest.param(
+            {"tool_calls": [call("f", "[" * 100_000)]},
+            '{"arguments": "' + "[" * 100_000 + '", "name": "f"}',
+            id="arguments too deep to parse stay the text",
+        ),
+        pytest.param(
+            {"tool_calls": [call("f")]}, '{"arguments": {}, "name": "f"}', id="no arguments"
+        ),
+        pytest.param(
+            {"tool_calls": [{"type": "custom", "custom": {"name": "sh", "input": "ls"}}]},
+            '{"arguments": "ls", "name": "sh"}',
+            id="a custom tool call",
+        ),
+        pytest.param(
+            {"tool_calls": [{"name": "lc", "args": {"q": 1}}]},
+            '{"arguments": {"q": 1}, "name": "lc"}',
+            id="a LangChain shaped call",
+        ),
+        pytest.param(
+            {"tool_calls": [call(None, "{}")]},
+            '{"arguments": {}, "name": null}',
+            id="a call without a name is still a call that was made",
+        ),
+        pytest.param(
+            {"content": None, "function_call": {"name": "old", "arguments": '{"a": 1}'}},
+            '{"arguments": {"a": 1}, "name": "old"}',
+            id="the call API before tool_calls",
+        ),
+        pytest.param(
+            {"content": [{"type": "tool_use", "name": "u", "input": {"q": 1}}]},
+            '{"arguments": {"q": 1}, "name": "u"}',
+            id="a tool_use block in the content",
+        ),
+        pytest.param({"tool_calls": ["bad", 3], "function_call": "bad"}, "", id="odd calls"),
+    ],
+)
+def test_an_assistant_turn_that_made_calls_is_those_calls(
+    turn: dict[str, Any], expected: str
+) -> None:
+    assert history({"role": "assistant", **turn}) == [expected]
+
+
+def test_only_assistant_turns_are_rendered_as_calls() -> None:
+    messages = norm_openai_chat(
+        {"messages": [{"role": "user", "content": "x", "tool_calls": [call("f")]}]}, {}
+    )["messages"]
+    assert messages == [{"role": "user", "content": "x"}]
+
+
+def test_a_chat_answer_with_the_old_function_call_or_a_custom_call_has_the_call() -> None:
+    old = {"choices": [{"message": {"function_call": {"name": "old", "arguments": '{"a": 1}'}}}]}
+    assert norm_openai_chat({}, old)["tool_calls"] == [
+        {"type": "function", "function": {"name": "old", "arguments": '{"a": 1}'}}
+    ]
+    both = {
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [{"type": "custom", "custom": {"name": "sh", "input": "ls"}}],
+                    "function_call": {"name": "old"},
+                }
+            }
+        ]
+    }
+    assert [c["function"] for c in norm_openai_chat({}, both)["tool_calls"]] == [
+        {"name": "sh", "arguments": "ls"},
+        {"name": "old", "arguments": ""},
+    ]
+    assert (
+        norm_openai_chat({}, {"choices": [{"message": {"function_call": "x"}}]})["tool_calls"] == []
+    )
+
+
+def test_responses_custom_tool_calls_and_results_are_kept() -> None:
+    request = {
+        "input": [
+            {"role": "user", "content": "Go"},
+            {"type": "custom_tool_call", "call_id": "c", "name": "sh", "input": "ls"},
+            {"type": "custom_tool_call_output", "call_id": "c", "output": "a b"},
+            {"type": "function_call_output", "call_id": "d", "content": "from content"},
+            {"role": "assistant", "type": "function_call", "name": "kept", "arguments": "{}"},
+        ]
+    }
+    response = {"output": [{"type": "custom_tool_call", "name": "sh", "input": "pwd"}]}
+    norm = norm_openai_responses(request, response)
+    assert norm["messages"] == [
+        {"role": "user", "content": "Go"},
+        {"role": "assistant", "content": '{"arguments": "ls", "name": "sh"}'},
+        {"role": "tool", "content": "a b"},
+        {"role": "tool", "content": "from content"},
+        {"role": "assistant", "content": ""},
+    ]
+    assert norm["tool_calls"] == [
+        {"type": "function", "function": {"name": "sh", "arguments": "pwd"}}
+    ]
