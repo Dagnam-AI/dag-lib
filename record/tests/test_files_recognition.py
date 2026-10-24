@@ -12,6 +12,7 @@ import pytest
 
 from dagnam_record import _files
 from dagnam_record._files import NotRecorderDirectoryError
+from dagnam_record._writer import read_status
 
 NOW = 1_791_797_400.0
 LINE = envelope("x", NOW)
@@ -57,16 +58,62 @@ def test_a_status_file_that_does_not_parse_as_an_object_proves_nothing(
     assert names(tmp_path) == [".status.json", "2026-10-12.jsonl"]
 
 
-def test_a_status_file_that_parses_vouches_for_every_dated_file(tmp_path: Path) -> None:
-    write_data(tmp_path, "2026-10-12.jsonl", [FOREIGN])
+def test_a_status_file_does_not_vouch_for_a_dated_file_that_is_not_an_envelope(
+    tmp_path: Path,
+) -> None:
+    write_data(tmp_path, "2026-10-12.jsonl", ["my log"])
     write_data(tmp_path, "2026-10-13.jsonl", [LINE])
+    (tmp_path / "2026-10-14.jsonl").write_text("", encoding="utf-8")
     status(tmp_path)
     found = _files.find(str(tmp_path))
-    assert [os.path.basename(path) for path in found.data] == [
-        "2026-10-12.jsonl",
-        "2026-10-13.jsonl",
-    ]
+    assert [os.path.basename(path) for path in found.data] == ["2026-10-13.jsonl"]
     assert found.status == str(tmp_path / ".status.json")
+    assert _files.purge(str(tmp_path)).deleted == ["2026-10-13.jsonl", ".status.json"]
+    assert names(tmp_path) == ["2026-10-12.jsonl", "2026-10-14.jsonl"]
+
+
+@pytest.mark.parametrize(
+    "body", ['{"status": "ok"}', '{"counts": []}', '{"counts": "x"}', '{"counts": null}', "[]"]
+)
+def test_a_status_file_without_counts_is_not_the_recorders_and_vouches_for_nothing(
+    body: str, tmp_path: Path
+) -> None:
+    write_data(tmp_path, "2026-02-02.jsonl", ["my log"])
+    status(tmp_path, body)
+    assert _files.find(str(tmp_path)) == _files.Found([], None)
+    with pytest.raises(NotRecorderDirectoryError):
+        _files.purge(str(tmp_path))
+    assert names(tmp_path) == [".status.json", "2026-02-02.jsonl"]
+
+
+def test_a_real_status_file_alone_is_a_recorder_directory_and_leaves_foreign_files(
+    tmp_path: Path,
+) -> None:
+    write_data(tmp_path, "2026-02-02.jsonl", ["my log"])
+    status(tmp_path)
+    assert _files.purge(str(tmp_path)).deleted == [".status.json"]
+    assert names(tmp_path) == ["2026-02-02.jsonl"]
+
+
+def test_prune_never_deletes_a_dated_file_that_does_not_start_like_an_envelope(
+    tmp_path: Path,
+) -> None:
+    status(tmp_path)
+    write_data(tmp_path, "2020-01-01.jsonl", ["my log"])
+    write_data(tmp_path, "2020-01-02.jsonl", [LINE])
+    (tmp_path / "2020-01-03.jsonl").write_text("", encoding="utf-8")
+    removed = _files.prune(str(tmp_path), 14, NOW)
+    assert [os.path.basename(path) for path in removed] == ["2020-01-02.jsonl"]
+    assert names(tmp_path) == [".status.json", "2020-01-01.jsonl", "2020-01-03.jsonl"]
+
+
+def test_a_status_file_over_a_megabyte_is_treated_as_unreadable(tmp_path: Path) -> None:
+    write_data(tmp_path, "2026-10-12.jsonl", [LINE])
+    status(tmp_path, '{"counts": {"written": 1}}' + " " * 1_000_001)
+    assert read_status(str(tmp_path)) == {}
+    assert _files.summarize(str(tmp_path)).counts is None
+    status(tmp_path, '{"counts": {"written": 1}}' + " " * 100)
+    assert read_status(str(tmp_path)) == {"counts": {"written": 1}}
 
 
 def test_without_a_status_each_file_must_start_like_an_envelope_line(tmp_path: Path) -> None:
@@ -157,7 +204,7 @@ def test_a_huge_line_is_read_in_pieces_never_whole(
 ) -> None:
     status(tmp_path)
     huge = "z" * 200_000
-    write_data(tmp_path, "2026-10-12.jsonl", [huge, LINE, huge])
+    write_data(tmp_path, "2026-10-12.jsonl", [LINE, huge, huge])
     sizes: List[int] = []
     real = os.fdopen
     monkeypatch.setattr(_files, "_CHUNK", 4096)
@@ -196,7 +243,7 @@ def test_the_first_stamp_is_the_first_one_that_parses_and_the_last_is_the_last(
     write_data(
         tmp_path,
         "2026-10-12.jsonl",
-        ["garbage", '{"v":1,"trace_id":"a","ts":"TOP SECRET"}', envelope("b", NOW), "garbage"],
+        ['{"v":1,"trace_id":"a","ts":"TOP SECRET"}', "garbage", envelope("b", NOW), "garbage"],
     )
     write_data(tmp_path, "2026-10-13.jsonl", [envelope("c", NOW + 86_400), "garbage"])
     summary = _files.summarize(str(tmp_path))
@@ -218,7 +265,7 @@ def test_a_last_line_without_a_newline_is_counted_and_stamped(tmp_path: Path) ->
 
 def test_only_a_stamp_in_the_envelope_position_is_ever_reported(tmp_path: Path) -> None:
     status(tmp_path)
-    forged = '{"note":"x","v":1,"trace_id":"a","ts":"2026-01-01T00:00:00Z"}'
+    forged = '{"v":1,"trace_id":"a","note":"x","ts":"2026-01-01T00:00:00Z"}'
     write_data(tmp_path, "2026-10-12.jsonl", [forged])
     summary = _files.summarize(str(tmp_path))
     assert (summary.lines, summary.first, summary.last) == (1, None, None)

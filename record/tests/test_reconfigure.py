@@ -98,3 +98,32 @@ def test_a_stress_of_calls_from_four_threads_during_many_reconfigurations_adds_u
     assert len(stored(directory)) == counts["written"]
     assert counts["written"] + sum(counts[key] for key in DROPS) == sent
     assert counts["dropped_error"] == 0
+
+
+def test_a_stress_across_two_alternating_directories_adds_up(tmp_path: Path) -> None:
+    first, second = tmp_path / "a", tmp_path / "b"
+    dagnam_record.install(dir=str(first))
+    per_thread = 300
+    barrier = threading.Barrier(7)
+
+    def work() -> None:
+        barrier.wait(timeout=30)
+        for _ in range(per_thread):
+            record()
+
+    threads = [threading.Thread(target=work) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=30)
+    for number in range(15):
+        dagnam_record.install(dir=str(second if number % 2 == 0 else first))
+    for thread in threads:
+        thread.join(60)
+        assert not thread.is_alive()
+    dagnam_record.uninstall()
+    # Each directory's file holds the counts of the writers that worked there, and a count that
+    # reached a writer after it was handed over is on its successor's directory: together, all.
+    counted = {key: saved_counts(first)[key] + saved_counts(second)[key] for key in COUNT_KEYS}
+    assert sum(counted.values()) == 6 * per_thread
+    assert len(stored(first)) + len(stored(second)) == counted["written"]
+    assert counted["dropped_error"] == 0

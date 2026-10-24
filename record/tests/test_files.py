@@ -154,7 +154,7 @@ def test_summarize_counts_files_lines_and_timestamps(tmp_path: Path) -> None:
         expired=True,
     )
     summary = _files.summarize(str(tmp_path))
-    assert (summary.files, summary.lines) == (3, 3)
+    assert (summary.files, summary.lines) == (2, 3)  # the empty 14th is not the recorder's
     assert summary.first == "2026-10-12T09:30:00.000Z"
     assert summary.last == "2026-10-13T01:02:03.000Z"
     assert summary.counts == {
@@ -173,7 +173,11 @@ def test_summarize_counts_files_lines_and_timestamps(tmp_path: Path) -> None:
 
 def test_summarize_prints_only_well_formed_timestamps(tmp_path: Path) -> None:
     status_file(tmp_path)
-    write_data(tmp_path, "2026-10-12.jsonl", ['{"ts": "TOP SECRET TEXT"}', "not json", "[1]"])
+    write_data(
+        tmp_path,
+        "2026-10-12.jsonl",
+        ['{"v":1,"trace_id":"a","ts":"TOP SECRET TEXT"}', "not json", "[1]"],
+    )
     write_data(tmp_path, "2026-10-13.jsonl", [envelope("x", at("2026-10-13"))])
     summary = _files.summarize(str(tmp_path))
     assert summary.lines == 4

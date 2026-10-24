@@ -298,3 +298,14 @@ def test_files_that_only_look_like_the_recorders_are_neither_shown_nor_deleted(
         assert (code, out) == (1, "")
         assert "holds no recorder file" in err
     assert sorted(path.name for path in tmp_path.iterdir()) == [".status.json", "2026-10-12.jsonl"]
+
+
+def test_a_status_file_without_counts_and_a_dated_log_survive_a_purge(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / ".status.json").write_text('{"status": "ok"}', encoding="utf-8")
+    write_data(tmp_path, "2026-02-02.jsonl", ["my log"])
+    code, out, err = run(["purge", "--dir", str(tmp_path)], capsys)
+    assert (code, out) == (1, "")
+    assert "holds no recorder file" in err
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".status.json", "2026-02-02.jsonl"]

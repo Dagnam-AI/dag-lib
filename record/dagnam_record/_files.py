@@ -6,10 +6,10 @@ else (other names, directories, symlinks, FIFOs) is not the recorder's: it is ne
 or deleted, and a directory that is itself a symlink is refused.
 
 A name alone is not enough, because another program may use the same names. A daily file is the
-recorder's only if ``.status.json`` is there and parses as a JSON object, or if the file's own
-first bytes are those of an envelope line (``{"v":1,"trace_id"``, which the recorder always writes
-first). ``.status.json`` is the recorder's if it parses, or if some daily file passed the test. A
-directory in which no file qualifies holds no recorder file.
+recorder's only if its own first bytes are those of an envelope line (``{"v":1,"trace_id"``, which
+the recorder always writes first); nothing else vouches for it, so an empty file is left alone.
+``.status.json`` is the recorder's if it parses as an object with a ``counts`` object, or if some
+daily file passed the test. A directory in which no file qualifies holds no recorder file.
 
 Nothing here prints or returns trace content; the only text taken from a data file is a first and
 last timestamp, and only if it has the exact shape of one. Data files are read in bounded pieces,
@@ -116,9 +116,9 @@ def find(directory: str) -> Found:
                 named.append(entry.path)
             elif entry.name == STATUS_FILE:
                 status = entry.path
-    parses = status is not None and bool(read_status(directory))
-    data = sorted(path for path in named if parses or starts_like_a_line(path))
-    return Found(data, status if parses or data else None)
+    data = sorted(path for path in named if starts_like_a_line(path))
+    ours = status is not None and isinstance(read_status(directory).get("counts"), dict)
+    return Found(data, status if ours or data else None)
 
 
 def _remove_if_before(path: str, cutoff: date) -> bool:

@@ -38,6 +38,8 @@ from dagnam_record._stream import deliver_pending
 
 LOGGER = logging.getLogger("dagnam_record")
 STATUS_FILE = ".status.json"
+STATUS_MAX = 1_000_000
+"""The most of a ``.status.json`` that is read: a larger one is treated as unreadable."""
 COUNT_KEYS = (
     "written",
     "dropped_full",
@@ -79,12 +81,15 @@ def _ensure_dir(directory: str) -> None:
             _fchmod(descriptor, 0o700)
     finally:
         os.close(descriptor)
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, "the trace directory is not writable", directory)
 
 
 def read_status(directory: str) -> Dict[str, Any]:
     """The saved status, or ``{}`` for anything but a readable regular file holding an object.
 
-    The open cannot wait (a FIFO would never deliver a writer) and does not follow a symlink.
+    The open cannot wait (a FIFO would never deliver a writer) and does not follow a symlink, and
+    a file of more than ``STATUS_MAX`` characters counts as unreadable.
     """
     try:
         descriptor = os.open(
@@ -96,7 +101,8 @@ def read_status(directory: str) -> Dict[str, Any]:
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 return {}
-            data = json.load(handle)
+            text = handle.read(STATUS_MAX + 1)
+            data = json.loads(text) if len(text) <= STATUS_MAX else None
         except (OSError, ValueError):
             return {}
     return data if isinstance(data, dict) else {}
@@ -149,6 +155,8 @@ class Writer:
         self._loaded = dict(self.counts)  # what was already on record when this writer began
         self._successor: Optional[Writer] = None  # takes lines that arrive after close()
         self._moved: Optional[Writer] = None  # takes counts that arrive after hand_over()
+        self._retired = False  # handed over and saved for good: the successor owns the file now
+        self.usable = not refused  # False: the directory was refused, every line will be dropped
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save
         self._started = clock()
@@ -166,26 +174,50 @@ class Writer:
             self._spawn()
 
     def submit(self, line: str) -> None:
-        """Queue one line. Never blocks, never raises: what cannot be kept is counted."""
-        forward: Optional[Writer] = None
+        """Queue one line. Never blocks, never raises: what cannot be kept is counted.
+
+        A writer that was handed over passes the line on to its successor, however long the
+        chain of successors has grown (a loop, not recursion).
+        """
+        try:
+            writer: Optional[Writer] = self
+            while writer is not None:
+                writer = writer._offer(line)
+        except Exception:  # whatever went wrong, the caller is never told
+            self._bump("dropped_error")
+
+    def _offer(self, line: str) -> Optional[Writer]:
+        """Queue ``line`` or count why not; the writer to try instead, if this one was handed over."""
         try:
             with self._gate:  # close() takes it to stop intake, so no line lands after the stop
                 if self._closed:
-                    forward = self._successor
+                    successor = self._successor
+                    if successor is not None:
+                        return self._flatten_successor(successor)
                     key = "dropped_error"
                 elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
                     key = "dropped_large"
                 else:
                     self._queue.put_nowait(line)
-                    return
+                    return None
         except queue.Full:
             key = "dropped_full"
-        except Exception:  # not a string, or anything else: the caller is never told
+        except Exception:  # not a string, or anything else
             key = "dropped_error"
-        if forward is not None:
-            forward.submit(line)  # handed over: the successor decides what becomes of it
-        else:
-            self._bump(key)
+        self._bump(key)
+        return None
+
+    def _flatten_successor(self, target: Writer) -> Writer:
+        while target._successor is not None:
+            target = target._successor
+        self._successor = target  # the next line takes one step, not the whole chain
+        return target
+
+    def _flatten_moved(self, target: Writer) -> Writer:
+        while target._moved is not None:
+            target = target._moved
+        self._moved = target
+        return target
 
     def count(self, key: str) -> None:
         """Count a line that was dropped before it reached ``submit`` (a key of ``COUNT_KEYS``)."""
@@ -193,6 +225,11 @@ class Writer:
 
     def close(self, timeout: float = 2.0) -> None:
         """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
+        self._halt(timeout)
+        self._persist()
+
+    def _halt(self, timeout: float) -> None:
+        """Shut intake, let the thread finish the queue (up to ``timeout``) and drop the file."""
         deliver_pending()  # streams that were let go: their lines must be in before intake stops
         with self._gate:
             self._closed = True
@@ -200,28 +237,30 @@ class Writer:
         thread = self._thread
         if thread is not None:
             try:
-                self._queue.put(None, timeout=timeout)
+                self._queue.put_nowait(None)  # wakes an idle thread; a busy one sees _closed
             except queue.Full:
                 pass
             thread.join(timeout)
         if thread is None or not thread.is_alive():
             self._drain()
             self._drop_fd()
-        self._persist()
 
-    def hand_over(self, successor: Writer) -> None:
+    def hand_over(self, successor: Writer, timeout: float = 2.0) -> None:
         """Stop in favour of ``successor``, losing no line and no count.
 
-        What is queued is written, then the counts are saved. A line or a count that reaches this
-        writer afterwards (a call that began with the old recorder) is passed to ``successor``.
-        In the same directory the successor also takes over the counts and the window start of this
-        writer (its own ``window_days`` then decides whether the window has ended), so ``.status.json`` goes on from where it was.
+        What is queued is written, then the counts are frozen and saved. A line or a count that
+        reaches this writer afterwards (a call that began with the old recorder, or a thread that
+        did not finish within ``timeout``) is passed to ``successor``, which counts it. In the
+        same directory the successor also takes over the counts and the window start of this
+        writer (its own ``window_days`` then decides whether the window has ended).
         """
         self._successor = successor
-        self.close()
+        self._halt(timeout)
         with self._lock:
             final = dict(self.counts)
-            self._moved = successor
+            self._moved = successor  # from here on every count goes to the successor
+        self._persist()  # the counts are frozen now: this is exactly what they were
+        self._retired = True
         if successor._dir == self._dir:
             successor._take_over(final, self._started)
 
@@ -274,10 +313,13 @@ class Writer:
     def _run(self, source: queue.Queue[Optional[str]]) -> None:
         while True:
             try:
-                line = source.get(timeout=_SAVE_EVERY)
+                # Once closed, finish what is queued and stop, even if the stop marker found no room.
+                line = source.get_nowait() if self._closed else source.get(timeout=_SAVE_EVERY)
             except queue.Empty:
                 deliver_pending()  # a safe point: this thread holds no writer lock here
                 self._persist_if_due()
+                if self._closed:
+                    return
                 continue
             if line is None:
                 return
@@ -286,13 +328,15 @@ class Writer:
             deliver_pending()
 
     def _bump(self, key: str) -> None:
-        with self._lock:
-            target = self._moved
-            if target is None:
-                self.counts[key] += 1
-                self._dirty = True
-                return
-        target._bump(key)
+        writer = self
+        while True:
+            with writer._lock:
+                moved = writer._moved
+                if moved is None:
+                    writer.counts[key] += 1
+                    writer._dirty = True
+                    return
+            writer = writer._flatten_moved(moved)
 
     def _is_expired(self, now: float) -> bool:
         if not self.expired and now - self._started >= self._window:
@@ -352,7 +396,7 @@ class Writer:
 
     def _persist(self) -> None:
         """Save the counts by atomic rename; a failure leaves them dirty for the next try."""
-        if not self._dirty:
+        if not self._dirty or self._retired:
             return
         self._saved_at = self._clock()
         with self._lock:

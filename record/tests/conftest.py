@@ -127,6 +127,22 @@ class Probe(Writer):
         """Use another queue."""
         self._queue = replacement
 
+    def successor(self) -> Any:
+        """The writer that takes this one's late lines."""
+        return self._successor
+
+    def moved_to(self) -> Any:
+        """The writer that takes this one's late counts."""
+        return self._moved
+
+    def mark_dirty(self) -> None:
+        """Pretend the counts changed since the last save."""
+        self._dirty = True
+
+    def real_persist(self) -> Callable[[], None]:
+        """The writer's own save of its counts, before a test replaces it."""
+        return self._persist
+
     def real_write(self) -> Callable[[str], None]:
         """The writer's own write, before a test replaces it."""
         return self._write

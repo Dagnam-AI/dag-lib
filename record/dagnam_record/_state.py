@@ -92,6 +92,24 @@ def _build(config: Config) -> Installed:
     return Installed(config, writer, recorder)
 
 
+def _adopt(built: Installed, previous: Optional[Installed]) -> Installed:
+    """``built`` if it can write; else the running recorder (if any), which is worth more."""
+    if built.writer.usable:
+        return built
+    if previous is None:  # a first install keeps going, so the drops are counted and visible
+        LOGGER.warning(
+            "dagnam_record: %s cannot be used; recorded calls will be dropped and counted",
+            built.config.directory,
+        )
+        return built
+    built.writer.close()
+    LOGGER.warning(
+        "dagnam_record: %s cannot be used; the recorder that is running is kept",
+        built.config.directory,
+    )
+    return previous
+
+
 def install(
     *,
     window_days: int = 14,
@@ -136,10 +154,10 @@ def install(
     config = _config(window_days, dir, sample, no_raw, redact)
     with STATE.lock:
         previous = STATE.installed
-        if previous is None or previous.config != config:
-            installed = STATE.installed = _build(config)
-        else:
+        if previous is not None and previous.config == config:
             installed = previous
+        else:
+            installed = STATE.installed = _adopt(_build(config), previous)
         patched = [_openai.install(installed.recorder), _anthropic.install(installed.recorder)]
         if previous is not None and previous is not installed:
             # Only now, with every new call going to the new recorder: the old writer writes what
