@@ -261,10 +261,16 @@ def test_a_null_openai_id_falls_back_to_the_envelopes(fixtures_dir: Path) -> Non
 
 def test_the_completions_creation_time_is_read_but_never_wins(fixtures_dir: Path) -> None:
     row = lines(fixtures_dir / "recorder_openai_responses.jsonl")[0]
-    assert "created_at" in row["response"]
+    assert row["response"]["created_at"] == 1_791_763_301  # the recorded call's own time
+    row["response"]["created_at"] += 5_000  # a proxy's clock, say
     record = to_record(row)
     assert record is not None
     assert record.ts == datetime(2026, 10, 12, 0, 1, 41, tzinfo=UTC)
+    chat = lines(fixtures_dir / "recorder_openai_chat.jsonl")[0]
+    chat["response"]["created"] += 5_000
+    from_chat = to_record(chat)
+    assert from_chat is not None
+    assert from_chat.ts == datetime(2026, 10, 12, 0, 0, 1, tzinfo=UTC)
 
 
 def test_raw_wins_over_a_norm_that_differs(fixtures_dir: Path) -> None:
