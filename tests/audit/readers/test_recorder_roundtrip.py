@@ -280,7 +280,7 @@ def drop_ids(records: list[TraceRecord]) -> list[TraceRecord]:
 def test_the_recorder_file_and_the_batch_export_read_to_the_same_records() -> None:
     recorded = drop_ids(list(read_traces(FIXTURES / CHAT, source="dagnam")[0]))
     exported = drop_ids(list(read_traces(FIXTURES / BATCH, source="openai")[0]))
-    assert len(recorded) == len(exported) == 13
+    assert len(recorded) == len(exported) == 14
     for number, (mine, theirs) in enumerate(zip(recorded, exported, strict=True), 1):
         assert mine == theirs, number
 
@@ -308,4 +308,4 @@ def test_scanning_the_recorder_file_equals_scanning_the_same_calls_as_an_openai_
     recorded.pop("generated_at")
     exported.pop("generated_at")
     assert recorded == exported
-    assert recorded["totals"]["calls"] == 13
+    assert recorded["totals"]["calls"] == 14

@@ -51,7 +51,7 @@ def test_column_map_is_rejected_for_the_dagnam_source(tmp_path: Path) -> None:
 def test_dagnam_source_dispatches_to_the_recorder_reader(fixtures_dir: Path) -> None:
     records, stats = read_traces(fixtures_dir / "recorder_openai_chat.jsonl", source="dagnam")
     assert [r.trace_id for r in records][:1] == ["rec_chat_1"]
-    assert stats.rows_seen == 13
+    assert stats.rows_seen == 14
 
 
 def test_the_cli_sources_and_the_source_literal_name_the_same_readers() -> None:

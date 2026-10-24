@@ -43,7 +43,7 @@ def test_the_reader_needs_the_envelope_header_fields() -> None:
 
 def test_openai_chat_line_reads_through_the_openai_parser(fixtures_dir: Path) -> None:
     out = read(fixtures_dir / "recorder_openai_chat.jsonl")
-    assert len(out) == 13
+    assert len(out) == 14
     assert all(
         r.trace_id.startswith("rec_chat_") for r in out
     )  # the envelope's id, not the completion's
@@ -328,8 +328,8 @@ def test_a_few_newer_lines_are_counted_and_the_rest_read(
     path = tmp_path / "mixed.jsonl"
     path.write_text("\n".join([*good * 5, newer]) + "\n", encoding="utf-8")
     records, stats = read_records(path, "dagnam", READER)
-    assert len(list(records)) == 65
-    assert (stats.rows_kept, stats.rows_malformed, stats.first_malformed) == (65, 1, (65,))
+    assert len(list(records)) == 70
+    assert (stats.rows_kept, stats.rows_malformed, stats.first_malformed) == (70, 1, (70,))
 
 
 NEWER = json.dumps({"v": 2, "trace_id": "x", "ts": "2026-10-12T00:00:00Z"})

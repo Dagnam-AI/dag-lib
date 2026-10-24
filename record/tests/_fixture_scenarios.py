@@ -209,6 +209,8 @@ def chat_file(env: Env) -> None:
     )
     custom = {"id": "call_12", "type": "custom", "custom": {"name": "run_shell", "input": "ls -l"}}
     env.chat(None, {"messages": [user("List the files.")]}, tool_calls=[custom])
+    ticket = '{"type": "ticket", "content": "Refund me."}'  # an agent's JSON prompt, not a message
+    env.chat("refunds", {"messages": [{"role": "system", "content": ticket}, user(ticket)]})
     thought = "<think>The customer wants a status.</think>Sure, one moment."
     env.chat(
         "It shipped.",

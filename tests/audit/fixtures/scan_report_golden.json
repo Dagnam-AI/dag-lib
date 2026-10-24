@@ -1,7 +1,7 @@
 {
   "dagnam": {
     "files": {},
-    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: dagnam\n- window: 2026-10-12T00:00:01+00:00 to 2026-10-12T00:00:13+00:00 (30 days)\n- price table: golden-1\n- totals: 13 calls, $0.00/month, 2,480 prompt + 26 completion tokens\n\n## Warnings\n\n- 46% of traces have no system prompt (over 20%); discovery is low-confidence for this export\n- workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 05cc6e47be9b11db | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 4 traces in the window; 1,000 needed |\n| unstructured-json | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| unstructured-short | enum_label | 0.1 | 0.00 | - | - | KEEP | not_audited: multimodal input: 33% of calls carry image, audio or file parts a text student cannot see |\n| 55c2849e062f06e8 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 2 traces in the window; 1,000 needed |\n| 53f67a4191cb39ff | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: dagnam\n- window: 2026-10-12T00:00:01+00:00 to 2026-10-12T00:00:14+00:00 (30 days)\n- price table: golden-1\n- totals: 14 calls, $0.00/month, 2,520 prompt + 28 completion tokens\n\n## Warnings\n\n- 43% of traces have no system prompt (over 20%); discovery is low-confidence for this export\n- workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 05cc6e47be9b11db | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 4 traces in the window; 1,000 needed |\n| unstructured-json | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| unstructured-short | enum_label | 0.1 | 0.00 | - | - | KEEP | not_audited: multimodal input: 33% of calls carry image, audio or file parts a text student cannot see |\n| 55c2849e062f06e8 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 2 traces in the window; 1,000 needed |\n| 53f67a4191cb39ff | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n| 7a83ba34bde154a9 | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
     "report": {
       "generated_at": "<generated_at>",
       "pii": {
@@ -26,18 +26,18 @@
       "schema": "dagnam.audit.scan/1",
       "source": "dagnam",
       "totals": {
-        "calls": 13,
-        "completion_tokens": 26,
-        "cost_usd_month": 0.0003876,
-        "prompt_tokens": 2480
+        "calls": 14,
+        "completion_tokens": 28,
+        "cost_usd_month": 0.0003948,
+        "prompt_tokens": 2520
       },
       "warnings": [
-        "46% of traces have no system prompt (over 20%); discovery is low-confidence for this export",
+        "43% of traces have no system prompt (over 20%); discovery is low-confidence for this export",
         "workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls."
       ],
       "window": {
         "days": 30.0,
-        "end": "2026-10-12T00:00:13+00:00",
+        "end": "2026-10-12T00:00:14+00:00",
         "sample_rate": 1.0,
         "start": "2026-10-12T00:00:01+00:00"
       },
@@ -122,7 +122,7 @@
           "id": "unstructured-short",
           "latency_ms": {
             "p50": 309.0,
-            "p95": 316.2
+            "p95": 318.0
           },
           "media_calls": 1,
           "models": [
@@ -211,11 +211,45 @@
             "savings_usd_month": null,
             "status": "too_few_samples"
           }
+        },
+        {
+          "calls": 1,
+          "calls_per_day": 0.03333333333333333,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 7.2000000000000005e-06,
+          "dataset": null,
+          "distinct_outputs": 1,
+          "entropy": -0.0,
+          "id": "7a83ba34bde154a9",
+          "latency_ms": {
+            "p50": 313.0,
+            "p95": 313.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "Refund me.",
+          "template_hash": "7a83ba34bde154a9",
+          "tokens": {
+            "completion": 2,
+            "prompt": 40
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "1 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
         }
       ]
     },
     "stderr": "",
-    "stdout": "Workload           Class       Calls/day $/month Verdict        \n----------------------------------------------------------------\n05cc6e47be9b11db   enum_label        0.1    0.00 too_few_samples\nunstructured-json  json_object       0.1    0.00 too_few_samples\nunstructured-short enum_label        0.1    0.00 not_audited    \n55c2849e062f06e8   enum_label        0.1    0.00 too_few_samples\n53f67a4191cb39ff   enum_label        0.0    0.00 too_few_samples\n\n5 workloads: 1 not_audited, 4 too_few_samples\nwarning: 46% of traces have no system prompt (over 20%); discovery is low-confidence for this export\nwarning: workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n"
+    "stdout": "Workload           Class       Calls/day $/month Verdict        \n----------------------------------------------------------------\n05cc6e47be9b11db   enum_label        0.1    0.00 too_few_samples\nunstructured-json  json_object       0.1    0.00 too_few_samples\nunstructured-short enum_label        0.1    0.00 not_audited    \n55c2849e062f06e8   enum_label        0.1    0.00 too_few_samples\n53f67a4191cb39ff   enum_label        0.0    0.00 too_few_samples\n7a83ba34bde154a9   enum_label        0.0    0.00 too_few_samples\n\n6 workloads: 1 not_audited, 5 too_few_samples\nwarning: 43% of traces have no system prompt (over 20%); discovery is low-confidence for this export\nwarning: workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n"
   },
   "generated": {
     "files": {

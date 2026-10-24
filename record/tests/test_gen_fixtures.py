@@ -52,7 +52,7 @@ def test_main_writes_every_file_to_the_directory_it_is_given(
     assert gen_fixtures.main([str(tmp_path / "out")]) == 0
     written = sorted(path.name for path in (tmp_path / "out").iterdir())
     assert written == sorted([*(spec.name for spec in gen_fixtures.SPECS), gen_fixtures.BATCH])
-    assert "recorder_openai_chat.jsonl: 13 lines" in capsys.readouterr().out
+    assert "recorder_openai_chat.jsonl: 14 lines" in capsys.readouterr().out
     first = json.loads(lines(tmp_path / "out", "recorder_openai_chat.jsonl")[0])
     assert (first["trace_id"], first["ts"], first["latency_ms"]) == (
         "rec_chat_1",

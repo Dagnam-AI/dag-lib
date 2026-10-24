@@ -29,7 +29,7 @@ Read by `tests/audit/readers/test_recorder.py` and `test_recorder_roundtrip.py`.
 
 | file | shape | lines |
 |---|---|---|
-| `recorder_openai_chat.jsonl` | Chat Completions: plain, cached tokens, a tool call, an omitted image, a developer message with assistant history, parallel tool calls, a history with a tool call and its result, the old `function_call` (answer and history), an empty system message, control characters, a `custom` tool call, an assistant turn with `<think>` | 13 |
+| `recorder_openai_chat.jsonl` | Chat Completions: plain, cached tokens, a tool call, an omitted image, a developer message with assistant history, parallel tool calls, a history with a tool call and its result, the old `function_call` (answer and history), an empty system message, control characters, a `custom` tool call, JSON text as a system and a user prompt, an assistant turn with `<think>` | 14 |
 | `recorder_openai_stream.jsonl` | `stream=True`: Chat text with usage, Chat with two tool calls, a Responses stream | 3 |
 | `recorder_openai_parse.jsonl` | `parse()` with a pydantic model: the recorded schema (`response_format`, `text_format`) and the `parsed` fields | 2 |
 | `recorder_openai_responses.jsonl` | Responses: a message, a `function_call`, an omitted `input_image`, a history with a `function_call` and its output, an empty `instructions` beside a developer message, a reasoning item, a `custom_tool_call`, a history with a custom tool call and its output and no `instructions` | 8 |
@@ -39,7 +39,7 @@ Read by `tests/audit/readers/test_recorder.py` and `test_recorder_roundtrip.py`.
 | `recorder_norm_only.jsonl` | `no_raw=True`: `norm` without the bodies, for OpenAI chat, Anthropic and Responses, and a chat history with a tool call | 4 |
 | `recorder_mixed_bad.jsonl` | three 200 lines among a 429, a 500, a dead connection (status 599) and a 529, which the reader skips without counting them malformed | 7 |
 | `recorder_other.jsonl` | two `record_call()` lines the recorder writes no norm for (`provider: "other"`, and OpenAI with endpoint `custom`) | 2 |
-| `openai_roundtrip_batch.jsonl` | the 13 calls of `recorder_openai_chat.jsonl` as an OpenAI Batch export: the request as the mock server received it on the wire (media in full) and the response it sent | 13 |
+| `openai_roundtrip_batch.jsonl` | the 14 calls of `recorder_openai_chat.jsonl` as an OpenAI Batch export: the request as the mock server received it on the wire (media in full) and the response it sent | 13 |
 
 ## Token-estimate fixtures
 

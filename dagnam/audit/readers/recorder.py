@@ -48,6 +48,7 @@ from dagnam.audit.readers.base import (
 )
 from dagnam.audit.readers.calls import tool_calls
 from dagnam.audit.readers.messages import (
+    content_text,
     final_reply,
     has_media,
     reply_text,
@@ -124,10 +125,11 @@ def _from_anthropic(
 
 
 def _from_norm(env: TraceEnvelope, norm: Norm) -> TraceRecord:
-    # An assistant turn is read as the raw parsers read one (reasoning the model wrote before its
-    # answer is not part of it); the recorder already put a turn's tool calls in its text.
+    # Each turn is read as the raw parsers read it: an assistant turn without the reasoning the
+    # model wrote before its answer (the recorder already put its tool calls in the text), any
+    # other as content, so a text that is JSON of a message reads the same from either form.
     messages = tuple(
-        Message(m.role, reply_text(m.content) if m.role == "assistant" else text(m.content))
+        Message(m.role, reply_text(m.content) if m.role == "assistant" else content_text(m.content))
         for m in norm.messages
     )
     if all(m.role == "assistant" for m in messages):  # as the raw parsers: nothing to answer
@@ -136,7 +138,7 @@ def _from_norm(env: TraceEnvelope, norm: Norm) -> TraceRecord:
         trace_id=env.trace_id,
         ts=parse_ts(env.ts),
         model=text(norm.model),
-        system=text(norm.system) or None,
+        system=content_text(norm.system) or None,
         messages=messages,
         response=reply_text(norm.response),
         response_tool_calls=tool_calls(list(norm.tool_calls)),
