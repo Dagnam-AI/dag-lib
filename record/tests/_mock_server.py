@@ -29,10 +29,14 @@ class Reply:
         events: Optional[List[Event]] = None,
         cut: bool = False,
         delay: float = 0.0,
+        hold: float = 0.0,
     ) -> None:
         self.status = status
         self.body = body
         self.events = events
+        self.hold = (
+            hold  # seconds the server keeps the connection open after the body (a stalled read)
+        )
         self.delay = delay  # seconds the server waits before answering (a call that is in flight)
         self.cut = cut  # promise more bytes than are sent, then hang up (a dropped connection)
 
@@ -78,6 +82,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
         self.wfile.flush()
+        time.sleep(reply.hold)
         self.close_connection = True
 
 

@@ -58,12 +58,18 @@ def _dump(value: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-class _Walk:
+class Walk:
     """The state of one conversion: how many nodes were visited and which containers are open."""
 
     def __init__(self) -> None:
         self.nodes = 0
         self.open: Set[int] = set()
+
+    def visit(self) -> None:
+        """Count one node; past ``MAX_NODES`` the body is too big to record."""
+        self.nodes += 1
+        if self.nodes > MAX_NODES:
+            raise LineTooLargeError("the body has too many parts to record")
 
 
 def _class_schema(value: type) -> Any:
@@ -71,14 +77,12 @@ def _class_schema(value: type) -> Any:
     method = getattr(value, "model_json_schema", None)
     schema = _attempt(method, {}) if callable(method) else None
     if isinstance(schema, dict):
-        return {"type": "json_schema", "name": value.__name__, "schema": _plain(schema, _Walk(), 0)}
+        return {"type": "json_schema", "name": value.__name__, "schema": _plain(schema, Walk(), 0)}
     return f"<class {value.__name__}>"
 
 
-def _plain(value: Any, walk: _Walk, depth: int) -> Any:
-    walk.nodes += 1
-    if walk.nodes > MAX_NODES:
-        raise LineTooLargeError("the body has too many parts to record")
+def _plain(value: Any, walk: Walk, depth: int) -> Any:
+    walk.visit()
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if depth >= _MAX_DEPTH:
@@ -122,7 +126,7 @@ def to_plain(value: Any) -> Any:
     a small structure enormous) raises ``LineTooLargeError``, so no input costs more than a
     constant number of steps.
     """
-    return _plain(value, _Walk(), 0)
+    return _plain(value, Walk(), 0)
 
 
 class Recorder:

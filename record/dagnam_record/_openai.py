@@ -108,12 +108,18 @@ class _Watcher:
             self._recorder.writer.count("dropped_partial")
 
     def error(self, exc: BaseException) -> None:
-        """The stream raised."""
-        _record_error(self._recorder, self._endpoint, self._request, exc, self._started)
+        """The stream raised. After its end marker the answer is complete and is recorded as such."""
+        if self._assembler.complete:
+            self.done()
+        else:
+            _record_error(self._recorder, self._endpoint, self._request, exc, self._started)
 
     def cancelled(self) -> None:
-        """The stream was interrupted or cancelled."""
-        _cancelled(self._recorder)
+        """The stream was interrupted or cancelled: a complete answer is still kept."""
+        if self._assembler.complete:
+            self.done()
+        else:
+            _cancelled(self._recorder)
 
 
 def _after(

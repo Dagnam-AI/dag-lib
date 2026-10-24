@@ -11,8 +11,34 @@ from typing import Any, Dict, List
 import pytest
 from typing_extensions import override
 
+from dagnam_record import _recorder
 from dagnam_record._envelope import LineTooLargeError
-from dagnam_record._recorder import Recorder, media_omitted, recording_disabled, to_plain
+from dagnam_record._recorder import (
+    Recorder,
+    Walk,
+    media_omitted,
+    recording_disabled,
+    to_plain,
+)
+
+HARD_CAP = 1_000_000  # a walk that visits this many nodes has run away (the real budget is 250,000)
+
+
+class CappedWalk(Walk):
+    """The real walk, plus a hard stop so a broken guard fails the test in a second, not never."""
+
+    @override
+    def visit(self) -> None:
+        """Count a node under the real budget, then under the hard cap."""
+        super().visit()
+        if self.nodes > HARD_CAP:
+            raise AssertionError("the walk ran away: a guard against cycles or blow-ups is broken")
+
+
+@pytest.fixture(autouse=True)
+def capped_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every conversion in this module runs under the hard cap."""
+    monkeypatch.setattr(_recorder, "Walk", CappedWalk)
 
 
 class NotGiven:
