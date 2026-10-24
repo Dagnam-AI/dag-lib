@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import random
 import shutil
 import signal
 import socket
@@ -43,6 +44,13 @@ DESTINATIONS: List[List[Any]] = []
 RESOLVED: List[str] = []
 
 
+def umask() -> int:
+    """The process umask (it can only be read by setting it, so it is put back at once)."""
+    current = os.umask(0)
+    os.umask(current)
+    return current
+
+
 def snapshot() -> Dict[str, Any]:
     """Every piece of process-global state a library could change behind the program's back."""
     logger = logging.getLogger("dagnam_record")
@@ -67,6 +75,13 @@ def snapshot() -> Dict[str, Any]:
         "faulthandler": faulthandler.is_enabled(),
         "interpreter": [sys.getrecursionlimit(), sys.getswitchinterval()],
         "timeout": socket.getdefaulttimeout(),
+        "umask": umask(),
+        "random": hash(repr(random.getstate())),
+        "asyncgen_hooks": repr(sys.get_asyncgen_hooks()),
+        "log_records": [repr(logging.getLogRecordFactory()), logging.raiseExceptions],
+        "third_party_loggers": [
+            logging.getLogger(n).level for n in ("httpx", "openai", "httpcore")
+        ],
         "threads": sorted(
             (t.name, t.daemon) for t in threading.enumerate() if t.name == "dagnam-record"
         ),
@@ -152,11 +167,30 @@ def watching(*, allow: bool, port: int) -> Generator[None]:
         note(address)
         return real_create(address, *args, **kwargs)
 
+    def send_to(self: socket.socket, *args: Any) -> int:
+        note(args[-1])  # ``sendto(data, address)`` and ``sendto(data, flags, address)``
+        raise OSError("a datagram in this test")
+
+    def send_message(self: socket.socket, *args: Any) -> int:
+        note(args[-1] if len(args) > 3 else None)  # ``sendmsg(buffers, ancdata, flags, address)``
+        raise OSError("a datagram in this test")
+
+    def by_name(host: Any) -> str:
+        RESOLVED.append(repr(host))
+        raise OSError("no name lookup in this test")
+
+    def by_name_ex(host: Any) -> Any:
+        by_name(host)
+
     with contextlib.ExitStack() as stack:
         stack.enter_context(mock.patch.object(socket.socket, "connect", connect))
         stack.enter_context(mock.patch.object(socket.socket, "connect_ex", connect_ex))
         stack.enter_context(mock.patch.object(socket, "getaddrinfo", info))
         stack.enter_context(mock.patch.object(socket, "create_connection", create))
+        stack.enter_context(mock.patch.object(socket.socket, "sendto", send_to))
+        stack.enter_context(mock.patch.object(socket.socket, "sendmsg", send_message))
+        stack.enter_context(mock.patch.object(socket, "gethostbyname", by_name))
+        stack.enter_context(mock.patch.object(socket, "gethostbyname_ex", by_name_ex))
         yield
 
 

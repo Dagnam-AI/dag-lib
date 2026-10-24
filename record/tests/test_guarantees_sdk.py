@@ -24,7 +24,9 @@ import pytest
 from typing_extensions import override
 
 import dagnam_record
-from dagnam_record import _compat
+from dagnam_record import _compat, _openai
+from dagnam_record._recorder import Recorder
+from dagnam_record._writer import Writer
 
 if TYPE_CHECKING:
     from _mock_server import MockServer
@@ -136,7 +138,7 @@ class Broken(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 def break_import(monkeypatch: pytest.MonkeyPatch, name: str, error: BaseException) -> None:
-    monkeypatch.delitem(sys.modules, name)
+    monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setattr(sys, "meta_path", [Broken(name, error), *sys.meta_path])
 
 
@@ -162,6 +164,10 @@ class OddImportError(ImportError):
         ("openai.resources.responses", "anthropic"),
         ("anthropic.resources.messages", "openai"),
         ("anthropic.lib.streaming", "openai"),
+        ("openai.resources.beta", "anthropic"),
+        ("anthropic.resources.beta.messages", "openai"),
+        ("anthropic.lib.bedrock._beta_messages", "openai"),
+        ("anthropic.lib.vertex._beta_messages", "openai"),
     ],
 )
 def test_a_broken_sdk_install_never_raises_out_of_install_and_the_other_sdk_is_recorded(
@@ -213,3 +219,58 @@ def test_an_sdk_whose_every_known_resource_is_gone_is_simply_not_patched(
     monkeypatch.setitem(sys.modules, "anthropic.lib.vertex._beta_messages", None)
     assert dagnam_record.install(dir=str(tmp_path / "t")) is False
     assert run_call("openai ok", mock_server)["choices"][0]["message"]["content"] == "Hello there"
+
+
+def test_an_sdk_module_whose_attribute_lookup_raises_does_not_break_install(
+    tmp_path: Path, mock_server: MockServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(name: str) -> object:
+        raise RuntimeError("a lazy attribute that fails")
+
+    monkeypatch.delitem(vars(openai), "__version__")
+    monkeypatch.setitem(vars(openai), "__getattr__", explode)
+    assert dagnam_record.install(dir=str(tmp_path / "t")) is True
+    run_call("openai ok", mock_server)
+    lines, status = lines_and_status(tmp_path / "t")
+    assert status["sdk_versions"]["openai"] == _compat.UNKNOWN
+    assert "request" not in lines[0]  # no readable version: norm only
+
+
+def test_a_patched_call_is_norm_only_from_the_first_call_without_install_noting_the_version(
+    tmp_path: Path, mock_server: MockServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No call is recorded raw in the gap between the patch going live and the version noted."""
+    monkeypatch.setattr(openai, "__version__", "0.28.1")
+    writer = Writer(str(tmp_path / "t"), start=False)
+    assert _openai.install(Recorder(writer))  # the patch only: install() has not noted anything
+    try:
+        run_call("openai ok", mock_server)
+        writer.close()
+    finally:
+        _openai.uninstall()
+    (line,) = [
+        json.loads(text)
+        for path in (tmp_path / "t").glob("*.jsonl")
+        for text in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert "request" not in line
+    assert line["norm"]["response"] == "Hello there"
+
+
+@pytest.mark.parametrize("version", ["0.28.1", "3.0.0", "absent"])
+def test_record_call_does_not_follow_the_installed_sdk_version(
+    version: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if version == "absent":
+        monkeypatch.setitem(sys.modules, "openai", None)
+    else:
+        monkeypatch.setattr(openai, "__version__", version)
+    dagnam_record.install(dir=str(tmp_path / "t"))
+    dagnam_record.record_call(
+        provider="openai",
+        request={"model": "m", "messages": [{"role": "user", "content": "Hi"}]},
+        response={"model": "m", "choices": [{"message": {"role": "assistant", "content": "Yo"}}]},
+    )
+    (line,) = lines_and_status(tmp_path / "t")[0]
+    assert line["request"]["messages"][0]["content"] == "Hi"  # the caller's bodies: kept as given
+    assert line["response"]["choices"][0]["message"]["content"] == "Yo"

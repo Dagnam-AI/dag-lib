@@ -15,6 +15,6 @@ All notable changes to `dagnam-record` are listed here, newest first. The format
   commands `python -m dagnam_record status` and `python -m dagnam_record purge` (with `--dry-run`).
 - The tested SDK ranges (`openai>=1.66,<3`, `anthropic>=0.40,<1`): the version of each patched SDK is
   saved as `sdk_versions` in `.status.json`; outside its range an SDK's calls are written as the
-  normalized form only, and the recorder logs one warning.
+  normalized form only, and the recorder logs one warning. `record_call()` is not narrowed by it.
 - `install()` no longer raises when an SDK is half-installed (an import that fails with something
   other than `ImportError`): that SDK is skipped and one warning is logged.

@@ -177,23 +177,25 @@ def install(
 
 
 def _note_sdks(installed: Installed, patched: Dict[str, bool]) -> None:
-    """Save the version of each patched SDK; an untested one is recorded as ``norm`` only, said once."""
+    """Save the version of each patched SDK, and say once about an untested one.
+
+    This only reports: whether a call is written as ``norm`` only is decided per call from the
+    SDK's imported version (see ``_compat.is_untested``), so nothing here can leave a gap.
+    """
     versions = {}
     for name, was_patched in patched.items():
         version = version_of(name) if was_patched else None
         if version is not None:
             versions[name] = version
     installed.writer.set_sdk_versions(versions)
-    untested = {name for name, found in versions.items() if not in_range(found, RANGES[name])}
-    installed.recorder.untested = frozenset(untested)
-    for name in sorted(untested):
-        if (name, versions[name]) not in STATE.warned_sdks:
-            STATE.warned_sdks.add((name, versions[name]))
+    for name, found in sorted(versions.items()):
+        if not in_range(found, RANGES[name]) and (name, found) not in STATE.warned_sdks:
+            STATE.warned_sdks.add((name, found))
             LOGGER.warning(
                 "dagnam_record: %s %s is outside the tested range %s; only the normalized form"
                 " of its calls is recorded",
                 name,
-                versions[name],
+                found,
                 ",".join(RANGES[name]),
             )
 
@@ -231,7 +233,8 @@ def record_call(
     ``provider`` is ``"openai"``, ``"anthropic"`` or ``"other"``, ``endpoint`` is
     ``"chat.completions"``, ``"responses"``, ``"messages"`` or ``"custom"``; ``request`` and
     ``response`` are the JSON bodies (SDK objects are converted). It goes through the same
-    sampling, redaction, size limit and writer as a patched call. Before ``install`` (or after
+    sampling, redaction, size limit and writer as a patched call; the installed SDK's version does not
+    narrow it to ``norm`` only (the caller supplied the bodies). Before ``install`` (or after
     ``uninstall``) it records nothing and logs one warning, unless the kill switch is on.
     """
     installed = STATE.installed

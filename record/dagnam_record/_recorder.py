@@ -12,9 +12,10 @@ from enum import Enum
 import hashlib
 import os
 import time
-from typing import Any, Callable, Dict, FrozenSet, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 import uuid
 
+from dagnam_record._compat import is_untested
 from dagnam_record._envelope import LineTooLargeError, build_line
 from dagnam_record._redact import apply
 from dagnam_record._writer import Writer
@@ -155,8 +156,9 @@ class Recorder:
     """Builds lines from plain bodies and hands them to the writer, counting what it drops.
 
     ``sample`` keeps that share of calls (see ``sampled``); ``redact`` is applied to the request
-    and to the response text before the line is built (see ``_redact``). A provider in
-    ``untested`` (its SDK is outside the tested range, see ``_compat``) is written as ``norm`` only.
+    and to the response text before the line is built (see ``_redact``). A call that ``emit``
+    saw an SDK make, whose SDK is outside the tested range (see ``_compat``), is written as
+    ``norm`` only; a call handed to ``record`` (``record_call``) is the caller's own and never is.
     """
 
     def __init__(
@@ -171,7 +173,6 @@ class Recorder:
         self.no_raw = no_raw
         self.sample = sample
         self.redact = redact
-        self.untested: FrozenSet[str] = frozenset()
 
     def fail_open(self, step: Callable[..., None], *arguments: Any) -> bool:
         """Run ``step``; any error is counted, never raised. True when the step ran cleanly."""
@@ -202,6 +203,7 @@ class Recorder:
             response,
             status=status,
             latency_ms=(time.perf_counter() - started) * 1000.0,
+            norm_only=is_untested(provider),
         )
 
     def record(
@@ -213,8 +215,11 @@ class Recorder:
         *,
         status: Optional[int],
         latency_ms: float,
+        norm_only: bool = False,
     ) -> None:
         """Build one line for a finished call with a known latency and queue it (or skip it).
+
+        ``norm_only`` writes the provider-neutral form without the raw bodies (as ``no_raw`` does).
 
         Raises ``ValueError`` for a call that cannot be recorded; callers go through ``fail_open``.
         """
@@ -232,6 +237,6 @@ class Recorder:
                 latency_ms=latency_ms,
                 status=status,
                 trace_id=trace_id,
-                no_raw=self.no_raw or provider in self.untested,
+                no_raw=self.no_raw or norm_only,
             )
         )

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import re
 import sys
 from types import ModuleType
-from typing import Optional
+from typing import Optional, Tuple
 
 import pytest
 
@@ -41,9 +43,60 @@ def test_anthropic_range(version: str, expected: bool) -> None:
     assert _compat.in_range(version, _compat.ANTHROPIC) is expected
 
 
-def test_the_declared_ranges_match_the_dev_dependencies() -> None:
-    assert _compat.OPENAI == (">=1.66", "<3")
-    assert _compat.ANTHROPIC == (">=0.40", "<1")
+ROOT_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+
+def dev_bounds(name: str) -> Tuple[str, str]:
+    """The lower and upper bound the repo's dev dependency group asks for ``name``."""
+    text = ROOT_PYPROJECT.read_text(encoding="utf-8")
+    found = re.search(rf'^\s*"{name}(>=[0-9.]+),(<[0-9.]+)",?$', text, re.MULTILINE)
+    assert found is not None, f"no bounded {name} in the dev dependencies"
+    return found.group(1), found.group(2)
+
+
+@pytest.mark.skipif(not ROOT_PYPROJECT.is_file(), reason="the repo's root pyproject is not here")
+def test_the_ranges_are_the_ones_the_dev_dependencies_test_against() -> None:
+    assert dev_bounds("openai") == _compat.OPENAI == (">=1.66", "<3")
+    assert dev_bounds("anthropic") == _compat.ANTHROPIC == (">=0.40", "<1")
+
+
+def test_a_version_with_thousands_of_digits_is_out_of_range_not_an_error() -> None:
+    assert _compat.in_range("1." + "9" * 5000, _compat.OPENAI) is False
+    assert _compat.in_range("9" * 5000 + ".1", _compat.OPENAI) is False
+
+
+def test_a_version_longer_than_64_characters_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake("openai", "1.70.0" + "0" * 58, monkeypatch)  # 64 characters: kept
+    assert _compat.version_of("openai") == "1.70.0" + "0" * 58
+    fake("openai", "1.70.0" + "0" * 59, monkeypatch)  # 65: unknown
+    assert _compat.version_of("openai") == _compat.UNKNOWN
+
+
+def test_a_module_whose_attribute_lookup_raises_has_an_unknown_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = ModuleType("openai")
+
+    def explode(name: str) -> object:
+        raise RuntimeError("a lazy attribute that fails")
+
+    vars(module)["__getattr__"] = explode
+    monkeypatch.setitem(sys.modules, "openai", module)
+    assert _compat.version_of("openai") == _compat.UNKNOWN
+
+
+def test_whether_an_sdk_is_untested_follows_its_imported_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake("openai", "1.70.0", monkeypatch)
+    assert _compat.is_untested("openai") is False
+    fake("openai", "0.28.1", monkeypatch)
+    assert _compat.is_untested("openai") is True
+    fake("openai", None, monkeypatch)
+    assert _compat.is_untested("openai") is True  # no readable version: not vouched for
+    monkeypatch.setitem(sys.modules, "openai", None)
+    assert _compat.is_untested("openai") is False  # not imported: nothing of it is patched
+    assert _compat.is_untested("something-else") is False  # a provider without a range
 
 
 def fake(name: str, version: Optional[object], monkeypatch: pytest.MonkeyPatch) -> None:
