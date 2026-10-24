@@ -1,7 +1,7 @@
 """``dagnam audit``: status, and the command group itself.
 
 ``scan`` lives in :mod:`dagnam.cli.audit_scan`, ``run`` in
-:mod:`dagnam.cli.audit_run` and ``cancel`` / ``delete`` in
+:mod:`dagnam.cli.audit_run`, ``key`` in :mod:`dagnam.cli.audit_key` and ``cancel`` / ``delete`` in
 :mod:`dagnam.cli.audit_cleanup`. The commands here drive the platform through
 ``DagnamClient`` with the stored API key. The ``dagnam.audit`` package is
 imported inside each handler so ``dagnam --help`` stays import-light.
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from dagnam._core.exceptions import APIError, DeploymentNotFoundError
 from dagnam.cli.audit_cleanup import cmd_audit_cancel, cmd_audit_delete
+from dagnam.cli.audit_key import cmd_audit_key
 from dagnam.cli.audit_run import client_from_env, cmd_audit_run, resolve_audit_dir
 from dagnam.cli.audit_scan import (
     cmd_audit_scan,
@@ -270,6 +271,20 @@ def register_audit(subparsers: SubParsersAction) -> None:
     status.add_argument("audit_dir", help="The audit directory.")
     status.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     status.set_defaults(func=cmd_audit_status)
+
+    key = sub.add_parser(
+        "key",
+        help="Print a workload's winning deployment key (stdout is the key only).",
+        description="Print the deployment key stored for a workload's winner, so"
+        " `export DEPLOYMENT_KEY=$(dagnam audit key ./audit <workload>)` works."
+        " Exits 2 when there is no such workload, no winner or no stored key.",
+    )
+    key.add_argument("audit_dir", help="The audit directory.")
+    key.add_argument("workload", help="The workload id (see `dagnam audit status`).")
+    key.add_argument(
+        "--json", action="store_true", help="Print {workload, deployment_id, key_ref, key}."
+    )
+    key.set_defaults(func=cmd_audit_key)
 
     cancel = sub.add_parser("cancel", help="Cancel running jobs and pause deployments.")
     cancel.add_argument("audit_dir", help="The audit directory.")

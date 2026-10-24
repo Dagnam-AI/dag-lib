@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dagnam audit key <audit-dir> <workload>` prints the deployment key of a workload's winning
+  endpoint, so `export DEPLOYMENT_KEY=$(dagnam audit key ./audit extract)` switches an app over.
+  Stdout holds only the key (`--json` adds the workload, deployment id and key reference); exit
+  status 2 means the workload is unknown, has no winner yet, or its key is not stored on this
+  machine (rotate it in the Studio, which invalidates any stored copy).
+
 ## [0.22.1] - 2026-10-23
 
 ### Fixed
