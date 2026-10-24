@@ -43,7 +43,7 @@ def test_the_reader_needs_the_envelope_header_fields() -> None:
 
 def test_openai_chat_line_reads_through_the_openai_parser(fixtures_dir: Path) -> None:
     out = read(fixtures_dir / "recorder_openai_chat.jsonl")
-    assert len(out) == 5
+    assert len(out) == 13
     assert all(
         r.trace_id.startswith("rec_chat_") for r in out
     )  # the envelope's id, not the completion's
@@ -62,7 +62,7 @@ def test_openai_chat_line_reads_through_the_openai_parser(fixtures_dir: Path) ->
 
 
 def test_openai_responses_line_reads_through_the_openai_parser(fixtures_dir: Path) -> None:
-    text, call, media = read(fixtures_dir / "recorder_openai_responses.jsonl")
+    text, call, media, *_ = read(fixtures_dir / "recorder_openai_responses.jsonl")
     assert (text.system, text.response, text.prompt_tokens) == (
         "Reply with one urgency label.",
         "high",
@@ -77,7 +77,7 @@ def test_openai_responses_line_reads_through_the_openai_parser(fixtures_dir: Pat
 
 
 def test_anthropic_line_maps_system_blocks_and_usage(fixtures_dir: Path) -> None:
-    plain, cached, thinking, tool, document = read(fixtures_dir / "recorder_anthropic.jsonl")
+    plain, cached, thinking, tool, document, *_ = read(fixtures_dir / "recorder_anthropic.jsonl")
     assert plain.system == "You are a triage bot. Answer in one word."
     assert plain.response == "returns"
     assert plain.model == "claude-sonnet-4-5-20250929"
@@ -103,11 +103,11 @@ def test_a_media_omitted_part_marks_the_call_and_reads_as_no_text(fixtures_dir: 
 def test_non_200_is_skipped_not_malformed(fixtures_dir: Path) -> None:
     records, stats = read_records(fixtures_dir / "recorder_mixed_bad.jsonl", "dagnam", READER)
     assert len(list(records)) == 3
-    assert (stats.rows_seen, stats.rows_kept, stats.rows_malformed) == (5, 3, 0)
+    assert (stats.rows_seen, stats.rows_kept, stats.rows_malformed) == (7, 3, 0)
 
 
 def test_norm_only_line_is_read_without_raw(fixtures_dir: Path) -> None:
-    chat, anthropic, other = read(fixtures_dir / "recorder_norm_only.jsonl")
+    chat, anthropic, *_ = read(fixtures_dir / "recorder_norm_only.jsonl")
     assert (chat.response, chat.model, chat.system) == (
         "shipping",
         "gpt-4o-mini-2024-07-18",
@@ -122,46 +122,59 @@ def test_norm_only_line_is_read_without_raw(fixtures_dir: Path) -> None:
         effective_response("", anthropic.response_tool_calls)
         == '{"arguments": {}, "name": "close_account"}'
     )
-    assert (other.model, other.system, other.response, other.latency_ms) == (
-        "my-local-model",
-        None,
-        "shipping",
-        123.5,
-    )
+
+
+def other_with_norm(fixtures_dir: Path) -> dict[str, Any]:
+    """A ``provider: "other"`` line that carries a norm.
+
+    The recorder writes no norm for ``other`` (it knows no such shape), so this is the recorded
+    raw-only line with a norm added by hand, for a recorder that may one day write one.
+    """
+    row = lines(fixtures_dir / "recorder_other.jsonl")[0]
+    norm = {
+        "model": "my-local-model",
+        "system": None,
+        "messages": [{"role": "user", "content": "Where is my order?"}],
+        "response": "shipping",
+        "tool_calls": [],
+        "prompt_tokens": 5,
+        "completion_tokens": 1,
+        "cached_prompt_tokens": 0,
+        "has_media": False,
+    }
+    return row | {"norm": norm, "norm_v": 1}
 
 
 def test_norm_wins_over_raw_for_the_other_provider(fixtures_dir: Path) -> None:
-    (_, _, other) = lines(fixtures_dir / "recorder_norm_only.jsonl")
+    other = other_with_norm(fixtures_dir)
     assert other["request"]
     assert other["response"]  # raw is there, and has no rules the reader knows
-    assert to_record(other) is not None
+    record = to_record(other)
+    assert record is not None
+    assert (record.model, record.system, record.response) == ("my-local-model", None, "shipping")
+    assert record.latency_ms == 51.0
 
 
-def test_other_provider_without_norm_is_malformed() -> None:
-    row = {
-        "v": 1,
-        "trace_id": "t",
-        "ts": "2026-10-12T00:00:00Z",
-        "provider": "other",
-        "endpoint": "custom",
-        "latency_ms": 1,
-        "status": 200,
-        "request": {"p": 1},
-        "response": {"r": 2},
-    }
+def test_other_provider_without_norm_is_malformed(fixtures_dir: Path) -> None:
+    other, openai_custom = lines(fixtures_dir / "recorder_other.jsonl")  # record_call: no norm
+    assert "norm" not in other
     with pytest.raises(MalformedRowError, match="no norm"):
-        to_record(row)
+        to_record(other)
+    # The same call handed over as OpenAI's has raw bodies the OpenAI parser reads.
+    record = to_record(openai_custom)
+    assert record is not None
+    assert (record.messages, record.response) == ((Message("user", "x"),), "y")
 
 
 def test_norm_with_no_user_turn_is_malformed(fixtures_dir: Path) -> None:
-    row = lines(fixtures_dir / "recorder_norm_only.jsonl")[2]
+    row = other_with_norm(fixtures_dir)
     row["norm"]["messages"] = [{"role": "assistant", "content": "hi"}]
     with pytest.raises(MalformedRowError, match="no user turn"):
         to_record(row)
 
 
 def test_norm_reply_is_cleaned_like_a_raw_one(fixtures_dir: Path) -> None:
-    row = lines(fixtures_dir / "recorder_norm_only.jsonl")[2]
+    row = other_with_norm(fixtures_dir)
     row["norm"]["response"] = "<think>hmm</think>shipping"
     record = to_record(row)
     assert record is not None
@@ -309,8 +322,8 @@ def test_a_few_newer_lines_are_counted_and_the_rest_read(
     path = tmp_path / "mixed.jsonl"
     path.write_text("\n".join([*good * 5, newer]) + "\n", encoding="utf-8")
     records, stats = read_records(path, "dagnam", READER)
-    assert len(list(records)) == 25
-    assert (stats.rows_kept, stats.rows_malformed, stats.first_malformed) == (25, 1, (25,))
+    assert len(list(records)) == 65
+    assert (stats.rows_kept, stats.rows_malformed, stats.first_malformed) == (65, 1, (65,))
 
 
 NEWER = json.dumps({"v": 2, "trace_id": "x", "ts": "2026-10-12T00:00:00Z"})
@@ -358,3 +371,19 @@ def test_a_first_line_that_is_only_invalid_leaves_the_judgement_to_the_malformed
 def test_a_file_that_is_not_the_recorders_is_unsupported(fixtures_dir: Path) -> None:
     with pytest.raises(UnsupportedExportError, match="v, trace_id, ts"):
         read(fixtures_dir / "openai_sample.jsonl")
+
+
+def test_a_norm_assistant_turn_is_read_like_a_raw_one(fixtures_dir: Path) -> None:
+    row = lines(fixtures_dir / "recorder_norm_only.jsonl")[0]
+    row["norm"]["messages"] = [
+        {"role": "user", "content": "Where is it?"},
+        {"role": "assistant", "content": "<think>status</think>Sure, one moment."},
+        {"role": "user", "content": "<think>kept</think>Well?"},
+    ]
+    record = to_record(row)
+    assert record is not None
+    assert [m.content for m in record.messages] == [
+        "Where is it?",
+        "Sure, one moment.",
+        "<think>kept</think>Well?",
+    ]

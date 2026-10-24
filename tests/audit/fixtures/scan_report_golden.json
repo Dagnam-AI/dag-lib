@@ -1,7 +1,7 @@
 {
   "dagnam": {
     "files": {},
-    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: dagnam\n- window: 2026-10-12T00:00:01+00:00 to 2026-10-12T00:00:05+00:00 (30 days)\n- price table: golden-1\n- totals: 5 calls, $0.00/month, 2,166 prompt + 11 completion tokens\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 05cc6e47be9b11db | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| 55c2849e062f06e8 | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n| 8e247331e772efed | enum_label | 0.0 | 0.00 | - | - | KEEP | not_audited: multimodal input: 100% of calls carry image, audio or file parts a text student cannot see |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: dagnam\n- window: 2026-10-12T00:00:01+00:00 to 2026-10-12T00:00:13+00:00 (30 days)\n- price table: golden-1\n- totals: 13 calls, $0.00/month, 2,480 prompt + 26 completion tokens\n\n## Warnings\n\n- 46% of traces have no system prompt (over 20%); discovery is low-confidence for this export\n- workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 05cc6e47be9b11db | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 4 traces in the window; 1,000 needed |\n| unstructured-json | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| unstructured-short | enum_label | 0.1 | 0.00 | - | - | KEEP | not_audited: multimodal input: 33% of calls carry image, audio or file parts a text student cannot see |\n| 55c2849e062f06e8 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 2 traces in the window; 1,000 needed |\n| 53f67a4191cb39ff | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
     "report": {
       "generated_at": "<generated_at>",
       "pii": {
@@ -26,32 +26,35 @@
       "schema": "dagnam.audit.scan/1",
       "source": "dagnam",
       "totals": {
-        "calls": 5,
-        "completion_tokens": 11,
-        "cost_usd_month": 0.0003315,
-        "prompt_tokens": 2166
+        "calls": 13,
+        "completion_tokens": 26,
+        "cost_usd_month": 0.0003876,
+        "prompt_tokens": 2480
       },
-      "warnings": [],
+      "warnings": [
+        "46% of traces have no system prompt (over 20%); discovery is low-confidence for this export",
+        "workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls."
+      ],
       "window": {
         "days": 30.0,
-        "end": "2026-10-12T00:00:05+00:00",
+        "end": "2026-10-12T00:00:13+00:00",
         "sample_rate": 1.0,
         "start": "2026-10-12T00:00:01+00:00"
       },
       "workloads": [
         {
-          "calls": 3,
-          "calls_per_day": 0.1,
+          "calls": 4,
+          "calls_per_day": 0.13333333333333333,
           "confidence": "high",
           "cost_source": "price_table",
-          "cost_usd_month": 0.00031709999999999996,
+          "cost_usd_month": 0.0003228,
           "dataset": null,
-          "distinct_outputs": 2,
-          "entropy": 0.9182958340544896,
+          "distinct_outputs": 3,
+          "entropy": 1.5,
           "id": "05cc6e47be9b11db",
           "latency_ms": {
-            "p50": 302.0,
-            "p95": 303.8
+            "p50": 302.5,
+            "p95": 310.0
           },
           "media_calls": 0,
           "models": [
@@ -63,8 +66,42 @@
           "template_excerpt": "You are a support triage assistant. Reply with one intent label.",
           "template_hash": "05cc6e47be9b11db",
           "tokens": {
-            "completion": 7,
-            "prompt": 2086
+            "completion": 8,
+            "prompt": 2120
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "4 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "low",
+          "cost_source": "price_table",
+          "cost_usd_month": 2.16e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "unstructured-json",
+          "latency_ms": {
+            "p50": 308.0,
+            "p95": 315.2
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "tool_call",
+          "structure_class": "json_object",
+          "template_excerpt": "",
+          "template_hash": "unstructured",
+          "tokens": {
+            "completion": 6,
+            "prompt": 120
           },
           "verdict": {
             "ratio": null,
@@ -74,18 +111,52 @@
           }
         },
         {
-          "calls": 1,
-          "calls_per_day": 0.03333333333333333,
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "low",
+          "cost_source": "price_table",
+          "cost_usd_month": 2.16e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "unstructured-short",
+          "latency_ms": {
+            "p50": 309.0,
+            "p95": 316.2
+          },
+          "media_calls": 1,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "",
+          "template_hash": "unstructured",
+          "tokens": {
+            "completion": 6,
+            "prompt": 120
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "multimodal input: 33% of calls carry image, audio or file parts a text student cannot see",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        },
+        {
+          "calls": 2,
+          "calls_per_day": 0.06666666666666667,
           "confidence": "high",
           "cost_source": "price_table",
-          "cost_usd_month": 7.2000000000000005e-06,
+          "cost_usd_month": 1.4400000000000001e-05,
           "dataset": null,
-          "distinct_outputs": 1,
-          "entropy": -0.0,
+          "distinct_outputs": 2,
+          "entropy": 1.0,
           "id": "55c2849e062f06e8",
           "latency_ms": {
-            "p50": 305.0,
-            "p95": 305.0
+            "p50": 308.0,
+            "p95": 316.1
           },
           "media_calls": 0,
           "models": [
@@ -97,12 +168,12 @@
           "template_excerpt": "Be brief.",
           "template_hash": "55c2849e062f06e8",
           "tokens": {
-            "completion": 2,
-            "prompt": 40
+            "completion": 4,
+            "prompt": 80
           },
           "verdict": {
             "ratio": null,
-            "reason": "1 traces in the window; 1,000 needed",
+            "reason": "2 traces in the window; 1,000 needed",
             "savings_usd_month": null,
             "status": "too_few_samples"
           }
@@ -116,35 +187,35 @@
           "dataset": null,
           "distinct_outputs": 1,
           "entropy": -0.0,
-          "id": "8e247331e772efed",
+          "id": "53f67a4191cb39ff",
           "latency_ms": {
-            "p50": 304.0,
-            "p95": 304.0
+            "p50": 310.0,
+            "p95": 310.0
           },
-          "media_calls": 1,
+          "media_calls": 0,
           "models": [
             "gpt-4o-mini-2024-07-18"
           ],
           "name": null,
           "response_mode": "text",
           "structure_class": "enum_label",
-          "template_excerpt": "Describe the photo.",
-          "template_hash": "8e247331e772efed",
+          "template_excerpt": "Rules.",
+          "template_hash": "53f67a4191cb39ff",
           "tokens": {
             "completion": 2,
             "prompt": 40
           },
           "verdict": {
             "ratio": null,
-            "reason": "multimodal input: 100% of calls carry image, audio or file parts a text student cannot see",
+            "reason": "1 traces in the window; 1,000 needed",
             "savings_usd_month": null,
-            "status": "not_audited"
+            "status": "too_few_samples"
           }
         }
       ]
     },
     "stderr": "",
-    "stdout": "Workload         Class      Calls/day $/month Verdict        \n-------------------------------------------------------------\n05cc6e47be9b11db enum_label       0.1    0.00 too_few_samples\n55c2849e062f06e8 enum_label       0.0    0.00 too_few_samples\n8e247331e772efed enum_label       0.0    0.00 not_audited    \n\n3 workloads: 1 not_audited, 2 too_few_samples\n"
+    "stdout": "Workload           Class       Calls/day $/month Verdict        \n----------------------------------------------------------------\n05cc6e47be9b11db   enum_label        0.1    0.00 too_few_samples\nunstructured-json  json_object       0.1    0.00 too_few_samples\nunstructured-short enum_label        0.1    0.00 not_audited    \n55c2849e062f06e8   enum_label        0.1    0.00 too_few_samples\n53f67a4191cb39ff   enum_label        0.0    0.00 too_few_samples\n\n5 workloads: 1 not_audited, 4 too_few_samples\nwarning: 46% of traces have no system prompt (over 20%); discovery is low-confidence for this export\nwarning: workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n"
   },
   "generated": {
     "files": {

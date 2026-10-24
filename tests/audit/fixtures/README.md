@@ -19,18 +19,27 @@ the dogfood agent can replace these files without rewriting the assertions.
 
 ## Local-recorder fixtures
 
-Trace-envelope v1 lines (`dagnam_contracts.trace`), written with the recorder's own line builder
-over documented provider response shapes and a fixed clock, so the ids are `rec_*` and the times
-are 2026-10-12. Read by `tests/audit/readers/test_recorder.py`; regenerate them with the recorder
-once it can record real calls.
+Trace-envelope v1 lines (`dagnam_contracts.trace`) exactly as `dagnam_record` wrote them while the
+real `openai` and `anthropic` clients called a local mock server. They are **generated**: run
+`record/tests/gen_fixtures.py` (see its docstring) and review the diff. Only `trace_id`
+(`rec_<tag>_<n>`), `ts` (2026-10-12, one second per call) and `latency_ms` are rewritten, so a second
+run gives the same bytes; `record/tests/test_gen_fixtures.py` fails when a file is stale. The bytes
+depend on the locked `openai` (2.54.0) and `anthropic` (0.125.0): regenerate when either is bumped.
+Read by `tests/audit/readers/test_recorder.py` and `test_recorder_roundtrip.py`.
 
 | file | shape | lines |
 |---|---|---|
-| `recorder_openai_chat.jsonl` | OpenAI Chat Completions: plain, cached tokens, a tool call, an omitted image (`media_omitted`), a developer message with assistant history | 5 |
-| `recorder_openai_responses.jsonl` | OpenAI Responses: a message, a `function_call`, an omitted `input_image` | 3 |
-| `recorder_anthropic.jsonl` | Anthropic Messages: system blocks, cache usage, a thinking block, a `tool_use`, an omitted document | 5 |
-| `recorder_norm_only.jsonl` | `norm` without raw (`--no-raw`) for OpenAI and Anthropic, plus a `provider: "other"` line | 3 |
-| `recorder_mixed_bad.jsonl` | three 200 lines among a 429 and a 500, which the reader skips without counting them malformed | 5 |
+| `recorder_openai_chat.jsonl` | Chat Completions: plain, cached tokens, a tool call, an omitted image, a developer message with assistant history, parallel tool calls, a history with a tool call and its result, the old `function_call` (answer and history), an empty system message, control characters, a `custom` tool call, an assistant turn with `<think>` | 13 |
+| `recorder_openai_stream.jsonl` | `stream=True`: Chat text with usage, Chat with two tool calls, a Responses stream | 3 |
+| `recorder_openai_parse.jsonl` | `parse()` with a pydantic model: the recorded schema (`response_format`, `text_format`) and the `parsed` fields | 2 |
+| `recorder_openai_responses.jsonl` | Responses: a message, a `function_call`, an omitted `input_image`, a history with a `function_call` and its output, an empty `instructions` beside a developer message, a reasoning item, a `custom_tool_call` | 7 |
+| `recorder_anthropic.jsonl` | Messages: system string and blocks, all three cache counters, thinking, `tool_use`, an omitted document, parallel tool use, a thinking-only answer, a tool-use history, a web-search answer, an empty system, control characters, a thinking history | 12 |
+| `recorder_anthropic_stream.jsonl` | `stream=True`: text, parallel tool use, thinking then text, a tool call cut at `max_tokens` | 4 |
+| `recorder_media.jsonl` | prompts with media of each kind (`media_omitted` markers in place of the payloads) | 5 |
+| `recorder_norm_only.jsonl` | `no_raw=True`: `norm` without the bodies, for OpenAI chat, Anthropic and Responses, and a chat history with a tool call | 4 |
+| `recorder_mixed_bad.jsonl` | three 200 lines among a 429, a 500, a dead connection (status 599) and a 529, which the reader skips without counting them malformed | 7 |
+| `recorder_other.jsonl` | two `record_call()` lines the recorder writes no norm for (`provider: "other"`, and OpenAI with endpoint `custom`) | 2 |
+| `openai_roundtrip_batch.jsonl` | the 13 calls of `recorder_openai_chat.jsonl` as an OpenAI Batch export: the request as the mock server received it on the wire (media in full) and the response it sent | 13 |
 
 ## Token-estimate fixtures
 
