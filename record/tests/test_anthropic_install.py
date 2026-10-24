@@ -40,7 +40,11 @@ ABSENT = (
 
 
 def patched_methods() -> List[Tuple[Any, str]]:
-    """Every (class, method) the patch wraps."""
+    """Every (class, method) the patch wraps, among those the installed SDK has.
+
+    An older SDK has fewer (no ``parse``, no beta ``stream``, no beta stream manager);
+    ``test_sdk_features`` makes sure the locked SDK has them all.
+    """
     classes = [
         messages_module.Messages,
         messages_module.AsyncMessages,
@@ -51,11 +55,19 @@ def patched_methods() -> List[Tuple[Any, str]]:
         vertex_beta.Messages,
         vertex_beta.AsyncMessages,
     ]
-    found = [(cls, name) for cls in classes for name in ("create", "parse", "stream")]
+    found = [
+        (cls, name)
+        for cls in classes
+        for name in ("create", "parse", "stream")
+        if hasattr(cls, name)
+    ]
     managers = ("MessageStreamManager", "BetaMessageStreamManager")
-    found += [(getattr(streaming, name), "__enter__") for name in managers]
+    found += [
+        (getattr(streaming, name), "__enter__") for name in managers if hasattr(streaming, name)
+    ]
     found += [(getattr(streaming, f"Async{name}"), "__aenter__") for name in managers[:1]]
-    found += [(streaming.BetaAsyncMessageStreamManager, "__aenter__")]
+    if hasattr(streaming, "BetaAsyncMessageStreamManager"):
+        found += [(streaming.BetaAsyncMessageStreamManager, "__aenter__")]
     return found
 
 
@@ -65,6 +77,7 @@ def is_patched(cls: Any, name: str) -> bool:
 
 def test_every_known_method_is_patched_and_uninstall_puts_the_sdks_own_back(arig: Any) -> None:
     methods = patched_methods()
+    assert (messages_module.Messages, "stream") in methods  # the floor: every supported SDK
     assert all(is_patched(cls, name) for cls, name in methods)
     originals = [getattr(cls, name).__wrapped__ for cls, name in methods]
     _anthropic.uninstall()
@@ -154,8 +167,8 @@ def test_an_sdk_without_one_resource_still_patches_the_others(
     for name in ("anthropic.resources.beta.messages", "anthropic.lib.bedrock._beta_messages"):
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.delattr(vertex_beta, "AsyncMessages")
-    monkeypatch.delattr(messages_module.Messages, "parse")
-    monkeypatch.delattr(streaming, "BetaMessageStreamManager")
+    monkeypatch.delattr(messages_module.Messages, "parse", raising=False)
+    monkeypatch.delattr(streaming, "BetaMessageStreamManager", raising=False)
     assert _anthropic.install(arig.recorder) is True
     assert is_patched(messages_module.Messages, "create")
     assert is_patched(vertex_beta.Messages, "create")
@@ -202,7 +215,8 @@ def test_the_installed_sdk_classes_are_the_ones_every_client_family_uses(arig: A
         assert is_patched(type(client.messages), "create")
         assert is_patched(type(client.messages), "stream")
         assert is_patched(type(client.beta.messages), "create")
-        assert is_patched(type(client.beta.messages), "stream")
+        if hasattr(type(client.beta.messages), "stream"):  # older SDKs have no beta helper
+            assert is_patched(type(client.beta.messages), "stream")
     async_clients = [
         anthropic.AsyncAnthropic(api_key=fake),
         AsyncAnthropicBedrock(aws_region="us-east-1", aws_access_key=fake, aws_secret_key=fake),

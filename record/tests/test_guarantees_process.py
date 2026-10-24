@@ -51,6 +51,9 @@ def run_python(
         env={
             "PYTHONPATH": f"{RECORD}:{TESTS}",
             "PATH": "/usr/bin:/bin",
+            # Apple's Python writes its bytecode cache under $HOME/Library; the tests assert that
+            # nothing at all is made there.
+            "PYTHONDONTWRITEBYTECODE": "1",
             "HOME": str(home),
             "USERPROFILE": str(home),
         },

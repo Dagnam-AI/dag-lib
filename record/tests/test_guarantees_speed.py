@@ -60,7 +60,10 @@ def stuck_writer(monkeypatch: pytest.MonkeyPatch) -> Iterator[threading.Event]:
     release = threading.Event()
 
     def blocked(self: Writer, line: str) -> None:
-        release.wait(15)
+        # Longer than the slowest honest run (BOUND): a thread that let go in the middle of a
+        # flood would take another line, and the counts below would be off by one. The teardown
+        # releases it at once; the limit only stops a failed teardown from hanging the suite.
+        release.wait(BOUND + 30)
 
     monkeypatch.setattr(Writer, "_write", blocked)
     yield release

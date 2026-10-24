@@ -198,7 +198,7 @@ def test_a_broken_sdk_install_never_raises_out_of_install_and_the_other_sdk_is_r
 def test_a_resource_the_sdk_no_longer_has_is_skipped_and_the_rest_is_recorded(
     tmp_path: Path, mock_server: MockServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delattr(Completions, "parse")
+    monkeypatch.delattr(Completions, "parse", raising=False)  # older SDKs have none
     monkeypatch.setitem(sys.modules, "openai.resources.responses", None)
     monkeypatch.delattr("anthropic.resources.messages.Messages.stream")
     assert dagnam_record.install(dir=str(tmp_path / "t")) is True

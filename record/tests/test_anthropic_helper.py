@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from typing import Any
 
 from _anthropic_bodies import MODEL, PATH, error_body, message_body, text_events, tool_events
 from _anthropic_calls import ARGS, run
 from _mock_server import Reply
+from _sdk_features import needs
 import anthropic
 from anthropic.lib.streaming import MessageStream, MessageStreamManager
 import pytest
@@ -51,6 +53,10 @@ def test_leaving_the_with_block_early_writes_nothing_and_counts(arig: Any) -> No
                 break
         manager = client.messages.stream(**ARGS)
         manager.__enter__().close()  # closing the message stream is the same early exit
+        # An SDK before 0.4x does not close the watched event stream when the helper's `with` or
+        # `close()` ends: the early exit is counted when the stream is collected instead.
+        del stream, manager
+        gc.collect()
     assert arig.raw() == []
     assert arig.writer.counts["dropped_partial"] == 2
 
@@ -61,6 +67,8 @@ def test_leaving_the_with_block_after_message_stop_records_it_once(arig: Any) ->
         for event in stream:
             if event.type == "message_stop":
                 break  # the iteration itself was never asked to end
+    del stream
+    gc.collect()  # older SDKs report a finished helper stream when it is collected, see above
     assert len(arig.lines()) == 1
     assert arig.writer.counts["dropped_partial"] == 0
 
@@ -113,7 +121,8 @@ def test_a_refused_helper_request_is_a_failed_call_raised_from_the_with(arig: An
     assert caught.value.status_code == 529
     (line,) = arig.lines()
     assert line["status"] == 529
-    assert line["response"] == {"error": {"type": "OverloadedError"}}
+    # 529 is `anthropic.OverloadedError` only in SDKs that have one.
+    assert line["response"] == {"error": {"type": type(caught.value).__name__}}
 
 
 def test_an_error_event_in_a_helper_stream_is_a_failed_call(arig: Any) -> None:
@@ -151,6 +160,8 @@ def test_an_async_helper_left_early_or_cancelled_is_counted_not_written(arig: An
                 break
 
     run(early, arig)
+    gc.collect()  # older SDKs count an early exit when the stream is collected ...
+    arig.writer.drain()  # ... at the next safe point
     assert arig.writer.counts["dropped_partial"] == 1
 
     arig.server.on(PATH, Reply(body=message_body(), delay=0.5))
@@ -172,6 +183,8 @@ def test_an_async_helper_left_early_or_cancelled_is_counted_not_written(arig: An
     assert arig.writer.counts["dropped_error"] == 0
 
 
+@needs("anthropic beta.messages.stream")
+@needs("anthropic BetaMessageStreamManager")
 def test_a_beta_helper_stream_is_recorded_with_its_betas(arig: Any) -> None:
     arig.server.on(PATH, Reply(events=text_events("Hel", "lo")))
     helper = arig.anthropic().beta.messages.stream(betas=["files-api-2025-04-14"], **ARGS)
@@ -182,6 +195,15 @@ def test_a_beta_helper_stream_is_recorded_with_its_betas(arig: Any) -> None:
     assert line["request"]["betas"] == ["files-api-2025-04-14"]
 
 
+def test_a_beta_create_is_recorded_with_its_betas(arig: Any) -> None:
+    arig.server.on(PATH, Reply(body=message_body()))
+    with arig.anthropic() as client:
+        client.beta.messages.create(betas=["x-1"], **ARGS)
+    (line,) = arig.lines()
+    assert line["request"]["betas"] == ["x-1"]
+
+
+@needs("anthropic beta.messages.parse")
 def test_a_beta_create_and_parse_are_recorded_once_each(arig: Any) -> None:
     arig.server.on(PATH, Reply(body=message_body()), Reply(body=message_body()))
     with arig.anthropic() as client:
@@ -193,6 +215,7 @@ def test_a_beta_create_and_parse_are_recorded_once_each(arig: Any) -> None:
     assert second["response"]["content"][0]["text"] == "Hello there"
 
 
+@needs("anthropic beta_tool")
 def test_a_tool_runner_records_each_request_it_makes(arig: Any) -> None:
     @anthropic.beta_tool
     def weather(city: str) -> str:
@@ -218,6 +241,7 @@ def test_a_tool_runner_records_each_request_it_makes(arig: Any) -> None:
     assert "tool_result" in str(lines[1]["request"]["messages"])
 
 
+@needs("anthropic messages.parse")
 def test_parse_never_returns_a_stream_even_when_asked_for_one(arig: Any) -> None:
     arig.server.on(PATH, Reply(body=message_body()))
     with arig.anthropic() as client:
@@ -228,6 +252,7 @@ def test_parse_never_returns_a_stream_even_when_asked_for_one(arig: Any) -> None
     assert arig.writer.counts["dropped_error"] == 0
 
 
+@needs("anthropic messages.parse")
 def test_parse_with_an_output_format_records_the_schema_and_the_answer(arig: Any) -> None:
     import pydantic
 

@@ -298,7 +298,8 @@ def strict_validate(line: str) -> None:
     _text(obj, "trace_id")
     if not _TS.fullmatch(_text(obj, "ts")):
         _reject("ts must be UTC RFC 3339 ending in Z")
-    datetime.fromisoformat(obj["ts"])
+    # Python 3.9 and 3.10 parse a trailing "Z" only after it is spelled as an offset.
+    datetime.fromisoformat(obj["ts"].replace("Z", "+00:00"))
     if obj.get("provider") not in ("openai", "anthropic", "other"):
         _reject("unknown provider")
     if obj.get("endpoint") not in ("chat.completions", "responses", "messages", "custom"):

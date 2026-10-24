@@ -175,6 +175,10 @@ def test_a_redactor_is_given_nothing_but_an_object(tmp_path: Path) -> None:
     assert saved_counts(tmp_path / "t")["dropped_error"] == 1
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 12),
+    reason="dagnam-contracts needs Python 3.12 or newer, so the redact extra cannot be installed here",
+)
 def test_redact_auto_uses_the_pii_redactor_of_dagnam_contracts(tmp_path: Path) -> None:
     dagnam_record.install(dir=str(tmp_path / "t"), redact="auto")
     record(request={"prompt": f"mail {EMAIL} please"}, response={"text": f"to {EMAIL}"})

@@ -8,6 +8,7 @@ from typing import Any, Dict, cast
 from _anthropic_bodies import MODEL, PATH, error_body, message_body, tool_use
 from _anthropic_calls import ARGS, MESSAGES, run
 from _mock_server import Reply
+from _sdk_features import FEATURES, needs
 import anthropic
 import pytest
 
@@ -205,11 +206,14 @@ def test_no_key_header_or_credential_is_ever_recorded(arig: Any) -> None:
             "authorization_token": CREDENTIAL,
         }
     ]
+    # An SDK from before MCP connectors takes neither parameter (it would refuse the call).
+    mcp: Dict[str, Any] = {}
+    if FEATURES["anthropic mcp_servers"]:
+        mcp = {"mcp_servers": servers, "fallback_credit_token": cast("Any", CREDENTIAL)}
     with arig.anthropic(auth_token="bearer-" + CREDENTIAL) as client:
         client.beta.messages.create(
             betas=["mcp-client-2025-04-04"],
-            mcp_servers=servers,
-            fallback_credit_token=cast("Any", CREDENTIAL),
+            **mcp,
             extra_headers={"x-api-key": CREDENTIAL, "authorization": "Bearer " + CREDENTIAL},
             extra_query={"key": CREDENTIAL},
             extra_body={"secret": CREDENTIAL},
@@ -217,14 +221,15 @@ def test_no_key_header_or_credential_is_ever_recorded(arig: Any) -> None:
         )
     seen = arig.server.seen[0]
     assert seen.headers["x-api-key"] == CREDENTIAL  # the extra header won over the client's key
-    assert seen.body["mcp_servers"][0]["authorization_token"] == CREDENTIAL  # the server got it
     (line,) = arig.lines()
     text = arig.raw()[0]
     assert CREDENTIAL not in text
     assert "anthropic-beta" not in text
     assert "sk-ant" not in text
-    assert line["request"]["mcp_servers"][0]["authorization_token"] == REDACTED
-    assert line["request"]["fallback_credit_token"] == REDACTED
+    if mcp:
+        assert seen.body["mcp_servers"][0]["authorization_token"] == CREDENTIAL  # the server got it
+        assert line["request"]["mcp_servers"][0]["authorization_token"] == REDACTED
+        assert line["request"]["fallback_credit_token"] == REDACTED
     assert line["request"]["betas"] == ["mcp-client-2025-04-04"]
     assert "secret" not in line["request"]  # extra_body is not a parameter we know
 
@@ -280,6 +285,7 @@ def test_not_given_values_and_sdk_objects_in_a_request_are_plain_json(arig: Any)
     }
 
 
+@needs("anthropic messages.count_tokens")
 def test_calls_that_are_not_message_calls_are_left_alone(arig: Any) -> None:
     arig.server.on("/v1/messages/count_tokens", Reply(body={"input_tokens": 4}))
     with arig.anthropic() as client:

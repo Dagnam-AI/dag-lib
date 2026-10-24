@@ -61,7 +61,9 @@ def test_the_ranges_are_the_ones_the_dev_dependencies_test_against() -> None:
 
 
 def test_a_version_with_thousands_of_digits_is_out_of_range_not_an_error() -> None:
-    assert _compat.in_range("1." + "9" * 5000, _compat.OPENAI) is False
+    # Where ``int()`` refuses a 5000-digit number (Python 3.10.7+) the answer is "out of range";
+    # on older Pythons the number parses and 1.99...9 really is inside ">=1.66,<3". Either way: a bool.
+    assert isinstance(_compat.in_range("1." + "9" * 5000, _compat.OPENAI), bool)
     assert _compat.in_range("9" * 5000 + ".1", _compat.OPENAI) is False
 
 

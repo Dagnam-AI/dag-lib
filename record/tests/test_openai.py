@@ -239,7 +239,8 @@ def test_install_twice_patches_once_and_uninstall_restores_the_original(rig: Any
     _openai.uninstall()
     assert Completions.create is original
     assert AsyncCompletions.create is not patched
-    assert not hasattr(responses_module.Responses.create, "__wrapped__")
+    # Not `__wrapped__`: an SDK's own `create` may carry one (openai 1.66 wraps it for `required_args`).
+    assert not hasattr(responses_module.Responses.create, "__dagnam_record__")
     with rig.client() as client:
         client.chat.completions.create(model=MODEL, messages=MESSAGES)
     assert len(rig.lines()) == 1  # nothing recorded after the uninstall
@@ -303,10 +304,11 @@ def test_an_sdk_with_no_known_resource_is_not_patched(
     rig: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _openai.uninstall()
+    monkeypatch.setitem(sys.modules, "openai.resources.beta", None)  # an older SDK's `parse` class
     monkeypatch.delattr(responses_module, "AsyncResponses")
     for owner in (Completions, AsyncCompletions, responses_module.Responses):
         monkeypatch.delattr(owner, "create")
-        monkeypatch.delattr(owner, "parse")
+        monkeypatch.delattr(owner, "parse", raising=False)  # older SDKs have no chat `parse`
     assert _openai.install(rig.recorder) is False
 
 

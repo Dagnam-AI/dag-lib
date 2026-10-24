@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from _sdk_features import needs
 import anthropic
 import gen_fixtures
 import openai
@@ -72,11 +73,13 @@ def test_other_sdk_versions_fail_the_check_with_the_versions_and_the_way_out(
 def test_a_missing_fixture_directory_fails_the_check_with_where_it_looked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(gen_fixtures, "SDK_VERSIONS", gen_fixtures.installed_versions())
     monkeypatch.setattr(gen_fixtures, "FIXTURES", tmp_path / "absent")
     with pytest.raises(RuntimeError, match=r"absent.*DAGNAM_RECORD_SDK_MATRIX=1"):
         gen_fixtures.check_environment()
 
 
+@needs("openai chat.completions.parse")  # the scenarios call it
 def test_main_writes_every_file_to_the_directory_it_is_given(
     fresh_state: None, tmp_path: Path, capsys: Any
 ) -> None:
