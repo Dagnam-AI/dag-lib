@@ -155,3 +155,42 @@ python -m twine upload "$out"/*
 - Verify the PyPI project page renders the README correctly.
 - Verify `pip install dagnam` works in a fresh environment.
 - Confirm `CHANGELOG.md` has a fresh empty `[Unreleased]` for the next cycle.
+
+## Releasing `dagnam-record`
+
+`record/` is a separate PyPI project, `dagnam-record`, released on its own by
+[`.github/workflows/release-record.yml`](.github/workflows/release-record.yml) when a tag
+`dagnam-record/v<version>` is pushed (for example `dagnam-record/v0.1.0`). It has no dependencies, so
+there is no platform check; everything else follows the `dagnam` release above: the same two GitHub
+environments (`testpypi`, `pypi`), trusted publishing, a build-provenance attestation, a smoke test
+from TestPyPI, and nothing publishes unless the whole CI workflow **and** the recorder's own matrix
+([`record-ci.yml`](.github/workflows/record-ci.yml): Python 3.9, 3.11 and 3.13 against the lowest and
+highest supported `openai` and `anthropic`) pass on the tagged commit.
+
+1. The version lives in `__version__` in `record/dagnam_record/__init__.py` (hatchling reads it).
+2. Fold the entries under `[Unreleased]` in `record/CHANGELOG.md` into a dated
+   `## [X.Y.Z] - YYYY-MM-DD` heading and leave `[Unreleased]` empty. This refuses a changelog or a
+   tag that is not ready, and the workflow runs it first:
+
+   ```bash
+   python scripts/check_changelog.py --changelog record/CHANGELOG.md \
+     --init record/dagnam_record/__init__.py --tag dagnam-record/vX.Y.Z --tag-prefix dagnam-record/v
+   ```
+
+3. Build and smoke test locally from a scratch directory, never from `record/dist`:
+
+   ```bash
+   out="$(mktemp -d)"
+   uv build --out-dir "$out" record
+   python3.9 -m venv "$out/venv"
+   "$out/venv/bin/pip" install "$out"/dagnam_record-*.whl
+   "$out/venv/bin/python" scripts/smoke_record.py X.Y.Z
+   ```
+
+4. Tag the commit that is on `main`: `git tag dagnam-record/vX.Y.Z && git push origin dagnam-record/vX.Y.Z`.
+
+Before the first release, add a *pending publisher* for the PyPI project `dagnam-record` on
+**TestPyPI** and **PyPI** (owner `Dagnam-AI`, repository `dag-lib`, workflow file
+`release-record.yml`, environment `testpypi` / `pypi` respectively). The GitHub environments are the
+ones `dagnam` already uses; if either restricts deployments to certain tags, allow
+`dagnam-record/v*` too.
