@@ -16,7 +16,7 @@ import weakref
 import pytest
 from typing_extensions import override
 
-from dagnam_record._stream import instrument
+from dagnam_record._stream import deliver_pending, instrument
 
 DONE = object()
 
@@ -216,6 +216,8 @@ def test_letting_go_of_the_stream_reports_it_once_and_does_not_keep_it_alive() -
     del stream
     gc.collect()
     assert ref() is None  # the report hook holds nothing that holds the stream
+    assert watcher.events == [("item", 1)]  # reported later, never from inside the collector
+    deliver_pending()
     assert watcher.events == [("item", 1), ("done",)]
 
 

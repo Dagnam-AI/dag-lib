@@ -34,6 +34,8 @@ import time
 from typing import Any, Callable, Dict, Optional
 import weakref
 
+from dagnam_record._stream import deliver_pending
+
 LOGGER = logging.getLogger("dagnam_record")
 STATUS_FILE = ".status.json"
 COUNT_KEYS = (
@@ -183,6 +185,7 @@ class Writer:
 
     def close(self, timeout: float = 2.0) -> None:
         """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
+        deliver_pending()  # streams that were let go: their lines must be in before intake stops
         with self._gate:
             self._closed = True
         atexit.unregister(self.close)
@@ -226,6 +229,7 @@ class Writer:
 
     def _drain(self) -> None:
         """Run the loop body for everything queued, in the calling thread."""
+        deliver_pending()
         while True:
             try:
                 line = self._queue.get_nowait()
@@ -240,12 +244,14 @@ class Writer:
             try:
                 line = source.get(timeout=_SAVE_EVERY)
             except queue.Empty:
+                deliver_pending()  # a safe point: this thread holds no writer lock here
                 self._persist_if_due()
                 continue
             if line is None:
                 return
             self._write(line)
             self._persist_if_due()
+            deliver_pending()
 
     def _bump(self, key: str) -> None:
         with self._lock:

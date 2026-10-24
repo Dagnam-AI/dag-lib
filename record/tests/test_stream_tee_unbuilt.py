@@ -9,7 +9,7 @@ from _mock_server import Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_text_events
 import pytest
 
-from dagnam_record._stream import AsyncTeeStream, TeeStream
+from dagnam_record._stream import AsyncTeeStream, TeeStream, deliver_pending
 
 MESSAGES: List[Any] = [{"role": "user", "content": "Hi"}]
 
@@ -69,6 +69,7 @@ def test_a_proxy_that_was_built_still_reports_when_collected(proxy: Any) -> None
     tee = proxy(Stream(), guard, told)
     del tee
     gc.collect()
+    deliver_pending()
     assert told.calls == ["done"]
 
 

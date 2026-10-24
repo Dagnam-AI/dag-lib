@@ -19,7 +19,13 @@ import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from dagnam_record._recorder import Recorder, recording_disabled
-from dagnam_record._stream import AsyncTeeStream, TeeStream, instrument
+from dagnam_record._stream import (
+    AsyncTeeStream,
+    TeeStream,
+    deliver_pending,
+    instrument,
+    register_exit,
+)
 
 Body = Dict[str, Any]
 Build = Callable[[Callable[..., Any]], Callable[..., Any]]
@@ -238,6 +244,7 @@ class Patcher:
                 recorder = patcher.recorder
                 if recorder is None:
                     return await original(resource, *args, **kwargs)
+                deliver_pending()  # a safe point: no writer lock is held here
                 request = patcher.snapshot(recorder, kwargs)
                 started = time.perf_counter()
                 try:
@@ -257,6 +264,7 @@ class Patcher:
             recorder = patcher.recorder
             if recorder is None:
                 return original(resource, *args, **kwargs)
+            deliver_pending()
             request = patcher.snapshot(recorder, kwargs)
             started = time.perf_counter()
             try:
@@ -292,10 +300,13 @@ class Patcher:
             return False
         patched = self.patch(plan)
         self.recorder = recorder if patched else None
+        if patched:
+            register_exit()  # after any writer made so far: it must run before that writer closes
         return patched
 
     def uninstall(self) -> None:
         """Put the SDK's own methods back and stop recording."""
+        deliver_pending()
         self.recorder = None
         while self._patched:
             cls, method, original = self._patched.pop()

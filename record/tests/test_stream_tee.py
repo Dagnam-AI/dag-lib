@@ -9,7 +9,7 @@ from typing import Any, Callable, List, Optional, Type
 
 import pytest
 
-from dagnam_record._stream import AsyncTeeStream, TeeStream
+from dagnam_record._stream import AsyncTeeStream, TeeStream, deliver_pending
 
 DONE = object()  # a script entry: the iterator ends here
 
@@ -264,6 +264,8 @@ def test_letting_go_of_a_stream_reports_the_end_once() -> None:
     next(stream)
     del stream
     gc.collect()
+    assert watcher.events == [("item", 1)]  # letting go is reported at the next safe point
+    deliver_pending()
     assert watcher.events == [("item", 1), "done"]
     finished = Watcher()
     done = tee([DONE], finished)
@@ -406,4 +408,6 @@ def test_letting_go_of_an_async_stream_reports_the_end_once() -> None:
     run(stream.__anext__())
     del stream
     gc.collect()
+    assert watcher.events == [("item", 1)]
+    deliver_pending()
     assert watcher.events == [("item", 1), "done"]

@@ -34,6 +34,7 @@ from dagnam_record._anthropic_assemble import ERROR_STATUS, MessageAssembler
 from dagnam_record._anthropic_body import Body, request_body, response_body
 from dagnam_record._patch import Patcher, Plan, error_status
 from dagnam_record._recorder import Recorder
+from dagnam_record._stream import deliver_pending
 
 PROVIDER = "anthropic"
 ENDPOINT = "messages"
@@ -63,6 +64,8 @@ def _wrap_stream(original: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(original)
     def stream(resource: Any, *args: Any, **kwargs: Any) -> Any:
         recorder = _PATCHER.recorder
+        if recorder is not None:
+            deliver_pending()  # a safe point: no writer lock is held here
         request = _PATCHER.snapshot(recorder, kwargs) if recorder is not None else None
         manager = original(resource, *args, **kwargs)
         if recorder is not None and request is not None:
