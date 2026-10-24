@@ -28,6 +28,24 @@ def test_a_half_sample_keeps_between_40_and_60_percent_of_2000_ids() -> None:
     assert 300 <= kept(0.25) <= 700
 
 
+@pytest.mark.parametrize(
+    ("trace_id", "fraction"),
+    [
+        ("trace-0", 0.6086722470968304),
+        ("trace-1", 0.09372610975976327),
+        ("trace-2", 0.853069755933122),
+        ("abc", 0.7283949105904022),
+        ("00000000-0000-0000-0000-000000000001", 0.4795184636032407),
+    ],
+)
+def test_the_decision_for_a_fixed_id_is_fixed_for_ever(trace_id: str, fraction: float) -> None:
+    # sha256 of the id, first 8 bytes: the same on every run, every machine, every Python.
+    assert sampled(trace_id, fraction) is False  # the share is "below the rate", not "at most"
+    assert sampled(trace_id, fraction + 1e-9) is True
+    assert sampled(trace_id, fraction - 1e-9) is False
+    assert sampled(trace_id, 1.0) is True
+
+
 def test_the_decision_depends_only_on_the_id_and_larger_rates_keep_more() -> None:
     ids = [f"id-{number}" for number in range(500)]
     assert [sampled(item, 0.3) for item in ids] == [sampled(item, 0.3) for item in ids]

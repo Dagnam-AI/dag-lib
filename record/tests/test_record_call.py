@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
+import time
 from typing import Any, Dict, List
 
 from _api_support import REQUEST, RESPONSE, finish_lines, record, saved_counts
@@ -13,6 +14,7 @@ import pytest
 
 import dagnam_record
 from dagnam_record import _state
+from dagnam_record._files import purge
 
 pytestmark = pytest.mark.usefixtures("fresh_state")
 
@@ -168,3 +170,31 @@ def test_under_the_kill_switch_it_is_silent(
         record()
     assert caplog.text == ""
     assert not (tmp_path / "t").exists()
+
+
+def wait_for_lines(directory: Path, wanted: int) -> List[str]:
+    """The lines on disk once there are ``wanted`` of them (the writer thread is asynchronous)."""
+    deadline = time.monotonic() + 10
+    found: List[str] = []
+    while time.monotonic() < deadline:
+        found = [
+            line
+            for path in sorted(directory.glob("*.jsonl"))
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+        if len(found) >= wanted:
+            break
+        time.sleep(0.01)
+    return found
+
+
+def test_after_a_purge_the_running_recorder_starts_a_new_file(tmp_path: Path) -> None:
+    directory = tmp_path / "t"
+    dagnam_record.install(dir=str(directory))
+    record(request={"prompt": "before"})
+    assert len(wait_for_lines(directory, 1)) == 1
+    name = next(directory.glob("*.jsonl")).name
+    assert purge(str(directory)).deleted == [name]
+    record(request={"prompt": "after"})
+    (line,) = wait_for_lines(directory, 1)
+    assert json.loads(line)["request"]["prompt"] == "after"

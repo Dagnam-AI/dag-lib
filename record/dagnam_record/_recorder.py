@@ -27,13 +27,17 @@ MAX_NODES = 250_000
 _UNSET_NAMES = frozenset({"NotGiven", "Omit"})  # the SDKs' "argument not passed" sentinels
 
 
-def recording_disabled() -> bool:
-    """The kill switch: ``DAGNAM_RECORD`` set to exactly ``0`` switches the recorder off.
+OFF_VALUES = frozenset({"0", "false", "off", "no", "disable", "disabled"})
 
-    Nothing else does: not unset, empty, ``1``, ``00``, ``false`` or ``off`` (``install()`` warns
-    about the last ones, which look like "off" but are not).
+
+def recording_disabled() -> bool:
+    """The kill switch: ``DAGNAM_RECORD`` switches the recorder off.
+
+    Off is one of ``0``, ``false``, ``off``, ``no``, ``disable``, ``disabled``, in any case and
+    with spaces around it. Everything else leaves the recorder on: unset, empty, ``1``, ``00``,
+    ``yes``, ``true``, ``on`` or any other text.
     """
-    return os.environ.get(KILL_SWITCH) == "0"
+    return os.environ.get(KILL_SWITCH, "").strip().lower() in OFF_VALUES
 
 
 def sampled(trace_id: str, rate: float) -> bool:

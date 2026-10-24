@@ -160,13 +160,13 @@ def test_purge_exits_1_when_a_file_cannot_be_deleted(
 
     def flaky(path: str) -> None:
         if path.endswith("10-12.jsonl"):
-            raise PermissionError(path)
+            raise PermissionError(13, "Permission denied", path)
         real_unlink(path)
 
     monkeypatch.setattr(os, "unlink", flaky)
     code, out, err = run(["purge", "--dir", str(directory)], capsys)
     assert code == 1
-    assert "could not delete 2026-10-12.jsonl" in err
+    assert "could not delete 2026-10-12.jsonl: Permission denied" in err
     assert "deleted 2 file(s)" in out
 
 
@@ -243,3 +243,58 @@ def test_python_dash_m_status_then_purge_with_a_temporary_home(tmp_path: Path) -
     assert again.returncode == 1
     assert "holds no recorder file" in again.stderr
     assert run_process([], tmp_path).returncode == 2
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t "])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--dir", "{}", "status"],
+        ["status", "--dir", "{}"],
+        ["purge", "--dir", "{}"],
+        ["--dir", "{}", "purge"],
+    ],
+)
+def test_an_empty_or_blank_directory_is_a_usage_error(
+    arguments: List[str], blank: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        _cli.main([blank if item == "{}" else item for item in arguments])
+    assert stopped.value.code == 2
+    assert "must not be empty" in capsys.readouterr().err
+
+
+def test_purge_dry_run_lists_what_it_would_delete_and_deletes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = make_directory(tmp_path)
+    code, out, err = run(["purge", "--dry-run", "--dir", str(directory)], capsys)
+    assert (code, err) == (0, "")
+    assert out.splitlines() == [
+        "would delete 2026-10-12.jsonl",
+        "would delete 2026-10-13.jsonl",
+        "would delete .status.json",
+        f"would delete 3 file(s) from {directory}",
+    ]
+    assert len(list(directory.iterdir())) == 3
+
+
+def test_purge_dry_run_refuses_what_a_real_purge_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_data(tmp_path, "2026-10-12.jsonl", ["somebody else's notes"])
+    code, out, err = run(["purge", "--dry-run", "--dir", str(tmp_path)], capsys)
+    assert (code, out) == (1, "")
+    assert "holds no recorder file" in err
+
+
+def test_files_that_only_look_like_the_recorders_are_neither_shown_nor_deleted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_data(tmp_path, "2026-10-12.jsonl", ["somebody else's notes"])
+    (tmp_path / ".status.json").write_text("{not json", encoding="utf-8")
+    for command in (["status"], ["purge"]):
+        code, out, err = run([*command, "--dir", str(tmp_path)], capsys)
+        assert (code, out) == (1, "")
+        assert "holds no recorder file" in err
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".status.json", "2026-10-12.jsonl"]

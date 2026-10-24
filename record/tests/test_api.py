@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import logging
 import os
 from pathlib import Path
 import stat
@@ -11,7 +10,7 @@ import sys
 import threading
 from typing import Any, Dict, List
 
-from _api_support import finish_lines, record, run_forked, saved_counts
+from _api_support import envelope, finish_lines, record, run_forked, saved_counts
 from _mock_server import Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_body
 from _openai_calls import API_KEY, unpatched
@@ -40,8 +39,15 @@ def hide_sdks(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
 
 
 def test_the_public_names() -> None:
-    assert dagnam_record.__all__ == ["__version__", "install", "record_call", "uninstall"]
+    assert dagnam_record.__all__ == [
+        "__version__",
+        "install",
+        "is_installed",
+        "record_call",
+        "uninstall",
+    ]
     assert dagnam_record.install is _state.install
+    assert dagnam_record.is_installed is _state.is_installed
     assert dagnam_record.record_call is _state.record_call
     assert dagnam_record.uninstall is _state.uninstall
 
@@ -87,35 +93,35 @@ def test_the_kill_switch_makes_install_a_no_op_that_writes_nothing(
     assert dagnam_record.install(**options) is False
 
 
-@pytest.mark.parametrize("value", ["", "1", "00", " 0", "0 ", "false", "off", "no", "yes"])
-def test_only_the_exact_value_zero_switches_it_off(
+OFF = ["0", "false", "off", "no", "disable", "disabled", " 0 ", "FALSE", "Off", " Disabled\t", "No"]
+ON = ["", "  ", "1", "00", "yes", "true", "on", "enabled", "2", "nope", "falsey", "0.0", "00000"]
+
+
+@pytest.mark.parametrize("value", OFF)
+def test_these_values_switch_the_recorder_off(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DAGNAM_RECORD", value)
+    assert dagnam_record.install(dir=str(tmp_path / "t")) is False
+    assert not (tmp_path / "t").exists()
+    assert not dagnam_record.is_installed()
+
+
+@pytest.mark.parametrize("value", ON)
+def test_any_other_value_leaves_it_on(
     value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DAGNAM_RECORD", value)
     assert dagnam_record.install(dir=str(tmp_path / "t")) is True
-    assert _state.STATE.installed is not None
+    assert dagnam_record.is_installed()
 
 
-@pytest.mark.parametrize("value", ["false", "off", "no", "FALSE"])
-def test_a_value_that_looks_like_off_but_is_not_zero_warns(
-    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    monkeypatch.setenv("DAGNAM_RECORD", value)
-    with caplog.at_level(logging.WARNING, logger="dagnam_record"):
-        dagnam_record.install(dir=str(tmp_path / "t"))
-    assert "does not switch the recorder off" in caplog.text
-    assert "set it to 0" in caplog.text
-
-
-def test_no_warning_for_unset_or_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="dagnam_record"):
-        monkeypatch.delenv("DAGNAM_RECORD", raising=False)
-        dagnam_record.install(dir=str(tmp_path / "a"))
-        monkeypatch.setenv("DAGNAM_RECORD", "1")
-        dagnam_record.install(dir=str(tmp_path / "b"))
-    assert caplog.text == ""
+def test_is_installed_follows_install_and_uninstall(tmp_path: Path) -> None:
+    assert dagnam_record.is_installed() is False
+    dagnam_record.install(dir=str(tmp_path / "t"))
+    assert dagnam_record.is_installed() is True
+    dagnam_record.uninstall()
+    assert dagnam_record.is_installed() is False
 
 
 def test_a_missing_sdk_is_not_an_error_and_record_call_still_works(
@@ -155,13 +161,14 @@ def test_install_prunes_the_recorders_own_files_older_than_the_window(tmp_path: 
     today = datetime.now(timezone.utc).date()
     old = (today - timedelta(days=15)).isoformat()
     edge = (today - timedelta(days=3)).isoformat()
+    line = envelope("x", 1_791_797_400.0)
     for name in (f"{old}.jsonl", f"{edge}.jsonl", f"{old}.txt", "notes.jsonl"):
-        (directory / name).write_text("x\n", encoding="utf-8")
+        (directory / name).write_text(line + "\n", encoding="utf-8")
     dagnam_record.install(dir=str(directory), window_days=14)
     assert sorted(p.name for p in directory.iterdir() if p.name != ".status.json") == sorted(
         [f"{edge}.jsonl", f"{old}.txt", "notes.jsonl"]
     )
-    (directory / f"{edge}.jsonl").write_text("x\n", encoding="utf-8")
+    (directory / f"{edge}.jsonl").write_text(line + "\n", encoding="utf-8")
     dagnam_record.install(dir=str(directory), window_days=2)  # new options: set up again
     assert not (directory / f"{edge}.jsonl").exists()
 
@@ -264,6 +271,8 @@ def test_the_options_are_checked(tmp_path: Path) -> None:
         {"redact": 3},
         {"redact": ""},
         {"dir": ""},
+        {"dir": "   "},
+        {"dir": "\t\n"},
         {"dir": 5},
         {"dir": "a\0b"},
     ]
@@ -352,3 +361,18 @@ def test_a_child_forked_while_install_was_running_can_still_install(tmp_path: Pa
         assert run_forked(child) == 0
     finally:
         _state.STATE.lock.release()
+
+
+def test_a_relative_directory_is_fixed_when_install_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.chdir(first)
+    dagnam_record.install(dir="traces")
+    monkeypatch.chdir(second)
+    record()
+    (line,) = finish_lines(first / "traces")
+    assert line["request"]["prompt"] == "hello"
+    assert not (second / "traces").exists()

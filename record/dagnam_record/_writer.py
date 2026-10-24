@@ -146,6 +146,9 @@ class Writer:
         # directory overwrite each other's file. Add per-process files if that matters.
         self.counts: Dict[str, int] = {key: as_count(saved.get(key)) for key in COUNT_KEYS}
         self.counts["dropped_error"] += refused  # the directory is not one we may write to
+        self._loaded = dict(self.counts)  # what was already on record when this writer began
+        self._successor: Optional[Writer] = None  # takes lines that arrive after close()
+        self._moved: Optional[Writer] = None  # takes counts that arrive after hand_over()
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save
         self._started = clock()
@@ -164,9 +167,11 @@ class Writer:
 
     def submit(self, line: str) -> None:
         """Queue one line. Never blocks, never raises: what cannot be kept is counted."""
+        forward: Optional[Writer] = None
         try:
             with self._gate:  # close() takes it to stop intake, so no line lands after the stop
                 if self._closed:
+                    forward = self._successor
                     key = "dropped_error"
                 elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
                     key = "dropped_large"
@@ -177,7 +182,10 @@ class Writer:
             key = "dropped_full"
         except Exception:  # not a string, or anything else: the caller is never told
             key = "dropped_error"
-        self._bump(key)
+        if forward is not None:
+            forward.submit(line)  # handed over: the successor decides what becomes of it
+        else:
+            self._bump(key)
 
     def count(self, key: str) -> None:
         """Count a line that was dropped before it reached ``submit`` (a key of ``COUNT_KEYS``)."""
@@ -201,6 +209,29 @@ class Writer:
             self._drop_fd()
         self._persist()
 
+    def hand_over(self, successor: Writer) -> None:
+        """Stop in favour of ``successor``, losing no line and no count.
+
+        What is queued is written, then the counts are saved. A line or a count that reaches this
+        writer afterwards (a call that began with the old recorder) is passed to ``successor``.
+        In the same directory the successor also takes over the counts and the window start of this
+        writer (its own ``window_days`` then decides whether the window has ended), so ``.status.json`` goes on from where it was.
+        """
+        self._successor = successor
+        self.close()
+        with self._lock:
+            final = dict(self.counts)
+            self._moved = successor
+        if successor._dir == self._dir:
+            successor._take_over(final, self._started)
+
+    def _take_over(self, final: Dict[str, int], started: float) -> None:
+        with self._lock:
+            for key in COUNT_KEYS:
+                self.counts[key] += max(final[key] - self._loaded[key], 0)
+            self._started = started  # whether the window has ended is judged afresh from it
+            self._dirty = True
+
     def reinit_after_fork(self) -> None:
         """Start over in a forked child.
 
@@ -213,6 +244,7 @@ class Writer:
         self._lock = threading.Lock()
         self._gate = threading.Lock()
         self.counts = dict.fromkeys(COUNT_KEYS, 0)
+        self._loaded = dict.fromkeys(COUNT_KEYS, 0)
         self._dirty = False
         self._saved_at = self._clock()
         self._drop_fd()  # closes this process's copy only
@@ -255,8 +287,12 @@ class Writer:
 
     def _bump(self, key: str) -> None:
         with self._lock:
-            self.counts[key] += 1
-            self._dirty = True
+            target = self._moved
+            if target is None:
+                self.counts[key] += 1
+                self._dirty = True
+                return
+        target._bump(key)
 
     def _is_expired(self, now: float) -> bool:
         if not self.expired and now - self._started >= self._window:
@@ -287,6 +323,8 @@ class Writer:
 
     def _descriptor(self, now: float) -> int:
         day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
+        if self._fd is not None and os.fstat(self._fd).st_nlink == 0:
+            self._drop_fd()  # the file was deleted (a purge) while we held it: start a new one
         if self._fd is None or day != self._day:
             self._drop_fd()
             _ensure_dir(self._dir)

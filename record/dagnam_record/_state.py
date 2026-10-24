@@ -15,13 +15,12 @@ from typing import Any, Callable, Dict, Optional, Union
 
 from dagnam_record import _anthropic, _openai
 from dagnam_record._files import DEFAULT_DIR, prune, resolve
-from dagnam_record._recorder import KILL_SWITCH, Recorder, recording_disabled, to_plain
+from dagnam_record._recorder import Recorder, recording_disabled, to_plain
 from dagnam_record._redact import Option, check, resolve as resolve_redact
 from dagnam_record._writer import Writer
 
 LOGGER = logging.getLogger("dagnam_record")
 MAX_WINDOW_DAYS = 365
-_LOOKS_LIKE_OFF = frozenset({"false", "off", "no"})
 
 
 @dataclass(frozen=True)
@@ -75,7 +74,7 @@ def _config(
         raise ValueError(f"window_days must be a whole number from 1 to {MAX_WINDOW_DAYS}")
     if isinstance(directory, os.PathLike):
         directory = os.fspath(directory)
-    if not isinstance(directory, str) or not directory or "\0" in directory:
+    if not isinstance(directory, str) or not directory.strip() or "\0" in directory:
         raise ValueError("dir must be a non-empty path")
     if isinstance(sample, bool) or not isinstance(sample, (int, float)) or not 0 < sample <= 1:
         raise ValueError("sample must be a number above 0 and at most 1")
@@ -84,21 +83,9 @@ def _config(
     return Config(window_days, resolve(directory), float(sample), no_raw, check(redact))
 
 
-def _warn_about_lookalikes() -> None:
-    value = os.environ.get(KILL_SWITCH)
-    if value is not None and value.strip().lower() in _LOOKS_LIKE_OFF:
-        LOGGER.warning(
-            "dagnam_record: %s=%r does not switch the recorder off; set it to 0 to do so",
-            KILL_SWITCH,
-            value,
-        )
-
-
-def _configure(config: Config, previous: Optional[Installed]) -> Installed:
-    """Build the writer and recorder for ``config`` after stopping the previous ones."""
+def _build(config: Config) -> Installed:
+    """The writer and recorder for ``config``; the previous ones are still running."""
     redactor = resolve_redact(config.redact)  # may raise ImportError: nothing has changed yet
-    if previous is not None:
-        previous.writer.close()  # writes its queue and saves its counts, which the new one reads
     writer = Writer(config.directory, window_days=config.window_days)
     prune(config.directory, config.window_days, time.time())
     recorder = Recorder(writer, no_raw=config.no_raw, sample=config.sample, redact=redactor)
@@ -122,34 +109,42 @@ def install(
       files dated more than ``window_days`` days ago are deleted whenever the recorder is set up
       (the first ``install``, or one with new options).
     * ``dir``: where the files go, default ``~/.dagnam/traces`` (created ``0700``; files ``0600``).
+      A relative path is made absolute when ``install`` runs, so a later ``chdir`` does not move it.
+      An empty or blank path is refused.
     * ``sample``: the share of calls kept, above 0 and at most 1, chosen by a hash of each call's
       trace id (see ``_recorder.sampled``).
     * ``no_raw``: write the provider-neutral ``norm`` only, never the request and response bodies.
     * ``redact``: ``None``, a function from text to text (see ``_redact``), or ``"auto"``, which
       needs the optional extra ``dagnam-record[redact]`` (a missing one raises ``ImportError``).
 
-    The kill switch ``DAGNAM_RECORD=0`` is read when ``install`` runs: ``install`` then does
-    nothing, validates nothing, writes nothing, and returns ``False``. Only the exact value ``0``
-    counts.
+    The kill switch is read when ``install`` runs: ``DAGNAM_RECORD`` set to ``0``, ``false``,
+    ``off``, ``no``, ``disable`` or ``disabled`` (any case, spaces around it ignored) makes
+    ``install`` do nothing, validate nothing, write nothing and return ``False``. Any other value,
+    including unset, empty, ``1``, ``00`` and ``true``, leaves the recorder on.
 
     A missing SDK is never an error: ``False`` means no SDK (``openai``, ``anthropic``) was
     patched, or the kill switch is on. The recorder is set up anyway, so ``record_call`` works for
     frameworks that bypass the SDKs. Calling ``install`` again is safe, from any thread: with the
     same options it only patches an SDK that has appeared since (one is never wrapped twice); with
     different options the recorder is reconfigured: the old writer writes what it has queued and
-    stops, then a new one starts (the window carries over in the same directory). Lines submitted
-    in the instant between the two are counted as dropped. Blocking work is limited to this call
-    (a directory and a thread are made); recording itself never blocks.
+    stops once the new one is in use, and passes on any line or count that still reaches it (the
+    window and the counts carry over in the same directory), so nothing is lost. Blocking work is
+    limited to this call (a directory and a thread are made); recording itself never blocks.
     """
     if recording_disabled():
         return False
-    _warn_about_lookalikes()
     config = _config(window_days, dir, sample, no_raw, redact)
     with STATE.lock:
-        installed = STATE.installed
-        if installed is None or installed.config != config:
-            installed = STATE.installed = _configure(config, installed)
+        previous = STATE.installed
+        if previous is None or previous.config != config:
+            installed = STATE.installed = _build(config)
+        else:
+            installed = previous
         patched = [_openai.install(installed.recorder), _anthropic.install(installed.recorder)]
+        if previous is not None and previous is not installed:
+            # Only now, with every new call going to the new recorder: the old writer writes what
+            # it holds and passes on whatever still reaches it, so nothing is lost on the way.
+            previous.writer.hand_over(installed.writer)
     return any(patched)
 
 
@@ -199,6 +194,11 @@ def record_call(
         return
     recorder = installed.recorder
     recorder.fail_open(_record, recorder, provider, endpoint, request, response, status, latency_ms)
+
+
+def is_installed() -> bool:
+    """Whether ``install`` has set up a recorder that ``uninstall`` has not stopped."""
+    return STATE.installed is not None
 
 
 def uninstall() -> None:

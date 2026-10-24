@@ -10,8 +10,8 @@ until the owner uploads the file it writes.
 shows and deletes what was recorded.
 """
 
-from dagnam_record._state import install, record_call, uninstall
+from dagnam_record._state import install, is_installed, record_call, uninstall
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__", "install", "record_call", "uninstall"]
+__all__ = ["__version__", "install", "is_installed", "record_call", "uninstall"]

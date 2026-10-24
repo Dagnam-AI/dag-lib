@@ -17,6 +17,7 @@ from dagnam_record._writer import COUNT_KEYS
 
 POSIX_ONLY = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX files")
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=timezone.utc).timestamp()
+LINE = envelope("x", NOW)
 
 
 def at(day: str, clock: str = "09:30:00") -> float:
@@ -43,7 +44,7 @@ def status_file(directory: Path, **fields: Any) -> None:
 
 def test_prune_deletes_only_dated_data_files_older_than_the_window(tmp_path: Path) -> None:
     for day in ("2026-10-08", "2026-09-30", "2026-10-09", "2026-10-10", "2026-10-23", "2026-11-30"):
-        write_data(tmp_path, f"{day}.jsonl", ["x"])
+        write_data(tmp_path, f"{day}.jsonl", [LINE])
     removed = _files.prune(str(tmp_path), 14, NOW)
     assert sorted(os.path.basename(path) for path in removed) == [
         "2026-09-30.jsonl",
@@ -62,13 +63,13 @@ def test_prune_deletes_only_dated_data_files_older_than_the_window(tmp_path: Pat
 def test_the_boundary_moves_with_the_window(window: int, kept: int, tmp_path: Path) -> None:
     for back in range(0, 9):
         day = datetime.fromtimestamp(NOW - back * 86400, timezone.utc).strftime("%Y-%m-%d")
-        write_data(tmp_path, f"{day}.jsonl", ["x"])
+        write_data(tmp_path, f"{day}.jsonl", [LINE])
     _files.prune(str(tmp_path), window, NOW)
     assert len(names(tmp_path)) == kept  # today and ``window`` days back stay
 
 
 def test_the_cutoff_is_the_utc_date_not_the_time_of_day(tmp_path: Path) -> None:
-    write_data(tmp_path, "2026-10-09.jsonl", ["x"])
+    write_data(tmp_path, "2026-10-09.jsonl", [LINE])
     midnight = at("2026-10-23", "00:00:00")
     last_second = at("2026-10-22", "23:59:59")
     assert _files.prune(str(tmp_path), 14, last_second) == []
@@ -85,12 +86,12 @@ def test_prune_never_touches_anything_that_is_not_a_dated_data_file(tmp_path: Pa
     box.mkdir()
     old = "2020-01-01"
     status_file(box)
-    write_data(box, "notes.jsonl", ["x"])
-    write_data(box, f"{old}.txt", ["x"])
-    write_data(box, f"{old}.jsonl.bak", ["x"])
-    write_data(box, f"{old}.jsonl.gz", ["x"])
-    write_data(box, "2020-13-45.jsonl", ["x"])
-    write_data(box, "abcd-ef-gh.jsonl", ["x"])
+    write_data(box, "notes.jsonl", [LINE])
+    write_data(box, f"{old}.txt", [LINE])
+    write_data(box, f"{old}.jsonl.bak", [LINE])
+    write_data(box, f"{old}.jsonl.gz", [LINE])
+    write_data(box, "2020-13-45.jsonl", [LINE])
+    write_data(box, "abcd-ef-gh.jsonl", [LINE])
     (box / "2020-02-02.jsonl").mkdir()
     (box / "2020-03-03.jsonl").symlink_to(target)
     os.mkfifo(box / "2020-04-04.jsonl")
@@ -103,7 +104,7 @@ def test_prune_never_touches_anything_that_is_not_a_dated_data_file(tmp_path: Pa
 def test_prune_of_a_missing_directory_or_a_symlink_to_one_does_nothing(tmp_path: Path) -> None:
     assert _files.prune(str(tmp_path / "absent"), 14, NOW) == []
     real = tmp_path / "real"
-    write_data(real, "2020-01-01.jsonl", ["x"])
+    write_data(real, "2020-01-01.jsonl", [LINE])
     link = tmp_path / "link"
     link.symlink_to(real)
     assert _files.prune(str(link), 14, NOW) == []
@@ -113,8 +114,8 @@ def test_prune_of_a_missing_directory_or_a_symlink_to_one_does_nothing(tmp_path:
 def test_prune_survives_a_file_it_cannot_delete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    write_data(tmp_path, "2020-01-01.jsonl", ["x"])
-    write_data(tmp_path, "2020-01-02.jsonl", ["x"])
+    write_data(tmp_path, "2020-01-01.jsonl", [LINE])
+    write_data(tmp_path, "2020-01-02.jsonl", [LINE])
 
     def refuse(path: str) -> None:
         raise PermissionError(path)
@@ -171,6 +172,7 @@ def test_summarize_counts_files_lines_and_timestamps(tmp_path: Path) -> None:
 
 
 def test_summarize_prints_only_well_formed_timestamps(tmp_path: Path) -> None:
+    status_file(tmp_path)
     write_data(tmp_path, "2026-10-12.jsonl", ['{"ts": "TOP SECRET TEXT"}', "not json", "[1]"])
     write_data(tmp_path, "2026-10-13.jsonl", [envelope("x", at("2026-10-13"))])
     summary = _files.summarize(str(tmp_path))
@@ -213,7 +215,7 @@ def test_summarize_refuses_what_is_not_a_recorder_directory(tmp_path: Path) -> N
     empty.mkdir()
     with pytest.raises(NotRecorderDirectoryError):
         _files.summarize(str(empty))
-    write_data(tmp_path / "other", "notes.jsonl", ["x"])
+    write_data(tmp_path / "other", "notes.jsonl", [LINE])
     with pytest.raises(NotRecorderDirectoryError):
         _files.summarize(str(tmp_path / "other"))
     real = tmp_path / "real"
@@ -282,8 +284,8 @@ def test_a_file_that_vanishes_after_the_listing_counts_as_empty(
 
 
 def test_purge_deletes_exactly_the_recorder_files(tmp_path: Path) -> None:
-    write_data(tmp_path, "2026-10-12.jsonl", ["x"])
-    write_data(tmp_path, "2026-10-13.jsonl", ["x"])
+    write_data(tmp_path, "2026-10-12.jsonl", [LINE])
+    write_data(tmp_path, "2026-10-13.jsonl", [LINE])
     status_file(tmp_path)
     for keep in (
         "notes.jsonl",
@@ -334,7 +336,7 @@ def test_purge_never_follows_a_symlink(tmp_path: Path) -> None:
     assert names(real) == ["2026-10-12.jsonl"]
     box = tmp_path / "box"
     mine = write_data(tmp_path / "mine", "diary.txt", ["precious"])
-    write_data(box, "2026-10-13.jsonl", ["x"])
+    write_data(box, "2026-10-13.jsonl", [LINE])
     (box / "2026-10-14.jsonl").symlink_to(mine)
     (box / ".status.json").symlink_to(mine)
     os.mkfifo(box / "2026-10-15.jsonl")
@@ -347,12 +349,12 @@ def test_purge_reports_files_it_could_not_delete_and_ignores_ones_already_gone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name in ("2026-10-11.jsonl", "2026-10-12.jsonl", "2026-10-13.jsonl"):
-        write_data(tmp_path, name, ["x"])
+        write_data(tmp_path, name, [LINE])
     real_unlink = os.unlink
 
     def flaky(path: str) -> None:
         if path.endswith("10-11.jsonl"):
-            raise PermissionError(path)
+            raise PermissionError(13, "Permission denied", path)
         if path.endswith("10-12.jsonl"):
             real_unlink(path)
             raise FileNotFoundError(path)
@@ -360,4 +362,7 @@ def test_purge_reports_files_it_could_not_delete_and_ignores_ones_already_gone(
 
     monkeypatch.setattr(os, "unlink", flaky)
     result = _files.purge(str(tmp_path))
-    assert (result.deleted, result.failed) == (["2026-10-13.jsonl"], ["2026-10-11.jsonl"])
+    assert (result.deleted, result.failed) == (
+        ["2026-10-13.jsonl"],
+        [("2026-10-11.jsonl", "Permission denied")],
+    )

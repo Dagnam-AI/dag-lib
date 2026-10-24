@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from enum import Enum
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 from typing_extensions import override
@@ -233,13 +233,30 @@ def test_media_omitted_counts_utf8_bytes() -> None:
     assert media_omitted("é") == {"type": "media_omitted", "bytes": 2}
 
 
-def test_the_kill_switch_is_exactly_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DAGNAM_RECORD", raising=False)
-    assert recording_disabled() is False
-    monkeypatch.setenv("DAGNAM_RECORD", "1")
-    assert recording_disabled() is False
-    monkeypatch.setenv("DAGNAM_RECORD", "0")
-    assert recording_disabled() is True
+@pytest.mark.parametrize(
+    ("value", "off"),
+    [
+        (None, False),
+        ("", False),
+        ("1", False),
+        ("00", False),
+        ("true", False),
+        ("0", True),
+        ("false", True),
+        ("OFF", True),
+        (" no ", True),
+        ("disable", True),
+        ("Disabled", True),
+    ],
+)
+def test_the_kill_switch_values(
+    value: Optional[str], off: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if value is None:
+        monkeypatch.delenv("DAGNAM_RECORD", raising=False)
+    else:
+        monkeypatch.setenv("DAGNAM_RECORD", value)
+    assert recording_disabled() is off
 
 
 def test_fail_open_runs_a_step_and_counts_what_goes_wrong(make: Any) -> None:

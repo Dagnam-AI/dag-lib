@@ -1,7 +1,7 @@
 """``python -m dagnam_record status|purge``: look at, or delete, what the recorder wrote.
 
 Exit codes: 0 done; 1 nothing to show or a purge that was refused or could not finish (the
-reason is on stderr); 2 a usage error (argparse's own code). Trace content is never printed: only
+reason is on stderr); 2 a usage error (argparse's own code, also for an empty ``--dir``). Trace content is never printed: only
 the directory, file names, counts and two timestamps.
 """
 
@@ -33,6 +33,12 @@ def _err(text: str) -> None:
     sys.stderr.write(text + "\n")
 
 
+def _directory(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("the directory must not be empty")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -40,7 +46,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"dagnam-record {__version__}")
     parser.add_argument(
-        "--dir", default=DEFAULT_DIR, help=f"trace directory (default {DEFAULT_DIR})"
+        "--dir",
+        type=_directory,
+        default=DEFAULT_DIR,
+        help=f"trace directory (default {DEFAULT_DIR})",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, text in (
@@ -52,7 +61,13 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = commands.add_parser(name, help=text, description=text)
         # SUPPRESS: ``--dir`` may come before or after the command, and the later one wins.
-        command.add_argument("--dir", default=argparse.SUPPRESS, help="trace directory")
+        command.add_argument(
+            "--dir", type=_directory, default=argparse.SUPPRESS, help="trace directory"
+        )
+        if name == "purge":
+            command.add_argument(
+                "--dry-run", action="store_true", help="only list what would be deleted"
+            )
     return parser
 
 
@@ -83,20 +98,21 @@ def _status(directory: str) -> int:
     return 0
 
 
-def _purge(directory: str) -> int:
+def _purge(directory: str, dry_run: bool) -> int:
     try:
-        result = purge(directory)
+        result = purge(directory, dry_run=dry_run)
     except FileNotFoundError:
         _out(f"nothing to delete: {directory} does not exist")
         return 0
     except (OSError, NotRecorderDirectoryError) as exc:
         _err(f"{PROG}: refused: {_why(exc, directory)}")
         return 1
+    verb = "would delete" if dry_run else "deleted"
     for name in result.deleted:
-        _out(f"deleted {name}")
-    for name in result.failed:
-        _err(f"{PROG}: could not delete {name}")
-    _out(f"deleted {len(result.deleted)} file(s) from {directory}")
+        _out(f"{verb} {name}")
+    for name, reason in result.failed:
+        _err(f"{PROG}: could not delete {name}: {reason}")
+    _out(f"{verb} {len(result.deleted)} file(s) from {directory}")
     return 1 if result.failed else 0
 
 
@@ -110,4 +126,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the command line and return its exit code."""
     arguments = _parser().parse_args(argv)
     directory = resolve(arguments.dir)
-    return _status(directory) if arguments.command == "status" else _purge(directory)
+    if arguments.command == "status":
+        return _status(directory)
+    return _purge(directory, arguments.dry_run)
