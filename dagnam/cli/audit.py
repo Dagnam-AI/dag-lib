@@ -22,6 +22,7 @@ from dagnam.cli.audit_key import cmd_audit_key
 from dagnam.cli.audit_run import client_from_env, cmd_audit_run, resolve_audit_dir
 from dagnam.cli.audit_scan import (
     cmd_audit_scan,
+    parse_map_pair,
     parse_sample_rate,
     parse_window,
     retired_live,
@@ -221,6 +222,7 @@ def register_audit(subparsers: SubParsersAction) -> None:
     scan.add_argument(
         "--map",
         action="append",
+        type=parse_map_pair,
         metavar="FIELD=COLUMN",
         help="Map a trace field to one of your columns (jsonl/csv sources); repeatable"
         " (default: none, the source's own field names are used).",
@@ -298,7 +300,7 @@ def register_audit(subparsers: SubParsersAction) -> None:
 
     key = sub.add_parser(
         "key",
-        docs_url=_docs("switching-a-workload"),
+        docs_url=_docs("dagnam-audit-key"),
         help="Print a workload's winning deployment key (stdout is the key only).",
         description="Print the deployment key stored for a workload's winner, so"
         " `export DEPLOYMENT_KEY=$(dagnam audit key ./audit <workload>)` works."

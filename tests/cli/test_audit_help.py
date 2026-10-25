@@ -59,10 +59,9 @@ def test_the_anchors_are_distinct_and_name_headings_of_the_docs_page() -> None:
     anchors = [_anchor(n) for n in sorted(SUBPARSERS)]
 
     assert len(set(anchors)) == len(anchors)
-    assert {f"dagnam-audit-{n}" for n in ("scan", "run", "status", "cancel", "delete")} <= set(
-        anchors
-    )
-    assert "switching-a-workload" in anchors
+    assert {
+        f"dagnam-audit-{n}" for n in ("scan", "run", "status", "key", "cancel", "delete")
+    } <= set(anchors)
 
 
 def _flags_with_a_default() -> list[tuple[str, argparse.Action]]:
@@ -117,7 +116,7 @@ def test_the_help_flag_prints_the_link_through_the_real_entry_point(
         run_cli(["audit", "key", "--help"])
 
     assert excinfo.value.code == 0
-    assert capsys.readouterr().out.rstrip().endswith(f"Docs: {DOCS_PAGE}#switching-a-workload")
+    assert capsys.readouterr().out.rstrip().endswith(f"Docs: {DOCS_PAGE}#dagnam-audit-key")
 
 
 def test_a_parser_without_a_docs_url_keeps_the_generic_link() -> None:
