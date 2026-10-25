@@ -9,7 +9,9 @@ reads a row's ``reason``, except :func:`_legacy` for a platform that sends no ``
 Statuses (the platform's words, stable):
 
 * ``deleted`` / ``already_absent``: nothing is left. ``stopped``: a cancel stopped it.
-* ``kept``: the platform left it on purpose and the audit is deleted around it. Any code.
+* ``kept``: the platform left it on purpose and the audit is deleted around it. Any code. The
+  ``deployment_adopted`` code is an endpoint the owner chose to keep: this client leaves it, and
+  its key, alone.
 * ``blocked``: one of the audit's own resources is still there. Any code: the client does
   not retry it, whatever it is.
 * anything else (a newer platform): shown as sent, never acted on, and it fails the
@@ -46,6 +48,8 @@ NOT_CREATED_HERE = "not_created_here"
 """The ``code`` of a recorded resource the platform did not create for the audit, so it left it alone."""
 PLATFORM_ONLY = "platform_only"
 """The ``code`` of a registry version this client cannot purge: the platform has no route for it."""
+DEPLOYMENT_ADOPTED = "deployment_adopted"
+"""The ``code`` of a ``kept`` deployment row: the owner chose to keep that endpoint through a cancel and a delete."""
 LEGACY_FINISHED_PREFIX = "Cannot cancel job with status "
 """What a platform without ``code`` said of a run a cancel found already ended (a ``blocked`` row)."""
 LEGACY_PAUSED_PREFIX = "Invalid status transition from paused to paused"
@@ -143,6 +147,7 @@ __all__ = [
     "ALREADY_STOPPED",
     "BLOCKED",
     "DELETED",
+    "DEPLOYMENT_ADOPTED",
     "KEPT",
     "LEGACY_FINISHED_PREFIX",
     "LEGACY_KEPT_PREFIXES",
