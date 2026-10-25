@@ -12,9 +12,12 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
+from gzip import BadGzipFile
+import os
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Any
+import zlib
 
 from dagnam.cli.audit_run import fail, resolve_audit_dir
 from dagnam.cli.common import print_next_step
@@ -23,10 +26,6 @@ from dagnam.cli.presentation import Column, emit_result, render_table
 if TYPE_CHECKING:
     from dagnam.audit.record import TraceRecord
     from dagnam.audit.state import AuditState
-
-
-MAPPABLE_SOURCES = ("jsonl", "csv")
-"""The sources whose columns ``--map`` can rename; the others have a fixed format."""
 
 
 def parse_window(value: str) -> int:
@@ -141,6 +140,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     from dagnam.audit.economics import price_workload
     from dagnam.audit.orchestrate import AUDITED_VERDICTS
     from dagnam.audit.prices import PriceTable
+    from dagnam.audit.readers import MAPPABLE_SOURCES, ExportInputError
     from dagnam.audit.scan_report import SupersededRunError, scan_window, write_scan
     from dagnam.audit.state import AuditBusyError, load_state, lock_audit
     from dagnam.audit.thresholds import MAX_SEQ_LENGTH
@@ -152,6 +152,10 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
     if column_map and args.source not in MAPPABLE_SOURCES:
         fail(args, "--map applies to the jsonl and csv sources only")
+    if export.is_dir():
+        fail(args, f"{args.export} is a directory: name the export file")
+    if export.exists() and not os.access(export, os.R_OK):
+        fail(args, f"{args.export} cannot be read: permission denied")
 
     def records() -> Iterator[TraceRecord]:
         return read_traces(export, source=args.source, column_map=column_map)[0]
@@ -166,8 +170,13 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
         workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
         audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
         datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
-    except (ValueError, FileNotFoundError) as exc:
+    except (ExportInputError, FileNotFoundError) as exc:
         fail(args, str(exc))
+    except (BadGzipFile, EOFError, zlib.error):
+        # Their messages can quote the file's own bytes: say only what is wrong with it.
+        if export.suffix != ".gz":
+            raise
+        fail(args, f"{args.export} is not a complete gzip file: re-export it")
     out.mkdir(parents=True, exist_ok=True)
     try:
         # Not under a live run: a workload it has not reached yet is in no
@@ -194,7 +203,6 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
 
 
 __all__ = [
-    "MAPPABLE_SOURCES",
     "cmd_audit_scan",
     "parse_map",
     "parse_map_pair",

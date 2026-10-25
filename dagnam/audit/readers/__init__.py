@@ -10,6 +10,7 @@ from typing import Literal
 from dagnam.audit.readers import generic, langfuse, langsmith, openai_jsonl
 from dagnam.audit.readers.base import (
     MALFORMED_FATAL_SHARE,
+    ExportInputError,
     MalformedExportError,
     Reader,
     ReadStats,
@@ -22,7 +23,9 @@ Source = Literal["langfuse", "langsmith", "openai", "jsonl", "csv"]
 
 __all__ = [
     "MALFORMED_FATAL_SHARE",
+    "MAPPABLE_SOURCES",
     "READERS",
+    "ExportInputError",
     "MalformedExportError",
     "ReadStats",
     "Reader",
@@ -34,7 +37,7 @@ __all__ = [
 
 def _fixed(reader: Reader, column_map: Mapping[str, str] | None) -> Reader:
     if column_map is not None:
-        raise ValueError("column_map applies to the jsonl and csv sources only")
+        raise ExportInputError("column_map applies to the jsonl and csv sources only")
     return reader
 
 
@@ -45,6 +48,9 @@ READERS: dict[str, Callable[[Mapping[str, str] | None], Reader]] = {
     "jsonl": generic.bind,
     "csv": generic.bind,
 }
+
+MAPPABLE_SOURCES = tuple(source for source, factory in READERS.items() if factory is generic.bind)
+"""The sources whose columns a ``column_map`` can rename; the others have a fixed format."""
 
 
 def read_traces(

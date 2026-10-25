@@ -36,10 +36,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 - `dagnam audit scan` no longer ends the usual command-line mistakes in a bare "unexpected error".
   `--map` on a source that has fixed fields (`langfuse`, `langsmith`, `openai`), a `--map` target
-  that is not a trace field, an export of a file type no reader knows, and a missing export file
-  now print what is wrong and exit 1; a `--map` value that is not `field=column` is a usage error
-  (exit 2) like a bad `--window`. Errors that are not the user's mistake still show only their
-  type, with the traceback behind `--debug`.
+  that is not a trace field, an export of a file type no reader knows, a missing export file, a
+  directory or an unreadable file given as the export, and a truncated or damaged `.gz` export now
+  print what is wrong (never a cell of your data) and exit 1; a `--map` value that is not
+  `field=column` is a usage error (exit 2) like a bad `--window`. Only those mistakes are printed:
+  every other failure, a stray `ValueError` included, still shows only its type, with the
+  traceback behind `--debug`. The reader raises the new `dagnam.audit.readers.ExportInputError`
+  for the mistakes it used to raise as a plain `ValueError`; it is a `ValueError` (and a
+  `DagnamError`), so code that catches `ValueError` keeps working. A malformed CSV or Parquet file
+  still ends in the bare error.
 - `dagnam audit key --help` now ends with the link to its own section of the workload audit docs
   (`#dagnam-audit-key`).
 
