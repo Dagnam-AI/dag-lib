@@ -117,7 +117,7 @@ def test_a_failure_that_is_not_the_users_mistake_still_hides_its_internals(
     def broken(*args: object, **kwargs: object) -> None:
         raise RuntimeError("secret internals: /home/someone/token")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
 
     status = _scan(run_cli, tmp_path, str(export), "--source", "jsonl")
 
@@ -139,7 +139,7 @@ def test_a_plain_value_error_from_the_read_stays_redacted_and_keeps_its_debug_tr
     def broken(*args: object, **kwargs: object) -> None:
         raise ValueError("secret internals: 'customer@example.com'")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
     argv = ["audit", "scan", str(export), "--source", "jsonl", "--out", str(tmp_path / "audit")]
 
     assert _scan(run_cli, tmp_path, str(export), "--source", "jsonl") == 1
@@ -236,7 +236,7 @@ def test_an_end_of_file_error_from_a_file_that_is_not_gzip_stays_an_internal_err
     def broken(*args: object, **kwargs: object) -> None:
         raise EOFError("secret internals")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
 
     assert _scan(run_cli, tmp_path, str(export), "--source", "jsonl") == 1
     err = capsys.readouterr().err
