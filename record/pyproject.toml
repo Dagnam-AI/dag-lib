@@ -17,6 +17,11 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
@@ -26,7 +31,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # Only for ``install(redact="auto")``, which loads the PII redactor of ``dagnam-contracts`` lazily.
-redact = ["dagnam-contracts>=0.4.1,<0.5"]
+redact = ["dagnam-contracts>=0.4.1,<0.6"]
 
 [project.urls]
 Homepage = "https://dagnam.ai"

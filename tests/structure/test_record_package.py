@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 import tomllib
 from typing import Any
 
@@ -140,7 +141,42 @@ def test_the_package_ships_typed_with_its_licence_files() -> None:
     assert (RECORD / "README.md").is_file()
     assert (RECORD / "CHANGELOG.md").is_file()
     assert (RECORD / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
-    assert (RECORD / "NOTICE").read_bytes() == (ROOT / "NOTICE").read_bytes()
+
+
+def test_the_notice_is_the_recorders_own_and_names_nothing_it_does_not_ship() -> None:
+    notice = (RECORD / "NOTICE").read_text(encoding="utf-8")
+    assert notice.startswith("dagnam-record\nCopyright 2026 Dagnam.AI\n")
+    assert "trademarks" in notice
+    # The SDK's NOTICE credits tokenizer tables that only the SDK ships.
+    for foreign in ("Qwen", "student_", "tokenizer", "vocabulary"):
+        assert foreign not in notice
+
+
+def test_the_classifiers_name_every_python_the_package_supports() -> None:
+    classifiers = _toml(RECORD / "pyproject.toml")["project"]["classifiers"]
+    for minor in range(9, 14):
+        assert f"Programming Language :: Python :: 3.{minor}" in classifiers
+
+
+def _bounds(requirement: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The ``>=`` and ``<`` versions of a requirement such as ``name>=0.5.0,<0.6``."""
+    lower, upper = re.search(r">=\s*([\d.]+)", requirement), re.search(r"<\s*([\d.]+)", requirement)
+    assert lower is not None
+    assert upper is not None
+    return tuple(map(int, lower[1].split("."))), tuple(map(int, upper[1].split(".")))
+
+
+def test_the_redact_extra_can_be_installed_next_to_the_sdk_it_is_recorded_for() -> None:
+    (extra,) = _toml(RECORD / "pyproject.toml")["project"]["optional-dependencies"]["redact"]
+    (sdk,) = [
+        requirement
+        for requirement in _toml(ROOT / "pyproject.toml")["project"]["dependencies"]
+        if requirement.startswith("dagnam-contracts")
+    ]
+    (extra_low, extra_high), (sdk_low, sdk_high) = _bounds(extra), _bounds(sdk)
+    # Some contract version both ask for: the SDK's own floor must be allowed by the extra.
+    assert extra_low <= sdk_low < extra_high
+    assert sdk_low < sdk_high
 
 
 def test_no_module_imports_the_network_or_the_sdk() -> None:

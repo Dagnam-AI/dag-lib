@@ -301,3 +301,13 @@ def test_every_ci_call_of_the_recorders_tests_goes_through_poe_except_the_sdist(
         and not line.strip().startswith("#")
     ]
     assert [name for name, _ in bare] == ["sdist"], bare
+
+
+def test_the_testpypi_install_takes_nothing_from_the_real_index() -> None:
+    install = _jobs(RELEASE)["smoke-testpypi"].split("- name: Install from TestPyPI", 1)[1]
+    install = install.split("- name: Run what was installed", 1)[0]
+    # The package has no dependencies; a second index would let a squatted name win a tie.
+    assert "--no-deps" in install
+    assert "--index-url https://test.pypi.org/simple/" in install
+    assert "extra-index-url" not in install
+    assert "https://pypi.org/simple" not in install

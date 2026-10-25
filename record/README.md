@@ -43,11 +43,16 @@ Everything is written to `~/.dagnam/traces` unless you pass `dir=`:
   so does the file, unless you redact it first (see [Redaction](#redaction)).
 - **Never stored:** request headers, API keys, organisation ids, anything passed as `extra_headers`,
   `extra_query`, `extra_body`, `timeout`, `api_key` or `auth_token`, and the client's own settings.
-  The two credential fields an Anthropic request body can carry (`authorization_token` of an MCP
-  server, `fallback_credit_token`) are replaced by `<redacted>`.
+  The credentials a request body can carry inside its tool definitions are replaced by
+  `<redacted>`: in every entry of `tools` and `mcp_servers` the keys `authorization`,
+  `authorization_token`, `api_key`, `access_token`, `token`, `secret`, `client_secret` and
+  `password` (in any case), every value under `headers`, and the user info and the query string of a
+  server URL (OpenAI MCP tools, Anthropic MCP servers); also Anthropic's `fallback_credit_token`.
+  A vendor's own field under another name is not known to the recorder: look at a sample.
 - Images, audio, documents and other media in a request or answer are replaced by
   `{"type": "media_omitted", "bytes": N}`: the file says that media was there and how big it was,
-  not what it was. Your program still gets the real payload.
+  not what it was. Your program still gets the real payload. This happens before `redact` runs, so
+  a redactor never reads the bytes of an image.
 - The directory is created with mode `0700` and the files with `0600`, so other users of the machine
   cannot read them. That is the only protection: the files are not encrypted, and anything that
   copies your home directory (a backup, a synced folder) copies them too.
@@ -62,20 +67,32 @@ yourself with the `dagnam` command line (below), and that step asks you to confi
 
 Recording stops by itself **14 days after the first `install()` in a directory** (`window_days`,
 1 to 365). The recorder then logs one INFO line, counts later calls as `dropped_expired` and your
-program carries on. To record again, run `python -m dagnam_record purge` (which also forgets the
+program carries on. A directory that is new (ephemeral container storage that is empty at each
+start) starts a new window, so give a long-lived service a persistent `dir`. To record again, run `python -m dagnam_record purge` (which also forgets the
 start of the window) or choose another `dir`.
 
+After the window has ended the recorder does no work at all: `install()` patches nothing and says so
+once, and a call that is still made costs a counter increment, no conversion and no line.
+
 Old files are removed **only when the recorder is set up**, that is when `install()` runs with new
-or first-time options: daily files dated more than `window_days` days before today (UTC) are deleted
-then, and never at midnight in a long-running process. **Upload within the window**: a program
-restarted on day 15 deletes day 0's file before you have used it.
+or first-time options and the window is still open: daily files dated more than `window_days` days
+before today (UTC) are deleted then, and never at midnight in a long-running process. Once the
+window has ended nothing is deleted, so a restart on day 20 does not eat the files waiting to be
+uploaded; a restart inside the window still removes files older than the window. **Upload within
+the window.**
 
 ## Switching it off
 
 Set `DAGNAM_RECORD` to `0`, `false`, `off`, `no`, `disable` or `disabled` (any case, spaces ignored)
 and `install()` does nothing, validates nothing, creates nothing and returns `False`; `record_call()`
 is silent too. Any other value, including unset, empty, `1` and `true`, leaves the recorder on. The
-variable is read when `install()` runs, not on every call.
+variable is read when `install()` runs **and again on every call**, so code that sets it later stops
+a running recorder.
+
+A process you cannot restart or change the environment of is stopped from outside by creating an
+empty file named `.disabled` in the trace directory (`touch ~/.dagnam/traces/.disabled`); it is
+checked on every call (one `stat`), and deleting the file starts recording again. A switched-off call
+does nothing and counts nothing. `purge` leaves the file alone.
 
 ## `install()`
 
@@ -84,7 +101,7 @@ dagnam_record.install(
     window_days=14,            # whole days, 1 to 365
     dir="~/.dagnam/traces",    # str or path; "~" is expanded; a relative path is fixed when install() runs
     sample=1.0,                # share of calls kept, above 0 and at most 1
-    no_raw=False,              # True: write only the normalized copy, never the request or response
+    no_raw=False,              # True: write only the normalized copy, never the raw request or response
     redact=None,               # None, a function from text to text, or "auto"
 )  # -> bool
 ```
@@ -101,6 +118,15 @@ dagnam_record.install(
   recorder is reconfigured and the old writer hands over what it still holds. A directory it cannot
   use leaves a running recorder as it was.
 - `sample` keeps a fixed share of calls, chosen from a hash of each call's id.
+- `no_raw` is **not a privacy mode**: the normalized copy (`norm`) still holds the full prompt,
+  the system text, the arguments of tool calls and the answer in clear text. It only avoids writing
+  the same text twice.
+- A directory that already exists is used as it is if it is private. One that is open to group or
+  others is tightened to `0700` only when it is empty or already holds recorder files; a shared
+  directory with other files in it (`/var/log/app`, your home directory) is refused, logged and
+  counted, and nothing is written, so the permissions of a directory that is not ours are never
+  changed. A `dir` starting with `~` that cannot be expanded (no `HOME` and no passwd entry, as in
+  a container run under an arbitrary user id) raises `ValueError`.
 - `dagnam_record.is_installed()` says whether a recorder is running. `dagnam_record.uninstall()`
   puts the SDKs' own methods back, writes what is queued and stops; it is safe to call twice.
 - A relative `dir` is made absolute when `install()` runs, so a later `os.chdir` does not move it.
@@ -209,20 +235,31 @@ program exits, not at the moment you leave the `with` block.
 
 ## Limits and counters
 
-A line may not exceed 1,000,000 bytes. Queued lines wait in memory: at most 1000, so a worst case is
-on the order of a gigabyte for very large bodies. Tool-heavy conversations reach the line limit
-sooner than you may expect, because the normalized copy repeats the earlier tool calls next to the
-raw request; use `no_raw=True` or `sample` if that bites.
+A line may not exceed 1,000,000 bytes. When raw and normalized copy together are over it, the
+normalized copy is left out (a reader derives it from the raw bodies) and the line is written if the
+raw bodies alone fit, so prompts of up to roughly 1 MB are recorded; only above that is the call
+dropped as `dropped_large`. A stream whose text already exceeds that size stops being kept while it
+is read (your program still gets every chunk) and is counted as `dropped_large`.
+
+Two budgets keep the recorder from harming the host:
+
+- **In memory:** lines waiting for the disk may hold at most 1000 lines and 32 MiB of text. A stuck
+  disk (a hung network mount) therefore costs at most 32 MiB, and the lines over the budget are
+  dropped as `dropped_full`.
+- **On disk:** the dated data files of a directory may hold at most 1 GiB in total (counted when the
+  recorder starts and at each new daily file, so several processes sharing one directory can pass it
+  by a day's worth). A line that would pass it is dropped as `dropped_full`. Lower `window_days`,
+  `sample` or switch on `no_raw` for a very busy program, and purge or upload what is there.
 
 The six counters in `status`:
 
 | counter | meaning |
 |---|---|
 | `written` | lines written |
-| `dropped_full` | the in-memory queue was full (a very busy program or a stuck disk) |
+| `dropped_full` | the in-memory queue was full (a very busy program or a stuck disk), or the directory reached its 1 GiB budget |
 | `dropped_large` | the line would be over 1,000,000 bytes |
 | `dropped_error` | anything else that went wrong: a body that could not be converted, a `redact` function that raised, an unusable directory, a `with_raw_response` call |
-| `dropped_expired` | calls after the 14-day window ended |
+| `dropped_expired` | calls after the recording window ended |
 | `dropped_partial` | a call or stream the recorder saw only part of (abandoned, cut off, cancelled, interrupted) |
 
 Status `599` in a line means the call got no HTTP response at all.
@@ -232,7 +269,11 @@ Status `599` in a line means the call got no HTTP response at all.
 The recorder runs inside your calls and is built to fail open: an error in it is counted and the
 call goes on, with the same result or the same exception your program would have had. Writing is
 done by one background thread through a bounded queue, so a slow or full disk never blocks a call.
-It prints nothing in normal operation and changes no global state (logging, signals, hooks).
+It prints nothing in normal operation. It does change a little process state, all of it undone by
+`uninstall()` except the exit hooks: it replaces methods of the SDK classes with wrappers, starts one
+daemon thread, and registers `atexit` and `os.register_at_fork` hooks. It does not touch your logging
+configuration or your signal handlers. If the thread cannot be started (a thread or process limit),
+`install()` logs a warning, returns, and every call is counted as `dropped_error`.
 
 What it cannot promise:
 
@@ -243,8 +284,9 @@ What it cannot promise:
 - A finished stream that you drop without closing is written at the next safe point: your next
   recorded call, the writer's idle check (up to 30 seconds), `uninstall()` or the end of the program.
 - `redact` runs on the thread that makes the call (only the file write is asynchronous), so a slow
-  function slows each call. Building the line, including the conversion of the request, also runs
-  there, before the request is sent.
+  function slows each call; media is removed first so it never sees an image, but a text-only prompt
+  of 300 KB costs the PII redactor (`redact="auto"`) on the order of 100 ms. Building the line,
+  including the conversion of the request, also runs there, before the request is sent.
 - `install()` itself does one-time file work (a directory, a thread) and can raise `ValueError`.
 - A forked child gets a fresh queue and zero counts; two processes sharing one directory share its
   `.status.json`, last writer wins.

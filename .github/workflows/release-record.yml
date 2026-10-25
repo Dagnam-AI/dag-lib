@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     # The install step alone waits up to 15 minutes for TestPyPI's index.
     timeout-minutes: 25
-    # Installs from two indexes and runs what it installed; it reads this repository for the
+    # Installs from TestPyPI alone and runs what it installed; it reads this repository for the
     # smoke script only.
     permissions:
       contents: read
@@ -150,9 +150,10 @@ jobs:
           # absent package -- a loop that falls through exits 0.
           installed=0
           for i in $(seq 1 15); do
-            if pip install \
+            # No dependencies, so nothing is taken from the real index: a squatted higher
+            # version of the name there could otherwise win a tie against this one.
+            if pip install --no-deps \
               --index-url https://test.pypi.org/simple/ \
-              --extra-index-url https://pypi.org/simple/ \
               "dagnam-record==${GITHUB_REF_NAME#dagnam-record/v}"; then installed=1; break; fi
             echo "Waiting for TestPyPI indexing ($i/15)..."
             sleep 60
