@@ -178,11 +178,12 @@ class Recorder:
     def paused(self) -> bool:
         """Whether a call must not be recorded now, so that nothing at all is done for it.
 
-        True when the kill switch ``DAGNAM_RECORD`` is on (read on every call, so an operator can
-        stop a running fleet), or the recording window has ended (each such call is counted as
+        True when the kill switch ``DAGNAM_RECORD`` is on or a ``.disabled`` file is in the trace
+        directory (both read on every call, so a running process can be stopped from outside by
+        creating the file), or the recording window has ended (each such call is counted as
         ``dropped_expired``).
         """
-        if recording_disabled():
+        if recording_disabled() or self.writer.switched_off():
             return True
         if self.writer.check_expired():
             self.writer.count("dropped_expired")

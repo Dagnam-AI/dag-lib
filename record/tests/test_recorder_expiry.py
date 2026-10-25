@@ -19,7 +19,7 @@ from openai.resources.chat.completions import Completions
 import pytest
 
 import dagnam_record
-from dagnam_record import _openai_body, _recorder
+from dagnam_record import _files, _openai_body, _recorder
 
 DAY = 86400
 MESSAGES: List[Any] = [{"role": "user", "content": "Hi"}]
@@ -148,3 +148,35 @@ def test_files_older_than_the_window_are_still_pruned_inside_it(tmp_path: Path) 
     assert not old.exists()
     dagnam_record.uninstall()
     assert os.path.exists(directory / ".status.json")
+
+
+@pytest.mark.usefixtures("fresh_state")
+def test_a_disabled_file_in_the_directory_stops_a_running_recorder_and_removing_it_restarts(
+    tmp_path: Path, mock_server: Any
+) -> None:
+    directory = tmp_path / "traces"
+    assert dagnam_record.install(dir=str(directory))
+    mock_server.on(CHAT_PATH, Reply(body=chat_body()))
+    client = _client(mock_server)
+    client.chat.completions.create(model=MODEL, messages=MESSAGES)
+    switch = directory / ".disabled"
+    switch.write_text("", encoding="utf-8")  # what an operator does on a live host
+    result = client.chat.completions.create(model=MODEL, messages=MESSAGES)
+    record()
+    assert result.choices[0].message.content == "Hello there"
+    switch.unlink()
+    client.chat.completions.create(model=MODEL, messages=MESSAGES)
+    lines = finish_lines(directory)
+    assert len(lines) == 2  # the first and the last
+    assert saved_counts(directory)["dropped_error"] == 0  # a switch is not a failure
+
+
+@pytest.mark.usefixtures("fresh_state")
+def test_purge_leaves_the_disabled_file_alone(tmp_path: Path) -> None:
+    directory = tmp_path / "traces"
+    dagnam_record.install(dir=str(directory))
+    record()
+    (directory / ".disabled").write_text("", encoding="utf-8")
+    finish_lines(directory)
+    assert _files.purge(str(directory)).failed == []
+    assert [path.name for path in directory.iterdir()] == [".disabled"]

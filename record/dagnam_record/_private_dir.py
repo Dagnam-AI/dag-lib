@@ -20,6 +20,8 @@ import stat
 from typing import Any, Callable, Dict, List
 
 STATUS_FILE = ".status.json"
+DISABLED_FILE = ".disabled"
+"""A file of this name in the directory switches recording off (see ``Recorder.paused``)."""
 STATUS_MAX = 1_000_000
 """The most of a ``.status.json`` that is read: a larger one is treated as unreadable."""
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)

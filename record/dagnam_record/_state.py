@@ -128,7 +128,8 @@ def install(
     * ``window_days``: whole days from 1 to 365, default 14. The first ``install`` in a directory
       starts the window; when it ends the recorder stops and logs once. The recorder's own daily
       files dated more than ``window_days`` days ago are deleted whenever the recorder is set up
-      (the first ``install``, or one with new options).
+      (the first ``install``, or one with new options) while the window is open; after it has
+      ended nothing is deleted.
     * ``dir``: where the files go, default ``~/.dagnam/traces`` (created ``0700``; files ``0600``).
       A relative path is made absolute when ``install`` runs, so a later ``chdir`` does not move it.
       An empty or blank path is refused.
@@ -138,10 +139,14 @@ def install(
     * ``redact``: ``None``, a function from text to text (see ``_redact``), or ``"auto"``, which
       needs the optional extra ``dagnam-record[redact]`` (a missing one raises ``ImportError``).
 
-    The kill switch is read when ``install`` runs: ``DAGNAM_RECORD`` set to ``0``, ``false``,
-    ``off``, ``no``, ``disable`` or ``disabled`` (any case, spaces around it ignored) makes
-    ``install`` do nothing, validate nothing, write nothing and return ``False``. Any other value,
-    including unset, empty, ``1``, ``00`` and ``true``, leaves the recorder on.
+    The kill switch: ``DAGNAM_RECORD`` set to ``0``, ``false``, ``off``, ``no``, ``disable`` or
+    ``disabled`` (any case, spaces around it ignored) makes ``install`` do nothing, validate
+    nothing, write nothing and return ``False``. Any other value, including unset, empty, ``1``,
+    ``00`` and ``true``, leaves the recorder on. It is read again on every call, and so is a file
+    named ``.disabled`` in the trace directory, so a running process can be stopped from outside.
+
+    When the window of ``dir`` has already ended, ``install`` patches no SDK, returns ``False`` and
+    logs once; a later call does no work and is counted as ``dropped_expired``.
 
     An SDK outside the range the recorder was tested with (see ``_compat``) is still recorded, but
     as the provider-neutral ``norm`` only, with one warning; the versions seen are saved in

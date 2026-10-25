@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, Optional
 import weakref
 
 from dagnam_record._private_dir import (
+    DISABLED_FILE,
     NOFOLLOW,
     NONBLOCK,
     STATUS_FILE,
@@ -85,6 +86,7 @@ class Writer:
         self._dir = os.path.abspath(os.path.expanduser(directory))
         self._window = window_days * _DAY
         self._max_line_bytes = max_line_bytes
+        self._disabled_path = os.path.join(self._dir, DISABLED_FILE)
         self._max_queue_bytes = max_queue_bytes
         self._max_total_bytes = max_total_bytes
         self._queued = 0  # characters waiting in the queue, changed under ``_gate``
@@ -336,6 +338,10 @@ class Writer:
                     writer._dirty = True
                     return
             writer = writer._flatten_moved(moved)
+
+    def switched_off(self) -> bool:
+        """Whether an operator has put a ``.disabled`` file in the directory (one ``stat``)."""
+        return os.path.lexists(self._disabled_path)
 
     def check_expired(self) -> bool:
         """Whether the recording window has ended (the first to see it logs it, once)."""
