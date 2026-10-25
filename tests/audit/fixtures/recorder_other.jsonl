@@ -1,0 +1,2 @@
+{"v":1,"trace_id":"rec_other_1","ts":"2026-10-12T00:15:01.000Z","provider":"other","endpoint":"custom","latency_ms":51.0,"status":200,"request":{"prompt":"Where is my order?"},"response":{"text":"shipping"}}
+{"v":1,"trace_id":"rec_other_2","ts":"2026-10-12T00:15:02.000Z","provider":"openai","endpoint":"custom","latency_ms":52.0,"status":200,"request":{"input":"x"},"response":{"output":"y"}}

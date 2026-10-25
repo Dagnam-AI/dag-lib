@@ -1,0 +1,940 @@
+{
+  "dagnam": {
+    "files": {},
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: dagnam\n- window: 2026-10-12T00:00:01+00:00 to 2026-10-12T00:00:14+00:00 (30 days)\n- price table: golden-1\n- totals: 14 calls, $0.00/month, 2,520 prompt + 28 completion tokens\n\n## Warnings\n\n- 43% of traces have no system prompt (over 20%); discovery is low-confidence for this export\n- workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 05cc6e47be9b11db | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 4 traces in the window; 1,000 needed |\n| unstructured-json | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| unstructured-short | enum_label | 0.1 | 0.00 | - | - | KEEP | not_audited: multimodal input: 33% of calls carry image, audio or file parts a text student cannot see |\n| 55c2849e062f06e8 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 2 traces in the window; 1,000 needed |\n| 53f67a4191cb39ff | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n| 7a83ba34bde154a9 | enum_label | 0.0 | 0.00 | - | - | KEEP | too_few_samples: 1 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "report": {
+      "generated_at": "<generated_at>",
+      "pii": {
+        "counts": {},
+        "pass_list": [
+          "PII_EMAIL",
+          "PII_PHONE",
+          "PII_PAYMENT_CARD",
+          "PII_NATIONAL_ID",
+          "PII_SECRET",
+          "PII_IBAN",
+          "PII_IP_ADDRESS",
+          "PII_DATE_OF_BIRTH",
+          "PII_UK_NINO",
+          "PII_CA_SIN",
+          "PII_IN_AADHAAR",
+          "PII_IN_PAN",
+          "PII_EU_VAT"
+        ]
+      },
+      "price_table_version": "golden-1",
+      "schema": "dagnam.audit.scan/1",
+      "source": "dagnam",
+      "totals": {
+        "calls": 14,
+        "completion_tokens": 28,
+        "cost_usd_month": 0.0003948,
+        "prompt_tokens": 2520
+      },
+      "warnings": [
+        "43% of traces have no system prompt (over 20%); discovery is low-confidence for this export",
+        "workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls."
+      ],
+      "window": {
+        "days": 30.0,
+        "end": "2026-10-12T00:00:14+00:00",
+        "sample_rate": 1.0,
+        "start": "2026-10-12T00:00:01+00:00"
+      },
+      "workloads": [
+        {
+          "calls": 4,
+          "calls_per_day": 0.13333333333333333,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 0.0003228,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.5,
+          "id": "05cc6e47be9b11db",
+          "latency_ms": {
+            "p50": 302.5,
+            "p95": 310.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with one intent label.",
+          "template_hash": "05cc6e47be9b11db",
+          "tokens": {
+            "completion": 8,
+            "prompt": 2120
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "4 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "low",
+          "cost_source": "price_table",
+          "cost_usd_month": 2.16e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "unstructured-json",
+          "latency_ms": {
+            "p50": 308.0,
+            "p95": 315.2
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "tool_call",
+          "structure_class": "json_object",
+          "template_excerpt": "",
+          "template_hash": "unstructured",
+          "tokens": {
+            "completion": 6,
+            "prompt": 120
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "low",
+          "cost_source": "price_table",
+          "cost_usd_month": 2.16e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "unstructured-short",
+          "latency_ms": {
+            "p50": 309.0,
+            "p95": 318.0
+          },
+          "media_calls": 1,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "",
+          "template_hash": "unstructured",
+          "tokens": {
+            "completion": 6,
+            "prompt": 120
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "multimodal input: 33% of calls carry image, audio or file parts a text student cannot see",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        },
+        {
+          "calls": 2,
+          "calls_per_day": 0.06666666666666667,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 1.4400000000000001e-05,
+          "dataset": null,
+          "distinct_outputs": 2,
+          "entropy": 1.0,
+          "id": "55c2849e062f06e8",
+          "latency_ms": {
+            "p50": 308.0,
+            "p95": 316.1
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "Be brief.",
+          "template_hash": "55c2849e062f06e8",
+          "tokens": {
+            "completion": 4,
+            "prompt": 80
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "2 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 1,
+          "calls_per_day": 0.03333333333333333,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 7.2000000000000005e-06,
+          "dataset": null,
+          "distinct_outputs": 1,
+          "entropy": -0.0,
+          "id": "53f67a4191cb39ff",
+          "latency_ms": {
+            "p50": 310.0,
+            "p95": 310.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "Rules.",
+          "template_hash": "53f67a4191cb39ff",
+          "tokens": {
+            "completion": 2,
+            "prompt": 40
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "1 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 1,
+          "calls_per_day": 0.03333333333333333,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 7.2000000000000005e-06,
+          "dataset": null,
+          "distinct_outputs": 1,
+          "entropy": -0.0,
+          "id": "7a83ba34bde154a9",
+          "latency_ms": {
+            "p50": 313.0,
+            "p95": 313.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "Refund me.",
+          "template_hash": "7a83ba34bde154a9",
+          "tokens": {
+            "completion": 2,
+            "prompt": 40
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "1 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "Workload           Class       Calls/day $/month Verdict        \n----------------------------------------------------------------\n05cc6e47be9b11db   enum_label        0.1    0.00 too_few_samples\nunstructured-json  json_object       0.1    0.00 too_few_samples\nunstructured-short enum_label        0.1    0.00 not_audited    \n55c2849e062f06e8   enum_label        0.1    0.00 too_few_samples\n53f67a4191cb39ff   enum_label        0.0    0.00 too_few_samples\n7a83ba34bde154a9   enum_label        0.0    0.00 too_few_samples\n\n6 workloads: 1 not_audited, 5 too_few_samples\nwarning: 43% of traces have no system prompt (over 20%); discovery is low-confidence for this export\nwarning: workload unstructured-json: This workload answers with tool calls: the replacement returns the call as {\"name\", \"arguments\"} JSON (an ordered list of them when the teacher made several) in message.content, not in tool_calls.\n"
+  },
+  "generated": {
+    "files": {
+      "workloads/3d7872eceb34b603/dataset.jsonl": "ffe2fa9f79837e816ae28bfa204d1547abc03d6d05e6201606bf021d2575fd17",
+      "workloads/3d7872eceb34b603/meta.json": "9f534dec40db5e1fe44b4d42166f18a7ca1e96e85584190e3eeb2e733a390a13",
+      "workloads/3d7872eceb34b603/split.json": "0f0d466cfc01bf6890c40f0188b098d2a299bbc1c9a39b9b991f573901234be7"
+    },
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: jsonl\n- window: 2026-08-01T00:00:00+00:00 to 2026-08-28T23:59:00+00:00 (60 days), sampled at 50% and scaled up\n- price table: golden-1\n- totals: 1,203 calls, $721.80/month, 120,300 prompt + 2,406 completion tokens\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 3869b40bcaa2c4e0 | free_text | 0.1 | 1.80 | - | - | KEEP | not_audited: free-text output is not a small-model job |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| 3d7872eceb34b603 | enum_label | 40.0 | 720.00 | 14.4x | 670.00 | NOT YET | candidate: teacher $720.00/month vs cpu-classifier $0.00/month + $50 maintenance = 14.4x |\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: PII_EMAIL: 1200, PII_PHONE: 0, PII_PAYMENT_CARD: 0, PII_NATIONAL_ID: 0, PII_SECRET: 0, PII_IBAN: 0, PII_IP_ADDRESS: 0, PII_DATE_OF_BIRTH: 0, PII_UK_NINO: 0, PII_CA_SIN: 0, PII_IN_AADHAAR: 0, PII_IN_PAN: 0, PII_EU_VAT: 0",
+    "report": {
+      "generated_at": "<generated_at>",
+      "pii": {
+        "counts": {
+          "PII_CA_SIN": 0,
+          "PII_DATE_OF_BIRTH": 0,
+          "PII_EMAIL": 1200,
+          "PII_EU_VAT": 0,
+          "PII_IBAN": 0,
+          "PII_IN_AADHAAR": 0,
+          "PII_IN_PAN": 0,
+          "PII_IP_ADDRESS": 0,
+          "PII_NATIONAL_ID": 0,
+          "PII_PAYMENT_CARD": 0,
+          "PII_PHONE": 0,
+          "PII_SECRET": 0,
+          "PII_UK_NINO": 0
+        },
+        "pass_list": [
+          "PII_EMAIL",
+          "PII_PHONE",
+          "PII_PAYMENT_CARD",
+          "PII_NATIONAL_ID",
+          "PII_SECRET",
+          "PII_IBAN",
+          "PII_IP_ADDRESS",
+          "PII_DATE_OF_BIRTH",
+          "PII_UK_NINO",
+          "PII_CA_SIN",
+          "PII_IN_AADHAAR",
+          "PII_IN_PAN",
+          "PII_EU_VAT"
+        ]
+      },
+      "price_table_version": "golden-1",
+      "schema": "dagnam.audit.scan/1",
+      "source": "jsonl",
+      "totals": {
+        "calls": 1203,
+        "completion_tokens": 2406,
+        "cost_usd_month": 721.8000000000158,
+        "prompt_tokens": 120300
+      },
+      "warnings": [],
+      "window": {
+        "days": 60.0,
+        "end": "2026-08-28T23:59:00+00:00",
+        "sample_rate": 0.5,
+        "start": "2026-08-01T00:00:00+00:00"
+      },
+      "workloads": [
+        {
+          "calls": 1200,
+          "calls_per_day": 40.0,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 720.0000000000158,
+          "dataset": {
+            "dedup_removed": 0,
+            "redactions": 1200,
+            "rows": 1200,
+            "split": {
+              "eval_holdout": 240,
+              "train": 960
+            },
+            "train_rows_capped": 0,
+            "train_rows_over_budget": 0,
+            "truncated": 0,
+            "truths_redacted": 0
+          },
+          "distinct_outputs": 2,
+          "entropy": 1.0,
+          "id": "3d7872eceb34b603",
+          "latency_ms": {
+            "p50": 500.0,
+            "p95": 500.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "Label the ticket.",
+          "template_hash": "3d7872eceb34b603",
+          "tokens": {
+            "completion": 2400,
+            "prompt": 120000
+          },
+          "verdict": {
+            "ratio": 14.39920516387527,
+            "reason": "teacher $720.00/month vs cpu-classifier $0.00/month + $50 maintenance = 14.4x",
+            "savings_usd_month": 669.9972400000158,
+            "status": "candidate"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 1.7999999999999998,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "3869b40bcaa2c4e0",
+          "latency_ms": {
+            "p50": 500.0,
+            "p95": 500.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": null,
+          "response_mode": "text",
+          "structure_class": "free_text",
+          "template_excerpt": "Write a reply.",
+          "template_hash": "3869b40bcaa2c4e0",
+          "tokens": {
+            "completion": 6,
+            "prompt": 300
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "free-text output is not a small-model job",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        }
+      ]
+    },
+    "stderr": "\nNext: dagnam audit run <out>\n",
+    "stdout": "Workload         Class      Calls/day $/month Verdict    \n---------------------------------------------------------\n3d7872eceb34b603 enum_label      40.0  720.00 candidate  \n3869b40bcaa2c4e0 free_text        0.1    1.80 not_audited\n\n2 workloads: 1 candidate, 1 not_audited\n"
+  },
+  "langfuse": {
+    "files": {},
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: langfuse\n- window: 2026-08-01T09:00:00+00:00 to 2026-08-01T09:10:03+00:00 (30 days)\n- price table: golden-1\n- totals: 12 calls, $0.00/month, 1,425 prompt + 207 completion tokens\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| be7a84cfa8530536 | free_text | 0.1 | 0.00 | - | - | KEEP | not_audited: free-text output is not a small-model job |\n| 983692dea8aecce9 | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee55f97cc0aad676 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee60e4f2c7340b71 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "report": {
+      "generated_at": "<generated_at>",
+      "pii": {
+        "counts": {},
+        "pass_list": [
+          "PII_EMAIL",
+          "PII_PHONE",
+          "PII_PAYMENT_CARD",
+          "PII_NATIONAL_ID",
+          "PII_SECRET",
+          "PII_IBAN",
+          "PII_IP_ADDRESS",
+          "PII_DATE_OF_BIRTH",
+          "PII_UK_NINO",
+          "PII_CA_SIN",
+          "PII_IN_AADHAAR",
+          "PII_IN_PAN",
+          "PII_EU_VAT"
+        ]
+      },
+      "price_table_version": "golden-1",
+      "schema": "dagnam.audit.scan/1",
+      "source": "langfuse",
+      "totals": {
+        "calls": 12,
+        "completion_tokens": 207,
+        "cost_usd_month": 0.00033795,
+        "prompt_tokens": 1425
+      },
+      "warnings": [],
+      "window": {
+        "days": 30.0,
+        "end": "2026-08-01T09:10:03+00:00",
+        "sample_rate": 1.0,
+        "start": "2026-08-01T09:00:00+00:00"
+      },
+      "workloads": [
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 0.000117,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "be7a84cfa8530536",
+          "latency_ms": {
+            "p50": 1730.0,
+            "p95": 1730.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "reply",
+          "response_mode": "text",
+          "structure_class": "free_text",
+          "template_excerpt": "You are a friendly support agent. Draft a short reply to the ticket.",
+          "template_hash": "59cf4830241f021d",
+          "tokens": {
+            "completion": 123,
+            "prompt": 288
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "free-text output is not a small-model job",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 0.0001062,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "983692dea8aecce9",
+          "latency_ms": {
+            "p50": 1140.0,
+            "p95": 1140.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "extract",
+          "response_mode": "text",
+          "structure_class": "json_object",
+          "template_excerpt": "Extract {product,order_id,sentiment} from the ticket as a JSON object. Reply with JSON only.",
+          "template_hash": "d199932a5e7455b2",
+          "tokens": {
+            "completion": 72,
+            "prompt": 420
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 5.805e-05,
+          "dataset": null,
+          "distinct_outputs": 2,
+          "entropy": 0.9182958340544896,
+          "id": "ee55f97cc0aad676",
+          "latency_ms": {
+            "p50": 580.0,
+            "p95": 580.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "urgency",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one urgency label from: low, medium, high, critical.",
+          "template_hash": "41615658691038a0",
+          "tokens": {
+            "completion": 6,
+            "prompt": 363
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 5.6699999999999996e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "ee60e4f2c7340b71",
+          "latency_ms": {
+            "p50": 620.0,
+            "p95": 620.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "intent",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one intent label from: billing, shipping, returns, account, other.",
+          "template_hash": "47cf5214326d057a",
+          "tokens": {
+            "completion": 6,
+            "prompt": 354
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "Workload         Class       Calls/day $/month Verdict        \n--------------------------------------------------------------\nbe7a84cfa8530536 free_text         0.1    0.00 not_audited    \n983692dea8aecce9 json_object       0.1    0.00 too_few_samples\nee55f97cc0aad676 enum_label        0.1    0.00 too_few_samples\nee60e4f2c7340b71 enum_label        0.1    0.00 too_few_samples\n\n4 workloads: 1 not_audited, 3 too_few_samples\n"
+  },
+  "langsmith": {
+    "files": {},
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: langsmith\n- window: 2026-08-01T09:00:00+00:00 to 2026-08-01T09:10:03+00:00 (30 days)\n- price table: golden-1\n- totals: 12 calls, $0.00/month, 1,425 prompt + 207 completion tokens\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| be7a84cfa8530536 | free_text | 0.1 | 0.00 | - | - | KEEP | not_audited: free-text output is not a small-model job |\n| 983692dea8aecce9 | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee55f97cc0aad676 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee60e4f2c7340b71 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "report": {
+      "generated_at": "<generated_at>",
+      "pii": {
+        "counts": {},
+        "pass_list": [
+          "PII_EMAIL",
+          "PII_PHONE",
+          "PII_PAYMENT_CARD",
+          "PII_NATIONAL_ID",
+          "PII_SECRET",
+          "PII_IBAN",
+          "PII_IP_ADDRESS",
+          "PII_DATE_OF_BIRTH",
+          "PII_UK_NINO",
+          "PII_CA_SIN",
+          "PII_IN_AADHAAR",
+          "PII_IN_PAN",
+          "PII_EU_VAT"
+        ]
+      },
+      "price_table_version": "golden-1",
+      "schema": "dagnam.audit.scan/1",
+      "source": "langsmith",
+      "totals": {
+        "calls": 12,
+        "completion_tokens": 207,
+        "cost_usd_month": 0.00033795,
+        "prompt_tokens": 1425
+      },
+      "warnings": [],
+      "window": {
+        "days": 30.0,
+        "end": "2026-08-01T09:10:03+00:00",
+        "sample_rate": 1.0,
+        "start": "2026-08-01T09:00:00+00:00"
+      },
+      "workloads": [
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 0.000117,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "be7a84cfa8530536",
+          "latency_ms": {
+            "p50": 1730.0,
+            "p95": 1730.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "reply",
+          "response_mode": "text",
+          "structure_class": "free_text",
+          "template_excerpt": "You are a friendly support agent. Draft a short reply to the ticket.",
+          "template_hash": "59cf4830241f021d",
+          "tokens": {
+            "completion": 123,
+            "prompt": 288
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "free-text output is not a small-model job",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 0.0001062,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "983692dea8aecce9",
+          "latency_ms": {
+            "p50": 1140.0,
+            "p95": 1140.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "extract",
+          "response_mode": "text",
+          "structure_class": "json_object",
+          "template_excerpt": "Extract {product,order_id,sentiment} from the ticket as a JSON object. Reply with JSON only.",
+          "template_hash": "d199932a5e7455b2",
+          "tokens": {
+            "completion": 72,
+            "prompt": 420
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 5.805e-05,
+          "dataset": null,
+          "distinct_outputs": 2,
+          "entropy": 0.9182958340544896,
+          "id": "ee55f97cc0aad676",
+          "latency_ms": {
+            "p50": 580.0,
+            "p95": 580.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "urgency",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one urgency label from: low, medium, high, critical.",
+          "template_hash": "41615658691038a0",
+          "tokens": {
+            "completion": 6,
+            "prompt": 363
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "export",
+          "cost_usd_month": 5.6699999999999996e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "ee60e4f2c7340b71",
+          "latency_ms": {
+            "p50": 620.0,
+            "p95": 620.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini"
+          ],
+          "name": "intent",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one intent label from: billing, shipping, returns, account, other.",
+          "template_hash": "47cf5214326d057a",
+          "tokens": {
+            "completion": 6,
+            "prompt": 354
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "Workload         Class       Calls/day $/month Verdict        \n--------------------------------------------------------------\nbe7a84cfa8530536 free_text         0.1    0.00 not_audited    \n983692dea8aecce9 json_object       0.1    0.00 too_few_samples\nee55f97cc0aad676 enum_label        0.1    0.00 too_few_samples\nee60e4f2c7340b71 enum_label        0.1    0.00 too_few_samples\n\n4 workloads: 1 not_audited, 3 too_few_samples\n"
+  },
+  "openai": {
+    "files": {},
+    "markdown": "# Workload scan\n\n- generated: <generated_at>\n- source: openai\n- window: 2026-08-01T09:00:00+00:00 to 2026-08-01T09:10:03+00:00 (30 days)\n- price table: golden-1\n- totals: 12 calls, $0.00/month, 1,425 prompt + 207 completion tokens\n\n## Not worth replacing\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n| be7a84cfa8530536 | free_text | 0.1 | 0.00 | - | - | KEEP | not_audited: free-text output is not a small-model job |\n| 983692dea8aecce9 | json_object | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee55f97cc0aad676 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n| ee60e4f2c7340b71 | enum_label | 0.1 | 0.00 | - | - | KEEP | too_few_samples: 3 traces in the window; 1,000 needed |\n\n## Candidates\n\n| workload | class | calls/day | $/month | ratio | savings $/month | verdict | why |\n|---|---|---|---|---|---|---|---|\n\n## PII\n\n- scanned for: PII_EMAIL, PII_PHONE, PII_PAYMENT_CARD, PII_NATIONAL_ID, PII_SECRET, PII_IBAN, PII_IP_ADDRESS, PII_DATE_OF_BIRTH, PII_UK_NINO, PII_CA_SIN, PII_IN_AADHAAR, PII_IN_PAN, PII_EU_VAT\n- found: none found",
+    "report": {
+      "generated_at": "<generated_at>",
+      "pii": {
+        "counts": {},
+        "pass_list": [
+          "PII_EMAIL",
+          "PII_PHONE",
+          "PII_PAYMENT_CARD",
+          "PII_NATIONAL_ID",
+          "PII_SECRET",
+          "PII_IBAN",
+          "PII_IP_ADDRESS",
+          "PII_DATE_OF_BIRTH",
+          "PII_UK_NINO",
+          "PII_CA_SIN",
+          "PII_IN_AADHAAR",
+          "PII_IN_PAN",
+          "PII_EU_VAT"
+        ]
+      },
+      "price_table_version": "golden-1",
+      "schema": "dagnam.audit.scan/1",
+      "source": "openai",
+      "totals": {
+        "calls": 12,
+        "completion_tokens": 207,
+        "cost_usd_month": 0.00033794999999999995,
+        "prompt_tokens": 1425
+      },
+      "warnings": [],
+      "window": {
+        "days": 30.0,
+        "end": "2026-08-01T09:10:03+00:00",
+        "sample_rate": 1.0,
+        "start": "2026-08-01T09:00:00+00:00"
+      },
+      "workloads": [
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 0.00011699999999999998,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "be7a84cfa8530536",
+          "latency_ms": {
+            "p50": 0.0,
+            "p95": 0.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": "reply",
+          "response_mode": "text",
+          "structure_class": "free_text",
+          "template_excerpt": "You are a friendly support agent. Draft a short reply to the ticket.",
+          "template_hash": "59cf4830241f021d",
+          "tokens": {
+            "completion": 123,
+            "prompt": 288
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "free-text output is not a small-model job",
+            "savings_usd_month": null,
+            "status": "not_audited"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 0.00010619999999999999,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "983692dea8aecce9",
+          "latency_ms": {
+            "p50": 0.0,
+            "p95": 0.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": "extract",
+          "response_mode": "text",
+          "structure_class": "json_object",
+          "template_excerpt": "Extract {product,order_id,sentiment} from the ticket as a JSON object. Reply with JSON only.",
+          "template_hash": "d199932a5e7455b2",
+          "tokens": {
+            "completion": 72,
+            "prompt": 420
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 5.8049999999999995e-05,
+          "dataset": null,
+          "distinct_outputs": 2,
+          "entropy": 0.9182958340544896,
+          "id": "ee55f97cc0aad676",
+          "latency_ms": {
+            "p50": 0.0,
+            "p95": 0.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": "urgency",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one urgency label from: low, medium, high, critical.",
+          "template_hash": "41615658691038a0",
+          "tokens": {
+            "completion": 6,
+            "prompt": 363
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        },
+        {
+          "calls": 3,
+          "calls_per_day": 0.1,
+          "confidence": "high",
+          "cost_source": "price_table",
+          "cost_usd_month": 5.67e-05,
+          "dataset": null,
+          "distinct_outputs": 3,
+          "entropy": 1.584962500721156,
+          "id": "ee60e4f2c7340b71",
+          "latency_ms": {
+            "p50": 0.0,
+            "p95": 0.0
+          },
+          "media_calls": 0,
+          "models": [
+            "gpt-4o-mini-2024-07-18"
+          ],
+          "name": "intent",
+          "response_mode": "text",
+          "structure_class": "enum_label",
+          "template_excerpt": "You are a support triage assistant. Reply with exactly one intent label from: billing, shipping, returns, account, other.",
+          "template_hash": "47cf5214326d057a",
+          "tokens": {
+            "completion": 6,
+            "prompt": 354
+          },
+          "verdict": {
+            "ratio": null,
+            "reason": "3 traces in the window; 1,000 needed",
+            "savings_usd_month": null,
+            "status": "too_few_samples"
+          }
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "Workload         Class       Calls/day $/month Verdict        \n--------------------------------------------------------------\nbe7a84cfa8530536 free_text         0.1    0.00 not_audited    \n983692dea8aecce9 json_object       0.1    0.00 too_few_samples\nee55f97cc0aad676 enum_label        0.1    0.00 too_few_samples\nee60e4f2c7340b71 enum_label        0.1    0.00 too_few_samples\n\n4 workloads: 1 not_audited, 3 too_few_samples\n"
+  }
+}

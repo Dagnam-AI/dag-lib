@@ -1,0 +1,116 @@
+name: dagnam-record CI
+
+# Which job enforces what:
+#
+#   dag-lib-ci.yml  `coverage` and `uv run poe check`: the recorder's 100% statement and branch
+#                   floor, on Python 3.12 with the SDK versions uv.lock pins. Also lint, format,
+#                   pyright (Python 3.9 rules for record/) and the import contract.
+#   this file       `matrix`: the recorder's tests pass (no coverage floor here) on the lowest,
+#                   a middle and the highest Python it supports, each with the lowest and the
+#                   highest `openai` and `anthropic` it declares (dagnam_record/_compat.py).
+#                   `sdist`: the source distribution carries tests that run.
+#
+# A separate file, not another job in dag-lib-ci.yml: that file gates every `dagnam/v*` release,
+# and a recorder-only break against a new SDK must not hold back the SDK, while
+# release-record.yml calls both.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      # Backport branches for a published minor, as in dag-lib-ci.yml.
+      - "release/*"
+  # The release workflow calls this file, so a tag cannot publish a commit these jobs would
+  # have failed.
+  workflow_call:
+
+# Least privilege: no job here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Recorder tests (Python ${{ matrix.python-version }}, ${{ matrix.sdk.name }} SDKs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+        # The ends of the declared ranges: openai>=1.66,<3 and anthropic>=0.40,<1. A test in
+        # tests/structure keeps these equal to _compat.py. "highest" is whatever is newest
+        # inside the range on the day, so a new SDK release shows up here first.
+        sdk:
+          - name: lowest
+            openai: "openai==1.66.0"
+            anthropic: "anthropic==0.40.0"
+          - name: highest
+            openai: "openai<3"
+            anthropic: "anthropic<1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Make a throwaway environment with this row's Python and SDK versions
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          OPENAI: ${{ matrix.sdk.openai }}
+          ANTHROPIC: ${{ matrix.sdk.anthropic }}
+        run: |
+          uv venv --python "$PYTHON_VERSION" "$RUNNER_TEMP/env"
+          # The redact extra needs dagnam-contracts, which needs Python 3.12 or newer; the one
+          # test of redact="auto" is skipped below that.
+          spec=record
+          if "$RUNNER_TEMP/env/bin/python" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+            spec="record[redact]"
+          fi
+          # poethepoet goes into the throwaway environment too: the test step below runs the
+          # repo's `test-record` task in it, not a hand-written pytest command.
+          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest poethepoet "$OPENAI" "$ANTHROPIC" -e "$spec"
+          "$RUNNER_TEMP/env/bin/python" -c "import anthropic, openai, sys; print(sys.version.split()[0], 'openai', openai.__version__, 'anthropic', anthropic.__version__)"
+      - name: Recorder tests
+        env:
+          # The recorded fixtures under tests/audit/fixtures are byte-exact for the SDK versions
+          # uv.lock pins, and the test that compares them with a fresh run refuses any others
+          # unless told this row runs other versions on purpose.
+          DAGNAM_RECORD_SDK_MATRIX: "1"
+          # Only a "lowest" row may skip test_sdk_features.py: in a "highest" row a feature the
+          # newest in-range SDK dropped fails it instead of silently skipping the tests that need it.
+          DAGNAM_RECORD_SDK_ROW: ${{ matrix.sdk.name }}
+        # The task's executor is "simple" (it runs in the active environment); this puts the
+        # throwaway environment first on PATH so `poe` and its `python` are the matrix row's.
+        run: PATH="$RUNNER_TEMP/env/bin:$PATH" poe test-record
+
+  sdist:
+    # `record/` ships its tests in the sdist (so a packager can run them). Prove they run from
+    # the unpacked archive on its own, with nothing from the checkout: that is what a packager has.
+    name: Tests from the source distribution (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+      - name: Build the source distribution and unpack it away from the checkout
+        run: |
+          uv build --sdist --out-dir "$RUNNER_TEMP/dist" record
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -xzf "$RUNNER_TEMP"/dist/dagnam_record-*.tar.gz -C "$RUNNER_TEMP/unpacked"
+      - name: Run its tests
+        env:
+          # No tests/audit/fixtures in an sdist: the fixture-currency test is told so.
+          DAGNAM_RECORD_SDK_MATRIX: "1"
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/env"
+          cd "$RUNNER_TEMP"/unpacked/dagnam_record-*
+          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest "openai<3" "anthropic<1" ".[redact]"
+          # Bare pytest on purpose, the one place: an unpacked sdist has no repository
+          # pyproject.toml, so there is no poe task to call (the same command is `test-record`).
+          "$RUNNER_TEMP/env/bin/python" -m pytest tests -q -p no:cacheprovider

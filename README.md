@@ -455,7 +455,8 @@ with neither a cost nor token counts is `unknown_cost`, never a free teacher.
 
 **`audit scan` reads what your tools export, and streams it.** Langfuse (the observations API,
 its blob export and its UI CSV/JSON exports), LangSmith runs, OpenAI Batch and stored
-completions -- Chat Completions or the Responses API -- and any JSONL, JSON or CSV file through
+completions -- Chat Completions or the Responses API --, the trace file the local recorder
+writes (`--source dagnam`, below), and any JSONL, JSON or CSV file through
 `--source jsonl|csv --map target=column`, where a column may be a dotted path into a nested
 record (`--map messages=input.inputBodyJson.messages` reads a Bedrock invocation log). Files
 may be gzipped; timestamps may be ISO text or an epoch in seconds, milliseconds, microseconds
@@ -488,6 +489,11 @@ that break each other and cycles of 9 or more fragile han units are not seen by 
 a known limit. It is
 never above the UTF-8 byte count of the NFC form of the text. A text of a few
 tokens rounds up.
+
+**Record your calls.** Without a trace export, the `dagnam-record` package (coming with the next
+release) writes one yourself. After `pip install dagnam-record`, call `dagnam_record.install()`
+once in your program; each OpenAI or Anthropic call is then appended to a local trace file as it
+happens, and `dagnam audit scan <file> --source dagnam` reads it like any other export.
 
 **Watch it on the website.** `dagnam audit run` mirrors the audit into your account as it
 goes -- the scan's workloads (ids, verdicts, spend, masked template excerpts and the redaction

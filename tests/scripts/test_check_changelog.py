@@ -84,3 +84,32 @@ def test_main_reports_every_reason_and_the_exit_status(
     init.write_text("no version here\n", encoding="utf-8")
     assert check_changelog.main(["--changelog", str(changelog), "--init", str(init)]) == 1
     assert "declares no __version__" in capsys.readouterr().err
+
+
+def test_main_refuses_a_tag_that_is_not_the_version_being_released(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--tag`` is how ``release-record.yml`` ties the pushed tag to ``__version__``."""
+    init = tmp_path / "__init__.py"
+    init.write_text('__version__ = "0.16.0"\n', encoding="utf-8")
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(READY, encoding="utf-8")
+    base = ["--changelog", str(changelog), "--init", str(init), "--tag-prefix", "pkg/v"]
+
+    assert check_changelog.main([*base, "--tag", "pkg/v0.16.0"]) == 0
+    assert "is ready for 0.16.0" in capsys.readouterr().out
+
+    for wrong in ("pkg/v0.16.1", "pkg/v0.16", "other/v0.16.0", "v0.16.0", "pkg/v0.16.0-rc1"):
+        assert check_changelog.main([*base, "--tag", wrong]) == 1
+        error = capsys.readouterr().err
+        assert f"the tag {wrong!r} is not 'pkg/v0.16.0'" in error
+
+    # Without --tag nothing changes: the existing callers pass no tag.
+    assert check_changelog.main(base) == 0
+    capsys.readouterr()
+    # A bad tag and a bad changelog are both reported.
+    changelog.write_text(READY.replace("## [Unreleased]\n", "## [Unreleased]\n\n- x\n"), "utf-8")
+    assert check_changelog.main([*base, "--tag", "pkg/v9.9.9"]) == 1
+    error = capsys.readouterr().err
+    assert "still holds entries" in error
+    assert "is not 'pkg/v0.16.0'" in error

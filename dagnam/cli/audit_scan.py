@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from gzip import BadGzipFile
 import os
 from pathlib import Path
@@ -24,7 +24,6 @@ from dagnam.cli.common import print_next_step
 from dagnam.cli.presentation import Column, emit_result, render_table
 
 if TYPE_CHECKING:
-    from dagnam.audit.record import TraceRecord
     from dagnam.audit.state import AuditState
 
 
@@ -134,16 +133,10 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     command that stops it. A scan never opens a socket, so it cannot stop them
     itself.
     """
-    from dagnam.audit import discover_workloads, read_traces, replaceability
-    from dagnam.audit.derive import derive_workloads
-    from dagnam.audit.discover import by_spend
-    from dagnam.audit.economics import price_workload
-    from dagnam.audit.orchestrate import AUDITED_VERDICTS
-    from dagnam.audit.prices import PriceTable
+    from dagnam.audit import NoTracesError, scan_export
     from dagnam.audit.readers import MAPPABLE_SOURCES, ExportInputError
-    from dagnam.audit.scan_report import SupersededRunError, scan_window, write_scan
+    from dagnam.audit.scan_report import SupersededRunError, write_scan
     from dagnam.audit.state import AuditBusyError, load_state, lock_audit
-    from dagnam.audit.thresholds import MAX_SEQ_LENGTH
     from dagnam.audit.workspace import UnsafeWorkloadsError
 
     # An audit directory named through a link (a temp or home directory often is one) is the
@@ -152,24 +145,24 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
     if column_map and args.source not in MAPPABLE_SOURCES:
         fail(args, "--map applies to the jsonl and csv sources only")
-    if export.is_dir():
+    if export.is_dir() and args.source != "dagnam":  # the recorder's folder of day files
         fail(args, f"{args.export} is a directory: name the export file")
     if export.exists() and not os.access(export, os.R_OK):
         fail(args, f"{args.export} cannot be read: permission denied")
 
-    def records() -> Iterator[TraceRecord]:
-        return read_traces(export, source=args.source, column_map=column_map)[0]
-
     try:
         # The reads are lazy, so a mistake in the export or the map surfaces anywhere in here:
         # it is the user's to fix, and says what it is (the catch-all hides the message).
-        found = discover_workloads(records(), window_days=args.window, sample_rate=args.sample_rate)
-        if not found:
-            fail(args, f"{args.export}: no traces to audit")
-        table = PriceTable.load(Path(args.price_table) if args.price_table else None)
-        workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
-        audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
-        datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
+        scan = scan_export(
+            export,
+            source=args.source,
+            column_map=column_map,
+            window_days=args.window,
+            sample_rate=args.sample_rate,
+            price_table=Path(args.price_table) if args.price_table else None,
+        )
+    except NoTracesError:
+        fail(args, f"{args.export}: no traces to audit")
     except (ExportInputError, FileNotFoundError) as exc:
         fail(args, str(exc))
     except (BadGzipFile, EOFError, zlib.error):
@@ -184,13 +177,11 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
         with lock_audit(out):
             report = write_scan(
                 out,
-                workloads,
-                datasets,
-                source=args.source,
-                window=scan_window(
-                    workloads, window_days=args.window, sample_rate=args.sample_rate
-                ),
-                price_table=table,
+                scan.workloads,
+                scan.datasets,
+                source=scan.source,
+                window=scan.window,
+                price_table=scan.table,
                 force=args.force,
             )
     except (AuditBusyError, SupersededRunError, UnsafeWorkloadsError) as exc:
@@ -198,7 +189,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     emit_result(report.to_json(), output=None, json_stdout=args.json, render_human=_render_scan)
     for line in retired_notice(retired_live(load_state(out)), out):
         print(line, file=sys.stderr)
-    if datasets:
+    if scan.datasets:
         print_next_step(f"dagnam audit run {out}")
 
 

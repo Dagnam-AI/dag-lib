@@ -1,0 +1,180 @@
+name: Release dagnam-record to PyPI
+
+on:
+  push:
+    tags:
+      - "dagnam-record/v*"
+
+# Guard against double-tag races (e.g. delete + re-push of the same tag, or two
+# tags arriving simultaneously). cancel-in-progress=false because once a build
+# starts uploading to PyPI we must let it finish: PyPI rejects re-uploads of
+# the same version, so cancellation would just produce a half-released state.
+concurrency:
+  group: release-record-${{ github.ref }}
+  cancel-in-progress: false
+
+# Nothing is inherited: every job below states what it needs.
+permissions: {}
+
+jobs:
+  # Unlike release.yml there is no `platform` job: dagnam-record depends on nothing, so no
+  # platform contract can be ahead of or behind it. What is checked first is the release
+  # itself: the tag, `__version__` and the changelog name one version. The package has no
+  # static version (hatchling reads `__version__`), so the tag is compared with that.
+  check:
+    name: Tag, version and changelog agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      # The release's own changelog: nothing left under [Unreleased], the newest dated
+      # heading is the version being tagged, and the tag is dagnam-record/v<that version>.
+      - name: Check the tag and changelog are ready for this release
+        run: |
+          python scripts/check_changelog.py \
+            --changelog record/CHANGELOG.md \
+            --init record/dagnam_record/__init__.py \
+            --tag "$GITHUB_REF_NAME" \
+            --tag-prefix dagnam-record/v
+
+  # The tagged commit passes the whole repository's CI (lint, types, import contracts, the suite
+  # and its 100% coverage floor) and the recorder's own matrix (Python 3.9 to 3.13 against the
+  # lowest and highest openai and anthropic it supports). A tag is what publishes and PyPI takes
+  # no version back, so nothing is built until both have passed on exactly this commit.
+  ci:
+    name: CI on the tagged commit
+    uses: ./.github/workflows/dag-lib-ci.yml
+    permissions:
+      contents: read
+
+  record-ci:
+    name: Recorder matrix on the tagged commit
+    uses: ./.github/workflows/record-ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: Build wheel and sdist
+    needs: [check, ci, record-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Build
+        working-directory: record
+        run: uv build
+      - name: Check distribution metadata
+        working-directory: record
+        run: |
+          uv run --no-project --with twine twine check dist/*
+          uv run --no-project --with "readme-renderer[md]" python -m readme_renderer README.md > /dev/null
+      # The oldest Python the package supports, with nothing but the built file installed.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.9"
+      - name: Install each built file into a clean environment and run it
+        run: |
+          version="${GITHUB_REF_NAME#dagnam-record/v}"
+          for built in record/dist/*.whl record/dist/*.tar.gz; do
+            echo "== $built"
+            python -m venv "$RUNNER_TEMP/smoke"
+            "$RUNNER_TEMP/smoke/bin/pip" install "$built"
+            "$RUNNER_TEMP/smoke/bin/python" scripts/smoke_record.py "$version"
+            rm -rf "$RUNNER_TEMP/smoke"
+          done
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "record/dist/*"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: record/dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dagnam-record
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  smoke-testpypi:
+    name: Install from TestPyPI and run it
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    # The install step alone waits up to 15 minutes for TestPyPI's index.
+    timeout-minutes: 25
+    # Installs from TestPyPI alone and runs what it installed; it reads this repository for the
+    # smoke script only.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.9"
+      - name: Install from TestPyPI
+        run: |
+          # TestPyPI's simple index lagged its own upload by more than 2.5 minutes
+          # on 2026-09-07 (the environment wait timer used to hide that); wait up
+          # to 15 minutes, and FAIL here rather than let the smoke test import an
+          # absent package -- a loop that falls through exits 0.
+          installed=0
+          for i in $(seq 1 15); do
+            # No dependencies, so nothing is taken from the real index: a squatted higher
+            # version of the name there could otherwise win a tie against this one.
+            if pip install --no-deps \
+              --index-url https://test.pypi.org/simple/ \
+              "dagnam-record==${GITHUB_REF_NAME#dagnam-record/v}"; then installed=1; break; fi
+            echo "Waiting for TestPyPI indexing ($i/15)..."
+            sleep 60
+          done
+          test "$installed" = 1 || { echo "::error::dagnam-record ${GITHUB_REF_NAME#dagnam-record/v} never appeared on TestPyPI"; exit 1; }
+      - name: Run what was installed
+        run: python scripts/smoke_record.py "${GITHUB_REF_NAME#dagnam-record/v}"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: smoke-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dagnam-record
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

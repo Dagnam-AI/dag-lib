@@ -3,32 +3,64 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import cast, get_args
 
 import pytest
 
 from dagnam.audit import UnsupportedExportError, read_traces
 from dagnam.audit.discover import discover_workloads
-from dagnam.audit.readers import READERS, Source, generic, langfuse, langsmith, openai_jsonl
+from dagnam.audit.readers import (
+    READERS,
+    Source,
+    generic,
+    langfuse,
+    langsmith,
+    openai_jsonl,
+    recorder,
+)
+from dagnam.cli.audit import SOURCES
 
 
 def test_registry_covers_every_documented_source() -> None:
-    assert set(READERS) == {"langfuse", "langsmith", "openai", "jsonl", "csv"}
+    assert set(READERS) == {"langfuse", "langsmith", "openai", "dagnam", "jsonl", "csv"}
     assert READERS["langfuse"](None) is langfuse.READER
     assert READERS["langsmith"](None) is langsmith.READER
     assert READERS["openai"](None) is openai_jsonl.READER
+    assert READERS["dagnam"](None) is recorder.READER
     assert READERS["jsonl"] is generic.bind
     assert READERS["csv"] is generic.bind
 
 
 def test_unknown_source_is_rejected_before_reading(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown source 'helicone'; expected one of csv, jsonl"):
+    with pytest.raises(
+        ValueError, match="unknown source 'helicone'; expected one of csv, dagnam, jsonl"
+    ):
         read_traces(tmp_path / "missing.jsonl", source=cast("Source", "helicone"))
 
 
 def test_column_map_is_rejected_for_vendor_sources(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="column_map applies to the jsonl and csv sources only"):
         read_traces(tmp_path / "missing.jsonl", source="langfuse", column_map={"system": "s"})
+
+
+def test_column_map_is_rejected_for_the_dagnam_source(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="column_map applies to the jsonl and csv sources only"):
+        read_traces(tmp_path / "missing.jsonl", source="dagnam", column_map={"system": "s"})
+
+
+def test_dagnam_source_dispatches_to_the_recorder_reader(fixtures_dir: Path) -> None:
+    records, stats = read_traces(fixtures_dir / "recorder_openai_chat.jsonl", source="dagnam")
+    assert [r.trace_id for r in records][:1] == ["rec_chat_1"]
+    assert stats.rows_seen == 14
+
+
+def test_the_cli_sources_and_the_source_literal_name_the_same_readers() -> None:
+    assert set(SOURCES) == set(get_args(Source)) == set(READERS)
+
+
+@pytest.mark.parametrize("source", sorted(get_args(Source)))
+def test_every_source_has_a_reader(source: str) -> None:
+    assert source in READERS
 
 
 def test_vendor_export_missing_required_fields(fixtures_dir: Path) -> None:

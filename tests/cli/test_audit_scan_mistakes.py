@@ -117,7 +117,7 @@ def test_a_failure_that_is_not_the_users_mistake_still_hides_its_internals(
     def broken(*args: object, **kwargs: object) -> None:
         raise RuntimeError("secret internals: /home/someone/token")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
 
     status = _scan(run_cli, tmp_path, str(export), "--source", "jsonl")
 
@@ -139,7 +139,7 @@ def test_a_plain_value_error_from_the_read_stays_redacted_and_keeps_its_debug_tr
     def broken(*args: object, **kwargs: object) -> None:
         raise ValueError("secret internals: 'customer@example.com'")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
     argv = ["audit", "scan", str(export), "--source", "jsonl", "--out", str(tmp_path / "audit")]
 
     assert _scan(run_cli, tmp_path, str(export), "--source", "jsonl") == 1
@@ -151,10 +151,10 @@ def test_a_plain_value_error_from_the_read_stays_redacted_and_keeps_its_debug_tr
         run_cli(["--debug", *argv])
 
 
-def test_a_lone_surrogate_in_a_trace_is_an_internal_error_not_a_message_to_print(
+def test_a_lone_surrogate_in_a_trace_is_a_malformed_row_with_a_clear_refusal(
     run_cli: CliRunner, tmp_path: Path, capsys: StrCapture
 ) -> None:
-    """``UnicodeEncodeError`` is a ``ValueError``; it must not be mistaken for a user's mistake."""
+    """The row cannot be hashed or written, so it is counted malformed (it used to crash the scan)."""
     odd = tmp_path / "surrogate.jsonl"
     odd.write_text(
         '{"trace_id": "t1", "ts": "2026-08-01T00:00:00Z", "messages": "hi", "response": "\\ud800"}\n'
@@ -166,10 +166,9 @@ def test_a_lone_surrogate_in_a_trace_is_an_internal_error_not_a_message_to_print
 
     assert status == 1
     err = capsys.readouterr().err
-    assert "unexpected error (UnicodeEncodeError)" in err
+    assert "jsonl export: 3 of 3 rows are malformed" in err
+    assert "unexpected error" not in err
     assert "surrogates not allowed" not in err
-    with pytest.raises(UnicodeEncodeError):
-        run_cli(["--debug", "audit", "scan", str(odd), "--source", "jsonl", "--out", "x"])
 
 
 def test_the_reader_mistakes_are_value_errors_still_for_library_callers() -> None:
@@ -188,6 +187,19 @@ def test_a_directory_is_not_an_export(
 
     assert _scan(run_cli, tmp_path, str(folder), "--source", "jsonl") == 1
     assert _error_line(capsys) == f"Error: {folder} is a directory: name the export file"
+
+
+def test_the_dagnam_source_takes_a_directory_of_day_files(
+    run_cli: CliRunner, tmp_path: Path
+) -> None:
+    recorded = Path(__file__).parents[1] / "audit" / "fixtures" / "recorder_openai_chat.jsonl"
+    days = tmp_path / "traces"
+    days.mkdir()
+    for day in ("2026-10-24", "2026-10-25"):
+        (days / f"{day}.jsonl").write_bytes(recorded.read_bytes())
+
+    assert _scan(run_cli, tmp_path, str(days), "--source", "dagnam") == 0
+    assert (tmp_path / "audit" / "scan-report.json").is_file()
 
 
 def test_a_file_this_user_may_not_read_says_so(
@@ -236,7 +248,7 @@ def test_an_end_of_file_error_from_a_file_that_is_not_gzip_stays_an_internal_err
     def broken(*args: object, **kwargs: object) -> None:
         raise EOFError("secret internals")
 
-    monkeypatch.setattr("dagnam.audit.discover_workloads", broken)
+    monkeypatch.setattr("dagnam.audit.scan.discover_workloads", broken)
 
     assert _scan(run_cli, tmp_path, str(export), "--source", "jsonl") == 1
     err = capsys.readouterr().err

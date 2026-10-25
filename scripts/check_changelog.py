@@ -10,8 +10,13 @@ have yet.
 
 Standard library only.
 
+With ``--tag`` it also refuses a pushed tag that is not ``--tag-prefix`` followed by that version,
+so a tag can never publish a version other than the one the code declares.
+
 Usage:
     python scripts/check_changelog.py
+    python scripts/check_changelog.py --changelog record/CHANGELOG.md --init record/dagnam_record/__init__.py
+    python scripts/check_changelog.py ... --tag "$GITHUB_REF_NAME" --tag-prefix dagnam-record/v
 """
 
 from __future__ import annotations
@@ -63,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--changelog", type=Path, default=ROOT / "CHANGELOG.md")
     parser.add_argument("--init", type=Path, default=ROOT / "dagnam" / "__init__.py")
+    parser.add_argument("--tag", help="the pushed tag, which must be --tag-prefix + the version")
+    parser.add_argument("--tag-prefix", default="v", help="what comes before the version in a tag")
     args = parser.parse_args(argv)
     declared = _VERSION.search(args.init.read_text(encoding="utf-8"))
     if declared is None:
@@ -71,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     found = problems(args.changelog.read_text(encoding="utf-8"), declared[1])
     for reason in found:
         sys.stderr.write(f"{args.changelog}: {reason}\n")
+    wanted = f"{args.tag_prefix}{declared[1]}"
+    if args.tag is not None and args.tag != wanted:
+        sys.stderr.write(f"the tag {args.tag!r} is not {wanted!r}, the version in {args.init}\n")
+        found.append("tag")
     if found:
         return 1
     sys.stdout.write(f"{args.changelog} is ready for {declared[1]}\n")

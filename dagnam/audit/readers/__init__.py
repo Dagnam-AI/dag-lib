@@ -7,7 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import Literal
 
-from dagnam.audit.readers import generic, langfuse, langsmith, openai_jsonl
+from dagnam.audit.readers import generic, langfuse, langsmith, openai_jsonl, recorder
 from dagnam.audit.readers.base import (
     MALFORMED_FATAL_SHARE,
     ExportInputError,
@@ -19,7 +19,7 @@ from dagnam.audit.readers.base import (
 )
 from dagnam.audit.record import TraceRecord
 
-Source = Literal["langfuse", "langsmith", "openai", "jsonl", "csv"]
+Source = Literal["langfuse", "langsmith", "openai", "dagnam", "jsonl", "csv"]
 
 __all__ = [
     "MALFORMED_FATAL_SHARE",
@@ -45,6 +45,7 @@ READERS: dict[str, Callable[[Mapping[str, str] | None], Reader]] = {
     "langfuse": partial(_fixed, langfuse.READER),
     "langsmith": partial(_fixed, langsmith.READER),
     "openai": partial(_fixed, openai_jsonl.READER),
+    "dagnam": partial(_fixed, recorder.READER),
     "jsonl": generic.bind,
     "csv": generic.bind,
 }
