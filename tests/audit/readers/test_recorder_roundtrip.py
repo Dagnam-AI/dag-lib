@@ -56,7 +56,7 @@ COMPARED = (
 
 ``response_tool_calls`` is compared too, as the canonical JSON a student answers (raw keeps each
 vendor's call object, norm the OpenAI shape without ids). ``reasoning_only`` is on the list
-beyond the plan's nine fields, because a call that is only reasoning must not read as an empty
+beyond the nine fields of the normalized form, because a call that is only reasoning must not read as an empty
 answer on one path and not the other."""
 
 EXPECTED_DIFFERENCES: dict[tuple[str, int], dict[str, str]] = {

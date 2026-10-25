@@ -60,6 +60,7 @@ from dagnam.audit.record import Message, TraceRecord
 
 REQUIRED_FIELDS = ("v", "trace_id", "ts")
 _OMITTED = "media_omitted"
+_SHOWN_VERSION_BELOW = 1_000
 _VENDOR_RESULT = "_tool_result"
 
 
@@ -204,6 +205,20 @@ def _from_norm(env: TraceEnvelope, norm: Norm) -> TraceRecord:
     )
 
 
+def _versions(row: Row) -> str:
+    """`` (v=2, norm_v=1)`` naming the version fields that hold a small integer, else nothing.
+
+    A version field is the file's own text, so any other value (a string, an object, a number
+    no recorder wrote) is left out of a message: these refusals quote nothing from the export.
+    """
+    shown = [
+        f"{key}={row[key]}"
+        for key in ("v", "norm_v")
+        if type(row.get(key)) is int and 0 <= row[key] < _SHOWN_VERSION_BELOW
+    ]
+    return f" ({', '.join(shown)})" if shown else ""
+
+
 def to_record(row: Row) -> TraceRecord | None:
     """Convert one line; ``None`` for a call that did not return 200."""
     # ``row`` is already parsed JSON, so the contract's 1 MB line cap is not applied here, as for
@@ -211,7 +226,7 @@ def to_record(row: Row) -> TraceRecord | None:
     try:
         env = parse_envelope(row)
     except UnsupportedEnvelopeVersion as exc:
-        raise MalformedRowError(f"{exc} (v={row.get('v')}, norm_v={row.get('norm_v')})") from exc
+        raise MalformedRowError(f"{exc}{_versions(row)}") from exc
     if env.status != 200:
         return None
     request, response = env.request, env.response
@@ -235,13 +250,10 @@ def first_row_problem(row: Row) -> str | None:
     try:
         parse_envelope(row)
     except UnsupportedEnvelopeVersion:
-        return (
-            f"written by a newer recorder (v={row.get('v')}, norm_v={row.get('norm_v')}); "
-            "upgrade dagnam to read it"
-        )
+        return f"written by a newer recorder{_versions(row)}; upgrade dagnam to read it"
     except EnvelopeError:
         pass
     return None
 
 
-READER = Reader(REQUIRED_FIELDS, to_record, first_row_problem)
+READER = Reader(REQUIRED_FIELDS, to_record, first_row_problem, reads_directory=True)

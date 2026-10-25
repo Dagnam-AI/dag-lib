@@ -30,12 +30,13 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
-from typing import Any, TextIO
+from typing import Any
 
 import polars as pl
 
 from dagnam._core.exceptions import DagnamError
 from dagnam._core.text import sanitize_terminal_text
+from dagnam.audit.readers.text_rows import Row, json_rows, jsonl_rows
 from dagnam.audit.record import TraceRecord
 
 MALFORMED_FATAL_SHARE = 0.05
@@ -50,8 +51,6 @@ _EPOCH_UNITS = ((1e17, 1e9), (1e14, 1e6), (1e11, 1e3))  # (from, per second): ns
 _EPOCH_TEXT = re.compile(r"\d+(?:\.\d+)?")
 _BASIC_DATE = re.compile(r"\d{8}")
 """``YYYYMMDD``, ISO 8601's basic date: as an epoch it would be 1970-73, never a trace's time."""
-
-Row = dict[str, Any]
 
 
 class ExportInputError(DagnamError, ValueError):
@@ -119,47 +118,11 @@ class Reader:
     to_record: Callable[[Row], TraceRecord | None]
     first_row_problem: Callable[[Row], str | None] | None = None
     """Judges the first row of an export beyond its fields: why no row of it can be read, if so."""
+    reads_directory: bool = False
+    """Whether the export may be a directory of files, read in name order, each on its own."""
 
 
 # ---- streaming rows ------------------------------------------------------------
-
-
-def _parse_line(line: str) -> Row | None:
-    try:
-        value = json.loads(line)
-    except (ValueError, RecursionError):  # nested too deeply to decode: one bad row, not the read
-        return None
-    return value if isinstance(value, dict) else None
-
-
-def _open_text(path: Path) -> TextIO:
-    """The file as text, gunzipped on the fly for ``.gz``; undecodable bytes never stop a read."""
-    if path.suffix == ".gz":
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
-    return path.open(encoding="utf-8", errors="replace")
-
-
-def _jsonl_rows(path: Path) -> Iterator[Row | None]:
-    with _open_text(path) as handle:
-        for line in handle:
-            if line.strip():  # a blank line is not a row
-                yield _parse_line(line)
-
-
-def _json_rows(path: Path) -> Iterator[Row | None]:
-    """A ``.json`` export: one array of rows (a UI "Export JSON"), an API page's ``data``, or JSONL."""
-    # ponytail: one JSON document is parsed whole; a UI export is small, and a
-    # large export comes as JSONL, which streams. Add a streaming parser if not.
-    with _open_text(path) as handle:
-        text = handle.read()
-    try:
-        document = json.loads(text)
-    except ValueError:  # JSON Lines under a .json name; U+2028 etc. may sit inside a string
-        yield from (_parse_line(line) for line in text.split("\n") if line.strip())
-        return
-    items = document.get("data") if isinstance(document, dict) else document
-    for item in items if isinstance(items, list) else [document]:
-        yield item if isinstance(item, dict) else None
 
 
 def _frame_rows(scan: Callable[[Path], pl.LazyFrame]) -> Callable[[Path], Iterator[Row | None]]:
@@ -172,9 +135,9 @@ def _frame_rows(scan: Callable[[Path], pl.LazyFrame]) -> Callable[[Path], Iterat
 
 _TEXT_SUFFIXES = frozenset({".jsonl", ".ndjson", ".json"})
 _SCANNERS: dict[str, Callable[[Path], Iterator[Row | None]]] = {
-    ".jsonl": _jsonl_rows,
-    ".ndjson": _jsonl_rows,
-    ".json": _json_rows,
+    ".jsonl": jsonl_rows,
+    ".ndjson": jsonl_rows,
+    ".json": json_rows,
     ".parquet": _frame_rows(pl.scan_parquet),
     # Every CSV cell arrives as a string; the field helpers coerce numbers.
     ".csv": _frame_rows(lambda path: pl.scan_csv(path, infer_schema=False)),
@@ -209,6 +172,27 @@ def iter_rows(path: Path) -> Iterator[Row | None]:
         yield from scan(path)
     except pl.exceptions.NoDataError:  # an empty file has no rows, which is not an error
         return
+    except pl.exceptions.PolarsError:  # its text can quote a cell, so none of it is passed on
+        fmt = path.suffix.lstrip(".")
+        raise ExportInputError(
+            f"the {fmt} export could not be read: it is not a well-formed {fmt} file"
+        ) from None
+
+
+_DAY_FILES = (".jsonl", ".jsonl.gz")
+
+
+def _export_rows(path: Path, reader: Reader) -> Iterator[Row | None]:
+    """The rows of one export file, or of every day file in a directory a reader accepts."""
+    if not path.is_dir():
+        yield from iter_rows(path)
+        return
+    if not reader.reads_directory:
+        raise ExportInputError("the export is a directory: name the export file")
+    # Name order is time order for the recorder's day files. Each file is read on its own, so a
+    # last line cut short by a crash cannot join the next day's first line.
+    for day in sorted(p for p in path.iterdir() if p.name.endswith(_DAY_FILES) and p.is_file()):
+        yield from iter_rows(day)
 
 
 def read_records(
@@ -221,7 +205,7 @@ def read_records(
 
 def _records(path: Path, source: str, reader: Reader, stats: ReadStats) -> Iterator[TraceRecord]:
     shape_checked = False
-    for index, row in enumerate(iter_rows(path)):
+    for index, row in enumerate(_export_rows(path, reader)):
         stats.rows_seen += 1
         if row is None:
             stats.note_malformed(index)

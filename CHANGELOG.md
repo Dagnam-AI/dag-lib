@@ -9,8 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Platform compatibility
 
-- The next release redacts with `dagnam-contracts` 0.5. A platform still running an older contract stops
-  every audit at its PII check: connect to a platform that runs contract 0.5 or newer.
+- The next release redacts with `dagnam-contracts` 0.5. Against a platform still running an older
+  contract, `dagnam audit run` refuses to start: connect to a platform that runs contract 0.5 or newer.
 
 ### Added
 
@@ -21,13 +21,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
   is read from the normalized form, which keeps the system text, the earlier turns including the
   tool calls an assistant turn made, the answer, its tool calls, the token counts and whether the
   prompt carried media. Calls that did not return 200 are skipped, and a file written by a newer
-  recorder is refused with a message that says so.
+  recorder is refused with a message that says so (it names the version numbers and quotes nothing
+  else from the file). `--source dagnam` also takes a folder: its `.jsonl` and `.jsonl.gz` files
+  are read in name order, which is time order for the recorder's day files, each on its own so a
+  line cut short by a crash cannot join the next file's first line.
 - `dagnam.audit.scan_export()` reads an export and returns its priced workloads and the rows derived
   for the ones worth auditing, without writing a file or printing. `dagnam audit scan` now uses it,
   with the same output as before.
 
 ### Fixed
 
+- A trace export holding a lone surrogate escape (`\ud800` with no partner, which some tools write
+  when they cut a string between UTF-16 halves) no longer crashes the scan with a
+  `UnicodeEncodeError` when it is a JSON or JSONL export of any source: the row is counted as
+  malformed like any other it cannot read.
+- A UTF-8 byte order mark at the start of a JSONL or JSON export (what Windows tools save) no longer
+  makes the first row unreadable; on a short file that alone could refuse the whole export.
+- A `.json` export nested too deeply to parse no longer raises `RecursionError`: it is read line by
+  line as JSON Lines, like any other `.json` file that is not one document.
+- A CSV or Parquet file that cannot be read now stops with "the csv export could not be read: it is
+  not a well-formed csv file" instead of an error that quoted the cell it failed on.
 - A tool call whose arguments are nested too deep to parse as JSON (tens of thousands of brackets)
   no longer raises `RecursionError` while a trace export is read: the arguments stay the text they are.
 

@@ -217,7 +217,11 @@ def register_audit(subparsers: SubParsersAction) -> None:
         help="Discover and price workloads from a trace export (no network).",
         description="Read a trace export, discover workloads, price them, derive redacted rows.",
     )
-    scan.add_argument("export", help="Path to the trace export file.")
+    scan.add_argument(
+        "export",
+        help="Path to the trace export file (with --source dagnam, a file or the folder of"
+        " the recorder's day files).",
+    )
     scan.add_argument("--source", required=True, choices=SOURCES, help="Export format.")
     scan.add_argument(
         "--map",

@@ -145,7 +145,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
     if column_map and args.source not in MAPPABLE_SOURCES:
         fail(args, "--map applies to the jsonl and csv sources only")
-    if export.is_dir():
+    if export.is_dir() and args.source != "dagnam":  # the recorder's folder of day files
         fail(args, f"{args.export} is a directory: name the export file")
     if export.exists() and not os.access(export, os.R_OK):
         fail(args, f"{args.export} cannot be read: permission denied")
