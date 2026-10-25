@@ -142,7 +142,7 @@ dev = [
     "anthropic>=0.40,<1",
     "hypothesis",
     "import-linter>=2.11",
-    "openai>=1.66,<3",
+    "openai>=1.66,<4",
     "pip-audit>=2.7",
     "poethepoet>=0.46.0",
     "pre-commit>=3.5",
