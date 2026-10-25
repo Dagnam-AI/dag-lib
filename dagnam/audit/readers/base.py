@@ -54,6 +54,16 @@ _BASIC_DATE = re.compile(r"\d{8}")
 Row = dict[str, Any]
 
 
+class ExportInputError(DagnamError, ValueError):
+    """The export or the column map was given in a way no reader accepts.
+
+    A mistake the person at the command line can fix, with a message that says what to change
+    and quotes nothing from the export. It is a :class:`ValueError` too, as these mistakes always
+    were, so a library caller that catches ``ValueError`` keeps working; the command line prints
+    only this class, never an arbitrary ``ValueError``.
+    """
+
+
 class UnsupportedExportError(DagnamError):
     """The export's first row lacks fields the chosen source reader requires."""
 
@@ -187,7 +197,7 @@ def iter_rows(path: Path) -> Iterator[Row | None]:
         return
     scan = _SCANNERS.get(path.suffix)
     if scan is None:
-        raise ValueError(
+        raise ExportInputError(
             f"unsupported export file type {path.suffix!r}: expected .jsonl, .json, .parquet or"
             " .csv (optionally gzipped)"
         )

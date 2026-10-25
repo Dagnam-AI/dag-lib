@@ -46,7 +46,9 @@ from dagnam.audit.cleanup_local import (
     forget_locally,
     live,
     mark_cancelled,
+    not_created_here,
     receipt_rows,
+    record_kept,
     recorded_ids,
     settle_cancel,
     unanswered,
@@ -60,7 +62,7 @@ from dagnam.audit.cleanup_walk import (
     unclaimed_to_delete,
     walk,
 )
-from dagnam.audit.receipt_rows import KEPT, Verdict, blocked, decide
+from dagnam.audit.receipt_rows import Verdict, blocked, decide
 from dagnam.audit.serving import refuse_if_serving, serving_here
 from dagnam.audit.state import DELETED_STATE, AuditDeletedError, AuditState, load_state, save_state
 
@@ -163,6 +165,12 @@ def settle_delete(
         reported is None and not verdicts & {Verdict.LEFT, Verdict.UNKNOWN}
     )
     write_receipt(audit_dir, receipt)
+    # What the platform kept is on disk BEFORE the client's own network calls (the reads and
+    # deletes below can be interrupted) and before any key or file goes: a replay the platform
+    # answers with a 404, or `--already-deleted`, must still find it. The ids the audit never
+    # created may be deleted by the walk below, so they are recorded after it, if still there.
+    record_kept(state, rows, skip=not_created_here(rows))
+    save_state(audit_dir, state)
     extra: list[dict[str, Any]] = []
     walked: set[str] = set()
     if deleted:
@@ -179,13 +187,7 @@ def settle_delete(
             extra = [blocked("deployment", i, SERVING_NOW) for i in sorted(serving)]
         walked = {i for found in mine.values() for i in found} | {str(r["id"]) for r in extra}
         extra += walk(client, mine, state.project_id)
-    state.kept_ids += [
-        str(r.get("id"))
-        for r in rows
-        if r.get("status") == KEPT
-        and str(r.get("id")) not in state.kept_ids
-        and str(r.get("id")) not in walked
-    ]
+    record_kept(state, rows, skip=walked)
     remember(state, extra, client.identity)
     if not deleted:
         save_state(audit_dir, state)
@@ -198,6 +200,7 @@ def settle_delete(
     left = [r for r in rows if decide(r).verdict is Verdict.LEFT]
     stuck = [r for r in extra if decide(r).verdict is Verdict.LEFT]
     up = any(r.get("kind") == "deployment" for r in [*left, *stuck])
+    save_state(audit_dir, state)  # the walked ids are settled: on disk before any key goes
     local = forget_locally(audit_dir, state, keep_keys=up, settled=not left)
     full = {**receipt, "entries": [*rows, *extra, *local]}
     if extra or local:

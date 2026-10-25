@@ -27,6 +27,7 @@ import json
 
 from dagnam.audit.readers.base import (
     UNKNOWN_MODEL,
+    ExportInputError,
     MalformedRowError,
     Reader,
     Row,
@@ -80,7 +81,7 @@ def bind(column_map: Mapping[str, str] | None) -> Reader:
     columns = {target: target for target in TARGETS}
     for target, source in (column_map or {}).items():
         if target not in columns:
-            raise ValueError(
+            raise ExportInputError(
                 f"unknown column_map target {target!r}; expected one of {', '.join(TARGETS)}"
             )
         columns[target] = source

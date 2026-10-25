@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from tests.audit import _receipts as r
 from tests.audit._cleanup import FakeCleanup, as_cleanup_client
-from tests.audit._recorded import HEAD, recorded_state
+from tests.audit._recorded import HEAD, SFT, recorded_state
 
 from dagnam._core.exceptions import APIError
 from dagnam._types import JsonObject
@@ -105,6 +105,38 @@ class TestDelete:
         assert recorded_ids(state)["dataset"] == ["ds-1"]
         assert recorded_ids(state)["project"] == []
         _only_the_audit_call(platform, "delete_audit")
+
+    def test_an_endpoint_the_owner_chose_to_keep_keeps_its_key_and_is_never_touched_from_here(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        state = load_state(prepared)
+        state.workloads["w2"][SFT].key_ref = "w2/sft_small"
+        save_state(prepared, state)
+        SecretStore(prepared).store("w2/sft_small", "dk-other")
+        platform.server_receipt = r.designed(  # dep-1's `deleted` row is replaced by a `kept` one
+            r.row("training_job", "job-1", "deleted"), r.ADOPTED_ROW
+        )
+
+        receipt = delete_audit(prepared, as_cleanup_client(platform))
+
+        _only_the_audit_call(platform, "delete_audit")  # no stop, no delete of its own
+        assert platform.present["deployment"] == {"dep-1", "dep-2"}
+        assert SecretStore(prepared).load("w1/head_tune") == "dk-secret"  # the kept endpoint's key
+        assert SecretStore(prepared).load("w2/sft_small") is None  # the rest of the keys go
+        assert not (prepared / "workloads").exists()
+        assert load_state(prepared).kept_ids == ["dep-1"]
+        assert load_state(prepared).halted == {"reason": "deleted"}
+        assert _exit(receipt, "delete") == 0
+
+    def test_a_repeat_delete_of_a_deleted_audit_still_leaves_a_kept_endpoints_key(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        platform.server_receipt = _deleted(r.ADOPTED_ROW)
+        delete_audit(prepared, as_cleanup_client(platform))
+
+        delete_audit(prepared, as_cleanup_client(platform))
+
+        assert SecretStore(prepared).load("w1/head_tune") == "dk-secret"
 
     def test_a_halted_audit_removes_nothing_local_and_exits_one(
         self, prepared: Path, platform: FakeCleanup
@@ -370,6 +402,27 @@ class TestCancel:
         assert head.run_status == "cancelled"  # `stopped` marks the run ...
         assert head.deploy_status is None  # ... `already_stopped` marks nothing
         assert load_state(prepared).halted == {"reason": "cancelled"}
+        assert _exit(receipt, "cancel") == 0
+
+    def test_an_endpoint_the_owner_chose_to_keep_is_left_alone_and_nothing_is_stopped_from_here(
+        self, prepared: Path, platform: FakeCleanup
+    ) -> None:
+        state = load_state(prepared)
+        state.unclaimed_ids = ["dep-1"]
+        save_state(prepared, state)
+        platform.server_receipt = r.designed(
+            r.row("training_job", "job-1", "stopped"),
+            r.ADOPTED_ROW,
+            status="halted",
+            schema=r.SCHEMA_CANCELLED,
+        )
+
+        receipt = cancel_audit(prepared, as_cleanup_client(platform))
+
+        _only_the_audit_call(platform, "cancel_audit")
+        head = load_state(prepared).workloads["w1"][HEAD]
+        assert head.deploy_status is None  # a kept endpoint is not marked paused
+        assert SecretStore(prepared).load("w1/head_tune") == "dk-secret"
         assert _exit(receipt, "cancel") == 0
 
     def test_a_blocked_row_is_exit_one_and_nothing_is_stopped_from_here(

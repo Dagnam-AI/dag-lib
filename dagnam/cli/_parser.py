@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import re
-from typing import TYPE_CHECKING, NoReturn, override
+from typing import TYPE_CHECKING, Any, NoReturn, override
 
 from dagnam.cli.common import DOCS_URL, format_ascii_art, resolve_version
 from dagnam.cli.errors import styled_error_label
@@ -172,7 +172,13 @@ class DagnamArgumentParser(argparse.ArgumentParser):
 
     Children created by ``add_subparsers().add_parser(...)`` inherit this class
     automatically, so the suggestion behavior applies at every command level.
+    ``add_parser(..., docs_url=...)`` points a command's own ``--help`` footer
+    at the docs section that explains it; without one the footer is the docs root.
     """
+
+    def __init__(self, *args: Any, docs_url: str | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.docs_url = docs_url or DOCS_URL
 
     @override
     def format_help(self) -> str:
@@ -181,7 +187,7 @@ class DagnamArgumentParser(argparse.ArgumentParser):
         subparsers = _subparsers_action(self)
         if subparsers is not None:
             return _format_group_help(self, subparsers)
-        return super().format_help() + f"\nDocs: {DOCS_URL}\n"
+        return super().format_help() + f"\nDocs: {self.docs_url}\n"
 
     def error(self, message: str) -> NoReturn:  # type: ignore[override]  # typeshed types error() -> None; we return NoReturn
         self.exit(2, self._format_error(message))

@@ -84,6 +84,21 @@ def test_cancel_cancels_running_jobs_pauses_deployments_and_nothing_else(
     assert (receipt["schema"], receipt["entries"]) == (CANCELLED, [])
 
 
+def test_an_endpoint_the_owner_chose_to_keep_is_shown_as_kept_and_is_not_paused(
+    run_cli: CliRunner, published: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    fake = _platform(monkeypatch, r.designed(r.ADOPTED_ROW, status="halted", schema=CANCELLED))
+
+    assert run_cli(["audit", "cancel", str(published)]) == 0
+
+    assert fake.call_log == [("cancel_audit", "audit-1")]  # no pause from here
+    assert (
+        "deployment dep-1: kept [deployment_adopted] (you chose to keep this endpoint)"
+        in capsys.readouterr().out
+    )
+    assert load_state(published).workloads["w1"][HEAD].deploy_status == "deploying"  # not "paused"
+
+
 def test_a_deployment_that_cannot_be_paused_fails_the_cancel_and_is_not_marked(
     run_cli: CliRunner, audit_dir: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:
