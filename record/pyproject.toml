@@ -41,7 +41,7 @@ Issues = "https://github.com/Dagnam-AI/dag-lib/issues"
 Security = "https://github.com/Dagnam-AI/dag-lib/blob/main/SECURITY.md"
 
 [build-system]
-requires = ["hatchling>=1.27,<1.32"]
+requires = ["hatchling>=1.27,<1.33"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
