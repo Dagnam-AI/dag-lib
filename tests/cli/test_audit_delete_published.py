@@ -157,8 +157,11 @@ def test_an_endpoint_kept_by_choice_and_one_not_the_audits_each_get_their_own_se
     assert run_cli(["audit", "delete", str(published), "--yes"]) == 0
 
     last = " ".join(capsys.readouterr().err.split())
-    assert "except 1 item kept on purpose because it is not the audit's to remove" in last
-    assert "1 endpoint you chose to keep was left running" in last
+    assert (
+        "The audit is deleted. Left in place (kept above): 1 item not the audit's to remove,"
+        " and 1 endpoint you chose to keep, still running." in last
+    )
+    assert "Everything" not in last  # one sentence, no contradiction
 
 
 def test_a_kept_endpoint_of_any_code_says_its_key_stays_and_that_no_command_removes_it(
@@ -172,7 +175,10 @@ def test_a_kept_endpoint_of_any_code_says_its_key_stays_and_that_no_command_remo
     last = " ".join(capsys.readouterr().err.split())
     assert "you chose to keep" not in last  # it is the platform's keep, not the owner's
     assert "The deployment key for 1 kept endpoint stays on this machine" in last
-    assert f"system keyring (service dagnam-audit) or in secrets.json in {published}" in last
+    assert (
+        f'system keyring (service dagnam-audit, account "{published.resolve()}::w1/head_tune")'
+        f" or in secrets.json in {published}"
+    ) in last
     assert "No dagnam command removes it: delete it yourself" in last
 
 

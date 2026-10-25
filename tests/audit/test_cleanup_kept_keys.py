@@ -149,3 +149,80 @@ def test_an_endpoint_the_owner_stopped_keeping_since_the_cancel_loses_its_key_an
     assert load_state(prepared).kept_ids == []
     assert _keys(prepared) == (None, None)
     assert load_state(prepared).workloads["w1"][HEAD].deployment_id == "dep-1"
+
+
+def _not_created_here(kind: str, item_id: str) -> JsonObject:
+    return r.row(kind, item_id, "kept", "not_created_here", "recorded, not tagged")
+
+
+def _unclaimed(audit_dir: Path, *ids: str) -> None:
+    """Resources this directory made before the audit, which the platform refused to claim."""
+    state = load_state(audit_dir)
+    state.unclaimed_ids = list(ids)
+    save_state(audit_dir, state)
+
+
+def test_a_cancel_does_not_make_what_the_audit_never_created_a_kept_endpoint_or_dataset(
+    prepared: Path, platform: FakeCleanup
+) -> None:
+    """The platform's ``not_created_here`` is "not ours to touch", never "the owner kept it"."""
+    _unclaimed(prepared, "ds-2", "dep-2")
+    platform.server_receipt = _cancelled(
+        r.ADOPTED_ROW,
+        _not_created_here("dataset", "ds-2"),
+        _not_created_here("deployment", "dep-2"),
+    )
+
+    cancel_audit(prepared, as_cleanup_client(platform))
+
+    assert load_state(prepared).kept_ids == ["dep-1"]
+
+
+def test_a_delete_after_a_cancel_still_deletes_what_this_directory_made_itself(
+    prepared: Path, platform: FakeCleanup
+) -> None:
+    """The same delete, with and without a cancel before it, deletes the same things."""
+    _unclaimed(prepared, "ds-2", "dep-2")
+    rows = (
+        r.ADOPTED_ROW,
+        _not_created_here("dataset", "ds-2"),
+        _not_created_here("deployment", "dep-2"),
+    )
+    platform.server_receipt = _cancelled(*rows)
+    cancel_audit(prepared, as_cleanup_client(platform))
+    platform.server_receipt = r.designed(*rows)
+
+    delete_audit(prepared, as_cleanup_client(platform), include_endpoints=True)
+
+    assert ("delete_dataset", "ds-2") in platform.call_log
+    assert ("delete_deployment", "dep-2") in platform.call_log
+    assert ("delete_deployment", "dep-1") not in platform.call_log  # the kept one is never touched
+    assert "ds-2" not in load_state(prepared).kept_ids
+    assert "dep-2" not in load_state(prepared).kept_ids
+    assert _keys(prepared) == (
+        "dk-kept",
+        None,
+    )  # dep-2 is gone, so its key goes; the kept key stays
+
+
+def test_the_kept_ids_are_on_disk_before_the_client_walks_what_the_platform_left(
+    prepared: Path, platform: FakeCleanup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interrupt inside the walk (a network call), then a 404 replay with ``--already-deleted``."""
+    _unclaimed(prepared, "ds-2")
+    platform.server_receipt = _deleted_around_the_kept_endpoint()
+
+    def interrupted(dataset_id: str) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(platform, "delete_dataset", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        delete_audit(prepared, as_cleanup_client(platform))
+    assert load_state(prepared).kept_ids == ["dep-1"]
+    assert load_state(prepared).halted is None
+
+    platform.account_error = APIError(404, "not found")
+    delete_audit(prepared, as_cleanup_client(platform), assume_gone=True)
+
+    assert _keys(prepared)[0] == "dk-kept"
+    assert load_state(prepared).halted == {"reason": "deleted"}

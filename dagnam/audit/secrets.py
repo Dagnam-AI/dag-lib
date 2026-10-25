@@ -38,7 +38,8 @@ class SecretStore:
         self.mode: str | None = None
         """``"keyring"`` or ``"file"`` once a key has been stored; ``None`` before."""
 
-    def _user(self, key_ref: str) -> str:
+    def account(self, key_ref: str) -> str:
+        """The keyring account name ``key_ref`` is stored under (the service is :data:`SERVICE`)."""
         return f"{self._dir.resolve()}::{key_ref}"
 
     def _path(self) -> Path:
@@ -64,7 +65,7 @@ class SecretStore:
         if backend is not None:
             module, error = backend
             try:
-                module.set_password(SERVICE, self._user(key_ref), value)
+                module.set_password(SERVICE, self.account(key_ref), value)
             except error as exc:
                 _LOGGER.warning(
                     "keyring unavailable (%s); storing %s in %s", exc, key_ref, SECRETS_FILE
@@ -88,7 +89,7 @@ class SecretStore:
         if backend is not None:
             module, error = backend
             try:
-                found = module.get_password(SERVICE, self._user(key_ref))
+                found = module.get_password(SERVICE, self.account(key_ref))
             except error:
                 found = None
             if isinstance(found, str):
@@ -101,7 +102,7 @@ class SecretStore:
         if backend is not None:
             module, error = backend
             try:
-                module.delete_password(SERVICE, self._user(key_ref))
+                module.delete_password(SERVICE, self.account(key_ref))
             except error:
                 pass
         secrets = self._read_file()
