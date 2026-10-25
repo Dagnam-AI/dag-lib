@@ -257,7 +257,7 @@ class Patcher:
             @functools.wraps(original)
             async def call_async(resource: Any, *args: Any, **kwargs: Any) -> Any:
                 recorder = patcher.recorder
-                if recorder is None:
+                if recorder is None or recorder.paused():
                     return await original(resource, *args, **kwargs)
                 deliver_pending()  # a safe point: no writer lock is held here
                 request = patcher.snapshot(recorder, kwargs)
@@ -277,7 +277,7 @@ class Patcher:
         @functools.wraps(original)
         def call_sync(resource: Any, *args: Any, **kwargs: Any) -> Any:
             recorder = patcher.recorder
-            if recorder is None:
+            if recorder is None or recorder.paused():
                 return original(resource, *args, **kwargs)
             deliver_pending()
             request = patcher.snapshot(recorder, kwargs)

@@ -164,7 +164,10 @@ class Writer:
         self._started = clock()
         if isinstance(started, (int, float)) and not isinstance(started, bool):
             self._started, self._dirty = float(started), False
+        if self._started > clock():  # a clock set back, or a start time from the future
+            self._started, self._dirty = clock(), True
         self.expired = False
+        self._is_expired(clock())  # a window that ended before this process began says so now
         self._saved_at = clock()
         self._fd: Optional[int] = None
         self._day = ""
@@ -278,6 +281,8 @@ class Writer:
                 self.counts[key] += max(final[key] - self._loaded[key], 0)
             self._started = started  # whether the window has ended is judged afresh from it
             self._dirty = True
+            self.expired = False
+        self._is_expired(self._clock())
 
     def reinit_after_fork(self) -> None:
         """Start over in a forked child.
@@ -346,12 +351,19 @@ class Writer:
                     return
             writer = writer._flatten_moved(moved)
 
+    def check_expired(self) -> bool:
+        """Whether the recording window has ended (the first to see it logs it, once)."""
+        return self.expired or self._is_expired(self._clock())
+
     def _is_expired(self, now: float) -> bool:
-        if not self.expired and now - self._started >= self._window:
-            self.expired = True
-            self._dirty = True
-            LOGGER.info("dagnam_record: the recording window has ended; no more calls are recorded")
-        return self.expired
+        if self.expired:
+            return True
+        if now - self._started < self._window:
+            return False
+        # ponytail: two threads that see the end together may both log it; one INFO line twice.
+        self.expired = self._dirty = True
+        LOGGER.info("dagnam_record: the recording window has ended; no more calls are recorded")
+        return True
 
     def _write(self, line: str) -> None:
         """Append one whole line. Any failure is counted, never raised."""

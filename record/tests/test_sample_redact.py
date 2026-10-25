@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable, Dict, List
 import uuid
 
@@ -245,3 +246,50 @@ def test_no_raw_for_a_provider_without_a_norm_is_counted_not_written(tmp_path: P
     record()  # provider "other" has no norm, so there would be nothing to keep
     assert finish_lines(tmp_path / "t") == []
     assert saved_counts(tmp_path / "t")["dropped_error"] == 1
+
+
+def test_redact_never_sees_the_bytes_of_an_image_and_the_line_says_how_big_it_was(
+    tmp_path: Path,
+) -> None:
+    image = "A" * 5_000_000  # 5 MB of base64, as a vision call sends
+    seen, mask = texts_seen()
+    dagnam_record.install(dir=str(tmp_path / "t"), redact=mask)
+    record(
+        provider="openai",
+        endpoint="chat.completions",
+        request={
+            "model": "m",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64," + image},
+                        },
+                    ],
+                }
+            ],
+        },
+        response={"choices": [{"message": {"content": "a cat"}}]},
+    )
+    (line,) = finish_lines(tmp_path / "t")
+    assert max(len(text) for text in seen) < 1000
+    part = line["request"]["messages"][0]["content"][1]
+    assert part["type"] == "media_omitted"
+    assert part["bytes"] > 5_000_000
+    assert line["norm"]["has_media"] is True
+
+
+def test_a_five_megabyte_image_costs_the_caller_well_under_a_second_with_the_pii_redactor(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("dagnam_contracts.hygiene")
+    dagnam_record.install(dir=str(tmp_path / "t"), redact="auto")
+    image = "A" * 5_000_000
+    body = {"messages": [{"role": "user", "content": [{"type": "input_audio", "data": image}]}]}
+    started = time.perf_counter()  # 1.6 s before the media was dropped ahead of the redactor
+    record(provider="openai", endpoint="chat.completions", request=body)
+    assert time.perf_counter() - started < 0.5
+    finish_lines(tmp_path / "t")

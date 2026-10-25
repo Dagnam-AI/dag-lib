@@ -89,7 +89,8 @@ def _build(config: Config) -> Installed:
     """The writer and recorder for ``config``; the previous ones are still running."""
     redactor = resolve_redact(config.redact)  # may raise ImportError: nothing has changed yet
     writer = Writer(config.directory, window_days=config.window_days)
-    prune(config.directory, config.window_days, time.time())
+    if not writer.expired:  # after the window the files wait for the upload, they are not pruned
+        prune(config.directory, config.window_days, time.time())
     recorder = Recorder(writer, no_raw=config.no_raw, sample=config.sample, redact=redactor)
     return Installed(config, writer, recorder)
 
@@ -164,10 +165,15 @@ def install(
             installed = previous
         else:
             installed = STATE.installed = _adopt(_build(config), previous)
-        patched = {
-            "openai": _openai.install(installed.recorder),
-            "anthropic": _anthropic.install(installed.recorder),
-        }
+        if installed.writer.expired:  # the window ended before this process began: no work at all
+            _openai.uninstall()
+            _anthropic.uninstall()
+            patched = {"openai": False, "anthropic": False}
+        else:
+            patched = {
+                "openai": _openai.install(installed.recorder),
+                "anthropic": _anthropic.install(installed.recorder),
+            }
         _note_sdks(installed, patched)
         if previous is not None and previous is not installed:
             # Only now, with every new call going to the new recorder: the old writer writes what

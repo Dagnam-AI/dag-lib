@@ -16,7 +16,8 @@ from typing import Any, Callable, Dict, Optional, Set
 import uuid
 
 from dagnam_record._compat import is_untested
-from dagnam_record._envelope import LineTooLargeError, build_line
+from dagnam_record._credentials import hide_credentials
+from dagnam_record._envelope import LineTooLargeError, build_line, omit_media
 from dagnam_record._redact import apply
 from dagnam_record._writer import Writer
 
@@ -174,6 +175,20 @@ class Recorder:
         self.sample = sample
         self.redact = redact
 
+    def paused(self) -> bool:
+        """Whether a call must not be recorded now, so that nothing at all is done for it.
+
+        True when the kill switch ``DAGNAM_RECORD`` is on (read on every call, so an operator can
+        stop a running fleet), or the recording window has ended (each such call is counted as
+        ``dropped_expired``).
+        """
+        if recording_disabled():
+            return True
+        if self.writer.check_expired():
+            self.writer.count("dropped_expired")
+            return True
+        return False
+
     def fail_open(self, step: Callable[..., None], *arguments: Any) -> bool:
         """Run ``step``; any error is counted, never raised. True when the step ran cleanly."""
         try:
@@ -223,9 +238,14 @@ class Recorder:
 
         Raises ``ValueError`` for a call that cannot be recorded; callers go through ``fail_open``.
         """
+        if self.paused():
+            return
         trace_id = str(uuid.uuid4())
         if not sampled(trace_id, self.sample):
             return
+        # Media goes first: the line would drop it anyway, and a redactor (or the PII one) must
+        # not read megabytes of base64 on the caller's thread.
+        request = hide_credentials(omit_media(request))
         if self.redact is not None:
             request, response = apply(self.redact, request), apply(self.redact, response)
         self.writer.submit(

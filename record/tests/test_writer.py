@@ -280,6 +280,36 @@ def test_the_window_is_counted_from_the_first_run_across_restarts(
     assert lines(next((tmp_path / "traces").glob("*.jsonl"))) == ["a"]
 
 
+def test_a_window_that_ended_before_the_writer_began_is_known_at_once(
+    make: Any, new_clock: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    directory = tmp_path / "traces"
+    directory.mkdir(mode=0o700)
+    (directory / ".status.json").write_text(
+        json.dumps({"started": T0 - 30 * DAY, "counts": {}}), encoding="utf-8"
+    )
+    with caplog.at_level(logging.INFO, logger="dagnam_record"):
+        writer = make(clock=new_clock(T0), window_days=14)
+        assert writer.expired
+        assert writer.check_expired()
+    assert [r.levelno for r in caplog.records if r.name == "dagnam_record"] == [logging.INFO]
+
+
+def test_a_start_time_from_the_future_is_taken_as_now(
+    make: Any, new_clock: Any, tmp_path: Path
+) -> None:
+    directory = tmp_path / "traces"
+    directory.mkdir(mode=0o700)
+    (directory / ".status.json").write_text(
+        json.dumps({"started": T0 + 400 * DAY, "counts": {}}), encoding="utf-8"
+    )
+    clock = new_clock(T0)
+    writer = make(clock=clock, window_days=1)  # a clock set back must not postpone the end
+    assert not writer.check_expired()
+    clock.now = T0 + DAY
+    assert writer.check_expired()
+
+
 @pytest.mark.parametrize(
     "content",
     ["not json", "[1]", '{"counts": 3, "started": true}', '{"counts": {"written": -4}}'],

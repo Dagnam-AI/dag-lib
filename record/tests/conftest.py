@@ -111,6 +111,10 @@ class Probe(Writer):
         """Whether the writer thread is running."""
         return self._thread is not None and self._thread.is_alive()
 
+    def clock(self) -> Any:
+        """The clock the writer reads."""
+        return self._clock
+
     def thread(self) -> Optional[threading.Thread]:
         """The writer thread, if one was started."""
         return self._thread
