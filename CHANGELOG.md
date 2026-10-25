@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Platform compatibility
+
+- The next release redacts with `dagnam-contracts` 0.5. A platform still running an older contract stops
+  every audit at its PII check: connect to a platform that runs contract 0.5 or newer.
+
 ### Added
 
 - `dagnam audit scan --source dagnam` (and `read_traces(..., source="dagnam")`) reads the trace files
