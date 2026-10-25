@@ -11,13 +11,8 @@ patched, see ``_compat``) and ``counts``: one number per key of ``COUNT_KEYS``.
 call the recorder saw only part of (a stream abandoned or cut off before its end, a call
 cancelled or interrupted): it is never written, because a partial answer is no training row.
 
-Permissions: the directory is created ``0700`` (its parents get the process defaults). An
-existing directory must be a real directory (not a symlink) owned by this user, and is tightened
-to ``0700`` if it is looser; it is opened with ``O_DIRECTORY|O_NOFOLLOW`` and checked and changed
-through that descriptor, so it cannot be swapped between the check and the change. Files are
-opened with ``O_NOFOLLOW|O_NONBLOCK``, must be regular files (a FIFO is refused, never waited
-on) and are set to ``0600``. Where ``O_DIRECTORY`` does not exist (Windows) a directory is only
-required to be a real one.
+Permissions: see ``_private_dir``; the files are opened with ``O_NOFOLLOW|O_NONBLOCK``, must be
+regular files (a FIFO is refused, never waited on) and are set to ``0600``.
 """
 
 from __future__ import annotations
@@ -35,12 +30,19 @@ import time
 from typing import Any, Callable, Dict, Optional
 import weakref
 
+from dagnam_record._private_dir import (
+    NOFOLLOW,
+    NONBLOCK,
+    STATUS_FILE,
+    as_count,
+    ensure_private_dir,
+    fchmod,
+    read_status,
+    recorded_bytes,
+)
 from dagnam_record._stream import deliver_pending
 
 LOGGER = logging.getLogger("dagnam_record")
-STATUS_FILE = ".status.json"
-STATUS_MAX = 1_000_000
-"""The most of a ``.status.json`` that is read: a larger one is treated as unreadable."""
 COUNT_KEYS = (
     "written",
     "dropped_full",
@@ -49,68 +51,13 @@ COUNT_KEYS = (
     "dropped_expired",
     "dropped_partial",
 )
+MAX_QUEUE_BYTES = 32 * 1024 * 1024
+"""The most text waiting in memory for the disk; a line over the rest is dropped as ``dropped_full``."""
+MAX_TOTAL_BYTES = 1024**3
+"""The most the dated data files of one directory may hold; a line over it is ``dropped_full``."""
 _SAVE_EVERY = 30.0
 _DAY = 86400
-_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
-_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-_fchmod: Callable[[int, int], None] = getattr(os, "fchmod", lambda descriptor, mode: None)
-_OWNER = os.getuid() if hasattr(os, "getuid") else None
 _WRITERS: weakref.WeakSet[Writer] = weakref.WeakSet()
-
-
-def _ensure_dir(directory: str) -> None:
-    """Make sure ``directory`` is a private directory of ours, or raise ``OSError``."""
-    os.makedirs(os.path.dirname(directory) or ".", exist_ok=True)
-    try:
-        os.mkdir(directory, 0o700)
-        return
-    except FileExistsError:
-        pass
-    if not _DIRECTORY:  # no way to open a directory: all that can be asked is that it is one
-        if os.path.islink(directory) or not os.path.isdir(directory):
-            raise NotADirectoryError(errno.ENOTDIR, "not a real directory", directory)
-        return
-    # A symlink or a file fails the open; the owner and mode are read from the open descriptor,
-    # and changed through it, so the path cannot be swapped for another in between.
-    descriptor = os.open(directory, os.O_RDONLY | _DIRECTORY | _NOFOLLOW)
-    try:
-        info = os.fstat(descriptor)
-        if _OWNER is not None and info.st_uid != _OWNER:
-            raise PermissionError(errno.EPERM, "the trace directory belongs to someone else")
-        if info.st_mode & 0o077:
-            _fchmod(descriptor, 0o700)
-    finally:
-        os.close(descriptor)
-    if not os.access(directory, os.W_OK | os.X_OK):
-        raise PermissionError(errno.EACCES, "the trace directory is not writable", directory)
-
-
-def read_status(directory: str) -> Dict[str, Any]:
-    """The saved status, or ``{}`` for anything but a readable regular file holding an object.
-
-    The open cannot wait (a FIFO would never deliver a writer) and does not follow a symlink, and
-    a file of more than ``STATUS_MAX`` characters counts as unreadable.
-    """
-    try:
-        descriptor = os.open(
-            os.path.join(directory, STATUS_FILE), os.O_RDONLY | _NOFOLLOW | _NONBLOCK
-        )
-    except OSError:
-        return {}
-    with os.fdopen(descriptor, encoding="utf-8") as handle:
-        try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                return {}
-            text = handle.read(STATUS_MAX + 1)
-            data = json.loads(text) if len(text) <= STATUS_MAX else None
-        except (OSError, ValueError):
-            return {}
-    return data if isinstance(data, dict) else {}
-
-
-def as_count(value: object) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def reinit_all_after_fork() -> None:
@@ -129,6 +76,8 @@ class Writer:
         window_days: int = 14,
         max_queue: int = 1000,
         max_line_bytes: int = 1_000_000,
+        max_queue_bytes: int = MAX_QUEUE_BYTES,
+        max_total_bytes: int = MAX_TOTAL_BYTES,
         clock: Callable[[], float] = time.time,
         start: bool = True,
     ) -> None:
@@ -136,13 +85,16 @@ class Writer:
         self._dir = os.path.abspath(os.path.expanduser(directory))
         self._window = window_days * _DAY
         self._max_line_bytes = max_line_bytes
+        self._max_queue_bytes = max_queue_bytes
+        self._max_total_bytes = max_total_bytes
+        self._queued = 0  # characters waiting in the queue, changed under ``_gate``
         self._max_queue = max_queue
         self._clock = clock
         self._queue: queue.Queue[Optional[str]] = queue.Queue(maxsize=max_queue)
         self._lock = threading.Lock()
         self._gate = threading.Lock()
         try:
-            _ensure_dir(self._dir)
+            ensure_private_dir(self._dir)
             previous = read_status(self._dir)
             refused = False
         except OSError:
@@ -158,6 +110,9 @@ class Writer:
         self._moved: Optional[Writer] = None  # takes counts that arrive after hand_over()
         self._retired = False  # handed over and saved for good: the successor owns the file now
         self.usable = not refused  # False: the directory was refused, every line will be dropped
+        # ponytail: the size of the directory is counted here and again at each new file;
+        # several processes sharing one directory may together pass the cap by a day's worth.
+        self._total = recorded_bytes(self._dir)
         self.sdk_versions: Dict[str, str] = {}
         started = previous.get("started")
         self._dirty = True  # a first run has a start time to save
@@ -172,6 +127,7 @@ class Writer:
         self._fd: Optional[int] = None
         self._day = ""
         self._closed = False
+        self._broken = False  # the thread could not be started: nothing will ever be written
         self._thread: Optional[threading.Thread] = None
         _WRITERS.add(self)
         atexit.register(self.close)
@@ -195,15 +151,18 @@ class Writer:
         """Queue ``line`` or count why not; the writer to try instead, if this one was handed over."""
         try:
             with self._gate:  # close() takes it to stop intake, so no line lands after the stop
-                if self._closed:
+                if self._closed or self._broken:
                     successor = self._successor
                     if successor is not None:
                         return self._flatten_successor(successor)
                     key = "dropped_error"
                 elif len(line) > self._max_line_bytes:  # characters never outnumber bytes
                     key = "dropped_large"
+                elif self._queued + len(line) > self._max_queue_bytes:
+                    key = "dropped_full"
                 else:
                     self._queue.put_nowait(line)
+                    self._queued += len(line)
                     return None
         except queue.Full:
             key = "dropped_full"
@@ -235,12 +194,19 @@ class Writer:
         self._bump(key)
 
     def close(self, timeout: float = 2.0) -> None:
-        """Write what is queued (waiting up to ``timeout``), save the counts and stop."""
-        self._halt(timeout)
-        self._persist()
+        """Write what is queued (waiting up to ``timeout``), save the counts and stop.
 
-    def _halt(self, timeout: float) -> None:
-        """Shut intake, let the thread finish the queue (up to ``timeout``) and drop the file."""
+        A thread that is still busy after ``timeout`` (a hung mount) is left alone, and so is the
+        disk: the counts are not saved from this thread, which would hang on the same mount.
+        """
+        if self._halt(timeout):
+            self._persist()
+
+    def _halt(self, timeout: float) -> bool:
+        """Shut intake, let the thread finish the queue (up to ``timeout``) and drop the file.
+
+        True when the thread is gone (or never ran) and so the disk is free to use.
+        """
         deliver_pending()  # streams that were let go: their lines must be in before intake stops
         with self._gate:
             self._closed = True
@@ -252,9 +218,11 @@ class Writer:
             except queue.Full:
                 pass
             thread.join(timeout)
-        if thread is None or not thread.is_alive():
+        stopped = thread is None or not thread.is_alive()
+        if stopped:
             self._drain()
             self._drop_fd()
+        return stopped
 
     def hand_over(self, successor: Writer, timeout: float = 2.0) -> None:
         """Stop in favour of ``successor``, losing no line and no count.
@@ -293,6 +261,7 @@ class Writer:
         child's. The window start is kept.
         """
         self._queue = queue.Queue(maxsize=self._max_queue)
+        self._queued = 0
         self._lock = threading.Lock()
         self._gate = threading.Lock()
         self.counts = dict.fromkeys(COUNT_KEYS, 0)
@@ -306,10 +275,20 @@ class Writer:
             self._spawn()
 
     def _spawn(self) -> None:
-        self._thread = threading.Thread(
+        thread = threading.Thread(
             target=self._run, args=(self._queue,), name="dagnam-record", daemon=True
         )
-        self._thread.start()
+        try:
+            thread.start()
+        except Exception as exc:  # a pid or thread limit: nothing can ever write, so say so once
+            LOGGER.warning(
+                "dagnam_record: cannot start the writer thread (%s); recorded calls are dropped",
+                type(exc).__name__,
+            )
+            self.usable = False
+            self._broken = True
+            return
+        self._thread = thread
 
     def _drain(self) -> None:
         """Run the loop body for everything queued, in the calling thread."""
@@ -320,6 +299,7 @@ class Writer:
             except queue.Empty:
                 return
             if line is not None:
+                self._took(line)
                 self._write(line)
                 self._persist_if_due()
 
@@ -336,9 +316,15 @@ class Writer:
                 continue
             if line is None:
                 return
+            self._took(line)
             self._write(line)
             self._persist_if_due()
             deliver_pending()
+
+    def _took(self, line: str) -> None:
+        """A line left the queue: its characters no longer count against the memory budget."""
+        with self._gate:
+            self._queued = max(self._queued - len(line), 0)
 
     def _bump(self, key: str) -> None:
         writer = self
@@ -377,9 +363,14 @@ class Writer:
             if len(data) - 1 > self._max_line_bytes:
                 self._bump("dropped_large")
                 return
+            descriptor = self._descriptor(now)  # may count the directory again (a new file)
+            if self._total + len(data) > self._max_total_bytes:
+                self._bump("dropped_full")  # the directory has its share: never fill the disk
+                return
             # One os.write on an O_APPEND descriptor: a reader never sees half a line.
-            if os.write(self._descriptor(now), data) != len(data):
+            if os.write(descriptor, data) != len(data):
                 raise OSError(errno.ENOSPC, "short write")
+            self._total += len(data)
             self._bump("written")
         except Exception:  # fail open: the recorder must never hurt the call it describes
             self._drop_fd()
@@ -391,15 +382,16 @@ class Writer:
             self._drop_fd()  # the file was deleted (a purge) while we held it: start a new one
         if self._fd is None or day != self._day:
             self._drop_fd()
-            _ensure_dir(self._dir)
+            ensure_private_dir(self._dir)
             path = os.path.join(self._dir, day + ".jsonl")
-            # O_NONBLOCK: a FIFO here fails (ENXIO) or is refused below, and never stalls the thread.
-            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW | _NONBLOCK
+            # ONONBLOCK: a FIFO here fails (ENXIO) or is refused below, and never stalls the thread.
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | NOFOLLOW | NONBLOCK
             self._fd = os.open(path, flags, 0o600)
             if not stat.S_ISREG(os.fstat(self._fd).st_mode):
                 raise OSError(errno.EINVAL, "the trace file is not a regular file", path)
-            _fchmod(self._fd, 0o600)  # a file made earlier, or under another umask, is tightened
+            fchmod(self._fd, 0o600)  # a file made earlier, or under another umask, is tightened
             self._day = day
+            self._total = recorded_bytes(self._dir)  # others may have written or purged since
         return self._fd
 
     def _drop_fd(self) -> None:
@@ -432,8 +424,8 @@ class Writer:
         path = os.path.join(self._dir, STATUS_FILE)
         temp = f"{path}.{os.getpid()}.tmp"
         try:
-            _ensure_dir(self._dir)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW
+            ensure_private_dir(self._dir)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | NOFOLLOW
             with os.fdopen(os.open(temp, flags, 0o600), "w", encoding="utf-8") as handle:
                 json.dump(payload, handle)
             os.replace(temp, path)

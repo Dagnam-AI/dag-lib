@@ -86,7 +86,7 @@ def test_a_directory_owned_by_someone_else_is_refused(
     make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / "traces").mkdir()
-    monkeypatch.setattr("dagnam_record._writer._OWNER", os.getuid() + 1)
+    monkeypatch.setattr("dagnam_record._private_dir._OWNER", os.getuid() + 1)
     writer = make()
     writer.submit("secret")
     writer.drain()
@@ -146,7 +146,7 @@ def test_a_directory_is_tightened_through_its_descriptor_not_by_path(
 def test_without_o_directory_a_real_directory_still_works(
     make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("dagnam_record._writer._DIRECTORY", 0)
+    monkeypatch.setattr("dagnam_record._private_dir.DIRECTORY", 0)
     (tmp_path / "traces").mkdir()
     writer = make()
     writer.submit("a")
@@ -159,7 +159,7 @@ def test_without_o_directory_a_real_directory_still_works(
 def test_without_o_directory_a_symlinked_directory_is_still_refused(
     make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("dagnam_record._writer._DIRECTORY", 0)
+    monkeypatch.setattr("dagnam_record._private_dir.DIRECTORY", 0)
     (tmp_path / "elsewhere").mkdir()
     (tmp_path / "traces").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
     writer = make()
@@ -170,7 +170,7 @@ def test_without_o_directory_a_symlinked_directory_is_still_refused(
 def test_without_o_directory_a_file_is_still_refused(
     make: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("dagnam_record._writer._DIRECTORY", 0)
+    monkeypatch.setattr("dagnam_record._private_dir.DIRECTORY", 0)
     (tmp_path / "traces").write_text("a file", encoding="utf-8")
     assert make().counts["dropped_error"] == 1
 

@@ -26,7 +26,8 @@ import re
 import stat
 from typing import Dict, List, Optional, Tuple, Union
 
-from dagnam_record._writer import COUNT_KEYS, STATUS_FILE, as_count, read_status
+from dagnam_record._private_dir import STATUS_FILE, as_count, read_status
+from dagnam_record._writer import COUNT_KEYS
 
 DEFAULT_DIR = "~/.dagnam/traces"
 _DATA_NAME = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})\.jsonl")
