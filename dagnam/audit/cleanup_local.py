@@ -21,6 +21,7 @@ from dagnam.audit.cleanup_kinds import KINDS
 from dagnam.audit.receipt_rows import (
     ALREADY_ABSENT,
     DELETED,
+    KEPT,
     NOT_ANSWERED,
     STOPPED,
     blocked,
@@ -165,14 +166,35 @@ def mark_cancelled(state: AuditState, stopped: Collection[str], gone: Collection
     state.halted = {"reason": RUN_CANCELLED}
 
 
+def record_kept(
+    state: AuditState, rows: Collection[Mapping[str, Any]], *, skip: Collection[str] = ()
+) -> None:
+    """Remember in ``state.kept_ids`` every id the platform kept, and forget the ones it deleted.
+
+    The ids are what later deletes read to leave a kept endpoint and its key alone, so they are
+    recorded from a cancel as well as a delete. An id the platform now says it deleted (its
+    owner stopped keeping it since) is no longer kept. ``skip`` holds ids this client deleted
+    itself.
+    """
+    gone = {str(r.get("id")) for r in rows if r.get("status") in GONE}
+    state.kept_ids = [i for i in state.kept_ids if i not in gone]
+    state.kept_ids += [
+        i
+        for i in dict.fromkeys(str(r.get("id")) for r in rows if r.get("status") == KEPT)
+        if i not in state.kept_ids and i not in skip
+    ]
+
+
 def settle_cancel(state: AuditState, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Record a published cancel's receipt in the state, and return it untouched.
 
     Only a row that says it stopped something marks the local run or endpoint: ``stopped``
     (paused or cancelled) and ``deleted`` / ``already_absent`` (gone). ``already_stopped``,
-    ``kept`` and ``blocked`` mark nothing, so a run that finished stays resumable.
+    ``kept`` and ``blocked`` mark nothing, so a run that finished stays resumable. The ids it
+    kept are recorded (:func:`record_kept`).
     """
     rows = receipt_rows(receipt)
+    record_kept(state, rows)
     mark_cancelled(
         state,
         {str(r.get("id")) for r in rows if r.get("status") == STOPPED and decide(r).marks},
@@ -290,6 +312,7 @@ __all__ = [
     "mark_cancelled",
     "now_iso",
     "receipt_rows",
+    "record_kept",
     "recorded_ids",
     "settle_cancel",
     "unanswered",
