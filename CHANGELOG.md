@@ -23,12 +23,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   its owner chose to (a `kept` row with code `deployment_adopted`): the row is printed as "you chose
   to keep this endpoint", it never fails the command, and the command never stops or deletes that
   endpoint. The deployment key of a kept endpoint (this one, or any other the platform keeps) stays
-  on this machine through every later delete, including a replay after a crash and
-  `--already-deleted`, because a cancel now records what the platform kept as well as a delete; the
-  delete says where the key is and that no dagnam command removes it. The other keys are still
-  removed, and a delete that kept an endpoint no longer says everything was deleted. A platform
-  that does not send the code behaves as before, and a code this version does not know is still
-  shown as sent.
+  on this machine when the audit is deleted. What the platform kept is recorded as soon as its
+  answer arrives, from a cancel as well as a delete and before anything is removed, so the key
+  survives a delete interrupted after that point and a later `--already-deleted`; if the process
+  dies before the platform's answer is recorded and no earlier cancel recorded the keep,
+  `--already-deleted` still removes it. The delete says where the key is and that no dagnam command
+  removes it. The other keys are still removed, and a delete that kept an endpoint no longer says
+  everything was deleted. A platform that does not send the code behaves as before, and a code this
+  version does not know is still shown as sent.
 
 ## [0.22.1] - 2026-10-23
 

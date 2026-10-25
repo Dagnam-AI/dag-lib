@@ -395,22 +395,26 @@ def _kept_untagged_note(audit_dir: Path, receipt: Mapping[str, Any]) -> None:
 
 
 def _retained_keys_note(audit_dir: Path) -> None:
-    """Say, on stderr, that the key of a kept endpoint stays on this machine, and how to remove it."""
-    from dagnam.audit.secrets import SECRETS_FILE
+    """Say, on stderr, where a kept endpoint's key stays on this machine (no command removes it)."""
+    from dagnam.audit.secrets import SECRETS_FILE, SecretStore
     from dagnam.audit.state import load_state
 
     state = load_state(audit_dir)
-    refs = {
-        step.key_ref
-        for step in state.all_steps()
-        if step.key_ref is not None and step.deployment_id in state.kept_ids
-    }
+    refs = sorted(
+        {
+            step.key_ref
+            for step in state.all_steps()
+            if step.key_ref is not None and step.deployment_id in state.kept_ids
+        }
+    )
     if refs:
         many = len(refs) > 1
+        accounts = ", ".join(f'"{SecretStore(audit_dir).account(ref)}"' for ref in refs)
         print(
             f"The deployment {'keys' if many else 'key'} for {len(refs)} kept"
             f" {'endpoints' if many else 'endpoint'} {'stay' if many else 'stays'} on this machine,"
-            f" in your system keyring (service dagnam-audit) or in {SECRETS_FILE} in {audit_dir},"
+            f" in your system keyring (service dagnam-audit, {'accounts' if many else 'account'}"
+            f" {accounts}) or in {SECRETS_FILE} in {audit_dir},"
             f" whichever dagnam stored {'them' if many else 'it'} in."
             f" No dagnam command removes {'them' if many else 'it'}: delete"
             f" {'them' if many else 'it'} yourself once {'they are' if many else 'it is'}"
@@ -488,23 +492,29 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
         if row.get("status") == KEPT and row.get("code") == DEPLOYMENT_ADOPTED
     )
     others = kept - chosen  # a chosen row is a kept row, so this is never negative
-    if others:
+    endpoints = f"{chosen} endpoint{'' if chosen == 1 else 's'} you chose to keep"
+    if others and chosen:
+        print(
+            f"The audit is deleted. Left in place (kept above): {others}"
+            f" {'item' if others == 1 else 'items'} not the audit's to remove, and {endpoints},"
+            " still running.",
+            file=sys.stderr,
+        )
+    elif others:
         print(
             f"Everything the audit created is deleted, except {others}"
             f" {'item' if others == 1 else 'items'} kept on purpose because"
             f" {'it is' if others == 1 else 'they are'} not the audit's to remove (kept above).",
             file=sys.stderr,
         )
-    elif not chosen:
-        print("Everything the audit created is deleted.", file=sys.stderr)
-    if chosen:
-        lead = "" if others else "The audit is deleted. "
-        what = (
-            "1 endpoint you chose to keep was"
-            if chosen == 1
-            else f"{chosen} endpoints you chose to keep were"
+    elif chosen:
+        print(
+            f"The audit is deleted. {endpoints} {'was' if chosen == 1 else 'were'} left running"
+            " (kept above).",
+            file=sys.stderr,
         )
-        print(f"{lead}{what} left running (kept above).", file=sys.stderr)
+    else:
+        print("Everything the audit created is deleted.", file=sys.stderr)
     _retained_keys_note(audit_dir)
 
 
