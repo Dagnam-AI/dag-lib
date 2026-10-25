@@ -21,7 +21,9 @@ from dagnam.audit.cleanup_kinds import KINDS
 from dagnam.audit.receipt_rows import (
     ALREADY_ABSENT,
     DELETED,
+    KEPT,
     NOT_ANSWERED,
+    NOT_CREATED_HERE,
     STOPPED,
     blocked,
     decide,
@@ -165,14 +167,44 @@ def mark_cancelled(state: AuditState, stopped: Collection[str], gone: Collection
     state.halted = {"reason": RUN_CANCELLED}
 
 
+def not_created_here(rows: Collection[Mapping[str, Any]]) -> set[str]:
+    """The ids the platform left alone because the audit did not create them.
+
+    They are not "kept by their owner": the directory that recorded them may still have to
+    delete them itself, so a cancel must not make them kept (see :func:`record_kept`).
+    """
+    return {str(r.get("id")) for r in rows if r.get("code") == NOT_CREATED_HERE}
+
+
+def record_kept(
+    state: AuditState, rows: Collection[Mapping[str, Any]], *, skip: Collection[str] = ()
+) -> None:
+    """Remember in ``state.kept_ids`` every id the platform kept, and forget the ones it deleted.
+
+    The ids are what later deletes read to leave a kept endpoint and its key alone, so they are
+    recorded from a cancel as well as a delete. An id the platform now says it deleted (its
+    owner stopped keeping it since) is no longer kept. ``skip`` holds ids that are not to be
+    recorded: those this client deletes itself, and those the audit never created.
+    """
+    gone = {str(r.get("id")) for r in rows if r.get("status") in GONE}
+    state.kept_ids = [i for i in state.kept_ids if i not in gone]
+    state.kept_ids += [
+        i
+        for i in dict.fromkeys(str(r.get("id")) for r in rows if r.get("status") == KEPT)
+        if i not in state.kept_ids and i not in skip
+    ]
+
+
 def settle_cancel(state: AuditState, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Record a published cancel's receipt in the state, and return it untouched.
 
     Only a row that says it stopped something marks the local run or endpoint: ``stopped``
     (paused or cancelled) and ``deleted`` / ``already_absent`` (gone). ``already_stopped``,
-    ``kept`` and ``blocked`` mark nothing, so a run that finished stays resumable.
+    ``kept`` and ``blocked`` mark nothing, so a run that finished stays resumable. The ids it
+    kept are recorded (:func:`record_kept`).
     """
     rows = receipt_rows(receipt)
+    record_kept(state, rows, skip=not_created_here(rows))
     mark_cancelled(
         state,
         {str(r.get("id")) for r in rows if r.get("status") == STOPPED and decide(r).marks},
@@ -245,15 +277,26 @@ def forget_locally(
     state is marked deleted only when ``settled`` (nothing of the audit's is left on the platform)
     and every local file went. Returns a ``blocked`` row for each local file that is a link, or
     sits behind one, and so was not removed: the next ``audit delete`` finishes it.
+
+    The key of an endpoint the platform kept (its id is in ``state.kept_ids``, e.g. one the
+    owner chose to keep) is never forgotten, whatever ``keep_keys`` says: it is the only way to
+    call an endpoint that is still serving. The other keys go, and so does the file only when it
+    holds none of the kept ones.
     """
     left: list[dict[str, Any]] = []
     if not keep_keys:
         try:
             secrets = SecretStore(audit_dir)
+            held = False
             for step in state.all_steps():
-                if step.key_ref is not None:
+                if step.key_ref is None:
+                    continue
+                if step.deployment_id in state.kept_ids:
+                    held = True
+                else:
                     secrets.forget(step.key_ref)
-            (audit_dir / SECRETS_FILE).unlink(missing_ok=True)
+            if not held:
+                (audit_dir / SECRETS_FILE).unlink(missing_ok=True)
         except UnsafeWorkloadsError as exc:
             left.append(_local_row(LOCAL_KEYS, SECRETS_FILE, exc))
         left += _remove_workloads(audit_dir)
@@ -277,8 +320,10 @@ __all__ = [
     "forget_locally",
     "live",
     "mark_cancelled",
+    "not_created_here",
     "now_iso",
     "receipt_rows",
+    "record_kept",
     "recorded_ids",
     "settle_cancel",
     "unanswered",

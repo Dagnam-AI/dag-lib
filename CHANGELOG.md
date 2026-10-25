@@ -26,6 +26,49 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - A tool call whose arguments are nested too deep to parse as JSON (tens of thousands of brackets)
   no longer raises `RecursionError` while a trace export is read: the arguments stay the text they are.
 
+## [0.23.0] - 2026-10-25
+
+### Added
+
+- `dagnam audit key <audit-dir> <workload>` prints the deployment key of a workload's winning
+  endpoint, so `export DEPLOYMENT_KEY=$(dagnam audit key ./audit extract)` switches an app over.
+  Stdout holds only the key (`--json` adds the workload, deployment id and key reference); exit
+  status 2 means the workload is unknown, has no winner yet, or its key is not stored on this
+  machine (rotate it in the Studio, which invalidates any stored copy).
+- Every `dagnam audit` subcommand's `--help` now ends with a link to its own section of the
+  workload audit docs page (`Docs: https://dagnam.ai/docs/dag-lib/workload-audit#<section>`), and
+  every optional flag's help states its default (`--window`, `--sample-rate`, `--out`,
+  `--price-table`, `--map`, `--workloads`, `--floor`, `--max-credits`). A test over the parser keeps
+  new flags and subcommands from skipping either.
+- `dagnam audit cancel` and `dagnam audit delete` understand an endpoint the platform keeps because
+  its owner chose to (a `kept` row with code `deployment_adopted`): the row is printed as "you chose
+  to keep this endpoint", it never fails the command, and the command never stops or deletes that
+  endpoint. The deployment key of a kept endpoint (this one, or any other the platform keeps) stays
+  on this machine when the audit is deleted. What the platform kept is recorded as soon as its
+  answer arrives, from a cancel as well as a delete and before anything is removed, so the key
+  survives a delete interrupted after that point and a later `--already-deleted`; if the process
+  dies before the platform's answer is recorded and no earlier cancel recorded the keep,
+  `--already-deleted` still removes it. The delete says where the key is and that no dagnam command
+  removes it. The other keys are still removed, and a delete that kept an endpoint no longer says
+  everything was deleted. A platform that does not send the code behaves as before, and a code this
+  version does not know is still shown as sent.
+
+### Fixed
+
+- `dagnam audit scan` no longer ends the usual command-line mistakes in a bare "unexpected error".
+  `--map` on a source that has fixed fields (`langfuse`, `langsmith`, `openai`), a `--map` target
+  that is not a trace field, an export of a file type no reader knows, a missing export file, a
+  directory or an unreadable file given as the export, and a truncated or damaged `.gz` export now
+  print what is wrong (never a cell of your data) and exit 1; a `--map` value that is not
+  `field=column` is a usage error (exit 2) like a bad `--window`. Only those mistakes are printed:
+  every other failure, a stray `ValueError` included, still shows only its type, with the
+  traceback behind `--debug`. The reader raises the new `dagnam.audit.readers.ExportInputError`
+  for the mistakes it used to raise as a plain `ValueError`; it is a `ValueError` (and a
+  `DagnamError`), so code that catches `ValueError` keeps working. A malformed CSV or Parquet file
+  still ends in the bare error.
+- `dagnam audit key --help` now ends with the link to its own section of the workload audit docs
+  (`#dagnam-audit-key`).
+
 ## [0.22.1] - 2026-10-23
 
 ### Fixed

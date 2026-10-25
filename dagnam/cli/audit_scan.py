@@ -12,9 +12,12 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from gzip import BadGzipFile
+import os
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Any
+import zlib
 
 from dagnam.cli.audit_run import fail, resolve_audit_dir
 from dagnam.cli.common import print_next_step
@@ -59,6 +62,12 @@ def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
             raise argparse.ArgumentTypeError(f"--map expects field=column, not {pair!r}")
         mapping[field] = column
     return mapping
+
+
+def parse_map_pair(value: str) -> str:
+    """One ``--map`` pair as argparse sees it: ``field=column`` is kept as typed, else a usage error."""
+    parse_map([value])
+    return value
 
 
 def retired_live(state: AuditState) -> list[tuple[str, str]]:
@@ -125,6 +134,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     itself.
     """
     from dagnam.audit import NoTracesError, scan_export
+    from dagnam.audit.readers import MAPPABLE_SOURCES, ExportInputError
     from dagnam.audit.scan_report import SupersededRunError, write_scan
     from dagnam.audit.state import AuditBusyError, load_state, lock_audit
     from dagnam.audit.workspace import UnsafeWorkloadsError
@@ -133,8 +143,16 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     # user's own choice: it is resolved once here and the real path is used from then on, while
     # a link INSIDE it (in a workload folder, at a file a scan writes) is still refused.
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
+    if column_map and args.source not in MAPPABLE_SOURCES:
+        fail(args, "--map applies to the jsonl and csv sources only")
+    if export.is_dir():
+        fail(args, f"{args.export} is a directory: name the export file")
+    if export.exists() and not os.access(export, os.R_OK):
+        fail(args, f"{args.export} cannot be read: permission denied")
 
     try:
+        # The reads are lazy, so a mistake in the export or the map surfaces anywhere in here:
+        # it is the user's to fix, and says what it is (the catch-all hides the message).
         scan = scan_export(
             export,
             source=args.source,
@@ -145,6 +163,13 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
         )
     except NoTracesError:
         fail(args, f"{args.export}: no traces to audit")
+    except (ExportInputError, FileNotFoundError) as exc:
+        fail(args, str(exc))
+    except (BadGzipFile, EOFError, zlib.error):
+        # Their messages can quote the file's own bytes: say only what is wrong with it.
+        if export.suffix != ".gz":
+            raise
+        fail(args, f"{args.export} is not a complete gzip file: re-export it")
     out.mkdir(parents=True, exist_ok=True)
     try:
         # Not under a live run: a workload it has not reached yet is in no
@@ -171,6 +196,7 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
 __all__ = [
     "cmd_audit_scan",
     "parse_map",
+    "parse_map_pair",
     "parse_sample_rate",
     "parse_window",
     "retired_live",

@@ -17,6 +17,7 @@ ENTRY_SHARED = "registry entry holds versions this audit did not record"
 WEIGHTS_SERVED = "a live deployment serves these weights; delete it, then run the delete again"
 NOT_IN_PROJECT = "not in this audit's project; it was left alone"
 WEIGHTS_KEPT = "the trained weights could not be removed from storage; run the delete again"
+ADOPTED = "the owner chose to keep this endpoint; it was left serving"
 HAS_SERVED = "the deployment has served before and is rolling out again; it was left as it is"
 DATASET_HELD = "Dataset is referenced by a training run and cannot be deleted"
 
@@ -66,6 +67,7 @@ ALREADY_STOPPED_ROW = row("training_job", "job-1", "stopped", "already_stopped")
 IN_USE_ELSEWHERE_ROW = row(
     "dataset", "ds-1", "kept", "in_use_elsewhere", "another training run still uses it"
 )
+ADOPTED_ROW = row("deployment", "dep-1", "kept", "deployment_adopted", ADOPTED)
 NOT_CREATED_HERE_ROW = row("dataset", "ds-9", "kept", "not_created_here", "recorded, not tagged")
 FAILED_ROW = row("dataset", "ds-1", "blocked", "failed", "an internal error in the step")
 HAS_SERVED_ROW = row("deployment", "dep-1", "blocked", "has_served", HAS_SERVED)
