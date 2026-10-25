@@ -32,6 +32,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
   everything was deleted. A platform that does not send the code behaves as before, and a code this
   version does not know is still shown as sent.
 
+### Fixed
+
+- `dagnam audit scan` no longer ends the usual command-line mistakes in a bare "unexpected error".
+  `--map` on a source that has fixed fields (`langfuse`, `langsmith`, `openai`), a `--map` target
+  that is not a trace field, an export of a file type no reader knows, and a missing export file
+  now print what is wrong and exit 1; a `--map` value that is not `field=column` is a usage error
+  (exit 2) like a bad `--window`. Errors that are not the user's mistake still show only their
+  type, with the traceback behind `--debug`.
+- `dagnam audit key --help` now ends with the link to its own section of the workload audit docs
+  (`#dagnam-audit-key`).
+
 ## [0.22.1] - 2026-10-23
 
 ### Fixed

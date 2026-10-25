@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from dagnam.audit.state import AuditState
 
 
+MAPPABLE_SOURCES = ("jsonl", "csv")
+"""The sources whose columns ``--map`` can rename; the others have a fixed format."""
+
+
 def parse_window(value: str) -> int:
     """``30d`` or ``30`` -> 30; anything else is a usage error."""
     digits = value[:-1] if value.endswith("d") else value
@@ -60,6 +64,12 @@ def parse_map(pairs: Sequence[str] | None) -> dict[str, str] | None:
             raise argparse.ArgumentTypeError(f"--map expects field=column, not {pair!r}")
         mapping[field] = column
     return mapping
+
+
+def parse_map_pair(value: str) -> str:
+    """One ``--map`` pair as argparse sees it: ``field=column`` is kept as typed, else a usage error."""
+    parse_map([value])
+    return value
 
 
 def retired_live(state: AuditState) -> list[tuple[str, str]]:
@@ -140,17 +150,24 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
     # user's own choice: it is resolved once here and the real path is used from then on, while
     # a link INSIDE it (in a workload folder, at a file a scan writes) is still refused.
     out, export, column_map = resolve_audit_dir(args.out), Path(args.export), parse_map(args.map)
+    if column_map and args.source not in MAPPABLE_SOURCES:
+        fail(args, "--map applies to the jsonl and csv sources only")
 
     def records() -> Iterator[TraceRecord]:
         return read_traces(export, source=args.source, column_map=column_map)[0]
 
-    found = discover_workloads(records(), window_days=args.window, sample_rate=args.sample_rate)
-    if not found:
-        fail(args, f"{args.export}: no traces to audit")
-    table = PriceTable.load(Path(args.price_table) if args.price_table else None)
-    workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
-    audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
-    datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
+    try:
+        # The reads are lazy, so a mistake in the export or the map surfaces anywhere in here:
+        # it is the user's to fix, and says what it is (the catch-all hides the message).
+        found = discover_workloads(records(), window_days=args.window, sample_rate=args.sample_rate)
+        if not found:
+            fail(args, f"{args.export}: no traces to audit")
+        table = PriceTable.load(Path(args.price_table) if args.price_table else None)
+        workloads = by_spend(price_workload(w, table) for w in found)  # sorted once priced
+        audited = [w for w in workloads if replaceability(w).status in AUDITED_VERDICTS]
+        datasets = derive_workloads(records, audited, max_seq_length=MAX_SEQ_LENGTH)
+    except (ValueError, FileNotFoundError) as exc:
+        fail(args, str(exc))
     out.mkdir(parents=True, exist_ok=True)
     try:
         # Not under a live run: a workload it has not reached yet is in no
@@ -177,8 +194,10 @@ def cmd_audit_scan(args: argparse.Namespace) -> None:
 
 
 __all__ = [
+    "MAPPABLE_SOURCES",
     "cmd_audit_scan",
     "parse_map",
+    "parse_map_pair",
     "parse_sample_rate",
     "parse_window",
     "retired_live",
