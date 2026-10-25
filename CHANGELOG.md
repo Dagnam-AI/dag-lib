@@ -19,6 +19,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
   every optional flag's help states its default (`--window`, `--sample-rate`, `--out`,
   `--price-table`, `--map`, `--workloads`, `--floor`, `--max-credits`). A test over the parser keeps
   new flags and subcommands from skipping either.
+- `dagnam audit cancel` and `dagnam audit delete` understand an endpoint the platform keeps because
+  its owner chose to (a `kept` row with code `deployment_adopted`): the row is printed as "you chose
+  to keep this endpoint", it never fails the command, and the command never stops or deletes that
+  endpoint. After a delete, the deployment key of a kept endpoint stays on this machine (it is the
+  only way to call it); the other keys are still removed. A platform that does not send the code
+  behaves as before, and a code this version does not know is still shown as sent.
 
 ## [0.22.1] - 2026-10-23
 

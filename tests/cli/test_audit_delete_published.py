@@ -123,6 +123,54 @@ def test_what_the_platform_keeps_on_purpose_is_not_deleted_and_is_not_a_failed_d
     ] == ["project proj-1", "model_entry entry-2", "model_version mv-2"]
 
 
+def test_an_endpoint_the_owner_chose_to_keep_is_said_plainly_and_is_not_a_failed_delete(
+    run_cli: CliRunner, published: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    fake = _platform(
+        monkeypatch, r.designed(r.row("training_job", "job-1", "deleted"), r.ADOPTED_ROW)
+    )
+
+    assert run_cli(["audit", "delete", str(published), "--yes"]) == 0
+
+    assert fake.call_log == [("delete_audit", "audit-1")]  # never stopped or deleted from here
+    captured = capsys.readouterr()
+    assert (
+        "deployment dep-1: kept [deployment_adopted] (you chose to keep this endpoint)"
+        in captured.out
+    )
+    last = " ".join(captured.err.split())
+    assert "1 endpoint you chose to keep was left running" in last
+    assert "not the audit's to remove" not in last  # the other kept-row sentence is not for it
+    assert "Everything the audit created is deleted: 1 endpoint" in last
+    assert "its deployment key stays on this machine" in last
+    assert load_state(published).halted == {"reason": "deleted"}
+
+
+def test_an_endpoint_kept_by_choice_and_one_not_the_audits_each_get_their_own_sentence(
+    run_cli: CliRunner, published: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    _platform(monkeypatch, r.designed(r.ADOPTED_ROW, r.PROJECT_NOT_OURS_ROW))
+
+    assert run_cli(["audit", "delete", str(published), "--yes"]) == 0
+
+    last = " ".join(capsys.readouterr().err.split())
+    assert "except 1 item kept on purpose because it is not the audit's to remove" in last
+    assert "1 endpoint you chose to keep was left running" in last
+
+
+def test_several_endpoints_kept_by_choice_are_counted(
+    run_cli: CliRunner, published: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
+) -> None:
+    second = r.row("deployment", "dep-2", "kept", "deployment_adopted", r.ADOPTED)
+    _platform(monkeypatch, r.designed(r.ADOPTED_ROW, second))
+
+    assert run_cli(["audit", "delete", str(published), "--yes"]) == 0
+
+    last = " ".join(capsys.readouterr().err.split())
+    assert "2 endpoints you chose to keep were left running" in last
+    assert "their deployment keys stay on this machine" in last
+
+
 def test_a_resource_of_the_audit_left_behind_still_fails_beside_what_was_kept(
     run_cli: CliRunner, published: Path, capsys: StrCapture, monkeypatch: PytestMonkeyPatch
 ) -> None:

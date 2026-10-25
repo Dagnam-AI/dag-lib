@@ -76,11 +76,17 @@ def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
     ``code`` that says something the status does not is shown beside it, as sent.
     """
     from dagnam.audit.cleanup import receipt_rows
+    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED
+
+    words = {
+        DEPLOYMENT_ADOPTED: "you chose to keep this endpoint"
+    }  # a sentence for a code worth one
 
     def line(row: Mapping[str, Any]) -> str:
         code = row.get("code")
         tag = f" [{code}]" if code and code != row.get("status") else ""
-        reason = f" ({row['reason']})" if row.get("reason") else ""
+        said = words.get(str(code)) or row.get("reason")
+        reason = f" ({said})" if said else ""
         served = " (was serving)" if row.get("was_serving") is True else ""
         return (
             f"{row.get('kind', '?')} {row.get('id', '?')}: {row.get('status', '?')}{tag}"
@@ -400,7 +406,8 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
     audit, NOTHING local is removed and the next ``audit delete`` finishes it.
     """
     from dagnam._core.exceptions import EndpointsServingError
-    from dagnam.audit.cleanup import DELETED_FILE, delete_audit
+    from dagnam.audit.cleanup import DELETED_FILE, delete_audit, receipt_rows
+    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED
     from dagnam.audit.state import AuditBusyError, lock_audit
     from dagnam.audit.workspace import UnsafeWorkloadsError
 
@@ -452,15 +459,29 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
             hint=f"dagnam audit delete {audit_dir} --yes"
             + (" --include-endpoints" if args.include_endpoints else ""),
         )
-    if kept:
+    chosen = sum(1 for row in receipt_rows(receipt) if row.get("code") == DEPLOYMENT_ADOPTED)
+    others = kept - chosen
+    if others:
         print(
-            f"Everything the audit created is deleted, except {kept}"
-            f" {'item' if kept == 1 else 'items'} kept on purpose because"
-            f" {'it is' if kept == 1 else 'they are'} not the audit's to remove (kept above).",
+            f"Everything the audit created is deleted, except {others}"
+            f" {'item' if others == 1 else 'items'} kept on purpose because"
+            f" {'it is' if others == 1 else 'they are'} not the audit's to remove (kept above).",
             file=sys.stderr,
         )
-    else:
+    elif not chosen:
         print("Everything the audit created is deleted.", file=sys.stderr)
+    if chosen:
+        head = (
+            "Everything else the audit created is deleted"
+            if others
+            else "Everything the audit created is deleted"
+        )
+        tail = (
+            f"{chosen} endpoints you chose to keep were left running (kept above); their deployment keys stay on this machine."
+            if chosen > 1
+            else "1 endpoint you chose to keep was left running (kept above); its deployment key stays on this machine."
+        )
+        print(f"{head}: {tail}", file=sys.stderr)
 
 
 __all__ = ["cmd_audit_cancel", "cmd_audit_delete"]

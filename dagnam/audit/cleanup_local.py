@@ -245,15 +245,26 @@ def forget_locally(
     state is marked deleted only when ``settled`` (nothing of the audit's is left on the platform)
     and every local file went. Returns a ``blocked`` row for each local file that is a link, or
     sits behind one, and so was not removed: the next ``audit delete`` finishes it.
+
+    The key of an endpoint the platform kept (its id is in ``state.kept_ids``, e.g. one the
+    owner chose to keep) is never forgotten, whatever ``keep_keys`` says: it is the only way to
+    call an endpoint that is still serving. The other keys go, and so does the file only when it
+    holds none of the kept ones.
     """
     left: list[dict[str, Any]] = []
     if not keep_keys:
         try:
             secrets = SecretStore(audit_dir)
+            held = False
             for step in state.all_steps():
-                if step.key_ref is not None:
+                if step.key_ref is None:
+                    continue
+                if step.deployment_id in state.kept_ids:
+                    held = True
+                else:
                     secrets.forget(step.key_ref)
-            (audit_dir / SECRETS_FILE).unlink(missing_ok=True)
+            if not held:
+                (audit_dir / SECRETS_FILE).unlink(missing_ok=True)
         except UnsafeWorkloadsError as exc:
             left.append(_local_row(LOCAL_KEYS, SECRETS_FILE, exc))
         left += _remove_workloads(audit_dir)
