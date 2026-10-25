@@ -76,16 +76,14 @@ def _render_receipt(receipt: Mapping[str, Any], path: Path) -> str:
     ``code`` that says something the status does not is shown beside it, as sent.
     """
     from dagnam.audit.cleanup import receipt_rows
-    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED
-
-    words = {
-        DEPLOYMENT_ADOPTED: "you chose to keep this endpoint"
-    }  # a sentence for a code worth one
+    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED, KEPT
 
     def line(row: Mapping[str, Any]) -> str:
         code = row.get("code")
         tag = f" [{code}]" if code and code != row.get("status") else ""
-        said = words.get(str(code)) or row.get("reason")
+        # A plain sentence for the one code worth it; every other row shows the reason as sent.
+        chosen = row.get("status") == KEPT and code == DEPLOYMENT_ADOPTED
+        said = "you chose to keep this endpoint" if chosen else row.get("reason")
         reason = f" ({said})" if said else ""
         served = " (was serving)" if row.get("was_serving") is True else ""
         return (
@@ -396,6 +394,31 @@ def _kept_untagged_note(audit_dir: Path, receipt: Mapping[str, Any]) -> None:
         )
 
 
+def _retained_keys_note(audit_dir: Path) -> None:
+    """Say, on stderr, that the key of a kept endpoint stays on this machine, and how to remove it."""
+    from dagnam.audit.secrets import SECRETS_FILE
+    from dagnam.audit.state import load_state
+
+    state = load_state(audit_dir)
+    refs = {
+        step.key_ref
+        for step in state.all_steps()
+        if step.key_ref is not None and step.deployment_id in state.kept_ids
+    }
+    if refs:
+        many = len(refs) > 1
+        print(
+            f"The deployment {'keys' if many else 'key'} for {len(refs)} kept"
+            f" {'endpoints' if many else 'endpoint'} {'stay' if many else 'stays'} on this machine,"
+            f" in your system keyring (service dagnam-audit) or in {SECRETS_FILE} in {audit_dir},"
+            f" whichever dagnam stored {'them' if many else 'it'} in."
+            f" No dagnam command removes {'them' if many else 'it'}: delete"
+            f" {'them' if many else 'it'} yourself once {'they are' if many else 'it is'}"
+            " no longer needed.",
+            file=sys.stderr,
+        )
+
+
 def cmd_audit_delete(args: argparse.Namespace) -> None:
     """Delete an audit: the platform deletes what is the audit's own; an unpublished one is deleted here.
 
@@ -407,7 +430,7 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
     """
     from dagnam._core.exceptions import EndpointsServingError
     from dagnam.audit.cleanup import DELETED_FILE, delete_audit, receipt_rows
-    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED
+    from dagnam.audit.receipt_rows import DEPLOYMENT_ADOPTED, KEPT
     from dagnam.audit.state import AuditBusyError, lock_audit
     from dagnam.audit.workspace import UnsafeWorkloadsError
 
@@ -459,8 +482,12 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
             hint=f"dagnam audit delete {audit_dir} --yes"
             + (" --include-endpoints" if args.include_endpoints else ""),
         )
-    chosen = sum(1 for row in receipt_rows(receipt) if row.get("code") == DEPLOYMENT_ADOPTED)
-    others = kept - chosen
+    chosen = sum(
+        1
+        for row in receipt_rows(receipt)
+        if row.get("status") == KEPT and row.get("code") == DEPLOYMENT_ADOPTED
+    )
+    others = kept - chosen  # a chosen row is a kept row, so this is never negative
     if others:
         print(
             f"Everything the audit created is deleted, except {others}"
@@ -471,17 +498,14 @@ def cmd_audit_delete(args: argparse.Namespace) -> None:
     elif not chosen:
         print("Everything the audit created is deleted.", file=sys.stderr)
     if chosen:
-        head = (
-            "Everything else the audit created is deleted"
-            if others
-            else "Everything the audit created is deleted"
+        lead = "" if others else "The audit is deleted. "
+        what = (
+            "1 endpoint you chose to keep was"
+            if chosen == 1
+            else f"{chosen} endpoints you chose to keep were"
         )
-        tail = (
-            f"{chosen} endpoints you chose to keep were left running (kept above); their deployment keys stay on this machine."
-            if chosen > 1
-            else "1 endpoint you chose to keep was left running (kept above); its deployment key stays on this machine."
-        )
-        print(f"{head}: {tail}", file=sys.stderr)
+        print(f"{lead}{what} left running (kept above).", file=sys.stderr)
+    _retained_keys_note(audit_dir)
 
 
 __all__ = ["cmd_audit_cancel", "cmd_audit_delete"]
