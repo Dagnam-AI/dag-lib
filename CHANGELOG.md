@@ -7,9 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-25
+
 ### Platform compatibility
 
-- The next release redacts with `dagnam-contracts` 0.5. Against a platform still running an older
+- dagnam 0.24.0 redacts with `dagnam-contracts` 0.5. Against a platform still running an older
   contract, `dagnam audit run` refuses to start: connect to a platform that runs contract 0.5 or newer.
 
 ### Added
