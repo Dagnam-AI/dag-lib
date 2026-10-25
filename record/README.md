@@ -160,9 +160,9 @@ The `dagnam` command line reads it:
 dagnam audit scan --source dagnam ~/.dagnam/traces/2026-10-24.jsonl
 ```
 
-The `dagnam` source arrives with the first `dagnam` release after 0.22.1. If `dagnam audit scan
---help` does not list `dagnam` among the sources, upgrade `dagnam` first. The reader takes one file;
-to scan several days, join them: `cat ~/.dagnam/traces/*.jsonl > traces.jsonl`. Only calls that
+The `dagnam` source arrives in `dagnam` 0.24.0. If `dagnam audit scan --help` does not list `dagnam`
+among the sources, upgrade `dagnam` first. The reader takes one file, or a folder: given
+`~/.dagnam/traces` it reads every `.jsonl` and `.jsonl.gz` file in it, in name order. Only calls that
 returned HTTP 200 are used. The scan itself makes no network call; `dagnam audit run` is the step
 that uploads the rows it derived, after you confirm.
 
