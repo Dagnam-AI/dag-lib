@@ -381,6 +381,13 @@ def _status(value: object) -> int:
     return value
 
 
+def _serialize(body: Body) -> str:
+    """The compact JSON of ``body``, one physical line even for a reader that splits on U+2028."""
+    line = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    # JSON allows these in a string, but ``str.splitlines()`` breaks a line at each of them.
+    return line.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029").replace("\x85", "\\u0085")
+
+
 def _build(
     provider: Any,
     endpoint: Any,
@@ -416,7 +423,12 @@ def _build(
         body["request"], body["response"] = request, response
     if norm is not None:
         body["norm"], body["norm_v"] = norm(request, response), NORM_VERSION
-    line = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    line = _serialize(body)
+    if len(line.encode("utf-8")) > MAX_LINE_BYTES and "norm" in body and not no_raw:
+        # The raw bodies say everything norm does (a reader derives it from them), and norm
+        # repeats the prompt: a long prompt fits once, so keep the raw bodies alone.
+        del body["norm"], body["norm_v"]
+        line = _serialize(body)
     if len(line.encode("utf-8")) > MAX_LINE_BYTES:  # a lone surrogate also raises here
         raise LineTooLargeError(f"line exceeds {MAX_LINE_BYTES} bytes")
     return line

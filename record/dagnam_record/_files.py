@@ -77,8 +77,16 @@ class Summary:
 
 
 def resolve(directory: str) -> str:
-    """The absolute path of ``directory`` (``~`` expanded; symlinks are not followed here)."""
-    return os.path.abspath(os.path.expanduser(directory))
+    """The absolute path of ``directory`` (``~`` expanded; symlinks are not followed here).
+
+    A ``~`` that cannot be expanded (no ``HOME`` and no passwd entry, as in a container run
+    under an arbitrary uid) raises ``ValueError``: left alone it would become a folder named
+    ``~`` in the current directory.
+    """
+    expanded = os.path.expanduser(directory)
+    if expanded.startswith("~"):
+        raise ValueError(f"cannot expand ~ in {directory!r}: the home directory is not known")
+    return os.path.abspath(expanded)
 
 
 def _real_date(name: str) -> bool:

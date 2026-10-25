@@ -65,6 +65,7 @@ class MessageAssembler:
     """Fold ``message_start`` .. ``message_stop`` events into one message body."""
 
     def __init__(self) -> None:
+        self.size = 0  # characters of text, thinking and tool-input pieces kept so far
         self._head: Optional[Body] = None  # the message of message_start, no content
         self._usage: Body = {}
         self._blocks: Dict[int, Body] = {}
@@ -120,6 +121,7 @@ class MessageAssembler:
         field = _PIECES.get(str(kind))  # the delta's text lives under the key of the same name
         if field is not None and isinstance(get(delta, field), str):
             self._pieces.setdefault(index, {}).setdefault(field, []).append(get(delta, field))
+            self.size += len(get(delta, field))
         elif kind == "signature_delta" and isinstance(get(delta, "signature"), str):
             block["signature"] = get(delta, "signature")  # one piece, as the SDK takes it
         elif kind == "citations_delta":

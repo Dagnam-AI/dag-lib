@@ -36,6 +36,10 @@ def _err(text: str) -> None:
 def _directory(value: str) -> str:
     if not value.strip():
         raise argparse.ArgumentTypeError("the directory must not be empty")
+    try:
+        resolve(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
     return value
 
 

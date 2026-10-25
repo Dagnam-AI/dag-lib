@@ -26,6 +26,7 @@ class ChatAssembler:
     status = 200
 
     def __init__(self) -> None:
+        self.size = 0  # characters of text kept so far (content, tool arguments, transcripts)
         self._head: Body = {}
         self._choices: Dict[int, Body] = {}
         self._usage: Any = None
@@ -59,14 +60,16 @@ class ChatAssembler:
         for key in ("content", "refusal"):
             if isinstance(get(delta, key), str):
                 slot[key].append(get(delta, key))
+                self.size += len(get(delta, key))
         for call in get(delta, "tool_calls") or []:
-            self._add_to(slot["calls"], self._call_index(slot, call), call)
+            self.size += self._add_to(slot["calls"], self._call_index(slot, call), call)
         if get(delta, "function_call") is not None:
-            self._add_to(slot["calls"], -1, {"function": get(delta, "function_call")})
+            self.size += self._add_to(slot["calls"], -1, {"function": get(delta, "function_call")})
         if get(delta, "audio") is not None:
             audio = slot.setdefault("audio", {"id": None, "transcript": [], "bytes": 0})
             audio["id"] = get(get(delta, "audio"), "id") or audio["id"]
             audio["transcript"].append(get(get(delta, "audio"), "transcript") or "")
+            self.size += len(audio["transcript"][-1])
             audio["bytes"] += len(get(get(delta, "audio"), "data") or "")
 
     @staticmethod
@@ -94,12 +97,15 @@ class ChatAssembler:
         return index
 
     @staticmethod
-    def _add_to(calls: Dict[int, Body], index: int, delta: Any) -> None:
+    def _add_to(calls: Dict[int, Body], index: int, delta: Any) -> int:
+        """Add a tool call delta; the characters it added."""
         call = calls.setdefault(index, _new_call())
         call["id"] = get(delta, "id") or call["id"]
         function = get(delta, "function")
-        call["name"] += get(function, "name") or ""
-        call["arguments"] += get(function, "arguments") or ""
+        name, arguments = get(function, "name") or "", get(function, "arguments") or ""
+        call["name"] += name
+        call["arguments"] += arguments
+        return len(name) + len(arguments)
 
     def result(self) -> Body:
         """The assembled response body."""
@@ -146,6 +152,8 @@ class ChatAssembler:
 
 class ResponsesAssembler:
     """Keep the terminal ``response.*`` event of a Responses stream: it carries the whole response."""
+
+    size = 0  # nothing builds up: only the last event is kept
 
     def __init__(self) -> None:
         self._kind: Optional[str] = None

@@ -376,3 +376,20 @@ def test_a_relative_directory_is_fixed_when_install_runs(
     (line,) = finish_lines(first / "traces")
     assert line["request"]["prompt"] == "hello"
     assert not (second / "traces").exists()
+
+
+def test_install_refuses_a_tilde_it_cannot_expand_and_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pwd = pytest.importorskip("pwd")
+    monkeypatch.delenv("HOME", raising=False)
+
+    def unknown(uid: int) -> Any:
+        raise KeyError(uid)
+
+    monkeypatch.setattr(pwd, "getpwuid", unknown)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="home directory"):
+        dagnam_record.install()  # the default directory is ~/.dagnam/traces
+    assert not dagnam_record.is_installed()
+    assert list(tmp_path.iterdir()) == []

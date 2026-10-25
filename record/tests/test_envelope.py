@@ -177,3 +177,66 @@ def test_an_already_omitted_part_still_marks_the_call_multimodal() -> None:
     assert norm_openai_chat(request, {})["has_media"] is True
     plain = {"messages": [{"role": "user", "content": [{"type": "text", "text": "x"}], "n": 1}]}
     assert norm_openai_chat(plain, {})["has_media"] is False
+
+
+@pytest.mark.parametrize("separator", [chr(0x2028), chr(0x2029), chr(0x85)])
+def test_the_unicode_line_separators_are_escaped_so_one_call_is_one_line(
+    separator: str, validate_line: Any
+) -> None:
+    text = f"before{separator}after"
+    line = build_line(
+        provider="openai",
+        endpoint="chat.completions",
+        request={"messages": [{"role": "user", "content": text}]},
+        response={},
+        latency_ms=1,
+    )
+    assert len(line.splitlines()) == 1  # what a reader that uses str.splitlines() sees
+    assert separator not in line
+    validate_line(line)
+    assert json.loads(line)["request"]["messages"][0]["content"] == text  # the same text back
+
+
+PROMPT = "word " * 140_000  # 700 KB: raw plus norm is over the limit, raw alone is not
+
+
+def test_a_long_prompt_keeps_its_raw_bodies_and_drops_the_normalized_copy(
+    validate_line: Any,
+) -> None:
+    line = build_line(
+        provider="openai",
+        endpoint="chat.completions",
+        request={"messages": [{"role": "user", "content": PROMPT}]},
+        response={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+        latency_ms=1,
+    )
+    validate_line(line)
+    body = json.loads(line)
+    assert body["request"]["messages"][0]["content"] == PROMPT
+    assert "norm" not in body
+    assert "norm_v" not in body
+
+
+def test_a_prompt_that_fits_with_its_normalized_copy_keeps_both() -> None:
+    body = json.loads(
+        build_line(
+            provider="openai",
+            endpoint="chat.completions",
+            request={"messages": [{"role": "user", "content": PROMPT[:100_000]}]},
+            response={},
+            latency_ms=1,
+        )
+    )
+    assert body["norm"]["messages"][0]["content"] == PROMPT[:100_000]
+
+
+def test_without_raw_there_is_nothing_to_fall_back_to() -> None:
+    with pytest.raises(ValueError, match="1000000"):
+        build_line(
+            provider="openai",
+            endpoint="chat.completions",
+            request={"messages": [{"role": "user", "content": "x" * 1_100_000}]},
+            response={},
+            latency_ms=1,
+            no_raw=True,
+        )

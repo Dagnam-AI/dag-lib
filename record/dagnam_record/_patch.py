@@ -19,6 +19,7 @@ import logging
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from dagnam_record._envelope import MAX_LINE_BYTES
 from dagnam_record._recorder import Recorder, recording_disabled
 from dagnam_record._stream import (
     AsyncTeeStream,
@@ -34,6 +35,8 @@ Build = Callable[[Callable[..., Any]], Callable[..., Any]]
 Plan = Tuple[Any, str, Build]
 """``(class, method name, build)``: ``build(the SDK's function)`` makes the wrapper."""
 MARKER = "__dagnam_record__"
+MAX_STREAM_CHARS = MAX_LINE_BYTES
+"""More text than this in one stream cannot fit a line, so the stream is let go at this point."""
 
 
 def import_failed(name: str, exc: Exception) -> None:
@@ -73,14 +76,22 @@ class Watcher:
         self._request = request
         self._started = started
         self._assembler = patcher.assembler(endpoint)
+        self._oversized = False
 
     def item(self, value: Any) -> None:
-        """One event of the stream."""
+        """One event of the stream; past ``MAX_STREAM_CHARS`` of text the stream is let go."""
+        if self._oversized:
+            return
         self._assembler.add(value)
+        if self._assembler.size > MAX_STREAM_CHARS:
+            self._oversized = True  # the line would be dropped anyway: keep no more of it
+            self._assembler = self._patcher.assembler(self._endpoint)  # an empty one frees the text
 
     def done(self) -> None:
         """The recorder is done with the stream: write it if it finished, else count it."""
-        if self._assembler.complete:
+        if self._oversized:
+            self._recorder.writer.count("dropped_large")
+        elif self._assembler.complete:
             self._recorder.emit(
                 self._patcher.provider,
                 self._endpoint,
@@ -94,7 +105,7 @@ class Watcher:
 
     def error(self, exc: BaseException) -> None:
         """The stream raised. After its end marker the answer is complete and is recorded as such."""
-        if self._assembler.complete:
+        if self._oversized or self._assembler.complete:
             self.done()
         else:
             self._patcher.record_error(
@@ -103,7 +114,7 @@ class Watcher:
 
     def cancelled(self) -> None:
         """The stream was interrupted or cancelled: a complete answer is still kept."""
-        if self._assembler.complete:
+        if self._oversized or self._assembler.complete:
             self.done()
         else:
             self._patcher.cancelled(self._recorder)
@@ -129,7 +140,8 @@ class Patcher:
         self.status_of = status_of
         self.in_place = in_place  # watch the SDK's own stream object, not a proxy of it
         self.recorder: Optional[Recorder] = None  # None: the wrappers pass straight through
-        self._patched: List[Tuple[Any, str, Any]] = []  # (class, method name, the SDK's function)
+        # (class, method name, the SDK's function, our wrapper)
+        self._patched: List[Tuple[Any, str, Any, Any]] = []
 
     def snapshot(self, recorder: Recorder, kwargs: Dict[str, Any]) -> Optional[Body]:
         """The request as plain JSON now, or ``None`` (already counted) if it cannot be taken."""
@@ -306,7 +318,7 @@ class Patcher:
                 wrapper = build(original)
                 setattr(wrapper, MARKER, True)
                 setattr(cls, method, wrapper)
-                self._patched.append((cls, method, original))
+                self._patched.append((cls, method, original, wrapper))
         return found
 
     def install(self, recorder: Recorder, plan: Iterable[Plan]) -> bool:
@@ -320,9 +332,15 @@ class Patcher:
         return patched
 
     def uninstall(self) -> None:
-        """Put the SDK's own methods back and stop recording."""
+        """Put the SDK's own methods back and stop recording.
+
+        A method that another library has wrapped since is left as it is: putting the SDK's
+        function back would remove that library's patch. Our wrapper under it is inert once the
+        recorder is gone (it passes every call straight through).
+        """
         deliver_pending()
         self.recorder = None
         while self._patched:
-            cls, method, original = self._patched.pop()
-            setattr(cls, method, original)
+            cls, method, original, wrapper = self._patched.pop()
+            if cls.__dict__.get(method) is wrapper:
+                setattr(cls, method, original)

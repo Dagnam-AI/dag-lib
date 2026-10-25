@@ -309,3 +309,19 @@ def test_a_status_file_without_counts_and_a_dated_log_survive_a_purge(
     assert (code, out) == (1, "")
     assert "holds no recorder file" in err
     assert sorted(path.name for path in tmp_path.iterdir()) == [".status.json", "2026-02-02.jsonl"]
+
+
+def test_a_tilde_that_cannot_be_expanded_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pwd = pytest.importorskip("pwd")
+    monkeypatch.delenv("HOME", raising=False)
+
+    def unknown(uid: int) -> Any:
+        raise KeyError(uid)
+
+    monkeypatch.setattr(pwd, "getpwuid", unknown)
+    with pytest.raises(SystemExit) as stopped:
+        _cli.main(["status"])  # the default directory starts with ~
+    assert stopped.value.code == 2
+    assert "home directory" in capsys.readouterr().err

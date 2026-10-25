@@ -12,7 +12,7 @@ from _api_support import envelope, write_data
 import pytest
 
 from dagnam_record import _files
-from dagnam_record._files import NotRecorderDirectoryError
+from dagnam_record._files import NotRecorderDirectoryError, resolve
 from dagnam_record._writer import COUNT_KEYS
 
 POSIX_ONLY = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX files")
@@ -370,3 +370,21 @@ def test_purge_reports_files_it_could_not_delete_and_ignores_ones_already_gone(
         ["2026-10-13.jsonl"],
         [("2026-10-11.jsonl", "Permission denied")],
     )
+
+
+def test_a_tilde_that_cannot_be_expanded_is_refused_not_made_a_folder_of_that_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An arbitrary-uid container: no HOME, and no passwd entry to fall back to.
+    monkeypatch.delenv("HOME", raising=False)
+    pwd = pytest.importorskip("pwd")
+
+    def unknown(uid: int) -> Any:
+        raise KeyError(uid)
+
+    monkeypatch.setattr(pwd, "getpwuid", unknown)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="home directory"):
+        resolve("~/.dagnam/traces")
+    assert resolve("plain/relative") == str(tmp_path / "plain" / "relative")
+    assert not (tmp_path / "~").exists()
