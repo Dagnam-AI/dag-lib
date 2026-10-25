@@ -439,7 +439,10 @@ typecheck = { cmd = "pyright", help = "Static type check (pyright, strict)" }
 lint-imports = { cmd = "lint-imports", help = "Verify the layer-first import contract" }
 test = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
 test-cov = { cmd = "pytest tests -q -n 4 --dist=loadfile --cov=dagnam --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
-audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\"", help = "Audit Python dependencies for known vulnerabilities" }
+# Accepted until 2026-12-01: the three filelock advisories concern ReadWriteLock and SoftFileLock;
+# dagnam only uses plain FileLock (audit/state.py, data/cache.py). Their fix is filelock 4.x, which
+# stops removing lock files and changes what users find in an audit or cache directory.
+audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\" --ignore-vuln GHSA-v4x8-3wr5-3wq8 --ignore-vuln GHSA-9vhv-jxww-xfm5 --ignore-vuln GHSA-567q-5qvw-pf92", help = "Audit Python dependencies for known vulnerabilities" }
 build = { cmd = "uv build", help = "Build the source distribution and wheel" }
 check = { sequence = [
     "lint",
