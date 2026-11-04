@@ -1,6 +1,6 @@
 """The recorder against SDKs it was not tested with: other versions, partial installs, renames.
 
-``openai>=1.66,<3`` and ``anthropic>=0.40,<1`` are the tested ranges (see ``_compat``). Outside
+``openai>=1.66,<4`` and ``anthropic>=0.40,<3`` are the tested ranges (see ``_compat``). Outside
 them the recorder writes the normalized form only and says so once; whatever else is wrong with
 an SDK, ``install`` still returns and the program's calls still work.
 """
@@ -66,7 +66,7 @@ def test_the_versions_in_use_are_saved_and_the_raw_bodies_are_kept_inside_the_ra
     assert all("request" in line and "response" in line and "norm" in line for line in lines)
 
 
-@pytest.mark.parametrize("version", ["0.28.1", "1.65.0", "3.0.0", "unreadable"])
+@pytest.mark.parametrize("version", ["0.28.1", "1.65.0", "4.0.0", "unreadable"])
 def test_an_openai_outside_the_range_is_recorded_as_norm_only_and_said_once(
     version: str,
     tmp_path: Path,
@@ -94,7 +94,7 @@ def test_an_openai_outside_the_range_is_recorded_as_norm_only_and_said_once(
 def test_an_anthropic_outside_the_range_is_norm_only_and_openai_is_not(
     tmp_path: Path, mock_server: MockServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(anthropic, "__version__", "1.0.0")
+    monkeypatch.setattr(anthropic, "__version__", "3.0.0")
     dagnam_record.install(dir=str(tmp_path / "t"))
     run_call("openai ok", mock_server)
     run_call("anthropic ok", mock_server)
@@ -108,10 +108,11 @@ def test_an_anthropic_outside_the_range_is_norm_only_and_openai_is_not(
 def test_the_tested_range_follows_the_declared_bounds() -> None:
     assert _compat.in_range("1.66.0", _compat.OPENAI)
     assert not _compat.in_range("1.65.99", _compat.OPENAI)
-    assert _compat.in_range("2.99.0", _compat.OPENAI)
-    assert not _compat.in_range("3.0.0", _compat.OPENAI)
+    assert _compat.in_range("3.99.0", _compat.OPENAI)
+    assert not _compat.in_range("4.0.0", _compat.OPENAI)
     assert _compat.in_range("0.40.0", _compat.ANTHROPIC)
-    assert not _compat.in_range("1.0.0", _compat.ANTHROPIC)
+    assert _compat.in_range("2.99.0", _compat.ANTHROPIC)
+    assert not _compat.in_range("3.0.0", _compat.ANTHROPIC)
 
 
 class Broken(importlib.abc.MetaPathFinder, importlib.abc.Loader):

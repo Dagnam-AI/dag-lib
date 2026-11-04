@@ -193,8 +193,8 @@ python -m dagnam_record [--dir DIR] purge [--dry-run]
 
 | SDK | Range the recorder is built and tested for |
 |---|---|
-| `openai` | `>=1.66,<3` |
-| `anthropic` | `>=0.40,<1` |
+| `openai` | `>=1.66,<4` |
+| `anthropic` | `>=0.40,<3` |
 
 The tests run on Python 3.9, 3.11, 3.12 and 3.13, with the lowest (`openai` 1.66.0, `anthropic`
 0.40.0) and the highest releases inside those ranges. Outside a range, the SDK is still recorded, but

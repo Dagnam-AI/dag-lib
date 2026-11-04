@@ -16,8 +16,8 @@ from typing import Any, Optional
 from _anthropic_bodies import PATH, text_events
 from _mock_server import MockServer, Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_text_events
+from _sdk_httpx import httpx
 import anthropic
-import httpx
 import openai
 from typing_extensions import override
 

@@ -29,8 +29,8 @@ from _fixture_env import CHAT, Env
 import _fixture_scenarios as openai_calls
 import _fixture_scenarios_more as other_calls
 from _mock_server import MockServer
+from _sdk_httpx import httpx
 import anthropic
-import httpx
 import openai
 
 import dagnam_record

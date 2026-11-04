@@ -30,7 +30,7 @@ All notable changes to `dagnam-record` are listed here, newest first. The format
   and a call does no work (it is counted as `dropped_expired`); restarts after the end no longer
   delete the files that wait for the upload.
 - `python -m dagnam_record status` and `purge` (with `--dry-run`), exit codes 0, 1 and 2.
-- The tested SDK ranges (`openai>=1.66,<3`, `anthropic>=0.40,<1`): the version of each patched SDK is
+- The tested SDK ranges (`openai>=1.66,<4`, `anthropic>=0.40,<3`): the version of each patched SDK is
   saved as `sdk_versions` in `.status.json`; outside its range an SDK's calls are written as the
   normalized form only, and the recorder logs one warning. `record_call()` is not narrowed by it.
 - Limits that keep the recorder from harming its host: at most 32 MiB of text queued for the disk and

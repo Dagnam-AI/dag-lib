@@ -13,7 +13,7 @@ from _api_support import envelope, finish_lines, record, saved_counts, write_dat
 from _mock_server import Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_body
 from _openai_calls import unpatched
-import httpx
+from _sdk_httpx import httpx
 import openai
 from openai.resources.chat.completions import Completions
 import pytest

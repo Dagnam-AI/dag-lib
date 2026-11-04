@@ -14,8 +14,8 @@ from _api_support import envelope, finish_lines, record, run_forked, saved_count
 from _mock_server import Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_body
 from _openai_calls import API_KEY, unpatched
+from _sdk_httpx import httpx
 from anthropic.resources.messages import Messages
-import httpx
 import openai
 from openai.resources.chat.completions import Completions
 import pytest

@@ -305,8 +305,13 @@ def test_an_sdk_with_no_known_resource_is_not_patched(
 ) -> None:
     _openai.uninstall()
     monkeypatch.setitem(sys.modules, "openai.resources.beta", None)  # an older SDK's `parse` class
-    monkeypatch.delattr(responses_module, "AsyncResponses")
-    for owner in (Completions, AsyncCompletions, responses_module.Responses):
+    # Not the module's ``AsyncResponses`` name: openai 3 serves it again lazily.
+    for owner in (
+        Completions,
+        AsyncCompletions,
+        responses_module.Responses,
+        responses_module.AsyncResponses,
+    ):
         monkeypatch.delattr(owner, "create")
         monkeypatch.delattr(owner, "parse", raising=False)  # older SDKs have no chat `parse`
     assert _openai.install(rig.recorder) is False

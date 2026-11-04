@@ -20,8 +20,8 @@ from typing import Any, Callable, Dict, Iterator, List, NoReturn, Optional, Tupl
 
 from _mock_server import MockServer
 from _openai_calls import API_KEY, ORGANIZATION
+from _sdk_httpx import httpx
 import anthropic
-import httpx
 import openai
 import pytest
 
@@ -403,8 +403,8 @@ class AnthropicRig(Rig):
         """A real client that talks to the mock server (no retries, no proxy from the env)."""
         kwargs.setdefault("max_retries", 0)
         kwargs.setdefault("base_url", self.server.root)
+        kwargs.setdefault("api_key", API_KEY)
         return anthropic.Anthropic(
-            api_key=API_KEY,
             http_client=httpx.Client(trust_env=False),
             **kwargs,
         )
@@ -413,8 +413,8 @@ class AnthropicRig(Rig):
         """The async twin of ``anthropic``."""
         kwargs.setdefault("max_retries", 0)
         kwargs.setdefault("base_url", self.server.root)
+        kwargs.setdefault("api_key", API_KEY)
         return anthropic.AsyncAnthropic(
-            api_key=API_KEY,
             http_client=httpx.AsyncClient(trust_env=False),
             **kwargs,
         )

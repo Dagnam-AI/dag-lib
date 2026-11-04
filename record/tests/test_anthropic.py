@@ -210,7 +210,7 @@ def test_no_key_header_or_credential_is_ever_recorded(arig: Any) -> None:
     mcp: Dict[str, Any] = {}
     if FEATURES["anthropic mcp_servers"]:
         mcp = {"mcp_servers": servers, "fallback_credit_token": cast("Any", CREDENTIAL)}
-    with arig.anthropic(auth_token="bearer-" + CREDENTIAL) as client:
+    with arig.anthropic(api_key=None, auth_token="bearer-" + CREDENTIAL) as client:
         client.beta.messages.create(
             betas=["mcp-client-2025-04-04"],
             **mcp,
@@ -274,11 +274,11 @@ def test_a_connection_error_and_a_timeout_are_recorded_as_no_response(arig: Any)
 def test_not_given_values_and_sdk_objects_in_a_request_are_plain_json(arig: Any) -> None:
     arig.server.on(PATH, Reply(body=message_body()), Reply(body=message_body()))
     with arig.anthropic() as client:
-        first = client.messages.create(temperature=anthropic.NOT_GIVEN, **ARGS)
+        first = client.messages.create(system=anthropic.NOT_GIVEN, **ARGS)
         again = [*MESSAGES, {"role": "assistant", "content": first.content}]
         client.messages.create(model=MODEL, max_tokens=8, messages=again)
     first_line, second = arig.lines()
-    assert "temperature" not in first_line["request"]
+    assert "system" not in first_line["request"]
     assert second["request"]["messages"][1] == {
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello there"}],

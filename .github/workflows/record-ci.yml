@@ -38,7 +38,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.9", "3.11", "3.13"]
-        # The ends of the declared ranges: openai>=1.66,<3 and anthropic>=0.40,<1. A test in
+        # The ends of the declared ranges: openai>=1.66,<4 and anthropic>=0.40,<3. A test in
         # tests/structure keeps these equal to _compat.py. "highest" is whatever is newest
         # inside the range on the day, so a new SDK release shows up here first.
         sdk:
@@ -46,8 +46,8 @@ jobs:
             openai: "openai==1.66.0"
             anthropic: "anthropic==0.40.0"
           - name: highest
-            openai: "openai<3"
-            anthropic: "anthropic<1"
+            openai: "openai<4"
+            anthropic: "anthropic<3"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,7 +110,7 @@ jobs:
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/env"
           cd "$RUNNER_TEMP"/unpacked/dagnam_record-*
-          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest "openai<3" "anthropic<1" ".[redact]"
+          uv pip install --python "$RUNNER_TEMP/env/bin/python" pytest "openai<4" "anthropic<3" ".[redact]"
           # Bare pytest on purpose, the one place: an unpacked sdist has no repository
           # pyproject.toml, so there is no poe task to call (the same command is `test-record`).
           "$RUNNER_TEMP/env/bin/python" -m pytest tests -q -p no:cacheprovider
