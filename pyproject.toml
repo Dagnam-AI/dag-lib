@@ -453,10 +453,15 @@ lint-imports = { cmd = "lint-imports", env = { PYTHONPATH = "record" }, help = "
 test-record = { cmd = "python -m pytest record/tests -q -p no:cacheprovider", executor = { type = "simple" }, help = "Run only the recorder's tests in the active environment, no coverage (the CI SDK matrix runs it in throwaway environments)" }
 test = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing", help = "Run the test suite in parallel with branch coverage (fails under 100%)" }
 test-cov = { cmd = "pytest tests record/tests -q -n 4 --dist=loadfile --cov=dagnam --cov=dagnam_record --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-report=json:coverage.json --cov-report=xml:coverage.xml", help = "Run tests in parallel and generate terminal, HTML, JSON, and XML coverage reports" }
-# Accepted until 2026-12-01: the three filelock advisories concern ReadWriteLock and SoftFileLock;
-# dagnam only uses plain FileLock (audit/state.py, data/cache.py). Their fix is filelock 4.x, which
-# stops removing lock files and changes what users find in an audit or cache directory.
-audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\" --ignore-vuln GHSA-v4x8-3wr5-3wq8 --ignore-vuln GHSA-9vhv-jxww-xfm5 --ignore-vuln GHSA-567q-5qvw-pf92", help = "Audit Python dependencies for known vulnerabilities" }
+# Accepted until 2026-12-01 (re-review at the monthly sweep). The filelock advisories: five concern
+# ReadWriteLock or SoftFileLock, which dagnam never uses (audit/state.py and data/cache.py use plain
+# FileLock); GHSA-69hj-f68j-2879 (UnixFileLock) and GHSA-8mx5-7m5m-r77g (WindowsFileLock mode) need
+# another local user who can write in the directory holding the lock file, and dagnam's lock files
+# live in the per-user cache and audit directories. The fix is filelock 4.x, which stops removing
+# lock files: state.json.lock and the model-cache lock files would then stay behind and break the
+# audit-directory and cache-listing contracts that tests/cli and tests/resources pin (8 tests fail
+# on 4.2.8), so the move is a deliberate SDK change, not a lock bump.
+audit = { cmd = "python -c \"import sys, truststore; truststore.inject_into_ssl(); from pip_audit._cli import audit; sys.exit(audit())\" --ignore-vuln GHSA-v4x8-3wr5-3wq8 --ignore-vuln GHSA-9vhv-jxww-xfm5 --ignore-vuln GHSA-567q-5qvw-pf92 --ignore-vuln GHSA-j8f7-rjxc-mr56 --ignore-vuln GHSA-cwqr-hh33-gh44 --ignore-vuln GHSA-rfpc-qcw5-3pc4 --ignore-vuln GHSA-fq56-3cx3-fjxp --ignore-vuln GHSA-69hj-f68j-2879 --ignore-vuln GHSA-8mx5-7m5m-r77g", help = "Audit Python dependencies for known vulnerabilities" }
 build = { cmd = "uv build", help = "Build the source distribution and wheel" }
 check = { sequence = [
     "lint",
