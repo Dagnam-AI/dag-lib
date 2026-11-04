@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from _anthropic_bodies import PATH, text_events
 from _anthropic_calls import ARGS, run
 from _mock_server import Reply
-import httpx
+from _sdk_httpx import httpx
 import pytest
 
 THROUGH_STOP = text_events("Hel", "lo")  # the SDK swallows the ping: 7 events, the last is the stop

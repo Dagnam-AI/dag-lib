@@ -14,8 +14,7 @@ from _openai_bodies import (
     response_body,
     response_events,
 )
-from _openai_calls import run, unpatched
-import httpx
+from _openai_calls import CUT_STREAM, run, unpatched
 import openai
 from openai.resources.chat.completions import AsyncCompletions, Completions
 import openai.resources.responses as responses_module
@@ -151,10 +150,11 @@ def test_a_stream_error_propagates_unchanged_and_is_recorded_as_failed(rig: Any)
 
 def test_a_dropped_connection_propagates_unchanged_and_is_recorded_as_failed(rig: Any) -> None:
     rig.server.on(CHAT_PATH, Reply(events=chat_text_events()[:2], cut=True))
-    with rig.client() as client, pytest.raises(httpx.RemoteProtocolError):
+    with rig.client() as client, pytest.raises(CUT_STREAM) as caught:
         list(open_chat(client))
     (line,) = rig.lines()
-    assert (line["status"], line["response"]) == (599, {"error": {"type": "RemoteProtocolError"}})
+    error = {"error": {"type": type(caught.value).__name__}}
+    assert (line["status"], line["response"]) == (599, error)
 
 
 def test_a_stream_call_refused_by_the_api_is_recorded_with_its_status(rig: Any) -> None:

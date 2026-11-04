@@ -22,8 +22,10 @@ from dagnam_record import _compat
         ("2.99.99", True),
         ("1.65.9", False),
         ("1.40.0", False),
-        ("3.0.0", False),
-        ("3.0.0rc1", False),
+        ("3.45.0", True),
+        ("3.99.99", True),
+        ("4.0.0", False),
+        ("4.0.0rc1", False),
         ("0.28.1", False),
         ("2.1.0.dev3", True),
         ("garbage", False),
@@ -37,7 +39,14 @@ def test_openai_range(version: str, expected: bool) -> None:
 
 @pytest.mark.parametrize(
     ("version", "expected"),
-    [("0.40.0", True), ("0.125.0", True), ("0.39.9", False), ("1.0.0", False), ("x", False)],
+    [
+        ("0.40.0", True),
+        ("0.125.0", True),
+        ("2.4.0", True),
+        ("0.39.9", False),
+        ("3.0.0", False),
+        ("x", False),
+    ],
 )
 def test_anthropic_range(version: str, expected: bool) -> None:
     assert _compat.in_range(version, _compat.ANTHROPIC) is expected
@@ -56,13 +65,13 @@ def dev_bounds(name: str) -> Tuple[str, str]:
 
 @pytest.mark.skipif(not ROOT_PYPROJECT.is_file(), reason="the repo's root pyproject is not here")
 def test_the_ranges_are_the_ones_the_dev_dependencies_test_against() -> None:
-    assert dev_bounds("openai") == _compat.OPENAI == (">=1.66", "<3")
-    assert dev_bounds("anthropic") == _compat.ANTHROPIC == (">=0.40", "<1")
+    assert dev_bounds("openai") == _compat.OPENAI == (">=1.66", "<4")
+    assert dev_bounds("anthropic") == _compat.ANTHROPIC == (">=0.40", "<3")
 
 
 def test_a_version_with_thousands_of_digits_is_out_of_range_not_an_error() -> None:
     # Where ``int()`` refuses a 5000-digit number (Python 3.10.7+) the answer is "out of range";
-    # on older Pythons the number parses and 1.99...9 really is inside ">=1.66,<3". Either way: a bool.
+    # on older Pythons the number parses and 1.99...9 really is inside ">=1.66,<4". Either way: a bool.
     assert isinstance(_compat.in_range("1." + "9" * 5000, _compat.OPENAI), bool)
     assert _compat.in_range("9" * 5000 + ".1", _compat.OPENAI) is False
 

@@ -16,7 +16,7 @@ from typing import Iterator, List
 from _guarantee_support import flood, quick
 from _openai_bodies import chat_body
 from _openai_calls import unpatched
-import httpx
+from _sdk_httpx import httpx
 import openai
 from openai.resources.chat.completions import Completions
 import pytest

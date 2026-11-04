@@ -13,8 +13,7 @@ from _openai_bodies import (
     chat_text_events,
     response_events,
 )
-from _openai_calls import run
-import httpx
+from _openai_calls import CUT_STREAM, run
 import pytest
 
 if TYPE_CHECKING:
@@ -56,7 +55,7 @@ def test_a_transport_failure_after_the_end_marker_records_the_complete_answer(
         iterator = iter(opener(client))
         for _ in range(reads):
             next(iterator)
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(CUT_STREAM):
             next(iterator)  # the error still reaches the caller unchanged
     line = only_row(rig)
     assert line["status"] == 200
@@ -79,7 +78,7 @@ def test_an_async_transport_failure_after_the_end_marker_records_the_complete_an
         iterator = (await opener(client)).__aiter__()
         for _ in range(reads):
             await iterator.__anext__()
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(CUT_STREAM):
             await iterator.__anext__()
 
     run(call, rig)
@@ -94,10 +93,11 @@ def test_a_transport_failure_before_the_end_marker_is_still_a_failed_call(
     rig: Any, path: str, events: List[Event], opener: Any
 ) -> None:
     rig.server.on(path, Reply(events=events, cut=True))
-    with rig.client() as client, pytest.raises(httpx.RemoteProtocolError):
+    with rig.client() as client, pytest.raises(CUT_STREAM) as caught:
         list(opener(client))
     (line,) = rig.lines()
-    assert (line["status"], line["response"]) == (599, {"error": {"type": "RemoteProtocolError"}})
+    error = {"error": {"type": type(caught.value).__name__}}
+    assert (line["status"], line["response"]) == (599, error)
 
 
 def test_an_interrupt_after_the_end_marker_records_the_complete_answer(rig: Any) -> None:
@@ -197,7 +197,7 @@ def test_the_complete_answer_of_a_failed_responses_stream_keeps_its_failed_statu
         iterator = iter(open_responses(client))
         for _ in range(3):
             next(iterator)
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(CUT_STREAM):
             next(iterator)
     (line,) = rig.lines()
     assert (line["status"], line["response"]) == (599, {"error": {"type": "response.failed"}})

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 from typing import Any
 
 from _anthropic_bodies import MODEL, PATH, error_body, message_body, text_events, tool_events
@@ -12,6 +13,7 @@ from _mock_server import Reply
 from _sdk_features import needs
 import anthropic
 from anthropic.lib.streaming import MessageStream, MessageStreamManager
+from anthropic.resources.messages import Messages
 import pytest
 
 from dagnam_record import _anthropic
@@ -242,6 +244,10 @@ def test_a_tool_runner_records_each_request_it_makes(arig: Any) -> None:
 
 
 @needs("anthropic messages.parse")
+@pytest.mark.skipif(
+    "stream" not in inspect.signature(getattr(Messages, "parse", lambda: None)).parameters,
+    reason="this SDK version's parse() takes no stream argument",
+)
 def test_parse_never_returns_a_stream_even_when_asked_for_one(arig: Any) -> None:
     arig.server.on(PATH, Reply(body=message_body()))
     with arig.anthropic() as client:

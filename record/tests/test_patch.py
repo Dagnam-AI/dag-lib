@@ -10,8 +10,7 @@ from _anthropic_bodies import PATH as MESSAGES_PATH, text_events
 from _anthropic_calls import ARGS
 from _mock_server import Event, Reply
 from _openai_bodies import CHAT_PATH, MODEL, chat_body, chat_text_events
-from _openai_calls import unpatched
-import httpx
+from _openai_calls import CUT_STREAM, unpatched
 from openai.resources.chat.completions import Completions
 import pytest
 
@@ -113,7 +112,7 @@ def test_an_oversized_stream_that_is_then_cut_is_counted_as_large_and_the_error_
         iterator = iter(client.chat.completions.create(model=MODEL, messages=MESSAGES, stream=True))
         for _ in range(3):
             next(iterator)
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(CUT_STREAM):
             next(iterator)
     assert rig.raw() == []
     assert (rig.writer.counts["dropped_large"], rig.writer.counts["dropped_error"]) == (1, 0)

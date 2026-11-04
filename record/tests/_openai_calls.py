@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
-if TYPE_CHECKING:
-    import openai
+from _sdk_httpx import httpx
+import openai
 
-
+CUT_STREAM = (httpx.RemoteProtocolError, openai.APIConnectionError)
+"""What a stream cut mid-body raises: openai 2 lets the HTTP library's error out, openai 3 wraps it."""
 API_KEY = "sk-proj-must-never-be-recorded-0123"
 ORGANIZATION = "org-must-never-be-recorded"
 

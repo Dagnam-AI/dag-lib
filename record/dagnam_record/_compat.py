@@ -12,8 +12,8 @@ import re
 import sys
 from typing import Optional, Tuple
 
-OPENAI = (">=1.66", "<3")
-ANTHROPIC = (">=0.40", "<1")
+OPENAI = (">=1.66", "<4")
+ANTHROPIC = (">=0.40", "<3")
 RANGES = {"openai": OPENAI, "anthropic": ANTHROPIC}
 UNKNOWN = "unknown"
 _RELEASE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")

@@ -10,6 +10,7 @@ from typing import Any, List, Tuple
 from _anthropic_bodies import PATH, message_body, text_events
 from _anthropic_calls import ARGS, run
 from _mock_server import Reply
+from _sdk_httpx import httpx
 import anthropic
 from anthropic.lib import streaming
 from anthropic.lib.bedrock import AnthropicBedrock, AsyncAnthropicBedrock
@@ -18,7 +19,6 @@ from anthropic.lib.vertex import AnthropicVertex, AsyncAnthropicVertex
 import anthropic.lib.vertex._beta_messages as vertex_beta
 import anthropic.resources.beta.messages as beta_messages
 import anthropic.resources.messages as messages_module
-import httpx
 import pytest
 
 from dagnam_record import _anthropic

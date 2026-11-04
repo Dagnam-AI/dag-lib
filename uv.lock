@@ -647,10 +647,10 @@ provides-extras = ["aio", "all", "audio", "audit", "flax", "pytorch", "streaming
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "anthropic", specifier = ">=0.40,<1" },
+    { name = "anthropic", specifier = ">=0.40,<3" },
     { name = "hypothesis" },
     { name = "import-linter", specifier = ">=2.11" },
-    { name = "openai", specifier = ">=1.66,<3" },
+    { name = "openai", specifier = ">=1.66,<4" },
     { name = "pip-audit", specifier = ">=2.7" },
     { name = "poethepoet", specifier = ">=0.46.0" },
     { name = "pre-commit", specifier = ">=3.5" },
