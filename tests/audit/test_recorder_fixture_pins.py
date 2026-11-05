@@ -4,8 +4,8 @@
 https://github.com/Dagnam-AI/dag-record and copied here by hand; the SDK's reader tests read them.
 Nothing else notices a local edit or a stale copy, so this pins each file's SHA-256 and the
 dag-record commit they came from. A deliberate refresh changes the hashes and ``SOURCE_COMMIT`` here
-in the same commit as the copy. (It cannot see dag-record regenerating; once ``dagnam-record`` is on
-PyPI, a test against the installed package is the better guard.)
+in the same commit as the copy. (It cannot see dag-record regenerating; ``test_recorder_live_package.py``
+runs the released package for that, and this file stays for the byte pins it cannot give.)
 """
 
 from __future__ import annotations

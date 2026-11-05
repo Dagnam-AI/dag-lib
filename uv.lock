@@ -592,6 +592,7 @@ tensorflow = [
 [package.dev-dependencies]
 dev = [
     { name = "anthropic" },
+    { name = "dagnam-record" },
     { name = "hypothesis" },
     { name = "import-linter" },
     { name = "openai" },
@@ -648,6 +649,7 @@ provides-extras = ["aio", "all", "audio", "audit", "flax", "pytorch", "streaming
 [package.metadata.requires-dev]
 dev = [
     { name = "anthropic", specifier = ">=0.40,<3" },
+    { name = "dagnam-record", specifier = ">=0.1.0,<0.2" },
     { name = "hypothesis" },
     { name = "import-linter", specifier = ">=2.11" },
     { name = "openai", specifier = ">=1.66,<4" },
@@ -671,6 +673,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/51/62/5396de1dc02b46afed45175437c8ca537c095a601bfda004d278b4266d82/dagnam_contracts-0.5.0.tar.gz", hash = "sha256:6cdfe8b0f9868f852930de56a70955c7a7fc2964d9568b2c565a611d40df8062", size = 167729, upload-time = "2026-10-24T22:22:02.239Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/fa/eb7bda6e08e431fe63856d9a0008f422a65ce449463933e078b8945d5fb4/dagnam_contracts-0.5.0-py3-none-any.whl", hash = "sha256:ee1d59251a1d7e0a06a0088b1ffdabbf50860e10f4318e027e8e3482cfca8d8e", size = 77998, upload-time = "2026-10-24T22:22:00.671Z" },
+]
+
+[[package]]
+name = "dagnam-record"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/39/028643f1053fc7939d44ff117aa5bb6a006c742852b41b41d224d9ac354e/dagnam_record-0.1.0.tar.gz", hash = "sha256:f7b78a56b3f987bfc6f44c9483bad647de84f141c43b67d57ec07bb49fd903f7", size = 196087, upload-time = "2026-11-05T05:41:26.543Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/51/15e015c551d7c4f68a9e2878770b8439d9e3d42471f6e5571e913302eb64/dagnam_record-0.1.0-py3-none-any.whl", hash = "sha256:15c8795647e0a6e0f2fa55085042fc5f72f5f23359f92966f6c4adbc1c2bfe5d", size = 67569, upload-time = "2026-11-05T05:41:25.144Z" },
 ]
 
 [[package]]
