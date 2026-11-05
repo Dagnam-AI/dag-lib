@@ -15,8 +15,8 @@ so a tag can never publish a version other than the one the code declares.
 
 Usage:
     python scripts/check_changelog.py
-    python scripts/check_changelog.py --changelog record/CHANGELOG.md --init record/dagnam_record/__init__.py
-    python scripts/check_changelog.py ... --tag "$GITHUB_REF_NAME" --tag-prefix dagnam-record/v
+    python scripts/check_changelog.py --changelog CHANGELOG.md --init dagnam/__init__.py
+    python scripts/check_changelog.py ... --tag "$GITHUB_REF_NAME" --tag-prefix dagnam/v
 """
 
 from __future__ import annotations

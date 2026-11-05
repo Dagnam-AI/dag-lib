@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The `dagnam-record` local recorder now lives in its own repository,
+  [Dagnam-AI/dag-record](https://github.com/Dagnam-AI/dag-record), and is no longer built from this one.
+  The `dagnam` package is unchanged: it still reads the recorder's trace files the same way.
+
 ## [0.24.2] - 2026-11-05
 
 ### Platform compatibility

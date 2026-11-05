@@ -1,7 +1,7 @@
 """The recorder's real output, read back: raw against norm, the round trip, media and the contract.
 
 The fixtures ``recorder_*.jsonl`` are the lines ``dagnam_record`` wrote while the real ``openai`` and
-``anthropic`` clients called a local mock server (``record/tests/gen_fixtures.py`` makes them), so
+``anthropic`` clients called a local mock server (``tests/gen_fixtures.py`` in https://github.com/Dagnam-AI/dag-record makes them), so
 nothing here is a hand-built shape.
 """
 
