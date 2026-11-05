@@ -22,9 +22,11 @@ the dogfood agent can replace these files without rewriting the assertions.
 Trace-envelope v1 lines (`dagnam_contracts.trace`) exactly as `dagnam_record` wrote them while the
 real `openai` and `anthropic` clients called a local mock server. They are **generated**: run
 `tests/gen_fixtures.py` in [Dagnam-AI/dag-record](https://github.com/Dagnam-AI/dag-record)
-(see its docstring), copy the files here and review the diff. Only `trace_id`
+(see its docstring), copy the files here by hand and review the diff. These copies are from
+dag-record commit `90d6071`; `tests/audit/test_recorder_fixture_pins.py` pins each file's SHA-256 and
+that commit, so a refresh changes both in the same commit. Only `trace_id`
 (`rec_<tag>_<n>`), `ts` (2026-10-12, one second per call) and `latency_ms` are rewritten, so a second
-run gives the same bytes; the recorder repository's `tests/test_gen_fixtures.py` fails when its copy is stale. The bytes
+run gives the same bytes; dag-record's `tests/test_gen_fixtures.py` fails when its copy is stale. The bytes
 depend on the locked `openai` (2.54.0) and `anthropic` (0.125.0): regenerate when either is bumped.
 Read by `tests/audit/readers/test_recorder.py` and `test_recorder_roundtrip.py`.
 

@@ -157,4 +157,4 @@ python -m twine upload "$out"/*
 - Confirm `CHANGELOG.md` has a fresh empty `[Unreleased]` for the next cycle.
 
 The local recorder, `dagnam-record`, is released from its own repository,
-[Dagnam-AI/dag-record](https://github.com/Dagnam-AI/dag-record); see its README for how.
+[Dagnam-AI/dag-record](https://github.com/Dagnam-AI/dag-record); see its [RELEASE.md](https://github.com/Dagnam-AI/dag-record/blob/main/RELEASE.md) for how.
