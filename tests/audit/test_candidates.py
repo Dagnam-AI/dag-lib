@@ -31,7 +31,7 @@ def test_trained_candidates_name_their_recipe_base_serving_rate_and_ceiling() ->
     assert (
         CandidateSpec(
             CandidateKind.HEAD_TUNE,
-            "head-tune-text-classification@1.2",
+            "head-tune-text-classification@1.3",
             "bert",
             None,
             "cpu-classifier",
@@ -42,7 +42,7 @@ def test_trained_candidates_name_their_recipe_base_serving_rate_and_ceiling() ->
     assert (
         CandidateSpec(
             CandidateKind.SFT_SMALL,
-            "qlora-sft-chat@1.2",
+            "qlora-sft-chat@1.3",
             "qwen2",
             3_000_000_000,
             "gpu-small-llm",

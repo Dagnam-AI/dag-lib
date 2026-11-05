@@ -81,8 +81,8 @@ def test_full_frontier_then_each_step_is_idempotent(
     assert (head.version_id, sft.version_id) == ("ds-1-v2", "ds-2-v2")
     assert (head.base, sft.base) == ("BERT small", "qwen-05b")
     assert [p["recipe_key"] for p in platform.submitted] == [
-        "head-tune-text-classification@1.2",
-        "qlora-sft-chat@1.2",
+        "head-tune-text-classification@1.3",
+        "qlora-sft-chat@1.3",
     ]
     assert head.agreement is not None
     assert head.agreement["floor"] == 0.97
