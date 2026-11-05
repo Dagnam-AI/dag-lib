@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-05
+
 ### Platform compatibility
 
 - `dagnam audit run` needs a platform that offers the training recipes `head-tune-text-classification@1.3`
