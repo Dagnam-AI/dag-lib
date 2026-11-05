@@ -491,8 +491,7 @@ never above the UTF-8 byte count of the NFC form of the text. A text of a few
 tokens rounds up.
 
 **Record your calls.** Without a trace export, the [`dagnam-record`](https://github.com/Dagnam-AI/dag-record) package
-writes one yourself. It is not published to PyPI yet, so there is nothing to `pip install` today
-(an unpublished name can be registered by anyone); follow the repository for the release. Once it is out,
+writes one yourself. Install it with `pip install dagnam-record`, then
 call `dagnam_record.install()` once in your program; each OpenAI or Anthropic call is then appended to a local trace file as it
 happens, and `dagnam audit scan <file> --source dagnam` reads it like any other export.
 
