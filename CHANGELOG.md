@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-05
+
 ### Changed
 
 - `dagnam` now requires `filelock` 4.2.8 or newer, which closes the open `filelock` advisories. filelock 4
