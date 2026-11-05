@@ -51,7 +51,7 @@ MAX_TRAIN_ROWS = 5_000
 MAX_SEQ_LENGTH = 2048
 """Characters of rendered prompt a derived row keeps (the recipes' ``max_seq_length`` default)."""
 SFT_MAX_TOKENS = 2048
-"""Tokens a ``qlora-sft-chat@1.2`` row may span (its ``max_seq_length`` default): the recipe drops,
+"""Tokens a ``qlora-sft-chat@1.3`` row may span (its ``max_seq_length`` default): the recipe drops,
 never cuts, a longer training row, so the scan leaves out the rows it estimates are longer."""
 SFT_MIN_TRAIN_ROWS = 32
 """Training rows ``qlora-sft-chat`` needs at least: the platform recipe's ``min_rows``."""

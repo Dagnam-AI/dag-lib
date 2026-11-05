@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Platform compatibility
+
+- `dagnam audit run` needs a platform that offers the training recipes `head-tune-text-classification@1.3`
+  and `qlora-sft-chat@1.3` (the live platform does as of 2026-11-05). Against one that does not, the
+  candidate that names them is recorded as `rejected_preflight: Unknown training recipe: '...'`
+  and the audit carries on with the rest.
+
+### Changed
+
+- Audit candidates now train on recipe 1.3 instead of 1.2. It is 1.2 on a patched dependency closure
+  (`urllib3`, `aiohttp`, `certifi`, `multidict`, `yarl`), so the trained models carry those security
+  fixes; the declared pins, the emitter and the hyperparameters are unchanged. Recipe 1.2 stays
+  accepted by the platform but keeps the vulnerable closure.
+
 ## [0.24.1] - 2026-11-05
 
 ### Changed

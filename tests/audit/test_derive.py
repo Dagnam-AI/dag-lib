@@ -337,7 +337,7 @@ INVOICE_LINES = "Invoice line 17: widget, 12 x 3.50 EUR, net 42.00 EUR\n" * 220
 
 
 def test_rows_over_the_student_s_context_leave_the_training_split_only() -> None:
-    # qlora-sft-chat@1.2 drops, never cuts, a row over its 2,048 tokens -- at
+    # qlora-sft-chat@1.3 drops, never cuts, a row over its 2,048 tokens -- at
     # train time, after the credits are spent. A 12k-character invoice in the user turn
     # is such a row (the last turn is kept whole); the scan now leaves it out of
     # training and counts it. The holdout keeps it, as serving will see it.

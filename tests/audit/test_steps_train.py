@@ -83,7 +83,7 @@ def test_submit_sends_the_frozen_payload_and_records_the_run(
             "project_id": "proj-1",
             "base_catalog_entry_id": "bert-small",
             "dataset_version_id": "ds-1-v2",
-            "recipe_key": "head-tune-text-classification@1.2",
+            "recipe_key": "head-tune-text-classification@1.3",
             "hyperparameters": {},
             "dataset_field_bindings": {},
         }
@@ -274,6 +274,22 @@ def test_submit_402_halts_the_budget_and_422_is_a_recorded_rejection(
     platform.submit_errors = [APIError(500, "boom")]
     with pytest.raises(APIError, match="boom"):
         submit(_ready(), ctx)
+
+
+def test_a_platform_that_does_not_offer_the_recipe_is_a_recorded_rejection_not_a_crash(
+    make_ctx: Callable[..., StepContext], platform: FakePlatform
+) -> None:
+    # An SDK that names recipe 1.3 against a platform released before it: the run create answers
+    # 400 with the unknown key, and the candidate records that, so the report can show it.
+    ctx = make_ctx()
+    platform.submit_errors = [
+        APIError(400, "Unknown training recipe: 'head-tune-text-classification@1.3'")
+    ]
+    step = ctx.step(submit(_ready(), ctx))
+    assert step.error == (
+        "rejected_preflight: Unknown training recipe: 'head-tune-text-classification@1.3'"
+    )
+    assert step.run_id is None
 
 
 def test_capacity_503_is_retried_after_retry_after(

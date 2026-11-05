@@ -73,7 +73,7 @@ class CandidateSpec:
 HOSTED_FLOOR = CandidateSpec(CandidateKind.HOSTED_FLOOR, None, None, None, None, None)
 HEAD_TUNE = CandidateSpec(
     CandidateKind.HEAD_TUNE,
-    "head-tune-text-classification@1.2",
+    "head-tune-text-classification@1.3",
     "bert",
     None,
     "cpu-classifier",
@@ -81,7 +81,7 @@ HEAD_TUNE = CandidateSpec(
 )
 SFT_SMALL = CandidateSpec(
     CandidateKind.SFT_SMALL,
-    "qlora-sft-chat@1.2",
+    "qlora-sft-chat@1.3",
     "qwen2",
     3_000_000_000,
     "gpu-small-llm",
