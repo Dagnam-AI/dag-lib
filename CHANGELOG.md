@@ -16,6 +16,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `dagnam-record` local recorder now lives in its own repository,
+  [Dagnam-AI/dag-record](https://github.com/Dagnam-AI/dag-record), and is no longer built from this one.
+  The `dagnam` package is unchanged: it still reads the recorder's trace files the same way.
 - Audit candidates now train on recipe 1.3 instead of 1.2. It is 1.2 on a patched dependency closure
   (`urllib3`, `aiohttp`, `certifi`, `multidict`, `yarl`), so the trained models carry those security
   fixes; the declared pins, the emitter and the hyperparameters are unchanged. Recipe 1.2 stays

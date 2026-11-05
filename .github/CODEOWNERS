@@ -13,4 +13,3 @@
 # redirect where the package is published from.
 /.github/workflows/ @angadsinghsandhu
 /pyproject.toml        @angadsinghsandhu
-/record/pyproject.toml @angadsinghsandhu

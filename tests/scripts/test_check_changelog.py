@@ -89,7 +89,7 @@ def test_main_reports_every_reason_and_the_exit_status(
 def test_main_refuses_a_tag_that_is_not_the_version_being_released(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``--tag`` is how ``release-record.yml`` ties the pushed tag to ``__version__``."""
+    """``--tag`` is how ``release.yml`` ties the pushed tag to ``__version__``."""
     init = tmp_path / "__init__.py"
     init.write_text('__version__ = "0.16.0"\n', encoding="utf-8")
     changelog = tmp_path / "CHANGELOG.md"

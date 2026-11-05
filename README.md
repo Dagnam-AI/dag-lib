@@ -490,8 +490,8 @@ a known limit. It is
 never above the UTF-8 byte count of the NFC form of the text. A text of a few
 tokens rounds up.
 
-**Record your calls.** Without a trace export, the `dagnam-record` package (coming with the next
-release) writes one yourself. After `pip install dagnam-record`, call `dagnam_record.install()`
+**Record your calls.** Without a trace export, the [`dagnam-record`](https://github.com/Dagnam-AI/dag-record) package
+writes one yourself. After `pip install dagnam-record`, call `dagnam_record.install()`
 once in your program; each OpenAI or Anthropic call is then appended to a local trace file as it
 happens, and `dagnam audit scan <file> --source dagnam` reads it like any other export.
 
