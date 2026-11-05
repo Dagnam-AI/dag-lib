@@ -175,6 +175,8 @@ def test_one_command_at_a_time_holds_an_audit_directory(tmp_path: Path) -> None:
         raise RuntimeError("crash")
     with lock_audit(root):  # released on the way out, crash or not
         assert (root / LOCK_FILE).exists()
+    # filelock 4 keeps the empty marker once released: unlinking it races a peer that already opened it.
+    assert (root / LOCK_FILE).read_bytes() == b""
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,7 @@ from tests.cli._audit_dirs import platform_with_everything, published_dir
 from dagnam._core.exceptions import EndpointsServingError
 from dagnam._types import JsonObject
 from dagnam.audit.cleanup import DELETED_FILE
-from dagnam.audit.state import load_state
+from dagnam.audit.state import LOCK_FILE, load_state
 
 if TYPE_CHECKING:
     from tests.typing_helpers import CliRunner, PytestMonkeyPatch, StrCapture
@@ -73,7 +73,12 @@ def platform(monkeypatch: PytestMonkeyPatch) -> FakeCleanup:
 
 
 def _files(root: Path) -> dict[str, bytes]:
-    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    """Every file under ``root`` but the empty lock marker: filelock 4 leaves it behind after any command."""
+    return {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and p.name != LOCK_FILE
+    }
 
 
 def _refused(run_cli: CliRunner, *argv: str) -> None:

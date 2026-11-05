@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `dagnam` now requires `filelock` 4.2.8 or newer, which closes the open `filelock` advisories. filelock 4
+  no longer deletes a lock file when it releases it (deleting one races a peer that already opened it),
+  so an empty `state.json.lock` stays in an audit directory after any `dagnam audit` command, and an
+  empty `<name>.lock` stays beside a cached dataset or model artifact. They hold no data, are never
+  listed or counted as cache entries, and are safe to delete when no `dagnam` command is running.
+
 ## [0.24.0] - 2026-10-25
 
 ### Platform compatibility

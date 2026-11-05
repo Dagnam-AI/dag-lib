@@ -583,7 +583,10 @@ class TestDownload:
         path = models.download(version_id, "a1", client=client, cache_dir=model_cache)
 
         assert (path.parent / ".last_access").exists()
-        assert list(model_cache.iterdir()) == [path.parent]  # no phantom double-encoded sibling
+        # No phantom double-encoded sibling: the artifact's directory and its ``<dir>%2Fa1.lock``
+        # marker, which filelock 4 leaves behind, are all the cache holds.
+        expected = {path.parent.name, f"{path.parent.name}%2Fa1.lock"}
+        assert {p.name for p in model_cache.iterdir()} == expected
 
         # Re-download (now a cache hit) exercises the OTHER touch_cache call
         # site -- the marker must still land in the same directory.
@@ -592,7 +595,7 @@ class TestDownload:
         assert path_again == path
         client.download_model_artifact_stream.assert_not_called()
         assert (path.parent / ".last_access").exists()
-        assert list(model_cache.iterdir()) == [path.parent]
+        assert {p.name for p in model_cache.iterdir()} == expected
 
     def test_uses_default_cache_dir_when_omitted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
