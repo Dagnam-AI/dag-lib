@@ -5,6 +5,8 @@ All notable changes to `dagnam-record` are listed here, newest first. The format
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-05
+
 ### Added
 
 - A stdlib-only recorder of `openai` and `anthropic` calls (no dependencies, Python 3.9 and newer,
