@@ -145,7 +145,7 @@ jobs:
       # toolchain comes from the runner and PyPI/npm; the pull request's own
       # install and tests run later, inside the model's sandbox.
       - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
 
@@ -161,7 +161,7 @@ jobs:
           fi
 
       - name: Fix CI failures with Claude
-        uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8 # v1.0.275
+        uses: anthropics/claude-code-action@c84e279f859e2591391e95bd309286eb111c345f # v1.0.284
         env:
           # See the SECURITY NOTE. On the step, not the job: a step's env wins
           # over anything an earlier step appended to GITHUB_ENV.
